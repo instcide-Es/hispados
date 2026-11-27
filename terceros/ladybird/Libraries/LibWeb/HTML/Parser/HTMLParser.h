@@ -1,0 +1,249 @@
+/*
+ * Copyright (c) 2020-2022, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Utf16String.h>
+#include <AK/Utf16View.h>
+#include <LibGC/Function.h>
+#include <LibGfx/Color.h>
+#include <LibJS/Heap/Cell.h>
+#include <LibURL/Forward.h>
+#include <LibWeb/CSS/Parser/Parser.h>
+#include <LibWeb/DOM/DocumentFragment.h>
+#include <LibWeb/DOM/FragmentSerializationMode.h>
+#include <LibWeb/Export.h>
+#include <LibWeb/Forward.h>
+#include <LibWeb/HTML/Parser/HTMLEncodingDetection.h>
+#include <LibWeb/HTML/Parser/HTMLTokenizer.h>
+#include <LibWeb/HTML/Parser/ParserScriptingMode.h>
+#include <LibWeb/HTML/SanitizerConfiguration.h>
+#include <LibWeb/Platform/Timer.h>
+#include <LibWebCommon/MimeSniff/MimeType.h>
+
+struct RustFfiHtmlParserHandle;
+struct RustFfiHtmlParserAttribute;
+
+namespace Web::HTML {
+
+class IncrementalDocumentParser;
+
+class WEB_API HTMLParser final : public JS::Cell {
+    GC_CELL(HTMLParser, JS::Cell);
+    GC_DECLARE_ALLOCATOR(HTMLParser);
+
+public:
+    virtual ~HTMLParser() override;
+
+    static GC::Ref<HTMLParser> create_for_scripting(DOM::Document&);
+    static GC::Ref<HTMLParser> create_with_open_input_stream(DOM::Document&, EncodingConfidence = EncodingConfidence::Irrelevant);
+    static GC::Ref<HTMLParser> create_with_uncertain_encoding(DOM::Document&, ReadonlyBytes input, Optional<MimeSniff::MimeType> maybe_mime_type = {});
+    static GC::Ref<HTMLParser> create_from_byte_string(DOM::Document&, StringView input, ParserScriptingMode, StringView encoding);
+    static GC::Ref<HTMLParser> create_for_decoded_string(DOM::Document&, Utf16View input, ParserScriptingMode, Utf16View encoding);
+
+    void run(HTMLTokenizer::StopAtInsertionPoint = HTMLTokenizer::StopAtInsertionPoint::No);
+    void run(URL::URL const&, HTMLTokenizer::StopAtInsertionPoint = HTMLTokenizer::StopAtInsertionPoint::No);
+    void run_until_completion(HTMLTokenizer::StopAtInsertionPoint = HTMLTokenizer::StopAtInsertionPoint::No);
+    void pop_all_open_elements();
+
+    struct ParserlessCompletionToken {
+        u64 parser_generation;
+    };
+    static ParserlessCompletionToken parserless_completion_token(DOM::Document const&);
+    static void the_end(GC::Ref<DOM::Document>, ParserlessCompletionToken);
+    static void the_end(GC::Ref<DOM::Document>, GC::Ptr<HTMLParser>);
+
+    DOM::Document& document();
+    enum class AllowDeclarativeShadowRoots {
+        No,
+        Yes,
+    };
+
+    static WebIDL::ExceptionOr<GC::Ref<DOM::DocumentFragment>> parse_html_fragment(Variant<GC::Ref<DOM::Element>, GC::Ref<DOM::DocumentFragment>> target, Utf16View markup,
+        AllowDeclarativeShadowRoots = AllowDeclarativeShadowRoots::No, ParserScriptingMode = ParserScriptingMode::Inert, FragmentFastPath = FragmentFastPath::Allow, SanitizerConfiguration const* = nullptr);
+
+    // Parses a restricted subset of in-body markup in context. On success, appends the parsed top-level nodes to
+    // top_level_nodes. Their subtrees are linked without running the insertion steps, which inserting each top-level
+    // node into a parent runs for the whole subtree.
+    static bool try_parse_html_fragment_fast_into_detached_nodes(DOM::Element& context, Utf16View, GC::RootVector<GC::Ref<DOM::Node>>& top_level_nodes);
+
+    // Parses a document from markup whose content is in the same subset of in-body markup without a parser, then runs
+    // "the end". Returns false without changing anything when the markup is not in that subset.
+    static bool try_parse_document_fast(DOM::Document&, Utf16View);
+
+    enum class SerializableShadowRoots {
+        No,
+        Yes,
+    };
+    static Utf16String serialize_html_fragment(DOM::Node const&, SerializableShadowRoots, ReadonlySpan<GC::Ref<DOM::ShadowRoot>>, DOM::FragmentSerializationMode = DOM::FragmentSerializationMode::Inner);
+
+    HTMLTokenizer& tokenizer() { return m_tokenizer; }
+    bool streaming_body_is_exhausted() const { return m_streaming_body_is_exhausted; }
+    void did_exhaust_streaming_body(Badge<IncrementalDocumentParser>) { m_streaming_body_is_exhausted = true; }
+    void set_encoding_confidence(Badge<IncrementalDocumentParser>, EncodingConfidence confidence) { m_encoding_confidence = confidence; }
+
+    void set_allow_declarative_shadow_roots(AllowDeclarativeShadowRoots allow) { m_allow_declarative_shadow_roots = allow; }
+
+    // https://html.spec.whatwg.org/multipage/parsing.html#parser-sanitizer-configuration
+    SanitizerConfiguration const* sanitizer_configuration() const { return m_sanitizer_configuration.has_value() ? &*m_sanitizer_configuration : nullptr; }
+    void set_sanitizer_configuration(SanitizerConfiguration const&);
+
+    void configure_element_created_by_rust_parser(DOM::Element&);
+    GC::Ref<DOM::Element> create_element_for_rust_parser(Utf16FlyString const&, ReadonlySpan<RustFfiHtmlParserAttribute>, Optional<Utf16FlyString> const& namespace_, DOM::Node& intended_parent, bool had_duplicate_attribute, GC::Ptr<HTMLFormElement>, bool has_template_element_on_stack);
+    void set_script_source_line_from_rust_parser(DOM::Element&, size_t source_line_number);
+    void mark_script_already_started_from_rust_parser(HTMLScriptElement&);
+    void process_meta_element_from_rust_parser(HTMLMetaElement&);
+    void stop_parsing_from_rust_parser();
+    bool process_script_end_tag_from_rust_parser(HTMLScriptElement&);
+    bool process_svg_script_end_tag_from_rust_parser(SVG::SVGScriptElement&);
+
+    // https://html.spec.whatwg.org/multipage/parsing.html#abort-a-parser
+    void abort();
+
+    bool aborted() const { return m_aborted; }
+    bool stopped() const { return m_stop_parsing; }
+    bool is_paused() const { return m_parser_pause_flag; }
+    bool is_script_created() const { return m_script_created; }
+
+    EncodingConfidence encoding_confidence() const { return m_encoding_confidence; }
+    void set_change_encoding_callback(GC::Ref<GC::Function<bool(StringView)>> callback) { m_change_encoding_callback = callback; }
+    void set_ready_for_more_input_callback(GC::Ref<GC::Function<void()>> callback) { m_ready_for_more_input_callback = callback; }
+    void set_parsing_complete_callback(GC::Ref<GC::Function<void()>> callback) { m_parsing_complete_callback = callback; }
+
+    size_t script_nesting_level() const { return m_script_nesting_level; }
+
+    void schedule_resume_check();
+    void set_post_parse_action(Function<void()> action) { m_post_parse_action = move(action); }
+
+private:
+    static GC::Ptr<DOM::DocumentFragment> try_parse_html_fragment_fast(DOM::Element&, Utf16View);
+
+    enum class ScriptCreatedParser {
+        No,
+        Yes,
+    };
+
+    enum class FragmentParser {
+        No,
+        Yes,
+    };
+
+    HTMLParser(DOM::Document&, ParserScriptingMode, StringView input, StringView encoding, EncodingConfidence);
+    HTMLParser(DOM::Document&, ParserScriptingMode, Utf16View input, Utf16View encoding, EncodingConfidence);
+    HTMLParser(DOM::Document&, ParserScriptingMode, Utf16View input, FragmentParser);
+    HTMLParser(DOM::Document&, ParserScriptingMode, ScriptCreatedParser, EncodingConfidence);
+
+    virtual void visit_edges(Cell::Visitor&) override;
+    virtual void finalize() override;
+
+    void stop_parsing() { m_stop_parsing = true; }
+
+    // https://html.spec.whatwg.org/multipage/parsing.html#start-the-speculative-html-parser
+    void start_the_speculative_html_parser();
+    // https://html.spec.whatwg.org/multipage/parsing.html#stop-the-speculative-html-parser
+    void stop_the_speculative_html_parser();
+
+    GC::Ref<DOM::Element> create_element_for(Utf16FlyString const&, ReadonlySpan<RustFfiHtmlParserAttribute>, Optional<Utf16FlyString> const& namespace_, DOM::Node& intended_parent);
+    void increment_script_nesting_level();
+    void decrement_script_nesting_level();
+    void change_the_encoding(StringView new_encoding);
+
+    void resume_after_parser_blocking_script();
+    void invoke_post_parse_action();
+    static void the_end(GC::Ref<DOM::Document>, GC::Ptr<HTMLParser>, u64 parser_generation);
+
+    bool m_streaming_body_is_exhausted { false };
+    HTMLTokenizer m_tokenizer;
+    RustFfiHtmlParserHandle* m_rust_parser { nullptr };
+
+    bool m_parsing_fragment { false };
+
+    // https://html.spec.whatwg.org/multipage/parsing.html#scripting-mode
+    ParserScriptingMode m_scripting_mode {};
+
+    // https://html.spec.whatwg.org/multipage/parsing.html#allow-declarative-shadow-roots
+    AllowDeclarativeShadowRoots m_allow_declarative_shadow_roots { AllowDeclarativeShadowRoots::No };
+
+    // https://html.spec.whatwg.org/multipage/parsing.html#parser-sanitizer-configuration
+    Optional<SanitizerConfiguration> m_sanitizer_configuration;
+
+    bool m_script_created { false };
+
+    bool m_aborted { false };
+    bool m_parser_pause_flag { false };
+    bool m_stop_parsing { false };
+    bool m_resume_check_pending { false };
+    size_t m_script_nesting_level { 0 };
+
+    // https://html.spec.whatwg.org/multipage/parsing.html#concept-encoding-confidence
+    EncodingConfidence m_encoding_confidence;
+    GC::Ptr<GC::Function<bool(StringView)>> m_change_encoding_callback;
+    GC::Ptr<GC::Function<void()>> m_ready_for_more_input_callback;
+    GC::Ptr<GC::Function<void()>> m_parsing_complete_callback;
+
+    Function<void()> m_post_parse_action;
+
+    GC::Ptr<DOM::Document> m_document;
+    GC::Ptr<HTMLFormElement> m_form_element;
+    GC::Ptr<DOM::Element> m_context_element;
+
+    // https://html.spec.whatwg.org/multipage/parsing.html#root-insertion-target
+    GC::Ptr<DOM::DocumentFragment> m_root_insertion_target;
+
+    // https://html.spec.whatwg.org/multipage/parsing.html#active-speculative-html-parser
+    GC::Ptr<SpeculativeHTMLParser> m_active_speculative_html_parser;
+
+    // The speculative HTML parser that the active one is whenever it's not null, so that it can go on from where it
+    // stopped while this parser hasn't got past there.
+    GC::Ptr<SpeculativeHTMLParser> m_speculative_html_parser;
+};
+
+class HTMLParserEndState final : public JS::Cell {
+    GC_CELL(HTMLParserEndState, JS::Cell);
+    GC_DECLARE_ALLOCATOR(HTMLParserEndState);
+
+public:
+    static GC::Ref<HTMLParserEndState> create(GC::Ref<DOM::Document>, GC::Ptr<HTMLParser>, u64 parser_generation);
+
+    void cancel();
+    void schedule_progress_check();
+
+private:
+    enum class Phase {
+        WaitingForDeferredScripts,
+        WaitingForDOMContentLoaded,
+        WaitingForASAPScripts,
+        WaitingForLoadEventDelay,
+        Completed,
+        Cancelled,
+    };
+
+    HTMLParserEndState(GC::Ref<DOM::Document>, GC::Ptr<HTMLParser>, u64 parser_generation);
+
+    virtual void visit_edges(Cell::Visitor&) override;
+
+    void check_progress();
+    void advance_to_dom_content_loaded_phase();
+    void complete();
+
+    Phase m_phase { Phase::WaitingForDeferredScripts };
+    bool m_check_pending { false };
+    GC::Ptr<DOM::Element> m_fragment_target_awaiting_style_sheets;
+
+    GC::Ref<DOM::Document> m_document;
+    GC::Ptr<HTMLParser> m_parser;
+    u64 m_parser_generation { 0 };
+    GC::Ref<Platform::Timer> m_timeout;
+};
+
+RefPtr<CSS::StyleValue const> parse_dimension_value(Utf16View);
+// Also expose the numeric value before layout clamping when parsing succeeds.
+RefPtr<CSS::StyleValue const> parse_dimension_value(Utf16View, double& unclamped_value);
+RefPtr<CSS::StyleValue const> parse_nonzero_dimension_value(Utf16View);
+Optional<Color> parse_legacy_color_value(Utf16View);
+RefPtr<CSS::StyleValue const> parse_table_child_element_align_value(Utf16View);
+
+}

@@ -1,0 +1,88 @@
+/*
+ * Copyright (c) 2021-2023, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/NeverDestroyed.h>
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HTML/Scripting/Script.h>
+#include <LibWeb/HTML/Scripting/ScriptFetchOptions.h>
+#include <LibWeb/Page/Page.h>
+
+namespace Web::HTML {
+
+GC_DEFINE_ALLOCATOR(Script);
+
+void register_javascript_source(Script& script, NonnullRefPtr<JS::SourceCode const> source_code, ScriptRegistry::JavaScriptSource::Type type, ScriptRegistry::IsInlineSource is_inline_source, size_t source_line_number)
+{
+    auto document = script.settings_object().responsible_document();
+    if (!document) {
+        // FIXME: Register worker sources once DevTools can target workers.
+        return;
+    }
+
+    auto source_length = is_inline_source == ScriptRegistry::IsInlineSource::Yes
+        ? document->source_length_in_code_units()
+        : source_code->length_in_code_units();
+
+    auto const& registered_script = document->script_registry().register_javascript_source(
+        move(source_code),
+        type,
+        script.filename(),
+        script.display_filename(),
+        "scriptElement"_utf16,
+        is_inline_source,
+        source_line_number,
+        source_length);
+
+    if (document->page().client().has_active_devtools_client())
+        document->page().client().page_did_register_javascript_source(*document, registered_script.description);
+}
+
+Script::Script(Optional<URL::URL> base_url, ByteString filename, EnvironmentSettingsObject& settings)
+    : m_base_url(move(base_url))
+    , m_filename(filename)
+    , m_display_filename(Utf16String::from_utf8(filename))
+    , m_settings(settings)
+{
+}
+
+Script::Script(Optional<URL::URL> base_url, ByteString filename, Utf16String display_filename, EnvironmentSettingsObject& settings)
+    : m_base_url(move(base_url))
+    , m_filename(filename)
+    , m_display_filename(move(display_filename))
+    , m_settings(settings)
+{
+}
+
+Script::~Script() = default;
+
+ScriptFetchOptions const& Script::fetch_options() const
+{
+    static NeverDestroyed<ScriptFetchOptions> default_fetch_options { default_script_fetch_options() };
+    if (!m_fetch_options)
+        return *default_fetch_options;
+    return *m_fetch_options;
+}
+
+void Script::set_fetch_options(ScriptFetchOptions fetch_options)
+{
+    m_fetch_options = make<ScriptFetchOptions>(move(fetch_options));
+}
+
+EnvironmentSettingsObject& Script::settings_object()
+{
+    return m_settings;
+}
+
+void Script::visit_edges(Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_settings);
+    visitor.visit(m_parse_error);
+    visitor.visit(m_error_to_rethrow);
+}
+
+}

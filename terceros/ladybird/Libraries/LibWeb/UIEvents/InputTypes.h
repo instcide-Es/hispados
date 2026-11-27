@@ -1,0 +1,35 @@
+/*
+ * Copyright (c) 2024, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Utf16FlyString.h>
+#include <LibWeb/Export.h>
+
+namespace Web::UIEvents::InputTypes {
+
+// https://w3c.github.io/input-events/#interface-InputEvent-Attributes
+#define ENUMERATE_INPUT_TYPES                     \
+    __ENUMERATE_INPUT_TYPE(deleteByCut)           \
+    __ENUMERATE_INPUT_TYPE(deleteContentBackward) \
+    __ENUMERATE_INPUT_TYPE(deleteWordBackward)    \
+    __ENUMERATE_INPUT_TYPE(deleteWordForward)     \
+    __ENUMERATE_INPUT_TYPE(deleteHardLineForward) \
+    __ENUMERATE_INPUT_TYPE(deleteContentForward)  \
+    __ENUMERATE_INPUT_TYPE(historyRedo)           \
+    __ENUMERATE_INPUT_TYPE(historyUndo)           \
+    __ENUMERATE_INPUT_TYPE(insertCompositionText) \
+    __ENUMERATE_INPUT_TYPE(insertFromPaste)       \
+    __ENUMERATE_INPUT_TYPE(insertLineBreak)       \
+    __ENUMERATE_INPUT_TYPE(insertParagraph)       \
+    __ENUMERATE_INPUT_TYPE(insertReplacementText) \
+    __ENUMERATE_INPUT_TYPE(insertText)
+
+#define __ENUMERATE_INPUT_TYPE(name) extern WEB_API Utf16FlyString const& name;
+ENUMERATE_INPUT_TYPES
+#undef __ENUMERATE_INPUT_TYPE
+
+}

@@ -1,0 +1,48 @@
+[package]
+name = "libweb_bindings_rust"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[features]
+# The features of the LibJS runtime, which this crate builds for LibWeb's library. The JIT is a default feature, as it
+# is of the runtime's crate, so that cargo builds and lints the crate the way LibWeb's library does unless told otherwise.
+default = ["jit"]
+allocator = ["dep:ladybird_allocator", "libjs_rust/allocator", "libwasm_engine/allocator", "libweb_rust/allocator"]
+jit = ["libjs_rust/jit"]
+address-sanitizer = ["libjs_rust/address-sanitizer"]
+thread-sanitizer = ["libjs_rust/thread-sanitizer", "libweb_rust/thread-sanitizer"]
+
+# After changing dependencies, regenerate the Flatpak sources:
+#   python3 Meta/CMake/flatpak/generate-cargo-sources.py
+[dependencies]
+ak = { path = "../../../../AK/Rust" }
+encoding_rs = "0.8.44"
+ladybird_allocator = { path = "../../../RustAllocator", optional = true }
+libcompositing_rust = { path = "../../../LibCompositing/Rust" }
+libcompress_rust = { path = "../../../LibCompress/Rust" }
+libcrypto_rust = { path = "../../../LibCrypto/Rust" }
+libgfx_rust = { path = "../../../LibGfx/Rust", default-features = false }
+libhttp_rust = { path = "../../../LibHTTP/Rust" }
+libipc_rust = { path = "../../../LibIPC/Rust" }
+libjs_rust = { path = "../../../LibJS/Rust", default-features = false }
+libtextcodec_rust = { path = "../../../LibTextCodec/Rust" }
+libunicode_rust = { path = "../../../LibUnicode/Rust", default-features = false }
+liburl_rust = { path = "../../../LibURL/Rust", default-features = false }
+libwasm_engine = { path = "../../../LibWasm/Engine" }
+libweb_html_tokenizer = { path = "../../HTML/Parser/Rust" }
+libweb_rust = { path = "../../Rust" }
+libwebcommon_rust = { path = "../../../LibWebCommon/Rust" }
+rustc-demangle = "0.1"
+smallvec = { version = "1.16.5", features = ["const_generics", "union"] }
+
+[build-dependencies]
+serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
+
+[dev-dependencies]
+serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
+
+[lints]
+workspace = true

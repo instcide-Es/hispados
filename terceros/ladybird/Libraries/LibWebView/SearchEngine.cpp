@@ -1,0 +1,57 @@
+/*
+ * Copyright (c) 2023-2025, Tim Flynn <trflynn89@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/Utf8View.h>
+#include <LibURL/Parser.h>
+#include <LibURL/URL.h>
+#include <LibWebView/SearchEngine.h>
+
+namespace WebView {
+
+static auto const& s_builtin_search_engines = *new auto(to_array<SearchEngine>({
+    { "Bing"_string, "https://www.bing.com/search?q=%s"_string, "https://www.bing.com/osjson.aspx?query=%s"_string },
+    { "Brave"_string, "https://search.brave.com/search?q=%s"_string, "https://search.brave.com/api/suggest?q=%s"_string },
+    { "DuckDuckGo"_string, "https://duckduckgo.com/?q=%s"_string, "https://duckduckgo.com/ac/?q=%s&type=list"_string },
+    { "Ecosia"_string, "https://ecosia.org/search?q=%s"_string, "https://ac.ecosia.org/autocomplete?q=%s&type=list"_string },
+    { "Google"_string, "https://www.google.com/search?q=%s"_string, "https://www.google.com/complete/search?client=chrome&q=%s"_string },
+    { "Kagi"_string, "https://kagi.com/search?q=%s"_string, "https://kagisuggest.com/api/autosuggest?q=%s"_string },
+    { "Mojeek"_string, "https://www.mojeek.com/search?q=%s"_string },
+    { "Qwant"_string, "https://www.qwant.com/?q=%s&t=web"_string, "https://api.qwant.com/api/suggest/?client=opensearch&q=%s"_string },
+    { "Startpage"_string, "https://startpage.com/search?q=%s"_string, "https://www.startpage.com/osuggestions?q=%s"_string },
+    { "Yahoo"_string, "https://search.yahoo.com/search?p=%s"_string, "https://search.yahoo.com/sugg/gossip/gossip-us-ura/?output=fxjson&command=%s"_string },
+    { "Yandex"_string, "https://yandex.com/search/?text=%s"_string, "https://suggest.yandex.com/suggest-ff.cgi?part=%s&uil=en&v=3"_string },
+}));
+
+ReadonlySpan<SearchEngine> builtin_search_engines()
+{
+    return s_builtin_search_engines;
+}
+
+String SearchEngine::format_search_query_for_display(StringView query) const
+{
+    static constexpr auto MAX_SEARCH_STRING_LENGTH = 32;
+
+    Utf8View query_view { query };
+    auto is_truncated = query_view.length() > MAX_SEARCH_STRING_LENGTH;
+    if (is_truncated)
+        query_view = query_view.unicode_substring_view(0, MAX_SEARCH_STRING_LENGTH);
+
+    return MUST(String::formatted("Search {} for “{}{}”", name, query_view.as_string(), is_truncated ? "…"sv : ""sv));
+}
+
+String SearchEngine::format_search_query_for_navigation(StringView query) const
+{
+    return MUST(query_url.replace("%s"sv, URL::percent_encode(query, URL::PercentEncodeSet::Component), ReplaceMode::All));
+}
+
+Optional<URL::URL> SearchEngine::suggestions_url_for_query(StringView query) const
+{
+    if (!suggestions_url.has_value())
+        return {};
+    return URL::Parser::basic_parse(MUST(suggestions_url->replace("%s"sv, URL::percent_encode(query, URL::PercentEncodeSet::Component), ReplaceMode::All)));
+}
+
+}

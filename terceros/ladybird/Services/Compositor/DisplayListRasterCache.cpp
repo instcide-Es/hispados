@@ -1,0 +1,548 @@
+/*
+ * Copyright (c) 2026, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/BitCast.h>
+#include <AK/ByteBuffer.h>
+#include <AK/HashTable.h>
+#include <AK/ScopeGuard.h>
+#include <Compositor/DisplayListRasterCache.h>
+#include <Compositor/FontSkia.h>
+#include <Compositor/SkiaBackendContext.h>
+#include <Compositor/SkiaUtils.h>
+#include <Compositor/VideoFrameSkia.h>
+#include <LibCompositing/DisplayList/DisplayListCommand.h>
+#include <LibCompositing/DisplayList/DisplayListResources.h>
+#include <LibGfx/Bitmap.h>
+#include <LibGfx/ColorSpace.h>
+#include <LibGfx/Font/Font.h>
+#include <LibGfx/YUVData.h>
+#include <LibMediaCodecs/VideoFrame.h>
+#include <LibMediaCodecs/VideoSurface.h>
+
+#include <core/SkFont.h>
+#include <core/SkImage.h>
+#include <core/SkImageFilter.h>
+#include <core/SkPath.h>
+#include <core/SkTextBlob.h>
+#include <core/SkYUVAPixmaps.h>
+#include <gpu/ganesh/GrDirectContext.h>
+#include <gpu/ganesh/SkImageGanesh.h>
+
+namespace Compositor {
+
+using namespace Compositing;
+
+// The Skia filters of the layers, keyed on what the replay says stays the same for as long as a layer's filters do. An
+// entry is only reused for the same filter bytes.
+struct DisplayListRasterCache::LayerImageFilterCache {
+    AK_ALLOC_WITH_KMALLOC;
+
+    struct Entry {
+        ByteBuffer filter_bytes;
+        sk_sp<SkImageFilter> image_filter;
+    };
+    struct BackdropEntry {
+        ByteBuffer filter_bytes;
+        Gfx::IntRect region;
+        Optional<Gfx::FloatRect> blur_edge;
+        Gfx::CornerRadii corner_radii;
+        Gfx::Color base_color;
+        bool limited_to_region { false };
+        sk_sp<SkImageFilter> image_filter;
+    };
+    HashMap<u64, Entry> entries;
+    HashMap<u64, BackdropEntry> backdrop_entries;
+};
+
+struct DisplayListRasterCache::ImageFrameImage {
+    AK_ALLOC_WITH_KMALLOC;
+
+    ImageFrameImage(Gfx::DecodedImageFrame frame, RefPtr<Gfx::SkiaBackendContext> skia_backend_context, sk_sp<SkImage> image)
+        : frame(move(frame))
+        , skia_backend_context(move(skia_backend_context))
+        , image(move(image))
+    {
+    }
+
+    // A raster image, or a texture over the IOSurface of the frame, reads the pixels of the frame, so the frame must live
+    // as long as the image.
+    Gfx::DecodedImageFrame frame;
+    RefPtr<Gfx::SkiaBackendContext> skia_backend_context;
+    sk_sp<SkImage> image;
+};
+
+struct DisplayListRasterCache::VideoSinkImage {
+    AK_ALLOC_WITH_KMALLOC;
+
+    u64 frame_id { 0 };
+    // Drawing is recorded here but read by the GPU afterwards, so the frame stays held, and its surface's pixels
+    // with it, until a different frame is drawn in its place.
+    RefPtr<Media::VideoFrame const> drawn_frame;
+    RefPtr<Gfx::SkiaBackendContext> skia_backend_context;
+    sk_sp<SkImage> image;
+    Gfx::IntSize visible_size;
+};
+
+struct DisplayListRasterCache::RepeatedTileRaster {
+    AK_ALLOC_WITH_KMALLOC;
+
+    RepeatedTileRaster(Gfx::IntSize tile_size, RefPtr<Gfx::SkiaBackendContext> skia_backend_context, sk_sp<SkImage> image)
+        : tile_size(tile_size)
+        , skia_backend_context(move(skia_backend_context))
+        , image(move(image))
+    {
+    }
+
+    size_t byte_size() const { return static_cast<size_t>(tile_size.width()) * tile_size.height() * 4; }
+
+    Gfx::IntSize tile_size;
+    RefPtr<Gfx::SkiaBackendContext> skia_backend_context;
+    sk_sp<SkImage> image;
+};
+
+struct DisplayListRasterCache::VectorImageRasters {
+    AK_ALLOC_WITH_KMALLOC;
+
+    explicit VectorImageRasters(RefPtr<Gfx::SkiaBackendContext> skia_backend_context)
+        : skia_backend_context(move(skia_backend_context))
+    {
+    }
+
+    struct Raster {
+        int raster_scale { 1 };
+        Gfx::IntRect rect_in_raster_pixels;
+        sk_sp<SkImage> image;
+        MonotonicTime last_used { MonotonicTime::now() };
+
+        size_t byte_size() const { return static_cast<size_t>(rect_in_raster_pixels.width()) * rect_in_raster_pixels.height() * 4; }
+    };
+
+    size_t total_byte_size() const
+    {
+        size_t total = 0;
+        for (auto const& raster : rasters)
+            total += raster.byte_size();
+        return total;
+    }
+
+    RefPtr<Gfx::SkiaBackendContext> skia_backend_context;
+
+    // The same image can be painted at several places in one frame (repeated SVG images, atlas-style images
+    // painted in many small slices), each with its own visible sub-rectangle, so a single image keeps a
+    // bounded set of rasters, most recently used first.
+    static constexpr size_t max_rasters = 32;
+    Vector<Raster> rasters;
+};
+
+struct DisplayListRasterCache::TextBlob {
+    AK_ALLOC_WITH_KMALLOC;
+
+    TextBlob(ByteBuffer glyph_bytes, sk_sp<SkTextBlob> blob, size_t byte_size, MonotonicTime last_used)
+        : glyph_bytes(move(glyph_bytes))
+        , blob(move(blob))
+        , byte_size(byte_size)
+        , last_used(last_used)
+    {
+    }
+
+    ByteBuffer glyph_bytes;
+    sk_sp<SkTextBlob> blob;
+    size_t byte_size { 0 };
+    MonotonicTime last_used;
+};
+
+struct DisplayListRasterCache::ClipPath {
+    AK_ALLOC_WITH_KMALLOC;
+
+    explicit ClipPath(SkPath path)
+        : path(move(path))
+    {
+    }
+
+    SkPath path;
+};
+
+DisplayListRasterCache::DisplayListRasterCache() = default;
+DisplayListRasterCache::~DisplayListRasterCache() = default;
+
+void DisplayListRasterCache::forget_fonts(ReadonlySpan<u64> font_ids)
+{
+    if (font_ids.is_empty())
+        return;
+    HashTable<u64> forgotten_font_ids;
+    for (auto id : font_ids)
+        forgotten_font_ids.set(id);
+    m_text_blobs.remove_all_matching([&](auto const& key, auto const& text_blob) {
+        if (!forgotten_font_ids.contains(key.font_id))
+            return false;
+        m_text_blob_cache_bytes -= text_blob->byte_size;
+        return true;
+    });
+}
+
+void DisplayListRasterCache::forget_image_frames(ReadonlySpan<u64> image_frame_ids)
+{
+    // Filters retain the images of the image frames that they were made with.
+    if (!image_frame_ids.is_empty())
+        m_layer_image_filter_cache = nullptr;
+    for (auto id : image_frame_ids)
+        m_image_frame_images.remove(id);
+}
+
+DisplayListRasterCache::LayerImageFilterCache& DisplayListRasterCache::ensure_layer_image_filter_cache()
+{
+    if (!m_layer_image_filter_cache)
+        m_layer_image_filter_cache = make<LayerImageFilterCache>();
+    return *m_layer_image_filter_cache;
+}
+
+sk_sp<SkImageFilter> DisplayListRasterCache::layer_image_filter(ReplayLayer const& layer, Function<sk_sp<SkImageFilter>()> const& create)
+{
+    ReadonlyBytes filter_bytes { layer.filter_bytes, layer.filter_bytes_size };
+    auto& entries = ensure_layer_image_filter_cache().entries;
+    if (auto cached = entries.find(layer.filter_cache_key); cached != entries.end() && cached->value.filter_bytes.bytes() == filter_bytes)
+        return cached->value.image_filter;
+    auto image_filter = create();
+    entries.set(layer.filter_cache_key, LayerImageFilterCache::Entry { MUST(ByteBuffer::copy(filter_bytes)), image_filter });
+    return image_filter;
+}
+
+sk_sp<SkImageFilter> DisplayListRasterCache::backdrop_image_filter(ReplayLayer const& layer, Optional<Gfx::FloatRect> blur_edge, bool limited_to_region, Function<sk_sp<SkImageFilter>()> const& create)
+{
+    ReadonlyBytes filter_bytes { layer.backdrop_filter_bytes, layer.backdrop_filter_bytes_size };
+    auto& entries = ensure_layer_image_filter_cache().backdrop_entries;
+    if (auto cached = entries.find(layer.filter_cache_key); cached != entries.end()
+        && cached->value.filter_bytes.bytes() == filter_bytes
+        && cached->value.region == layer.backdrop_region
+        && cached->value.blur_edge == blur_edge
+        && cached->value.corner_radii == layer.backdrop_corner_radii
+        && cached->value.base_color == layer.backdrop_base_color
+        && cached->value.limited_to_region == limited_to_region)
+        return cached->value.image_filter;
+    auto image_filter = create();
+    entries.set(layer.filter_cache_key, LayerImageFilterCache::BackdropEntry { MUST(ByteBuffer::copy(filter_bytes)), layer.backdrop_region, blur_edge, layer.backdrop_corner_radii, layer.backdrop_base_color, limited_to_region, image_filter });
+    return image_filter;
+}
+
+void DisplayListRasterCache::keep_only_layer_filters(ReadonlySpan<u64> drawn_layer_filter_cache_keys)
+{
+    if (!m_layer_image_filter_cache)
+        return;
+    HashTable<u64> drawn;
+    for (auto key : drawn_layer_filter_cache_keys)
+        drawn.set(key);
+    m_layer_image_filter_cache->entries.remove_all_matching([&](auto key, auto const&) { return !drawn.contains(key); });
+    m_layer_image_filter_cache->backdrop_entries.remove_all_matching([&](auto key, auto const&) { return !drawn.contains(key); });
+}
+
+static sk_sp<SkImage> create_skia_image(Gfx::DecodedImageFrame const& frame, RefPtr<Gfx::SkiaBackendContext> const& skia_backend_context)
+{
+    if (skia_backend_context) {
+        if (auto image = Gfx::sk_texture_image_sharing_pixels_of_decoded_image_frame(frame, *skia_backend_context))
+            return image;
+    }
+
+    auto raster_image = Gfx::sk_image_from_decoded_image_frame(frame);
+    auto* gr_context = skia_backend_context ? skia_backend_context->sk_context() : nullptr;
+    if (!gr_context)
+        return raster_image;
+
+    auto texture_image = SkImages::TextureFromImage(gr_context, raster_image.get(), skgpu::Mipmapped::kNo, skgpu::Budgeted::kYes);
+    if (texture_image)
+        return texture_image;
+    return raster_image;
+}
+
+sk_sp<SkImage> DisplayListRasterCache::image_for_image_frame(Gfx::DecodedImageFrame const& frame, ImageFrameResourceId id, RefPtr<Gfx::SkiaBackendContext> const& skia_backend_context)
+{
+    if (auto cached = m_image_frame_images.get(id.value()); cached.has_value()) {
+        auto const& image = *cached.value();
+        // A frame replaced under the same id has pixels of its own, so this also catches a replacement that was
+        // not evicted.
+        if (image.frame.has_same_pixels_as(frame) && image.skia_backend_context.ptr() == skia_backend_context.ptr())
+            return image.image;
+    }
+
+    auto image = create_skia_image(frame, skia_backend_context);
+    m_image_frame_images.set(id.value(), make<ImageFrameImage>(frame, skia_backend_context, image));
+    return image;
+}
+
+void DisplayListRasterCache::forget_video_sink(Media::VideoSinkHandle handle)
+{
+    m_video_sink_images.remove(handle.value());
+}
+
+void DisplayListRasterCache::forget_vector_images_other_than(ReadonlySpan<u64> drawn_vector_image_ids)
+{
+    if (m_vector_image_rasters.is_empty())
+        return;
+    HashTable<u64> drawn;
+    for (auto id : drawn_vector_image_ids)
+        drawn.set(id);
+    m_vector_image_rasters.remove_all_matching([&](auto id, auto const&) { return !drawn.contains(id); });
+}
+
+sk_sp<SkImage> DisplayListRasterCache::image_for_video_sink(Media::VideoSinkHandle handle, Media::VideoFrame const& frame, RefPtr<Gfx::SkiaBackendContext> const& skia_backend_context, Gfx::IntSize& visible_size)
+{
+    auto& cached_image = *m_video_sink_images.ensure(handle.value(), [] { return make<VideoSinkImage>(); });
+    auto cached_image_matches = [&] {
+        if (!cached_image.image)
+            return false;
+        if (cached_image.skia_backend_context != skia_backend_context)
+            return false;
+        return cached_image.frame_id == frame.id();
+    }();
+    if (cached_image_matches) {
+        cached_image.drawn_frame = frame;
+        visible_size = cached_image.visible_size;
+        return cached_image.image;
+    }
+
+    auto image = sk_image_from_video_frame(frame, skia_backend_context);
+    if (!image)
+        return nullptr;
+
+    cached_image.frame_id = frame.id();
+    cached_image.drawn_frame = frame;
+    cached_image.skia_backend_context = skia_backend_context;
+    cached_image.image = image;
+    cached_image.visible_size = frame.size().to_type<int>();
+    visible_size = cached_image.visible_size;
+    return image;
+}
+
+sk_sp<SkImage> DisplayListRasterCache::repeated_tile_raster(u64 tile_key, Gfx::IntSize tile_size, RefPtr<Gfx::SkiaBackendContext> const& skia_backend_context) const
+{
+    auto cached_raster = m_repeated_tile_rasters.find(tile_key);
+    if (cached_raster == m_repeated_tile_rasters.end())
+        return nullptr;
+
+    auto const& raster = *cached_raster->value;
+    if (raster.tile_size != tile_size)
+        return nullptr;
+    if (raster.skia_backend_context.ptr() != skia_backend_context.ptr())
+        return nullptr;
+
+    return raster.image;
+}
+
+void DisplayListRasterCache::add_repeated_tile_raster(u64 tile_key, Gfx::IntSize tile_size, RefPtr<Gfx::SkiaBackendContext> const& skia_backend_context, sk_sp<SkImage> image)
+{
+    constexpr size_t max_repeated_tile_raster_bytes = 64 * MiB;
+    auto raster = make<RepeatedTileRaster>(tile_size, skia_backend_context, move(image));
+    if (m_repeated_tile_raster_bytes + raster->byte_size() > max_repeated_tile_raster_bytes) {
+        m_repeated_tile_rasters.clear();
+        m_repeated_tile_raster_bytes = 0;
+    }
+    if (auto existing = m_repeated_tile_rasters.get(tile_key); existing.has_value())
+        m_repeated_tile_raster_bytes -= (*existing)->byte_size();
+    m_repeated_tile_raster_bytes += raster->byte_size();
+    m_repeated_tile_rasters.set(tile_key, move(raster));
+}
+
+sk_sp<SkImage> DisplayListRasterCache::vector_image_raster(DisplayListResourceId id, int raster_scale, RefPtr<Gfx::SkiaBackendContext> const& skia_backend_context, Gfx::IntRect visible_rect_in_raster_pixels, Gfx::IntRect& raster_rect_in_raster_pixels)
+{
+    auto cached_rasters = m_vector_image_rasters.find(id.value());
+    if (cached_rasters == m_vector_image_rasters.end())
+        return nullptr;
+
+    auto& rasters = *cached_rasters->value;
+    if (rasters.skia_backend_context.ptr() != skia_backend_context.ptr())
+        return nullptr;
+
+    for (size_t i = 0; i < rasters.rasters.size(); ++i) {
+        if (rasters.rasters[i].raster_scale != raster_scale || !rasters.rasters[i].rect_in_raster_pixels.contains(visible_rect_in_raster_pixels))
+            continue;
+        if (i != 0) {
+            auto raster = move(rasters.rasters[i]);
+            rasters.rasters.remove(i);
+            rasters.rasters.prepend(move(raster));
+        }
+        rasters.rasters.first().last_used = MonotonicTime::now();
+        raster_rect_in_raster_pixels = rasters.rasters.first().rect_in_raster_pixels;
+        return rasters.rasters.first().image;
+    }
+    return {};
+}
+
+bool DisplayListRasterCache::has_rasterized_vector_image(DisplayListResourceId id, int raster_scale) const
+{
+    auto cached_rasters = m_vector_image_rasters.find(id.value());
+    if (cached_rasters == m_vector_image_rasters.end())
+        return false;
+    return cached_rasters->value->rasters.contains([&](auto const& raster) { return raster.raster_scale == raster_scale; });
+}
+
+bool DisplayListRasterCache::reserve_vector_image_raster(DisplayListResourceId id, RefPtr<Gfx::SkiaBackendContext> const& skia_backend_context, Gfx::IntRect rect_in_raster_pixels)
+{
+    auto& rasters = *m_vector_image_rasters.ensure(id.value(), [&] {
+        return make<VectorImageRasters>(skia_backend_context);
+    });
+
+    if (rasters.skia_backend_context.ptr() != skia_backend_context.ptr()) {
+        rasters.rasters.clear();
+        rasters.skia_backend_context = skia_backend_context;
+    }
+
+    // When the budget is exceeded, evict rasters that are not part of the active working set (not used
+    // recently). If everything is recently used, the live working set genuinely exceeds the budget; then skip
+    // caching this raster instead of evicting hot entries, so an oversized page degrades to direct replay for
+    // the overflow instead of thrashing the whole cache. Additions are rare by design, so the total is simply
+    // recomputed here instead of being tracked incrementally.
+    constexpr size_t max_vector_image_raster_cache_bytes = 512 * MiB;
+    auto raster_bytes = static_cast<size_t>(rect_in_raster_pixels.width()) * rect_in_raster_pixels.height() * 4;
+    auto total_bytes = raster_bytes + m_vector_image_raster_cache_reserved_bytes;
+    for (auto const& it : m_vector_image_rasters)
+        total_bytes += it.value->total_byte_size();
+    if (total_bytes > max_vector_image_raster_cache_bytes) {
+        auto now = MonotonicTime::now();
+        for (auto& it : m_vector_image_rasters) {
+            it.value->rasters.remove_all_matching([&](auto const& raster) {
+                if (now - raster.last_used < AK::Duration::from_milliseconds(250))
+                    return false;
+                total_bytes -= raster.byte_size();
+                return true;
+            });
+        }
+        if (total_bytes > max_vector_image_raster_cache_bytes)
+            return false;
+    }
+
+    // Reserve before rasterizing: the records of an image can create other cached rasters while they are painted.
+    m_vector_image_raster_cache_reserved_bytes += raster_bytes;
+    return true;
+}
+
+sk_sp<SkImage> DisplayListRasterCache::finish_vector_image_raster(DisplayListResourceId id, int raster_scale, RefPtr<Gfx::SkiaBackendContext> const& skia_backend_context, Gfx::IntRect rect_in_raster_pixels, sk_sp<SkImage> image)
+{
+    auto raster_bytes = static_cast<size_t>(rect_in_raster_pixels.width()) * rect_in_raster_pixels.height() * 4;
+    m_vector_image_raster_cache_reserved_bytes -= raster_bytes;
+    if (!image)
+        return {};
+
+    auto& rasters = *m_vector_image_rasters.ensure(id.value(), [&] {
+        return make<VectorImageRasters>(skia_backend_context);
+    });
+    if (rasters.skia_backend_context.ptr() != skia_backend_context.ptr()) {
+        rasters.rasters.clear();
+        rasters.skia_backend_context = skia_backend_context;
+    }
+    if (rasters.rasters.size() == VectorImageRasters::max_rasters)
+        rasters.rasters.take_last();
+    rasters.rasters.prepend({ raster_scale, rect_in_raster_pixels, image });
+    return image;
+}
+
+static u64 text_blob_glyph_hash(ReadonlySpan<DisplayListGlyph> glyphs)
+{
+    u64 hash = glyphs.size();
+    for (auto const& glyph : glyphs) {
+        u64 position = static_cast<u64>(bit_cast<u32>(glyph.position.x())) << 32 | bit_cast<u32>(glyph.position.y());
+        hash = (hash ^ position) * 0x9e3779b97f4a7c15ULL;
+        hash = (hash ^ glyph.glyph_id) * 0x9e3779b97f4a7c15ULL;
+        hash ^= hash >> 32;
+    }
+    return hash;
+}
+
+static sk_sp<SkTextBlob> make_text_blob(Gfx::Font const& font, float scale, ReadonlySpan<DisplayListGlyph> glyphs, [[maybe_unused]] u8 font_smoothing, bool uses_lcd_text)
+{
+    if (font.is_invisible())
+        return nullptr;
+    auto maybe_sk_font = skia_font(font, scale, uses_lcd_text);
+    if (!maybe_sk_font.has_value())
+        return nullptr;
+    auto& sk_font = *maybe_sk_font;
+#ifdef AK_OS_MACOS
+    // INTEROP: Blink disables CoreGraphics outline dilation for antialiased text.
+    // https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/platform/fonts/mac/font_platform_data_mac.mm
+    switch (static_cast<FontSmoothing>(font_smoothing)) {
+    case FontSmoothing::Antialiased:
+        sk_font.setEdging(SkFont::Edging::kAntiAlias);
+        sk_font.setHinting(SkFontHinting::kNone);
+        break;
+    case FontSmoothing::None:
+        sk_font.setEdging(SkFont::Edging::kAlias);
+        break;
+    case FontSmoothing::SubpixelAntialiased:
+        sk_font.setEdging(SkFont::Edging::kSubpixelAntiAlias);
+        break;
+    default:
+        break;
+    }
+#endif
+    SkTextBlobBuilder builder;
+    auto const& run = builder.allocRunPos(sk_font, glyphs.size());
+
+    auto font_ascent = font.pixel_metrics().ascent;
+    for (size_t i = 0; i < glyphs.size(); ++i) {
+        run.glyphs[i] = glyphs[i].glyph_id;
+        run.pos[i * 2] = glyphs[i].position.x() * scale;
+        run.pos[i * 2 + 1] = (glyphs[i].position.y() + font_ascent) * scale;
+    }
+    return builder.make();
+}
+
+sk_sp<SkTextBlob> DisplayListRasterCache::text_blob(Gfx::Font const& font, FontResourceId font_id, float scale, ReadonlySpan<DisplayListGlyph> glyphs, u8 font_smoothing, bool uses_lcd_text)
+{
+    constexpr size_t max_text_blob_cache_bytes = 16 * MiB;
+    constexpr auto text_blob_idle_duration = AK::Duration::from_milliseconds(250);
+
+    ReadonlyBytes glyph_bytes { reinterpret_cast<u8 const*>(glyphs.data()), glyphs.size() * sizeof(DisplayListGlyph) };
+    TextBlobCacheKey key { font_id.value(), bit_cast<u32>(scale), font_smoothing, uses_lcd_text, text_blob_glyph_hash(glyphs) };
+    auto now = MonotonicTime::now();
+
+    if (auto cached = m_text_blobs.find(key); cached != m_text_blobs.end()) {
+        auto& text_blob = *cached->value;
+        if (text_blob.glyph_bytes.bytes() == glyph_bytes) {
+            text_blob.last_used = now;
+            return text_blob.blob;
+        }
+        m_text_blob_cache_bytes -= text_blob.byte_size;
+        m_text_blobs.remove(cached);
+    }
+
+    auto blob = make_text_blob(font, scale, glyphs, font_smoothing, uses_lcd_text);
+    if (!blob)
+        return nullptr;
+
+    auto byte_size = glyphs.size() * 24 + 256;
+    if (m_text_blob_cache_bytes + byte_size > max_text_blob_cache_bytes) {
+        if (now - m_text_blob_cache_sweep_time < text_blob_idle_duration)
+            return blob;
+        m_text_blob_cache_sweep_time = now;
+        m_text_blobs.remove_all_matching([&](auto const&, auto const& text_blob) {
+            if (now - text_blob->last_used < text_blob_idle_duration)
+                return false;
+            m_text_blob_cache_bytes -= text_blob->byte_size;
+            return true;
+        });
+        if (m_text_blob_cache_bytes + byte_size > max_text_blob_cache_bytes)
+            return blob;
+    }
+
+    m_text_blob_cache_bytes += byte_size;
+    m_text_blobs.set(key, make<TextBlob>(MUST(ByteBuffer::copy(glyph_bytes)), blob, byte_size, now));
+    return blob;
+}
+
+SkPath DisplayListRasterCache::clip_path(u64 path_identity, Gfx::PathData const& path)
+{
+    return m_clip_paths.ensure(path_identity, [&] { return make<ClipPath>(Gfx::to_skia_path(path)); })->path;
+}
+
+void DisplayListRasterCache::keep_only_clip_paths(ReadonlySpan<u64> drawn_path_identities)
+{
+    if (m_clip_paths.is_empty())
+        return;
+    HashTable<u64> drawn;
+    for (auto identity : drawn_path_identities)
+        drawn.set(identity);
+    m_clip_paths.remove_all_matching([&](auto identity, auto const&) { return !drawn.contains(identity); });
+}
+
+}

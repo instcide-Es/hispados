@@ -1,0 +1,208 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/Hex.h>
+#include <AK/WeakPtr.h>
+#include <LibCrypto/Hash/Hash.h>
+#include <LibURL/URL.h>
+#include <LibWebView/CrashReportDiagnostics.h>
+#include <LibWebView/CrashReportReview.h>
+
+namespace WebView {
+
+static String to_string(StringView text)
+{
+    return String::from_utf8_with_replacement_character(text);
+}
+
+static ByteString sha256_hex(ReadonlyBytes bytes)
+{
+    return encode_hex(Crypto::Hash::digest(Crypto::Hash::HashKind::SHA256, bytes).bytes());
+}
+
+CrashReportReview::CrashReportReview(CrashReportStore& store)
+    : m_store(store)
+{
+}
+
+CrashReportReview::~CrashReportReview() = default;
+
+ErrorOr<CrashReportReview::Report> CrashReportReview::open(ByteString const& report_name)
+{
+    VERIFY(!m_submission);
+
+    m_report_name = {};
+    m_text_digest = {};
+    m_prepared_manifest = {};
+    m_prepared_description = {};
+    m_prepared_url = {};
+
+    auto saved_report = TRY(m_store.saved_report(report_name));
+
+    m_report_name = report_name;
+    m_text_digest = sha256_hex(saved_report.text.bytes());
+
+    // A submission sends what this same parse produces, so the user cannot be shown one reading of a report and send
+    // another.
+    auto diagnostics = CrashReportDiagnostics::parse(saved_report.text);
+
+    Report report;
+    report.name = report_name;
+
+    auto add_field = [&](StringView label, StringView value, bool is_code = false) {
+        if (!value.is_empty())
+            report.fields.append({ to_string(label), to_string(value), is_code });
+    };
+
+    // A signal reads best as its name followed by its number.
+    auto signal = [&](StringView prefix) {
+        auto name = diagnostics.header(prefix);
+        auto number = diagnostics.header(ByteString::formatted("{} number", prefix));
+        if (name.is_empty() || number.is_empty())
+            return name;
+        return ByteString::formatted("{} ({})", name, number);
+    };
+
+    // Shown in local time.
+    if (diagnostics.crashed_at.has_value()) {
+        if (auto crashed_at = diagnostics.crashed_at->to_string("%Y-%m-%d %H:%M:%S"sv, UnixDateTime::LocalTime::Yes); !crashed_at.is_error())
+            add_field("Crash date"sv, crashed_at.value().bytes_as_string_view());
+    }
+    for (auto header : CrashReportDiagnostics::failure_headers) {
+        if (auto value = diagnostics.header(header); !value.is_empty()) {
+            add_field(header, value, true);
+            break;
+        }
+    }
+    add_field("Termination signal"sv, signal("Termination signal"sv));
+    add_field("Ladybird version"sv, diagnostics.header("Version"sv), true);
+    add_field("Platform"sv, diagnostics.header("Platform"sv));
+    add_field("Process"sv, diagnostics.header("Process"sv));
+    add_field("Architecture"sv, diagnostics.header("Architecture"sv));
+    add_field("Git commit"sv, diagnostics.header("Git commit"sv), true);
+    add_field("Sandbox"sv, diagnostics.header("Sandbox"sv));
+
+    return report;
+}
+
+ErrorOr<ByteString> CrashReportReview::report_text() const
+{
+    VERIFY(!m_report_name.is_empty());
+    return TRY(m_store.saved_report(m_report_name)).text;
+}
+
+Optional<String> CrashReportReview::website_from_url(URL::URL const& url)
+{
+    if (url.scheme() != "http"sv && url.scheme() != "https"sv)
+        return {};
+
+    auto website = url;
+    website.set_username(""sv);
+    website.set_password(""sv);
+    auto serialized_website = website.serialize(URL::ExcludeFragment::Yes);
+    if (serialized_website.bytes().size() > maximum_url_bytes)
+        return {};
+    return serialized_website;
+}
+
+Optional<String> CrashReportReview::validate(StringView description, Optional<StringView> url)
+{
+    if (description.length() > maximum_description_bytes)
+        return "This description is too long to include in a report."_string;
+    if (!url.has_value())
+        return {};
+    if (url->is_empty())
+        return "Enter a website URL or leave the option unchecked."_string;
+    if (url->length() > maximum_url_bytes)
+        return "This website URL is too long to include in a report."_string;
+    if (!url->starts_with("http://"sv, CaseSensitivity::CaseInsensitive)
+        && !url->starts_with("https://"sv, CaseSensitivity::CaseInsensitive))
+        return "Enter an http or https URL."_string;
+    return {};
+}
+
+Optional<String> CrashReportReview::send(String const& description, Optional<String> const& url)
+{
+    VERIFY(!m_report_name.is_empty());
+    VERIFY(!m_submission);
+
+    Optional<StringView> url_view;
+    if (url.has_value())
+        url_view = url->bytes_as_string_view();
+    if (auto error = validate(description, url_view); error.has_value())
+        return error;
+
+    // Sending the same choices again, after a failed or canceled attempt, sends the same submission, which the server
+    // recognizes if the earlier attempt reached it. Other choices make a new submission, carrying only those.
+    if (description != m_prepared_description || url != m_prepared_url) {
+        m_prepared_manifest = {};
+        m_prepared_description = description;
+        m_prepared_url = url;
+    }
+
+    auto submission = CrashReportSubmission::create(m_store,
+        {
+            .report_name = m_report_name,
+            .description = description.to_byte_string(),
+            .url = url.has_value() ? url->to_byte_string() : ByteString {},
+            .reviewed_text_digest = m_text_digest,
+            .manifest = m_prepared_manifest,
+        });
+
+    submission->on_progress = [weak_this = make_weak_ptr()](auto stage) {
+        if (auto* self = weak_this.ptr(); self && self->on_progress)
+            self->on_progress(stage);
+    };
+    submission->on_prepared = [weak_this = make_weak_ptr()](ByteString const& manifest) {
+        if (auto* self = weak_this.ptr())
+            self->m_prepared_manifest = manifest;
+    };
+    submission->on_retry = [weak_this = make_weak_ptr()](String reason, u32 retry_number, u32 maximum_retries, u32 delay_seconds) {
+        if (auto* self = weak_this.ptr(); self && self->on_retry)
+            self->on_retry(move(reason), retry_number, maximum_retries, delay_seconds);
+    };
+    submission->on_sent = [weak_this = make_weak_ptr()] {
+        if (auto* self = weak_this.ptr()) {
+            self->m_submission = nullptr;
+            if (self->on_sent)
+                self->on_sent();
+        }
+    };
+    submission->on_failed = [weak_this = make_weak_ptr()](auto failure, String reason) {
+        if (auto* self = weak_this.ptr()) {
+            self->m_submission = nullptr;
+            if (self->on_failed)
+                self->on_failed(failure, move(reason));
+        }
+    };
+
+    m_submission = submission;
+    submission->start();
+    return {};
+}
+
+void CrashReportReview::set_prepared_submission(PreparedSubmission submission)
+{
+    m_prepared_manifest = move(submission.manifest);
+    m_prepared_description = move(submission.description);
+    m_prepared_url = move(submission.url);
+}
+
+ErrorOr<void> CrashReportReview::decline()
+{
+    VERIFY(!m_report_name.is_empty());
+    return m_store.mark_seen(m_report_name);
+}
+
+// The report stays on the device, and sending it again sends the same submission, which the server recognizes if the
+// canceled one reached it after all.
+void CrashReportReview::cancel_sending()
+{
+    if (auto submission = move(m_submission))
+        submission->cancel();
+}
+
+}

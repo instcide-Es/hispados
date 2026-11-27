@@ -1,0 +1,376 @@
+/*
+ * Copyright (c) 2020-2021, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/ByteString.h>
+#include <AK/Function.h>
+#include <AK/HashMap.h>
+#include <AK/NonnullRawPtr.h>
+#include <AK/Optional.h>
+#include <AK/RefPtr.h>
+#include <AK/SourceLocation.h>
+#include <AK/String.h>
+#include <AK/StringView.h>
+#include <AK/Time.h>
+#include <AK/WeakPtr.h>
+#include <LibAudio/Audibility.h>
+#include <LibAudio/PlaybackGroupId.h>
+#include <LibCompositing/Types.h>
+#include <LibCore/Forward.h>
+#include <LibGfx/Point.h>
+#include <LibGfx/SharedImage.h>
+#include <LibHTTP/Header.h>
+#include <LibIPC/ConnectionToServer.h>
+#include <LibIPC/Transport.h>
+#include <LibMediaClient/Client.h>
+#include <LibRequests/CacheState.h>
+#include <LibRequests/NetworkError.h>
+#include <LibRequests/RequestTimingInfo.h>
+#include <LibURL/Origin.h>
+#include <LibURL/URL.h>
+#include <LibWebCommon/Bindings/Navigation.h>
+#include <LibWebCommon/CSS/StyleSheetIdentifier.h>
+#include <LibWebCommon/Forward.h>
+#include <LibWebCommon/Gamepad/GamepadSnapshot.h>
+#include <LibWebCommon/HTML/ActivateTab.h>
+#include <LibWebCommon/HTML/ApplyHistoryStep.h>
+#include <LibWebCommon/HTML/CrossProcessId.h>
+#include <LibWebCommon/HTML/FileFilter.h>
+#include <LibWebCommon/HTML/HistoryHandlingBehavior.h>
+#include <LibWebCommon/HTML/HistoryOperation.h>
+#include <LibWebCommon/HTML/MuteState.h>
+#include <LibWebCommon/HTML/ReplicatedNavigableState.h>
+#include <LibWebCommon/HTML/SameDocumentNavigationEntry.h>
+#include <LibWebCommon/HTML/Scripting/ScriptRegistryTypes.h>
+#include <LibWebCommon/HTML/SelectItem.h>
+#include <LibWebCommon/HTML/SessionHistoryEntryDescriptor.h>
+#include <LibWebCommon/HTML/UserNavigationInvolvement.h>
+#include <LibWebCommon/HTML/VisibilityState.h>
+#include <LibWebCommon/HTML/WebViewHints.h>
+#include <LibWebCommon/HTML/WorkerAgentTypes.h>
+#include <LibWebCommon/Page/EventResult.h>
+#include <LibWebCommon/Page/PageId.h>
+#include <LibWebCommon/Page/ScreenWakeLockState.h>
+#include <LibWebCommon/Page/ViewportIsFullscreen.h>
+#include <LibWebCommon/StorageAPI/StorageEndpoint.h>
+#include <LibWebCommon/WebView/Debugger.h>
+#include <LibWebView/AudioServerActivity.h>
+#include <LibWebView/BlobURLStore.h>
+#include <LibWebView/BrowsingSession.h>
+#include <LibWebView/ChildIdentity.h>
+#include <LibWebView/Forward.h>
+#include <LibWebView/RequestServerSiteBindings.h>
+#include <LibWebView/StorageAreaRegistry.h>
+#include <LibWebView/WebContentPage.h>
+#include <WebContent/WebContentClientEndpoint.h>
+#include <WebContent/WebContentServerEndpoint.h>
+
+namespace WebView {
+
+class ViewImplementation;
+
+class WEBVIEW_API WebContentClient final
+    : public IPC::ConnectionToServer<WebContentClientEndpoint, WebContentServerEndpoint, WebContentClientPageRoutingStub>
+    , public WebContentClientEndpoint
+    , public StorageAreaListener {
+    C_OBJECT_ABSTRACT(WebContentClient);
+
+    friend class WebContentTestClient;
+
+public:
+    template<CallableAs<IterationDecision, WebContentClient&> Callback>
+    static void for_each_client(Callback callback);
+
+    static size_t client_count() { return clients().size(); }
+    static Optional<WebContentClient&> client_for_compositor_context_id(Web::CompositorContextId);
+
+    virtual Messages::WebContentClient::DidAddBlobUrlEntryResponse did_add_blob_url_entry(Web::PageId page_id, Web::HTML::EnvironmentId environment_id, Utf16String url, Web::FileAPI::SerializedBlobURLEntry entry) override;
+    virtual void did_remove_blob_url_entries(Web::PageId page_id, Web::HTML::EnvironmentId environment_id, Vector<Utf16String> urls) override;
+    virtual void close_worker_agent(Web::PageId page_id, Web::HTML::WorkerAgentId agent_id, Web::HTML::WorkerAgentOwnerToken owner_token) override;
+    virtual void did_retain_blob_url_token(Web::HTML::CrossProcessId navigable_id, URL::BlobURLEntry::Token token) override;
+    virtual Messages::WebContentClient::DidRequestBlobUrlEntryResponse did_request_blob_url_entry(Utf16String url, Optional<URL::BlobURLEntry::Token> token) override;
+
+    WebContentClient(NonnullOwnPtr<IPC::Transport>, BrowsingSession&, Web::PageId initial_page_id, Web::HTML::CrossProcessId root_navigable_id);
+    ~WebContentClient();
+
+    IsPrivate is_private() const { return m_is_private; }
+    BrowsingSession& session() const { return *m_session; }
+
+    RequestServerSiteBindings& request_server_site_bindings() { return m_request_server_site_bindings; }
+    RequestServerSiteBindings const& request_server_site_bindings() const { return m_request_server_site_bindings; }
+    void remove_blob_url_entries();
+
+    void connect_test_endpoint(NonnullOwnPtr<IPC::Transport>);
+    // Null outside test mode: the test endpoint is only connected when the UI process runs tests.
+    WebContentTestClient* test_connection() { return m_test_connection; }
+
+    void set_initial_top_level_history_entry(Badge<Application>, Web::HTML::SessionHistoryEntryDescriptor entry, Web::HTML::CrossProcessId document_id)
+    {
+        m_initial_top_level_history_entry = move(entry);
+        m_initial_top_level_document_id = document_id;
+    }
+    WebContentPage& open_initial_page_for_new_top_level_traversable();
+    WebContentPage& open_page_for_new_top_level_traversable(Web::PageId, CanonicalTraversable&);
+    void discard_page_of_undisplayed_top_level_traversable(Web::PageId);
+    void close_page_of_closed_tab(Web::PageId page_id);
+
+    void set_compositor_connection_id(Badge<Application>, i32);
+    Optional<i32> compositor_connection_id(Badge<Application>) const { return m_compositor_connection_id; }
+
+    virtual void did_misbehave(StringView message_name, StringView reason) override;
+    // The process is about to be ended for using more memory than the limit.
+    void did_exceed_memory_limit() { m_exceeded_memory_limit = true; }
+    // A tab that a page of this process belongs to was shown or hidden.
+    void did_change_visibility_of_a_tab();
+    enum class HTTPCookieAccess : u8 {
+        Allowed,
+        // A WebDriver cookie command runs, but for another document, which the renderer may not have heard of yet.
+        RefusedForURL,
+        Refused,
+    };
+    HTTPCookieAccess http_cookie_access_for(URL::URL const&) const;
+    static bool renderers_may_synthesize_input_for_testing();
+    bool may_read_local_files() const;
+    // Documents with no site, such as those of an opaque origin, come with whatever made them, so they do not count.
+    void did_host_document_of_site(Utf16String site);
+
+    // Connects a client to the ImageDecoder of this process, for its main thread or for a worker on a thread of it.
+    Optional<IPC::TransportHandle> connect_new_image_decoder_client(Optional<u64>& client_generation);
+
+    // A process that has hosted local file content may read local files. Site isolation gives such content processes
+    // of its own, which host nothing else.
+    bool has_hosted_local_file_content() const { return m_has_hosted_local_file_content; }
+    void set_has_hosted_local_file_content() { m_has_hosted_local_file_content = true; }
+    // The WebUI whose documents the process has hosted, whose channel the process may have. Site isolation gives such
+    // documents processes of their own, which host nothing else.
+    Optional<String> const& hosted_web_ui() const { return m_hosted_web_ui; }
+    void set_hosted_web_ui(String host) { m_hosted_web_ui = move(host); }
+    // A process can take in a tab of an origin only if all it has ever hosted, and so may still hold, is tabs of that
+    // origin with their same-site and data: URL iframes. An origin-keyed tab keeps apart from the other origins of
+    // its site, so it only joins origin-keyed tabs of its origin, in a process that has not hosted iframes of those
+    // other origins. The user may let the tabs of all origins of a site share processes, which then go by site.
+    void note_hosted_document(CanonicalDocument const&);
+    bool has_hosted_only_tabs_like(CanonicalDocument const&) const;
+    bool has_hosted_only_tabs_unlike(CanonicalDocument const&) const;
+    void register_embedded_page(Web::PageId page_id, CanonicalTraversable&);
+    void unregister_embedded_page(Web::PageId page_id);
+    Optional<Web::PageId> page_id_for_traversable(CanonicalTraversable const&) const;
+    bool holds_part_of_a_tab_in_the_group_of(CanonicalTraversable const&);
+    void release_unneeded_representing_pages();
+    bool hosts_an_environment_with_storage_key(Web::StorageAPI::StorageKey const&);
+    Optional<CanonicalEnvironmentSettingsObject const&> hosted_environment(Web::HTML::EnvironmentId const& environment_id);
+    bool hosts_a_document_of_origin(URL::Origin const&);
+
+    WebContentPage* page(Web::PageId page_id) const;
+    template<CallableAs<IterationDecision, WebContentPage&> Callback>
+    void for_each_page(Callback);
+
+    Optional<CanonicalNavigable&> hosted_navigable(Web::HTML::CrossProcessId navigable_id);
+    // True for every page ID the UI process has handed to this connection, closed pages included, since a
+    // message the connection sent while it had the page can arrive after the page is gone.
+    virtual bool may_act_for_page(Web::PageId page_id) const override;
+    // True for every storage area ID the UI process has handed to this connection, torn-down areas included, for
+    // the same reason.
+    virtual bool may_act_for_storage_area(Web::StorageAPI::StorageAreaId) const override;
+
+    // The tabs with an open page in this process, each listed once.
+    Vector<u64> performance_owners() const;
+    Optional<u64> exclusive_performance_owner() const;
+
+    void did_lose_process();
+    void did_save_crash_report(ByteString const& report_name);
+    ErrorOr<void> reconnect_to_compositor_process(Badge<Application>);
+    ErrorOr<void> recreate_compositor_contexts(Badge<Application>);
+    // The user let the page at the URL capture audio. The process's AudioServer hears of the permission before this
+    // returns, so a page told afterwards finds it in place.
+    // A file: page's microphone grant, which has no origin to be kept for; every other site's is the PermissionManager's.
+    ErrorOr<void> grant_audio_capture_to_file(URL::URL const&);
+
+    // The sites this process asked for the permissions of, which the UI process keeps it up to date on.
+    Vector<URL::Origin> const& permission_origins() const { return m_permission_origins; }
+    // Keeps the process up to date on a site's permissions from now on.
+    void add_permission_origin(URL::Origin const&);
+    // The permission follows the origins the process's open pages show, so it goes with a navigation away.
+    void update_audio_capture_permission();
+    u64 audio_capture_decision_count() const { return m_audio_capture_decision_count; }
+    u64 audio_capture_refusal_count() const { return m_audio_capture_refusal_count; }
+    // Stands in for the AudioServer reporting a capture stream with the given label, which the renderer chooses.
+    void report_audio_capture_for_testing(Web::PageId labelled_page_id, bool capturing);
+    // The process's AudioServer plays the page's sound while the page is authorized. It hears of an authorization
+    // before this returns, so a document the page goes on to run is heard from its start.
+    void authorize_audio_playback(Web::PageId);
+    void revoke_audio_playback(Web::PageId);
+    // Muting the page leaves its sound out whether or not it is authorized, and authorizes nothing.
+    void set_audio_playback_mute_state(Web::PageId, Web::HTML::MuteState);
+    void forget_audio_playback(Web::PageId);
+    void replay_compositor_view_state_after_reconnect(Badge<Application>);
+    void notify_compositor_process_reconnected(Badge<Application>);
+    Web::CompositorContextId compositor_context_id_for_page(WebContentPage const&);
+    Web::CompositorContextId allocate_compositor_context(Web::PageId page_id, Web::PagePresentationRegistration);
+    Optional<Web::PageId> page_id_for_compositor_context_id(Web::CompositorContextId) const;
+    bool has_requested_close() const { return m_requested_close; }
+    void close_server_if_unused();
+
+    pid_t pid() const { return m_child_identity.pid; }
+    u64 child_id() const { return m_child_identity.child_id; }
+    void set_child_identity(ChildIdentity identity) { m_child_identity = identity; }
+
+private:
+    bool forget_compositor_context(Web::CompositorContextId);
+    void destroy_all_compositor_contexts();
+    void cancel_navigation_transactions();
+
+    virtual WebContentClientPageStub* page_stub(Web::PageId const& page_id) override { return page(page_id); }
+
+    virtual void die() override;
+
+    virtual Messages::WebContentClient::AllocateCompositorContextIdResponse allocate_compositor_context_id(Web::PageId page_id, Web::PagePresentationRegistration) override;
+    virtual void did_destroy_compositor_context(Web::CompositorContextId) override;
+    virtual Messages::WebContentClient::DidRequestAllCookiesWebdriverResponse did_request_all_cookies_webdriver(URL::URL, Optional<HTTP::Cookie::PartitionContext>) override;
+    virtual Messages::WebContentClient::DidRequestAllCookiesCookiestoreResponse did_request_all_cookies_cookiestore(Web::PageId page_id, Web::HTML::EnvironmentId, URL::URL) override;
+    virtual Messages::WebContentClient::DidRequestPermissionSnapshotResponse did_request_permission_snapshot(Web::PageId, URL::Origin top_level_origin) override;
+    virtual Messages::WebContentClient::DidRequestNamedCookieResponse did_request_named_cookie(URL::URL, String) override;
+    virtual Messages::WebContentClient::DidRequestNotificationsStateForTestingResponse did_request_notifications_state_for_testing(Web::PageId) override;
+    virtual Messages::WebContentClient::DidRequestCookieResponse did_request_cookie(Web::PageId page_id, Optional<Web::HTML::EnvironmentId>, URL::URL, HTTP::Cookie::Source) override;
+    virtual void did_close_browsing_context(Web::PageId page_id) override;
+    virtual Messages::WebContentClient::DidRequestStorageUsageResponse did_request_storage_usage(Web::PageId page_id, Web::HTML::EnvironmentId environment_id) override;
+    virtual Messages::WebContentClient::ConnectToStorageAreaResponse connect_to_storage_area(Web::PageId page_id, Web::StorageAPI::StorageEndpointType, Web::HTML::EnvironmentId environment_id) override;
+    virtual void disconnect_from_storage_area(Web::StorageAPI::StorageAreaId) override;
+    virtual void set_storage_item(Web::StorageAPI::StorageAreaId, Utf16String key, Utf16String value, String url) override;
+    virtual void remove_storage_item(Web::StorageAPI::StorageAreaId, Utf16String key, String url) override;
+    virtual void clear_storage_area(Web::StorageAPI::StorageAreaId, String url) override;
+
+    // StorageAreaListener: what the registry tells this process about the areas it mirrors.
+    virtual void storage_area_changed(Web::StorageAPI::StorageAreaId, Optional<Utf16String> const& key, Optional<Utf16String> const& old_value, Optional<Utf16String> const& new_value, String const& url) override;
+    virtual void storage_area_write_acknowledged(Web::StorageAPI::StorageAreaId) override;
+    virtual void storage_area_write_refused(Web::StorageAPI::StorageAreaId, Vector<StorageItem>) override;
+    virtual void storage_area_reset(Web::StorageAPI::StorageAreaId, Vector<StorageItem>) override;
+    virtual Messages::WebContentClient::DidStartDownloadWithoutRequestResponse did_start_download_without_request(Web::PageId page_id, URL::URL, ByteString suggested_filename, Optional<u64> total_size) override;
+    virtual Messages::WebContentClient::DidStartDownloadResponse did_start_download(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id, Optional<Utf16String> navigation_id, URL::URL, ByteString suggested_filename, Optional<u64> total_size, HTTP::Cookie::SameSiteContext same_site_context, int request_server_client_id, u64 request_server_request_id, ByteBuffer initial_data, JsonValue network_response) override;
+    virtual Messages::WebContentClient::DidRequestNewWebViewResponse did_request_new_web_view(Web::PageId page_id, Web::HTML::ActivateTab, Web::HTML::WebViewHints, Web::HTML::CrossProcessId current_navigable_id, Utf16String name, bool no_opener, Optional<URL::URL> current_document_base_url) override;
+    virtual Messages::WebContentClient::StartWorkerAgentResponse start_worker_agent(Web::PageId page_id, Web::HTML::WorkerAgentStartRequest request) override;
+    virtual void register_dedicated_worker(Web::PageId page_id, Web::HTML::WorkerAgentStartRequest request, IPC::TransportHandle worker_transport) override;
+    virtual void did_update_cookie(HTTP::Cookie::Cookie) override;
+    virtual Messages::WebContentClient::DidIsKnownHstsHostResponse did_is_known_hsts_host(String) override;
+    virtual Messages::WebContentClient::DidLoseRequestServerConnectionResponse did_lose_request_server_connection(Optional<Utf16String> top_level_site) override;
+    virtual Messages::WebContentClient::RequestMediaServerConnectionResponse request_media_server_connection() override;
+    virtual Messages::WebContentClient::RequestAudioServerConnectionResponse request_audio_server_connection() override;
+    virtual Messages::WebContentClient::RequestWebrtcClientConnectionResponse request_webrtc_client_connection() override;
+    virtual Messages::WebContentClient::RequestImageDecoderConnectionResponse request_image_decoder_connection() override;
+    virtual void did_release_image_decoder() override;
+    virtual void request_video_presentation_channel() override;
+    virtual void gamepad_play_effect(Web::Gamepad::GamepadHandle handle, Web::Gamepad::GamepadEffect effect) override;
+    virtual void gamepad_stop_effects(Web::Gamepad::GamepadHandle handle) override;
+
+    void remember_compositor_context(Web::CompositorContextId, Optional<Web::PageId> page_id);
+    void fail_renderer_owned_downloads();
+
+    RefPtr<WebContentTestClient> m_test_connection;
+
+    IsPrivate m_is_private { IsPrivate::No };
+    RefPtr<BrowsingSession> m_session;
+    RequestServerSiteBindings m_request_server_site_bindings;
+    bool m_requested_close { false };
+    bool m_rejected_ipc { false };
+    bool m_exceeded_memory_limit { false };
+    // The site of the documents this process hosts, if it has only hosted those of one.
+    Optional<Utf16String> m_site_of_hosted_documents;
+    Optional<u64> m_image_decoder_client_generation;
+    bool m_has_hosted_documents_of_several_sites { false };
+    bool m_has_hosted_local_file_content { false };
+    Optional<String> m_hosted_web_ui;
+    Optional<URL::Origin> m_origin_of_hosted_tabs;
+    bool m_hosted_tabs_are_origin_keyed { false };
+    bool m_has_hosted_more_than_tabs_of_one_origin { false };
+    // NB: Such a process takes in more tabs only while the tabs of a site share processes.
+    bool m_has_hosted_tabs_of_more_than_one_origin_of_a_site { false };
+    Vector<u64> m_crashed_view_ids;
+
+    bool has_hosted_only_tabs_of_the_site_of(CanonicalDocument const&) const;
+    WebContentPage& open_page(Web::PageId, CanonicalTraversable&);
+    WebContentPage* find_page(Web::PageId) const;
+
+    // Every page ID the UI process has handed to this connection. A page stays in the map once it closes,
+    // because messages the connection sent while it had the page can arrive after the page is gone.
+    HashMap<Web::PageId, NonnullRefPtr<WebContentPage>> m_pages;
+    HashMap<Web::CompositorContextId, Optional<Web::PageId>> m_compositor_contexts;
+    Optional<i32> m_compositor_connection_id;
+    Optional<Web::PageId> m_unassigned_initial_page_id;
+    Web::HTML::CrossProcessId m_root_navigable_id;
+    Optional<Web::HTML::SessionHistoryEntryDescriptor> m_initial_top_level_history_entry;
+    Web::HTML::CrossProcessId m_initial_top_level_document_id;
+
+    ChildIdentity m_child_identity;
+
+    ErrorOr<IPC::TransportHandle> connect_audio_server_client();
+    ErrorOr<void> ensure_audio_server_controller();
+    ErrorOr<void> initialize_audio_server_controller();
+    ErrorOr<void> tell_audio_server_of_capture_permission();
+    ErrorOr<void> tell_audio_server_of_playback_authorization(Audio::PlaybackGroupId);
+    void did_change_audio_playback_audibility(Audio::PlaybackGroupId, Audio::Audibility);
+    static String audio_capture_permission_key(URL::URL const&);
+    bool audio_capture_permitted() const { return page_permitting_audio_capture(); }
+    WebContentPage* page_permitting_audio_capture() const;
+    bool page_permits_audio_capture(WebContentPage const&) const;
+    bool page_may_capture_audio(WebContentPage const&) const;
+    void decide_audio_capture_request(u64 request_id, Audio::PlaybackGroupId);
+    void send_audio_capture_decision(u64 request_id, bool allowed);
+    void update_audio_capture_indicators();
+
+    // The controller connections to the MediaServer and AudioServer spawned for this process, from its first media use
+    // until it exits. The AudioServer mixes for this process alone, so a compromised one hears only its own site.
+    RefPtr<MediaClient::Client> m_media_server_client;
+    Optional<int> m_media_server_client_id;
+    RefPtr<AudioServerControlClient> m_audio_server_client;
+    u64 m_audio_tab_id { 0 };
+    // The pages the user let capture audio, and whether an open page is one of them; the AudioServer is told of the latter,
+    // again whenever it relaunches, and rules on nothing itself.
+    HashTable<String> m_audio_capture_grants;
+    Vector<URL::Origin> m_permission_origins;
+    bool m_audio_capture_permitted { false };
+    u64 m_audio_capture_decision_count { 0 };
+    u64 m_audio_capture_refusal_count { 0 };
+    // Likewise, the AudioServer is told again of the groups it may play, and of those the user has muted.
+    HashTable<Audio::PlaybackGroupId> m_authorized_audio_playback_groups;
+    HashTable<Audio::PlaybackGroupId> m_muted_audio_playback_groups;
+    AudioServerActivity m_audio_server_activity {
+        [this](Audio::PlaybackGroupId group, Audio::Audibility audibility) { did_change_audio_playback_audibility(group, audibility); },
+        [this] { update_audio_capture_indicators(); },
+    };
+    RefPtr<Core::Timer> m_detached_page_close_timer;
+
+    bool all_tabs_are_hidden() const;
+    void release_memory_of_hidden_tabs();
+    RefPtr<Core::Timer> m_release_memory_of_hidden_tabs_timer;
+
+    // When this process last got a WebRTCClient, so that it can't make us spawn them in a loop.
+    Vector<MonotonicTime> m_webrtc_client_launch_times;
+
+    static HashTable<WebContentClient*>& clients();
+};
+
+template<CallableAs<IterationDecision, WebContentPage&> Callback>
+void WebContentClient::for_each_page(Callback callback)
+{
+    for (auto const& [page_id, page] : m_pages) {
+        if (!page->is_open())
+            continue;
+        if (callback(*page) == IterationDecision::Break)
+            return;
+    }
+}
+
+template<CallableAs<IterationDecision, WebContentClient&> Callback>
+void WebContentClient::for_each_client(Callback callback)
+{
+    for (auto& it : clients()) {
+        if (callback(*it) == IterationDecision::Break)
+            return;
+    }
+}
+
+}

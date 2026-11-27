@@ -1,0 +1,113 @@
+/*
+ * Copyright (c) 2023, Preston Taylor <95388976+PrestonLTaylor@users.noreply.github.com>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/IntrusiveList.h>
+#include <AK/Utf16String.h>
+#include <LibWeb/DOM/DocumentLoadEventDelayer.h>
+#include <LibWeb/DOM/DocumentObserver.h>
+#include <LibWeb/SVG/SVGGraphicsElement.h>
+#include <LibWeb/SVG/SVGURIReference.h>
+
+namespace Web::SVG {
+
+class SVGUseElement final
+    : public SVGGraphicsElement
+    , public SVGURIReferenceMixin<SupportsXLinkHref::Yes> {
+    WEB_WRAPPABLE(SVGUseElement, SVGGraphicsElement);
+    GC_DECLARE_ALLOCATOR(SVGUseElement);
+
+public:
+    virtual ~SVGUseElement() override = default;
+
+    virtual void attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_) override;
+
+    void svg_element_changed(SVGElement&);
+    void svg_element_changed_before_parsing_complete(SVGElement&);
+    void svg_element_removed(SVGElement&);
+    void element_instance_changed(Badge<SVGElement>);
+
+    // AD-HOC: The spec states that the x, y, width and height IDL attributes reflect the respective computed values and their
+    //         corresponding presentation attributes but other browsers reflect the attribute values instead - see
+    //         https://github.com/w3c/svgwg/issues/1153
+
+    // https://w3c.github.io/svgwg/svg2-draft/struct.html#__svg__SVGUseElement__x
+    REFLECT_ANIMATED_LENGTH_ATTRIBUTE(x, Horizontal, SVGLengthValue::number(0));
+
+    // https://w3c.github.io/svgwg/svg2-draft/struct.html#__svg__SVGUseElement__y
+    REFLECT_ANIMATED_LENGTH_ATTRIBUTE(y, Vertical, SVGLengthValue::number(0));
+
+    // https://w3c.github.io/svgwg/svg2-draft/struct.html#__svg__SVGUseElement__width
+    REFLECT_ANIMATED_LENGTH_ATTRIBUTE(width, Horizontal, SVGLengthValue::number(0));
+
+    // https://w3c.github.io/svgwg/svg2-draft/struct.html#__svg__SVGUseElement__height
+    REFLECT_ANIMATED_LENGTH_ATTRIBUTE(height, Vertical, SVGLengthValue::number(0));
+
+    GC::Ptr<SVGElement> instance_root() const;
+
+private:
+    SVGUseElement(DOM::Document&, DOM::QualifiedName);
+
+    virtual void initialize_element() override;
+    virtual void visit_edges(Cell::Visitor&) override;
+    virtual void finalize() override;
+    virtual void adopted_from(DOM::Document&) override;
+    virtual void inserted() override;
+    virtual void removed_from(IsSubtreeRoot, Node* old_ancestor, Node& old_root) override;
+    virtual void moved_from(IsSubtreeRoot, GC::Ptr<Node> old_ancestor) override;
+
+    virtual bool is_svg_use_element() const override { return true; }
+
+    virtual CSS::ElementBoxKind box_kind() const override;
+
+    virtual bool needs_preparation_for_style_computation() const override { return m_reclone_pending; }
+    virtual void prepare_for_style_computation() override;
+
+    void process_the_url(Optional<Utf16String> const& href);
+    Optional<Utf16String> href_value() const;
+    DOM::Document const& document_containing_reference() const;
+
+    GC::Ptr<DOM::Element> referenced_element() const;
+
+    void fetch_the_document(URL::URL const& url);
+    void discard_the_url();
+    void stop_using_resource_document();
+    bool is_referenced_element_same_document() const;
+
+    void request_reclone();
+    void clone_element_tree_as_our_shadow_tree(GC::Ptr<Element> to_clone);
+    static void link_to_corresponding_elements(SVGElement& instance, SVGElement& original);
+    bool is_valid_reference_element(Element const& reference_element) const;
+    bool would_create_circular_reference(Element const& target) const;
+    bool would_create_circular_reference_impl(Element const& target, GC::HeapHashTable<GC::Ref<Element const>>& visited) const;
+    void register_for_referenced_element_changes();
+    void unregister_for_referenced_element_changes();
+
+    bool m_needs_parsing_complete_reclone { false };
+    bool m_reclone_pending { false };
+
+    Optional<URL::URL> m_href;
+
+    GC::Ptr<DOM::DocumentObserver> m_document_observer;
+    GC::Ptr<SVGResourceDocument> m_resource_document;
+    Optional<u64> m_resource_document_callback_id;
+    Optional<DOM::DocumentLoadEventDelayer> m_load_event_delayer;
+
+    IntrusiveListNode<SVGUseElement> m_list_node;
+
+public:
+    using DocumentUseElementList = IntrusiveList<&SVGUseElement::m_list_node>;
+};
+
+}
+
+namespace Web::DOM {
+
+template<>
+inline bool Node::fast_is<SVG::SVGUseElement>() const { return is_svg_use_element(); }
+
+}

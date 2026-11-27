@@ -1,0 +1,7 @@
+// https://compression.spec.whatwg.org/#decompressionstream
+[Exposed=*, ImplementedIn=Rust]
+interface DecompressionStream {
+    constructor(CompressionFormat format);
+};
+
+DecompressionStream includes GenericTransformStream;

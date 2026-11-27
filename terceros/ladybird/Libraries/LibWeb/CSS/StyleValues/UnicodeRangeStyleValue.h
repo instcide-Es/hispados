@@ -1,0 +1,29 @@
+/*
+ * Copyright (c) 2025, Sam Atkins <sam@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <LibGfx/Font/UnicodeRange.h>
+#include <LibWeb/CSS/StyleValues/StyleValue.h>
+
+namespace Web::CSS {
+
+class UnicodeRangeStyleValue final : public StyleValueWithDefaultOperators<UnicodeRangeStyleValue> {
+public:
+    virtual ~UnicodeRangeStyleValue() override = default;
+
+    Gfx::UnicodeRange unicode_range() const { return Gfx::UnicodeRange(m_value->unicode_range.min_code_point, m_value->unicode_range.max_code_point); }
+
+private:
+    friend class StyleValue;
+
+    explicit UnicodeRangeStyleValue(StyleValueFFI::StyleValueData const* data)
+        : StyleValueWithDefaultOperators(Type::UnicodeRange, data)
+    {
+    }
+};
+
+}

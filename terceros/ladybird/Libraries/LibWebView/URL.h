@@ -1,0 +1,67 @@
+/*
+ * Copyright (c) 2023-2025, Tim Flynn <trflynn89@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Optional.h>
+#include <AK/String.h>
+#include <AK/StringView.h>
+#include <LibURL/URL.h>
+#include <LibWebView/Forward.h>
+#include <LibWebView/SearchEngine.h>
+
+namespace WebView {
+
+enum class AppendTLD {
+    No,
+    Yes,
+};
+
+enum class UserInputClassification : u8 {
+    Search,
+    InternalURL,
+    ExternalURL,
+};
+
+struct ClassifiedUserInput {
+    UserInputClassification classification { UserInputClassification::Search };
+    Optional<URL::URL> url;
+};
+
+WEBVIEW_API ClassifiedUserInput classify_user_input(StringView, AppendTLD = AppendTLD::No);
+// Like classify_user_input(), but without checking whether the text names a local file that exists, such as "setup.py".
+// An absolute path is still taken for a file: URL. This suits text that did not come from the user.
+WEBVIEW_API ClassifiedUserInput classify_user_input_ignoring_local_files(StringView, AppendTLD = AppendTLD::No);
+WEBVIEW_API Optional<URL::URL> sanitize_url(StringView, Optional<SearchEngine> const& search_engine = {}, AppendTLD = AppendTLD::No);
+WEBVIEW_API bool location_looks_like_url(StringView, AppendTLD = AppendTLD::No);
+WEBVIEW_API bool is_url_handled_internally(URL::URL const&);
+WEBVIEW_API Optional<URL::URL> url_from_text(StringView);
+WEBVIEW_API Vector<URL::URL> sanitize_urls(ReadonlySpan<ByteString> raw_urls);
+// The user info, host and port of an http(s) URL, without "www.". This is how url_for_display() starts.
+WEBVIEW_API String authority_for_display(URL::URL const&);
+WEBVIEW_API String url_for_display(URL::URL const&);
+
+struct URLParts {
+    StringView scheme_and_subdomain;
+    StringView effective_tld_plus_one;
+    StringView remainder;
+};
+WEBVIEW_API Optional<URLParts> break_url_into_parts(StringView url);
+
+// These are both used for the "right-click -> copy FOO" interaction for links.
+enum class URLType {
+    Email,
+    Telephone,
+    Other,
+};
+WEBVIEW_API URLType url_type(URL::URL const&);
+WEBVIEW_API ByteString url_text_to_copy(URL::URL const&);
+WEBVIEW_API ByteString image_filename_with_extension(ByteString filename, StringView image_mime_type);
+
+// The URL that the browsing history records for a visit to the URL, if history records it at all.
+WEBVIEW_API Optional<String> normalize_url_for_history(URL::URL const&);
+
+}

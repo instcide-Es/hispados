@@ -1,0 +1,26 @@
+// https://w3c.github.io/gamepad/#dom-gamepadmappingtype
+enum GamepadMappingType {
+    "",
+    "standard",
+    "xr-standard",
+};
+
+// https://w3c.github.io/gamepad/#dom-gamepad
+[Exposed=Window, ImplementedIn=Rust]
+interface Gamepad {
+    readonly attribute DOMString id;
+    readonly attribute long index;
+    readonly attribute boolean connected;
+    readonly attribute DOMHighResTimeStamp timestamp;
+    readonly attribute GamepadMappingType mapping;
+    readonly attribute FrozenArray<double> axes;
+    readonly attribute FrozenArray<GamepadButton> buttons;
+    [FIXME] readonly attribute FrozenArray<GamepadTouch> touches;
+    [SameObject] readonly attribute GamepadHapticActuator vibrationActuator;
+};
+
+// https://w3c.github.io/gamepad/#idl-def-navigator-partial-1
+[Exposed=Window]
+partial interface Navigator {
+    sequence<Gamepad?> getGamepads();
+};

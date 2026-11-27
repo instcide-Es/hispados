@@ -1,0 +1,5 @@
+// https://storage.spec.whatwg.org/#navigatorstorage
+[SecureContext]
+interface mixin NavigatorStorage {
+    [SameObject] readonly attribute StorageManager storage;
+};

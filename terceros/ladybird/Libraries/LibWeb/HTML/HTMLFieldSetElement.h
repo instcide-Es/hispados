@@ -1,0 +1,69 @@
+/*
+ * Copyright (c) 2020, the SerenityOS developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Utf16FlyString.h>
+#include <LibWeb/ARIA/Roles.h>
+#include <LibWeb/DOM/HTMLCollection.h>
+#include <LibWeb/HTML/HTMLElement.h>
+
+namespace Web::HTML {
+
+class HTMLFieldSetElement final
+    : public HTMLElement {
+    WEB_WRAPPABLE(HTMLFieldSetElement, HTMLElement);
+    GC_DECLARE_ALLOCATOR(HTMLFieldSetElement);
+
+public:
+    virtual ~HTMLFieldSetElement() override;
+
+    Utf16FlyString type() const
+    {
+        return "fieldset"_utf16_fly_string;
+    }
+
+    bool is_disabled() const;
+
+    GC::Ptr<DOM::HTMLCollection> const& elements();
+
+    // ^FormAssociatedElement
+    virtual bool is_form_associated_element() const override { return true; }
+
+    // ^FormAssociatedElement
+    // https://html.spec.whatwg.org/multipage/forms.html#category-listed
+    virtual bool is_listed() const override { return true; }
+
+    // https://html.spec.whatwg.org/multipage/forms.html#category-autocapitalize
+    virtual bool is_autocapitalize_and_autocorrect_inheriting() const override { return true; }
+
+    virtual Optional<ARIA::Role> default_role() const override { return ARIA::Role::group; }
+
+    virtual CSS::ElementBoxKind box_kind() const override;
+
+    void refresh_disabled_state_of_descendant_form_controls();
+
+private:
+    HTMLFieldSetElement(DOM::Document&, DOM::QualifiedName);
+    virtual void visit_edges(Cell::Visitor&) override;
+
+    virtual void attribute_changed(Utf16FlyString const&, Optional<Utf16String> const&, Optional<Utf16String> const&, Optional<Utf16FlyString> const&) override;
+    virtual void children_changed(ChildrenChangedMetadata const&) override;
+    virtual void inserted() override;
+
+    virtual bool is_html_fieldset_element() const override { return true; }
+
+    GC::Ptr<DOM::HTMLCollection> m_elements;
+};
+
+}
+
+namespace Web::DOM {
+
+template<>
+inline bool Node::fast_is<HTML::HTMLFieldSetElement>() const { return is_html_fieldset_element(); }
+
+}

@@ -1,0 +1,117 @@
+/*
+ * Copyright (c) 2020, the SerenityOS developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibGC/Heap.h>
+#include <LibWeb/CSS/ElementBoxKind.h>
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/HTML/HTMLButtonElement.h>
+#include <LibWeb/HTML/HTMLFieldSetElement.h>
+#include <LibWeb/HTML/HTMLInputElement.h>
+#include <LibWeb/HTML/HTMLLegendElement.h>
+#include <LibWeb/HTML/HTMLObjectElement.h>
+#include <LibWeb/HTML/HTMLOutputElement.h>
+#include <LibWeb/HTML/HTMLSelectElement.h>
+#include <LibWeb/HTML/HTMLTextAreaElement.h>
+#include <LibWeb/Layout/Box.h>
+#include <LibWeb/Painting/PaintFacts.h>
+
+namespace Web::HTML {
+
+GC_DEFINE_ALLOCATOR(HTMLFieldSetElement);
+
+HTMLFieldSetElement::HTMLFieldSetElement(DOM::Document& document, DOM::QualifiedName qualified_name)
+    : HTMLElement(document, move(qualified_name))
+{
+}
+
+HTMLFieldSetElement::~HTMLFieldSetElement() = default;
+
+void HTMLFieldSetElement::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_elements);
+}
+
+// https://html.spec.whatwg.org/multipage/form-elements.html#concept-fieldset-disabled
+bool HTMLFieldSetElement::is_disabled() const
+{
+    // A fieldset element is a disabled fieldset if it matches any of the following conditions:
+    // - Its disabled attribute is specified
+    if (has_attribute(AttributeNames::disabled))
+        return true;
+
+    // - It is a descendant of another fieldset element whose disabled attribute is specified, and is not a descendant of that fieldset element's first legend element child, if any.
+    for (auto* fieldset_ancestor = first_ancestor_of_type<HTMLFieldSetElement>(); fieldset_ancestor; fieldset_ancestor = fieldset_ancestor->first_ancestor_of_type<HTMLFieldSetElement>()) {
+        if (fieldset_ancestor->has_attribute(HTML::AttributeNames::disabled)) {
+            auto* first_legend_element_child = fieldset_ancestor->first_child_of_type<HTMLLegendElement>();
+            if (!first_legend_element_child || !is_descendant_of(*first_legend_element_child))
+                return true;
+        }
+    }
+
+    return false;
+}
+
+void HTMLFieldSetElement::inserted()
+{
+    Base::inserted();
+
+    if (is_connected())
+        document().set_has_form_or_fieldset_element();
+}
+
+void HTMLFieldSetElement::attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_)
+{
+    Base::attribute_changed(name, old_value, value, namespace_);
+
+    if (name == HTML::AttributeNames::disabled)
+        refresh_disabled_state_of_descendant_form_controls();
+}
+
+void HTMLFieldSetElement::children_changed(ChildrenChangedMetadata const& metadata)
+{
+    Base::children_changed(metadata);
+
+    if (metadata.type == ChildrenChangedMetadata::Type::Removal && is<HTMLLegendElement>(*metadata.node) && has_attribute(HTML::AttributeNames::disabled))
+        refresh_disabled_state_of_descendant_form_controls();
+}
+
+void HTMLFieldSetElement::refresh_disabled_state_of_descendant_form_controls()
+{
+    for_each_in_subtree_of_type<HTMLElement>([](auto& element) {
+        if (element.is_form_associated_custom_element())
+            element.update_face_disabled_state();
+        if (element.is_form_associated_element()) {
+            if (auto* input = as_if<HTMLInputElement>(element))
+                Painting::push_form_control_paint_facts(*input);
+            element.set_needs_repaint();
+        }
+        return TraversalDecision::Continue;
+    });
+}
+
+// https://html.spec.whatwg.org/multipage/form-elements.html#dom-fieldset-elements
+GC::Ptr<DOM::HTMLCollection> const& HTMLFieldSetElement::elements()
+{
+    // The elements IDL attribute must return an HTMLCollection rooted at the fieldset element, whose filter matches listed elements.
+    if (!m_elements) {
+        auto filter = GC::create_function(heap(), [](DOM::Element const& element) {
+            if (auto const* form_associated_element = as_if<FormAssociatedElement>(element); form_associated_element && form_associated_element->is_listed())
+                return true;
+
+            return false;
+        });
+        m_elements = DOM::HTMLCollection::create(*this, DOM::HTMLCollection::Scope::Descendants, filter, DOM::HTMLCollection::AttributeInvalidationType::FormControls, nullptr, DOM::HTMLCollection::Kind::FormControls);
+    }
+    return m_elements;
+}
+
+CSS::ElementBoxKind HTMLFieldSetElement::box_kind() const
+{
+    return CSS::ElementBoxKind::FieldSet;
+}
+
+}

@@ -1,0 +1,44 @@
+/*
+ * Copyright (c) 2018-2020, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Utf16View.h>
+#include <LibWeb/HTML/HTMLElement.h>
+
+namespace Web::HTML {
+
+class HTMLTitleElement final : public HTMLElement {
+    WEB_WRAPPABLE(HTMLTitleElement, HTMLElement);
+    GC_DECLARE_ALLOCATOR(HTMLTitleElement);
+
+public:
+    virtual ~HTMLTitleElement() override;
+
+    Utf16String text() const;
+    void set_text(Utf16View value);
+
+private:
+    HTMLTitleElement(DOM::Document&, DOM::QualifiedName);
+
+    virtual bool is_html_title_element() const override { return true; }
+    virtual void inserted() override;
+    virtual void removed_from(IsSubtreeRoot, Node* old_ancestor, Node& old_root) override;
+    virtual void children_changed(ChildrenChangedMetadata const&) override;
+
+    void report_title_change_to_page();
+
+    bool m_suppresses_title_change_reports { false };
+};
+
+}
+
+namespace Web::DOM {
+
+template<>
+inline bool Node::fast_is<HTML::HTMLTitleElement>() const { return is_html_title_element(); }
+
+}

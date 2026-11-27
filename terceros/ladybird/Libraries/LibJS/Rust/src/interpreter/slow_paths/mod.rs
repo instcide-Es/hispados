@@ -1,0 +1,1772 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+//! The runtime's implementation of the slow paths the interpreter calls.
+//! Each group lives in its own module, and the methods here hand each call to it.
+
+pub mod bindings;
+pub mod calls;
+pub mod control;
+pub mod feedback;
+pub mod operators;
+pub mod property_access;
+
+use core::cell::Cell;
+use core::ops::Deref;
+
+use super::runtime_functions::{Runtime, RuntimeFunctions, SlowPathControl, handle_asm_exception};
+use super::vm::Vm;
+use crate::bytecode::executable::PropertyLookupCache;
+use crate::bytecode::feedback::{call_feedback_flags, keyed_feedback_bits};
+use crate::bytecode::op;
+use crate::bytecode::property_access::Strict;
+use crate::gc::root::{MarkedValues, MarkedVec};
+use crate::layout::value::Value;
+use libjs_abi::PutKind;
+use property_access::KeyedSiteCache;
+
+/// An operand list, whose values are in an array when the list is too long for the instruction.
+pub(super) enum OperandList<'a> {
+    Inline(&'a [Value]),
+    InArray(MarkedVec<'a, Value>),
+}
+
+impl OperandList<'_> {
+    /// Lends the values of the list.
+    pub(super) fn values(&self) -> OperandListValues<'_> {
+        match self {
+            Self::Inline(values) => OperandListValues::Inline(values),
+            Self::InArray(values) => OperandListValues::InArray(values.values()),
+        }
+    }
+}
+
+/// The values of an OperandList, which it lends.
+pub(super) enum OperandListValues<'a> {
+    Inline(&'a [Value]),
+    InArray(MarkedValues<'a, Value>),
+}
+
+impl Deref for OperandListValues<'_> {
+    type Target = [Value];
+
+    fn deref(&self) -> &[Value] {
+        match self {
+            Self::Inline(values) => values,
+            Self::InArray(values) => values,
+        }
+    }
+}
+
+/// The operand list of `values`, which are copied out of the array they are in if `is_in_array`.
+pub(super) fn operand_list<'a>(vm: &'a Vm, is_in_array: bool, values: &'a [Value]) -> OperandList<'a> {
+    if !is_in_array {
+        return OperandList::Inline(values);
+    }
+    let array = values[0].as_object();
+    let length = array.indexed_array_like_size();
+    let list = MarkedVec::with_capacity(vm, length as usize);
+    for index in 0..length {
+        list.push(array.indexed_get(index).expect("a dense array").value);
+    }
+    OperandList::InArray(list)
+}
+
+/// Whether the code at the bytecode offset `pc` of the running executable is strict.
+pub(super) fn strict_at(vm: &Vm, pc: u32) -> Strict {
+    if vm.current_executable().is_strict_at(pc) {
+        Strict::Yes
+    } else {
+        Strict::No
+    }
+}
+
+/// The VM a helper receives as an integer argument.
+fn vm_from_helper_argument<'vm>(argument: u64) -> &'vm Vm {
+    // SAFETY: The interpreter passes the VM it runs on, whose address escaped to it through the FFI call that started
+    // it, and the VM outlives every call the interpreter makes into the runtime.
+    unsafe { &*core::ptr::with_exposed_provenance::<Vm>(argument as usize) }
+}
+
+/// The slow path of Call, for JIT code too, whose arguments are not in an operand record.
+pub fn call_slow_path(
+    vm: &Vm,
+    pc: u32,
+    instruction: &op::Call,
+    values: &mut op::CallValues,
+    arguments: &[Value],
+) -> SlowPathControl {
+    let control = calls::call(vm, pc, instruction, values, arguments);
+    feedback::record_call_value_after(vm, control, instruction.call_feedback, || values.dst)
+}
+
+/// The slow path of CallDirectEval, for JIT code too, whose arguments are not in an operand record.
+pub fn call_direct_eval_slow_path(
+    vm: &Vm,
+    pc: u32,
+    instruction: &op::CallDirectEval,
+    values: &mut op::CallDirectEvalValues,
+    arguments: &[Value],
+) -> SlowPathControl {
+    feedback::record_call(vm, instruction.call_feedback, values.callee, call_feedback_flags::NONE);
+    let control = calls::call_direct_eval(vm, pc, instruction, values, arguments);
+    feedback::record_call_value_after(vm, control, instruction.call_feedback, || values.dst)
+}
+
+/// The slow path of CallConstruct, for JIT code too, whose arguments are not in an operand record.
+pub fn call_construct_slow_path(
+    vm: &Vm,
+    pc: u32,
+    instruction: &op::CallConstruct,
+    values: &mut op::CallConstructValues,
+    arguments: &[Value],
+) -> SlowPathControl {
+    feedback::record_call(
+        vm,
+        instruction.call_feedback,
+        values.callee,
+        call_feedback_flags::SAW_CONSTRUCT,
+    );
+    let control = calls::call_construct(vm, pc, instruction, values, arguments);
+    feedback::record_call_value_after(vm, control, instruction.call_feedback, || values.dst)
+}
+
+/// The slow path of SuperCall, for JIT code too, whose arguments are not in an operand record.
+pub fn super_call_slow_path(
+    vm: &Vm,
+    pc: u32,
+    instruction: &op::SuperCall,
+    values: &mut op::SuperCallValues,
+    arguments: &[Value],
+) -> SlowPathControl {
+    feedback::record_call(
+        vm,
+        instruction.call_feedback,
+        values.super_constructor,
+        call_feedback_flags::SAW_CONSTRUCT,
+    );
+    let control = calls::super_call(vm, pc, instruction, values, arguments);
+    feedback::record_call_value_after(vm, control, instruction.call_feedback, || values.dst)
+}
+
+impl RuntimeFunctions for Runtime {
+    // Arithmetic, comparisons, conversions and the jumps on comparisons: operators.rs.
+
+    fn helper_to_boolean(encoded_value: u64) -> u64 {
+        operators::helper_to_boolean(encoded_value)
+    }
+
+    /// The profiling interpreter calls this when the running frame's executable has used up its tier-up budget. The
+    /// pc is shifted left by one, and the low bit says whether a loop back edge (rather than a function entry) used up
+    /// the budget.
+    fn helper_tier_up_check(vm: u64, encoded_pc: u64) -> u64 {
+        crate::jit::tier_up::tier_up_check(vm_from_helper_argument(vm), encoded_pc) as u64
+    }
+
+    fn helper_coerce_this(vm: u64) -> u64 {
+        let vm = vm_from_helper_argument(vm);
+        let frame = vm.running_execution_context().expect("a frame is running");
+        // SAFETY: The running execution context is live.
+        crate::interpreter::execution_context::coerce_this(vm, unsafe { frame.as_ref() });
+        0
+    }
+
+    fn helper_enter_jit_code(vm: u64) -> u64 {
+        crate::jit::entry_exit::helper_enter_jit_code(vm_from_helper_argument(vm)) as u64
+    }
+
+    fn helper_enter_jit_code_after_catch(vm: u64, pc: u64) -> u64 {
+        crate::jit::entry_exit::helper_enter_jit_code_after_catch(vm_from_helper_argument(vm), pc as u32) as u64
+    }
+
+    fn helper_single_ascii_character_string(vm: u64, encoded_value: u64) -> u64 {
+        operators::helper_single_ascii_character_string(vm_from_helper_argument(vm), encoded_value)
+    }
+
+    fn add_values(vm: &Vm, pc: u32, dst: &Cell<Value>, lhs: Value, rhs: Value, length: u32) -> SlowPathControl {
+        operators::add_values(vm, pc, dst, lhs, rhs, length)
+    }
+
+    fn sub_values(vm: &Vm, pc: u32, dst: &Cell<Value>, lhs: Value, rhs: Value, length: u32) -> SlowPathControl {
+        operators::sub_values(vm, pc, dst, lhs, rhs, length)
+    }
+
+    fn mul_values(vm: &Vm, pc: u32, dst: &Cell<Value>, lhs: Value, rhs: Value, length: u32) -> SlowPathControl {
+        operators::mul_values(vm, pc, dst, lhs, rhs, length)
+    }
+
+    fn div_values(vm: &Vm, pc: u32, dst: &Cell<Value>, lhs: Value, rhs: Value, length: u32) -> SlowPathControl {
+        operators::div_values(vm, pc, dst, lhs, rhs, length)
+    }
+
+    fn mod_values(vm: &Vm, pc: u32, dst: &Cell<Value>, lhs: Value, rhs: Value, length: u32) -> SlowPathControl {
+        operators::mod_values(vm, pc, dst, lhs, rhs, length)
+    }
+
+    fn exp_values(vm: &Vm, pc: u32, dst: &Cell<Value>, lhs: Value, rhs: Value, length: u32) -> SlowPathControl {
+        operators::exp_values(vm, pc, dst, lhs, rhs, length)
+    }
+
+    fn bitwise_and_values(vm: &Vm, pc: u32, dst: &Cell<Value>, lhs: Value, rhs: Value, length: u32) -> SlowPathControl {
+        operators::bitwise_and_values(vm, pc, dst, lhs, rhs, length)
+    }
+
+    fn bitwise_or_values(vm: &Vm, pc: u32, dst: &Cell<Value>, lhs: Value, rhs: Value, length: u32) -> SlowPathControl {
+        operators::bitwise_or_values(vm, pc, dst, lhs, rhs, length)
+    }
+
+    fn bitwise_xor_values(vm: &Vm, pc: u32, dst: &Cell<Value>, lhs: Value, rhs: Value, length: u32) -> SlowPathControl {
+        operators::bitwise_xor_values(vm, pc, dst, lhs, rhs, length)
+    }
+
+    fn left_shift_values(vm: &Vm, pc: u32, dst: &Cell<Value>, lhs: Value, rhs: Value, length: u32) -> SlowPathControl {
+        operators::left_shift_values(vm, pc, dst, lhs, rhs, length)
+    }
+
+    fn right_shift_values(vm: &Vm, pc: u32, dst: &Cell<Value>, lhs: Value, rhs: Value, length: u32) -> SlowPathControl {
+        operators::right_shift_values(vm, pc, dst, lhs, rhs, length)
+    }
+
+    fn unsigned_right_shift_values(
+        vm: &Vm,
+        pc: u32,
+        dst: &Cell<Value>,
+        lhs: Value,
+        rhs: Value,
+        length: u32,
+    ) -> SlowPathControl {
+        operators::unsigned_right_shift_values(vm, pc, dst, lhs, rhs, length)
+    }
+
+    fn less_than_values(vm: &Vm, pc: u32, dst: &Cell<Value>, lhs: Value, rhs: Value, length: u32) -> SlowPathControl {
+        operators::less_than_values(vm, pc, dst, lhs, rhs, length)
+    }
+
+    fn less_than_equals_values(
+        vm: &Vm,
+        pc: u32,
+        dst: &Cell<Value>,
+        lhs: Value,
+        rhs: Value,
+        length: u32,
+    ) -> SlowPathControl {
+        operators::less_than_equals_values(vm, pc, dst, lhs, rhs, length)
+    }
+
+    fn greater_than_values(
+        vm: &Vm,
+        pc: u32,
+        dst: &Cell<Value>,
+        lhs: Value,
+        rhs: Value,
+        length: u32,
+    ) -> SlowPathControl {
+        operators::greater_than_values(vm, pc, dst, lhs, rhs, length)
+    }
+
+    fn greater_than_equals_values(
+        vm: &Vm,
+        pc: u32,
+        dst: &Cell<Value>,
+        lhs: Value,
+        rhs: Value,
+        length: u32,
+    ) -> SlowPathControl {
+        operators::greater_than_equals_values(vm, pc, dst, lhs, rhs, length)
+    }
+
+    fn loosely_equals_values(
+        vm: &Vm,
+        pc: u32,
+        dst: &Cell<Value>,
+        lhs: Value,
+        rhs: Value,
+        length: u32,
+    ) -> SlowPathControl {
+        operators::loosely_equals_values(vm, pc, dst, lhs, rhs, length)
+    }
+
+    fn loosely_inequals_values(
+        vm: &Vm,
+        pc: u32,
+        dst: &Cell<Value>,
+        lhs: Value,
+        rhs: Value,
+        length: u32,
+    ) -> SlowPathControl {
+        operators::loosely_inequals_values(vm, pc, dst, lhs, rhs, length)
+    }
+
+    fn strictly_equals_values(
+        _vm: &Vm,
+        pc: u32,
+        dst: &Cell<Value>,
+        lhs: Value,
+        rhs: Value,
+        length: u32,
+    ) -> SlowPathControl {
+        operators::strictly_equals_values(pc, dst, lhs, rhs, length)
+    }
+
+    fn strictly_inequals_values(
+        _vm: &Vm,
+        pc: u32,
+        dst: &Cell<Value>,
+        lhs: Value,
+        rhs: Value,
+        length: u32,
+    ) -> SlowPathControl {
+        operators::strictly_inequals_values(pc, dst, lhs, rhs, length)
+    }
+
+    fn jump_less_than_values(
+        vm: &Vm,
+        pc: u32,
+        lhs: Value,
+        rhs: Value,
+        true_target: u32,
+        false_target: u32,
+    ) -> SlowPathControl {
+        operators::jump_less_than_values(vm, pc, lhs, rhs, true_target, false_target)
+    }
+
+    fn jump_less_than_equals_values(
+        vm: &Vm,
+        pc: u32,
+        lhs: Value,
+        rhs: Value,
+        true_target: u32,
+        false_target: u32,
+    ) -> SlowPathControl {
+        operators::jump_less_than_equals_values(vm, pc, lhs, rhs, true_target, false_target)
+    }
+
+    fn jump_greater_than_values(
+        vm: &Vm,
+        pc: u32,
+        lhs: Value,
+        rhs: Value,
+        true_target: u32,
+        false_target: u32,
+    ) -> SlowPathControl {
+        operators::jump_greater_than_values(vm, pc, lhs, rhs, true_target, false_target)
+    }
+
+    fn jump_greater_than_equals_values(
+        vm: &Vm,
+        pc: u32,
+        lhs: Value,
+        rhs: Value,
+        true_target: u32,
+        false_target: u32,
+    ) -> SlowPathControl {
+        operators::jump_greater_than_equals_values(vm, pc, lhs, rhs, true_target, false_target)
+    }
+
+    fn jump_loosely_equals_values(
+        vm: &Vm,
+        pc: u32,
+        lhs: Value,
+        rhs: Value,
+        true_target: u32,
+        false_target: u32,
+    ) -> SlowPathControl {
+        operators::jump_loosely_equals_values(vm, pc, lhs, rhs, true_target, false_target)
+    }
+
+    fn jump_loosely_inequals_values(
+        vm: &Vm,
+        pc: u32,
+        lhs: Value,
+        rhs: Value,
+        true_target: u32,
+        false_target: u32,
+    ) -> SlowPathControl {
+        operators::jump_loosely_inequals_values(vm, pc, lhs, rhs, true_target, false_target)
+    }
+
+    fn jump_strictly_equals_values(
+        _vm: &Vm,
+        _pc: u32,
+        lhs: Value,
+        rhs: Value,
+        true_target: u32,
+        false_target: u32,
+    ) -> SlowPathControl {
+        operators::jump_strictly_equals_values(lhs, rhs, true_target, false_target)
+    }
+
+    fn jump_strictly_inequals_values(
+        _vm: &Vm,
+        _pc: u32,
+        lhs: Value,
+        rhs: Value,
+        true_target: u32,
+        false_target: u32,
+    ) -> SlowPathControl {
+        operators::jump_strictly_inequals_values(lhs, rhs, true_target, false_target)
+    }
+
+    fn unary_minus(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::UnaryMinus,
+        values: &mut op::UnaryMinusValues,
+    ) -> SlowPathControl {
+        operators::unary_minus(vm, pc, values)
+    }
+
+    fn unary_plus(vm: &Vm, pc: u32, _instruction: &op::UnaryPlus, values: &mut op::UnaryPlusValues) -> SlowPathControl {
+        operators::unary_plus(vm, pc, values)
+    }
+
+    fn bitwise_not(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::BitwiseNot,
+        values: &mut op::BitwiseNotValues,
+    ) -> SlowPathControl {
+        operators::bitwise_not(vm, pc, values)
+    }
+
+    fn increment(vm: &Vm, pc: u32, _instruction: &op::Increment, values: &mut op::IncrementValues) -> SlowPathControl {
+        operators::increment(vm, pc, values)
+    }
+
+    fn decrement(vm: &Vm, pc: u32, _instruction: &op::Decrement, values: &mut op::DecrementValues) -> SlowPathControl {
+        operators::decrement(vm, pc, values)
+    }
+
+    fn postfix_increment(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::PostfixIncrement,
+        values: &mut op::PostfixIncrementValues,
+    ) -> SlowPathControl {
+        operators::postfix_increment(vm, pc, values)
+    }
+
+    fn postfix_decrement(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::PostfixDecrement,
+        values: &mut op::PostfixDecrementValues,
+    ) -> SlowPathControl {
+        operators::postfix_decrement(vm, pc, values)
+    }
+
+    fn to_int32(vm: &Vm, pc: u32, _instruction: &op::ToInt32, values: &mut op::ToInt32Values) -> SlowPathControl {
+        operators::to_int32(vm, pc, values)
+    }
+
+    fn to_length(vm: &Vm, pc: u32, _instruction: &op::ToLength, values: &mut op::ToLengthValues) -> SlowPathControl {
+        operators::to_length(vm, pc, values)
+    }
+
+    fn to_object(vm: &Vm, pc: u32, _instruction: &op::ToObject, values: &mut op::ToObjectValues) -> SlowPathControl {
+        operators::to_object(vm, pc, values)
+    }
+
+    fn to_primitive_with_string_hint(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::ToPrimitiveWithStringHint,
+        values: &mut op::ToPrimitiveWithStringHintValues,
+    ) -> SlowPathControl {
+        operators::to_primitive_with_string_hint(vm, pc, values)
+    }
+
+    fn to_string(vm: &Vm, pc: u32, _instruction: &op::ToString, values: &mut op::ToStringValues) -> SlowPathControl {
+        operators::to_string(vm, pc, values)
+    }
+
+    fn r#typeof(vm: &Vm, pc: u32, _instruction: &op::Typeof, values: &mut op::TypeofValues) -> SlowPathControl {
+        operators::r#typeof(vm, pc, values)
+    }
+
+    fn concat_string(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::ConcatString,
+        values: &mut op::ConcatStringValues,
+    ) -> SlowPathControl {
+        operators::concat_string(vm, pc, values)
+    }
+
+    fn r#in(vm: &Vm, pc: u32, _instruction: &op::In, values: &mut op::InValues) -> SlowPathControl {
+        operators::r#in(vm, pc, values)
+    }
+
+    fn instance_of(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::InstanceOf,
+        values: &mut op::InstanceOfValues,
+    ) -> SlowPathControl {
+        operators::instance_of(vm, pc, values)
+    }
+
+    fn is_constructor(
+        _vm: &Vm,
+        pc: u32,
+        _instruction: &op::IsConstructor,
+        values: &mut op::IsConstructorValues,
+    ) -> SlowPathControl {
+        operators::is_constructor(pc, values)
+    }
+
+    // Property access and its inline caches: property_access.rs.
+
+    fn get_by_id(vm: &Vm, pc: u32, instruction: &op::GetById, values: &mut op::GetByIdValues) -> SlowPathControl {
+        let control = property_access::get_by_id(vm, pc, instruction, values);
+        feedback::record_cache_value_after(vm, control, instruction.cache, || values.dst)
+    }
+
+    // The slow paths of JIT code for these instructions. JIT code records no feedback.
+
+    fn get_by_id_from_jit(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::GetById,
+        values: &mut op::GetByIdValues,
+    ) -> SlowPathControl {
+        if let Some(control) = crate::jit::calls::get_by_id_from_jit(vm, pc, instruction, values) {
+            return control;
+        }
+        property_access::get_by_id(vm, pc, instruction, values)
+    }
+
+    fn get_by_value_from_jit(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::GetByValue,
+        values: &mut op::GetByValueValues,
+    ) -> SlowPathControl {
+        if property_access::try_get_by_value_cache(vm, instruction, values) {
+            return SlowPathControl::continue_at(pc + op::GetByValue::LENGTH);
+        }
+        property_access::get_by_value(vm, pc, instruction, values, KeyedSiteCache::Use)
+    }
+
+    fn put_by_value_from_jit(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::PutByValue,
+        values: &mut op::PutByValueValues,
+    ) -> SlowPathControl {
+        if property_access::try_put_by_value_cache(vm, instruction, values) {
+            return SlowPathControl::continue_at(pc + op::PutByValue::LENGTH);
+        }
+        // NB: Stores that fill a hole of an array take the interpreter's quick way for them.
+        if property_access::put_kind_from_operand(instruction.kind) == PutKind::Normal
+            && property_access::try_put_by_value_holey_array(values)
+        {
+            return SlowPathControl::continue_at(pc + op::PutByValue::LENGTH);
+        }
+        property_access::put_by_value(vm, pc, instruction, values, KeyedSiteCache::Use)
+    }
+
+    fn get_by_id_cached_accessor(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::GetById,
+        values: &mut op::GetByIdValues,
+    ) -> SlowPathControl {
+        let control = property_access::get_by_id_cached_accessor(vm, pc, instruction, values);
+        feedback::record_cache_value_after(vm, control, instruction.cache, || values.dst)
+    }
+
+    fn get_by_id_with_this(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::GetByIdWithThis,
+        values: &mut op::GetByIdWithThisValues,
+    ) -> SlowPathControl {
+        let control = property_access::get_by_id_with_this(vm, pc, instruction, values);
+        feedback::record_cache_value_after(vm, control, instruction.cache, || values.dst)
+    }
+
+    fn get_by_value(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::GetByValue,
+        values: &mut op::GetByValueValues,
+    ) -> SlowPathControl {
+        feedback::record_keyed(vm, instruction.keyed_feedback, values.base, values.property);
+        let control = property_access::get_by_value(vm, pc, instruction, values, KeyedSiteCache::Use);
+        feedback::record_cache_value_after(vm, control, instruction.cache, || values.dst)
+    }
+
+    fn get_by_value_uncached(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::GetByValue,
+        values: &mut op::GetByValueValues,
+    ) -> SlowPathControl {
+        feedback::record_keyed(vm, instruction.keyed_feedback, values.base, values.property);
+        let control = property_access::get_by_value(vm, pc, instruction, values, KeyedSiteCache::Skip);
+        feedback::record_cache_value_after(vm, control, instruction.cache, || values.dst)
+    }
+
+    fn try_get_by_id_cache_on_primitive(
+        vm: &Vm,
+        _pc: u32,
+        instruction: &op::GetById,
+        values: &mut op::GetByIdValues,
+    ) -> bool {
+        if !property_access::try_get_by_id_cache_on_primitive(vm, instruction, values) {
+            return false;
+        }
+        feedback::record_cache_value(vm, instruction.cache, values.dst);
+        true
+    }
+
+    fn try_get_by_value_cache(
+        vm: &Vm,
+        _pc: u32,
+        instruction: &op::GetByValue,
+        values: &mut op::GetByValueValues,
+    ) -> bool {
+        if !property_access::try_get_by_value_cache(vm, instruction, values) {
+            return false;
+        }
+        feedback::record_keyed(vm, instruction.keyed_feedback, values.base, values.property);
+        feedback::record_cache_value(vm, instruction.cache, values.dst);
+        true
+    }
+
+    fn get_by_value_with_this(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::GetByValueWithThis,
+        values: &mut op::GetByValueWithThisValues,
+    ) -> SlowPathControl {
+        let control = property_access::get_by_value_with_this(vm, pc, values);
+        feedback::record_value_after(vm, control, instruction.value_feedback, || values.dst)
+    }
+
+    fn get_length(vm: &Vm, pc: u32, instruction: &op::GetLength, values: &mut op::GetLengthValues) -> SlowPathControl {
+        let control = property_access::get_length(vm, pc, instruction, values);
+        feedback::record_cache_value_after(vm, control, instruction.cache, || values.dst)
+    }
+
+    fn get_length_with_this(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::GetLengthWithThis,
+        values: &mut op::GetLengthWithThisValues,
+    ) -> SlowPathControl {
+        let control = property_access::get_length_with_this(vm, pc, instruction, values);
+        feedback::record_cache_value_after(vm, control, instruction.cache, || values.dst)
+    }
+
+    fn get_method(vm: &Vm, pc: u32, instruction: &op::GetMethod, values: &mut op::GetMethodValues) -> SlowPathControl {
+        property_access::get_method(vm, pc, instruction, values)
+    }
+
+    fn put_by_id(vm: &Vm, pc: u32, instruction: &op::PutById, values: &mut op::PutByIdValues) -> SlowPathControl {
+        property_access::put_by_id(vm, pc, instruction, values)
+    }
+
+    fn put_by_id_with_this(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::PutByIdWithThis,
+        values: &mut op::PutByIdWithThisValues,
+    ) -> SlowPathControl {
+        property_access::put_by_id_with_this(vm, pc, instruction, values)
+    }
+
+    fn put_by_value(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::PutByValue,
+        values: &mut op::PutByValueValues,
+    ) -> SlowPathControl {
+        feedback::record_keyed(vm, instruction.keyed_feedback, values.base, values.property);
+        property_access::put_by_value(vm, pc, instruction, values, KeyedSiteCache::Use)
+    }
+
+    fn put_by_value_uncached(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::PutByValue,
+        values: &mut op::PutByValueValues,
+    ) -> SlowPathControl {
+        feedback::record_keyed(vm, instruction.keyed_feedback, values.base, values.property);
+        property_access::put_by_value(vm, pc, instruction, values, KeyedSiteCache::Skip)
+    }
+
+    fn try_put_by_value_cache(
+        vm: &Vm,
+        _pc: u32,
+        instruction: &op::PutByValue,
+        values: &mut op::PutByValueValues,
+    ) -> bool {
+        if !property_access::try_put_by_value_cache(vm, instruction, values) {
+            return false;
+        }
+        feedback::record_keyed(vm, instruction.keyed_feedback, values.base, values.property);
+        true
+    }
+
+    fn put_by_value_with_this(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::PutByValueWithThis,
+        values: &mut op::PutByValueWithThisValues,
+    ) -> SlowPathControl {
+        property_access::put_by_value_with_this(vm, pc, instruction, values)
+    }
+
+    fn put_by_spread(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::PutBySpread,
+        values: &mut op::PutBySpreadValues,
+    ) -> SlowPathControl {
+        property_access::put_by_spread(vm, pc, values)
+    }
+
+    fn delete_by_id(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::DeleteById,
+        values: &mut op::DeleteByIdValues,
+    ) -> SlowPathControl {
+        property_access::delete_by_id(vm, pc, instruction, values)
+    }
+
+    fn delete_by_value(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::DeleteByValue,
+        values: &mut op::DeleteByValueValues,
+    ) -> SlowPathControl {
+        property_access::delete_by_value(vm, pc, instruction, values)
+    }
+
+    fn get_private_by_id(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::GetPrivateById,
+        values: &mut op::GetPrivateByIdValues,
+    ) -> SlowPathControl {
+        property_access::get_private_by_id(vm, pc, instruction, values)
+    }
+
+    fn put_private_by_id(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::PutPrivateById,
+        values: &mut op::PutPrivateByIdValues,
+    ) -> SlowPathControl {
+        property_access::put_private_by_id(vm, pc, instruction, values)
+    }
+
+    fn has_private_id(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::HasPrivateId,
+        values: &mut op::HasPrivateIdValues,
+    ) -> SlowPathControl {
+        property_access::has_private_id(vm, pc, instruction, values)
+    }
+
+    fn add_private_name(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::AddPrivateName,
+        _values: &mut op::AddPrivateNameValues,
+    ) -> SlowPathControl {
+        property_access::add_private_name(vm, pc, instruction)
+    }
+
+    fn init_object_literal_property(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::InitObjectLiteralProperty,
+        values: &mut op::InitObjectLiteralPropertyValues,
+    ) -> SlowPathControl {
+        property_access::init_object_literal_property(vm, pc, instruction, values)
+    }
+
+    fn cache_object_shape(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::CacheObjectShape,
+        values: &mut op::CacheObjectShapeValues,
+    ) -> SlowPathControl {
+        property_access::cache_object_shape(vm, pc, instruction, values)
+    }
+
+    fn new_object(vm: &Vm, pc: u32, instruction: &op::NewObject, values: &mut op::NewObjectValues) -> SlowPathControl {
+        property_access::new_object(vm, pc, instruction, values)
+    }
+
+    fn new_object_with_no_prototype(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::NewObjectWithNoPrototype,
+        values: &mut op::NewObjectWithNoPrototypeValues,
+    ) -> SlowPathControl {
+        property_access::new_object_with_no_prototype(vm, pc, values)
+    }
+
+    fn copy_object_excluding_properties(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::CopyObjectExcludingProperties,
+        values: &mut op::CopyObjectExcludingPropertiesValues,
+        excluded_names: &mut [Value],
+    ) -> SlowPathControl {
+        property_access::copy_object_excluding_properties(vm, pc, instruction, values, excluded_names)
+    }
+
+    fn create_data_property_or_throw(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::CreateDataPropertyOrThrow,
+        values: &mut op::CreateDataPropertyOrThrowValues,
+    ) -> SlowPathControl {
+        property_access::create_data_property_or_throw(vm, pc, values)
+    }
+
+    fn get_object_property_iterator(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::GetObjectPropertyIterator,
+        values: &mut op::GetObjectPropertyIteratorValues,
+    ) -> SlowPathControl {
+        property_access::get_object_property_iterator(vm, pc, instruction, values)
+    }
+
+    fn object_property_iterator_next(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::ObjectPropertyIteratorNext,
+        values: &mut op::ObjectPropertyIteratorNextValues,
+    ) -> SlowPathControl {
+        property_access::object_property_iterator_next(vm, pc, values)
+    }
+
+    fn try_get_by_id_cache(encoded_base: u64, cache_address: u64) -> u64 {
+        // SAFETY: The interpreter passes the address of one of the running executable's property lookup caches.
+        let cache = unsafe { &*core::ptr::with_exposed_provenance::<PropertyLookupCache>(cache_address as usize) };
+        property_access::try_get_by_id_cache(Value::from_bits(encoded_base), cache).0
+    }
+
+    fn try_get_by_value_typed_array(
+        vm: &Vm,
+        _pc: u32,
+        instruction: &op::GetByValue,
+        values: &mut op::GetByValueValues,
+    ) -> bool {
+        let handled = property_access::try_get_by_value_typed_array(vm, values);
+        if handled {
+            feedback::record_keyed(vm, instruction.keyed_feedback, values.base, values.property);
+            feedback::record_cache_value(vm, instruction.cache, values.dst);
+        }
+        handled
+    }
+
+    fn try_inline_get_by_id_accessor(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::GetById,
+        values: &mut op::GetByIdValues,
+    ) -> bool {
+        property_access::try_inline_get_by_id_accessor(vm, pc, instruction, values)
+    }
+
+    fn try_put_by_id_cache(vm: &Vm, _pc: u32, instruction: &op::PutById, values: &mut op::PutByIdValues) -> bool {
+        property_access::try_put_by_id_cache(vm, instruction, values)
+    }
+
+    fn try_put_by_value_holey_array(
+        vm: &Vm,
+        _pc: u32,
+        instruction: &op::PutByValue,
+        values: &mut op::PutByValueValues,
+    ) -> bool {
+        let handled = property_access::try_put_by_value_holey_array(values);
+        if handled {
+            // NB: The interpreter only comes here for stores that fill a hole or need more storage, which its fast path
+            //     does not handle. JIT code handles them itself where nothing can observe it.
+            feedback::record_keyed_bits(
+                vm,
+                instruction.keyed_feedback,
+                keyed_feedback_bits::INT32_INDEX | keyed_feedback_bits::HOLEY | keyed_feedback_bits::OUT_OF_BOUNDS,
+            );
+        }
+        handled
+    }
+
+    fn try_put_by_value_typed_array(
+        vm: &Vm,
+        _pc: u32,
+        instruction: &op::PutByValue,
+        values: &mut op::PutByValueValues,
+    ) -> bool {
+        let handled = property_access::try_put_by_value_typed_array(vm, values);
+        if handled {
+            feedback::record_keyed(vm, instruction.keyed_feedback, values.base, values.property);
+        }
+        handled
+    }
+
+    // Bindings and environments: bindings.rs.
+
+    fn create_mutable_binding(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::CreateMutableBinding,
+        values: &mut op::CreateMutableBindingValues,
+    ) -> SlowPathControl {
+        bindings::create_mutable_binding(vm, pc, instruction, values)
+    }
+
+    fn create_immutable_binding(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::CreateImmutableBinding,
+        values: &mut op::CreateImmutableBindingValues,
+    ) -> SlowPathControl {
+        bindings::create_immutable_binding(vm, pc, instruction, values)
+    }
+
+    fn create_lexical_environment(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::CreateLexicalEnvironment,
+        values: &mut op::CreateLexicalEnvironmentValues,
+    ) -> SlowPathControl {
+        bindings::create_lexical_environment_slow_path(vm, pc, instruction, values)
+    }
+
+    fn create_variable_environment(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::CreateVariableEnvironment,
+        values: &mut op::CreateVariableEnvironmentValues,
+    ) -> SlowPathControl {
+        bindings::create_variable_environment_slow_path(vm, pc, instruction, values)
+    }
+
+    fn create_variable(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::CreateVariable,
+        values: &mut op::CreateVariableValues,
+    ) -> SlowPathControl {
+        bindings::create_variable_slow_path(vm, pc, instruction, values)
+    }
+
+    fn create_private_environment(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::CreatePrivateEnvironment,
+        values: &mut op::CreatePrivateEnvironmentValues,
+    ) -> SlowPathControl {
+        bindings::create_private_environment(vm, pc, instruction, values)
+    }
+
+    fn dynamic_get_binding(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::DynamicGetBinding,
+        values: &mut op::DynamicGetBindingValues,
+    ) -> SlowPathControl {
+        let control = bindings::dynamic_get_binding(vm, pc, instruction, values);
+        feedback::record_value_after(vm, control, instruction.value_feedback, || values.dst)
+    }
+
+    fn dynamic_get_initialized_binding(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::DynamicGetInitializedBinding,
+        values: &mut op::DynamicGetInitializedBindingValues,
+    ) -> SlowPathControl {
+        let control = bindings::dynamic_get_initialized_binding(vm, pc, instruction, values);
+        feedback::record_value_after(vm, control, instruction.value_feedback, || values.dst)
+    }
+
+    fn dynamic_get_callee_and_this(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::DynamicGetCalleeAndThisFromEnvironment,
+        values: &mut op::DynamicGetCalleeAndThisFromEnvironmentValues,
+    ) -> SlowPathControl {
+        let control = bindings::dynamic_get_callee_and_this(vm, pc, instruction, values);
+        feedback::record_value_after(vm, control, instruction.value_feedback, || values.callee)
+    }
+
+    fn dynamic_initialize_lexical_binding(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::DynamicInitializeLexicalBinding,
+        values: &mut op::DynamicInitializeLexicalBindingValues,
+    ) -> SlowPathControl {
+        bindings::dynamic_initialize_lexical_binding(vm, pc, instruction, values)
+    }
+
+    fn dynamic_initialize_variable_binding(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::DynamicInitializeVariableBinding,
+        values: &mut op::DynamicInitializeVariableBindingValues,
+    ) -> SlowPathControl {
+        bindings::dynamic_initialize_variable_binding(vm, pc, instruction, values)
+    }
+
+    fn dynamic_set_lexical_binding(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::DynamicSetLexicalBinding,
+        values: &mut op::DynamicSetLexicalBindingValues,
+    ) -> SlowPathControl {
+        bindings::dynamic_set_lexical_binding(vm, pc, instruction, values)
+    }
+
+    fn dynamic_set_variable_binding(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::DynamicSetVariableBinding,
+        values: &mut op::DynamicSetVariableBindingValues,
+    ) -> SlowPathControl {
+        bindings::dynamic_set_variable_binding(vm, pc, instruction, values)
+    }
+
+    fn set_variable_binding_of_block_function(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::SetVariableBindingOfBlockFunction,
+        values: &mut op::SetVariableBindingOfBlockFunctionValues,
+    ) -> SlowPathControl {
+        bindings::set_variable_binding_of_block_function(vm, pc, instruction, values)
+    }
+
+    fn dynamic_typeof_binding(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::DynamicTypeofBinding,
+        values: &mut op::DynamicTypeofBindingValues,
+    ) -> SlowPathControl {
+        bindings::dynamic_typeof_binding(vm, pc, instruction, values)
+    }
+
+    fn enter_object_environment(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::EnterObjectEnvironment,
+        values: &mut op::EnterObjectEnvironmentValues,
+    ) -> SlowPathControl {
+        bindings::enter_object_environment(vm, pc, instruction, values)
+    }
+
+    fn get_binding(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::GetBinding,
+        values: &mut op::GetBindingValues,
+    ) -> SlowPathControl {
+        let control = bindings::get_binding(vm, pc, instruction, values);
+        feedback::record_value_after(vm, control, instruction.value_feedback, || values.dst)
+    }
+
+    fn get_initialized_binding(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::GetInitializedBinding,
+        values: &mut op::GetInitializedBindingValues,
+    ) -> SlowPathControl {
+        bindings::get_initialized_binding(vm, pc, instruction, values)
+    }
+
+    fn initialize_lexical_binding(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::InitializeLexicalBinding,
+        values: &mut op::InitializeLexicalBindingValues,
+    ) -> SlowPathControl {
+        bindings::initialize_lexical_binding(vm, pc, instruction, values)
+    }
+
+    fn initialize_variable_binding(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::InitializeVariableBinding,
+        values: &mut op::InitializeVariableBindingValues,
+    ) -> SlowPathControl {
+        bindings::initialize_variable_binding(vm, pc, instruction, values)
+    }
+
+    fn get_callee_and_this(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::GetCalleeAndThisFromEnvironment,
+        values: &mut op::GetCalleeAndThisFromEnvironmentValues,
+    ) -> SlowPathControl {
+        let control = bindings::get_callee_and_this(vm, pc, instruction, values);
+        feedback::record_value_after(vm, control, instruction.value_feedback, || values.callee)
+    }
+
+    fn get_global(vm: &Vm, pc: u32, instruction: &op::GetGlobal, values: &mut op::GetGlobalValues) -> SlowPathControl {
+        let control = bindings::get_global(vm, pc, instruction, values);
+        feedback::record_value_after(vm, control, instruction.value_feedback, || values.dst)
+    }
+
+    fn typeof_global(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::TypeofGlobal,
+        values: &mut op::TypeofGlobalValues,
+    ) -> SlowPathControl {
+        bindings::typeof_global(vm, pc, instruction, values)
+    }
+
+    fn set_global(vm: &Vm, pc: u32, instruction: &op::SetGlobal, values: &mut op::SetGlobalValues) -> SlowPathControl {
+        bindings::set_global(vm, pc, instruction, values)
+    }
+
+    fn get_import(vm: &Vm, pc: u32, instruction: &op::GetImport, values: &mut op::GetImportValues) -> SlowPathControl {
+        bindings::get_import(vm, pc, instruction, values)
+    }
+
+    fn get_import_meta(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::GetImportMeta,
+        values: &mut op::GetImportMetaValues,
+    ) -> SlowPathControl {
+        bindings::get_import_meta(vm, pc, instruction, values)
+    }
+
+    fn import_call(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::ImportCall,
+        values: &mut op::ImportCallValues,
+    ) -> SlowPathControl {
+        bindings::import_call(vm, pc, instruction, values)
+    }
+
+    fn get_new_target(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::GetNewTarget,
+        values: &mut op::GetNewTargetValues,
+    ) -> SlowPathControl {
+        bindings::get_new_target(vm, pc, instruction, values)
+    }
+
+    fn resolve_binding(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::ResolveBinding,
+        values: &mut op::ResolveBindingValues,
+    ) -> SlowPathControl {
+        bindings::resolve_binding(vm, pc, instruction, values)
+    }
+
+    fn resolve_global_binding(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::ResolveGlobalBinding,
+        values: &mut op::ResolveGlobalBindingValues,
+    ) -> SlowPathControl {
+        bindings::resolve_global_binding(vm, pc, instruction, values)
+    }
+
+    fn resolve_super_base(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::ResolveSuperBase,
+        values: &mut op::ResolveSuperBaseValues,
+    ) -> SlowPathControl {
+        bindings::resolve_super_base(vm, pc, instruction, values)
+    }
+
+    fn resolve_this_binding(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::ResolveThisBinding,
+        values: &mut op::ResolveThisBindingValues,
+    ) -> SlowPathControl {
+        bindings::resolve_this_binding(vm, pc, instruction, values)
+    }
+
+    fn set_lexical_binding(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::SetLexicalBinding,
+        values: &mut op::SetLexicalBindingValues,
+    ) -> SlowPathControl {
+        bindings::set_lexical_binding(vm, pc, instruction, values)
+    }
+
+    fn set_variable_binding(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::SetVariableBinding,
+        values: &mut op::SetVariableBindingValues,
+    ) -> SlowPathControl {
+        bindings::set_variable_binding(vm, pc, instruction, values)
+    }
+
+    fn get_resolved_binding(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::GetResolvedBinding,
+        values: &mut op::GetResolvedBindingValues,
+    ) -> SlowPathControl {
+        bindings::get_resolved_binding(vm, pc, instruction, values)
+    }
+
+    fn set_resolved_binding(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::SetResolvedBinding,
+        values: &mut op::SetResolvedBindingValues,
+    ) -> SlowPathControl {
+        bindings::set_resolved_binding(vm, pc, instruction, values)
+    }
+
+    fn delete_variable(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::DeleteVariable,
+        values: &mut op::DeleteVariableValues,
+    ) -> SlowPathControl {
+        bindings::delete_variable(vm, pc, instruction, values)
+    }
+
+    fn typeof_binding(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::TypeofBinding,
+        values: &mut op::TypeofBindingValues,
+    ) -> SlowPathControl {
+        bindings::typeof_binding(vm, pc, instruction, values)
+    }
+
+    fn verify_environment_coordinate(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::VerifyEnvironmentCoordinate,
+        values: &mut op::VerifyEnvironmentCoordinateValues,
+    ) -> SlowPathControl {
+        bindings::verify_environment_coordinate(vm, pc, instruction, values)
+    }
+
+    // Calls, functions and classes: calls.rs.
+
+    fn try_inline_call(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::Call,
+        values: &mut op::CallValues,
+        arguments: &mut [Value],
+    ) -> bool {
+        calls::try_inline_call(vm, pc, instruction, values, arguments)
+    }
+
+    fn create_rest_params(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::CreateRestParams,
+        values: &mut op::CreateRestParamsValues,
+    ) -> SlowPathControl {
+        calls::create_rest_params(vm, pc, instruction, values)
+    }
+
+    fn create_arguments(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::CreateArguments,
+        values: &mut op::CreateArgumentsValues,
+    ) -> SlowPathControl {
+        calls::create_arguments(vm, pc, instruction, values)
+    }
+
+    fn get_argument(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::GetArgument,
+        values: &mut op::GetArgumentValues,
+    ) -> SlowPathControl {
+        calls::get_argument(vm, pc, instruction, values)
+    }
+
+    fn stack_overflow(vm: &Vm, pc: u32) -> SlowPathControl {
+        calls::stack_overflow(vm, pc)
+    }
+
+    fn get_super_constructor(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::GetSuperConstructor,
+        values: &mut op::GetSuperConstructorValues,
+    ) -> SlowPathControl {
+        calls::get_super_constructor(vm, pc, values)
+    }
+
+    fn get_class_field_initializer_name(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::GetClassFieldInitializerName,
+        values: &mut op::GetClassFieldInitializerNameValues,
+    ) -> SlowPathControl {
+        calls::get_class_field_initializer_name(vm, pc, values)
+    }
+
+    fn get_class_proto_parent(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::GetClassProtoParent,
+        values: &mut op::GetClassProtoParentValues,
+    ) -> SlowPathControl {
+        calls::get_class_proto_parent(vm, pc, values)
+    }
+
+    fn new_class(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::NewClass,
+        values: &mut op::NewClassValues,
+        element_keys: &mut [Value],
+    ) -> SlowPathControl {
+        calls::new_class(vm, pc, instruction, values, element_keys)
+    }
+
+    fn call(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::Call,
+        values: &mut op::CallValues,
+        arguments: &mut [Value],
+    ) -> SlowPathControl {
+        call_slow_path(vm, pc, instruction, values, arguments)
+    }
+
+    fn call_direct_eval(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::CallDirectEval,
+        values: &mut op::CallDirectEvalValues,
+        arguments: &mut [Value],
+    ) -> SlowPathControl {
+        call_direct_eval_slow_path(vm, pc, instruction, values, arguments)
+    }
+
+    fn call_with_argument_array(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::CallWithArgumentArray,
+        values: &mut op::CallWithArgumentArrayValues,
+    ) -> SlowPathControl {
+        feedback::record_call(vm, instruction.call_feedback, values.callee, call_feedback_flags::NONE);
+        let control = calls::call_with_argument_array(vm, pc, instruction, values);
+        feedback::record_call_value_after(vm, control, instruction.call_feedback, || values.dst)
+    }
+
+    fn call_direct_eval_with_argument_array(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::CallDirectEvalWithArgumentArray,
+        values: &mut op::CallDirectEvalWithArgumentArrayValues,
+    ) -> SlowPathControl {
+        feedback::record_call(vm, instruction.call_feedback, values.callee, call_feedback_flags::NONE);
+        let control = calls::call_direct_eval_with_argument_array(vm, pc, instruction, values);
+        feedback::record_call_value_after(vm, control, instruction.call_feedback, || values.dst)
+    }
+
+    fn call_construct(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::CallConstruct,
+        values: &mut op::CallConstructValues,
+        arguments: &mut [Value],
+    ) -> SlowPathControl {
+        call_construct_slow_path(vm, pc, instruction, values, arguments)
+    }
+
+    fn call_construct_with_argument_array(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::CallConstructWithArgumentArray,
+        values: &mut op::CallConstructWithArgumentArrayValues,
+    ) -> SlowPathControl {
+        feedback::record_call(
+            vm,
+            instruction.call_feedback,
+            values.callee,
+            call_feedback_flags::SAW_CONSTRUCT,
+        );
+        let control = calls::call_construct_with_argument_array(vm, pc, instruction, values);
+        feedback::record_call_value_after(vm, control, instruction.call_feedback, || values.dst)
+    }
+
+    fn super_call(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::SuperCall,
+        values: &mut op::SuperCallValues,
+        arguments: &mut [Value],
+    ) -> SlowPathControl {
+        super_call_slow_path(vm, pc, instruction, values, arguments)
+    }
+
+    fn super_call_with_forwarded_arguments(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::SuperCallWithForwardedArguments,
+        values: &mut op::SuperCallWithForwardedArgumentsValues,
+    ) -> SlowPathControl {
+        feedback::record_call(
+            vm,
+            instruction.call_feedback,
+            values.super_constructor,
+            call_feedback_flags::SAW_CONSTRUCT,
+        );
+        let control = calls::super_call_with_forwarded_arguments(vm, pc, instruction, values);
+        feedback::record_call_value_after(vm, control, instruction.call_feedback, || values.dst)
+    }
+
+    fn bind_this_from_super_call(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::BindThisFromSuperCall,
+        values: &mut op::BindThisFromSuperCallValues,
+    ) -> SlowPathControl {
+        calls::bind_this_from_super_call(vm, pc, values)
+    }
+
+    fn super_call_with_argument_array(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::SuperCallWithArgumentArray,
+        values: &mut op::SuperCallWithArgumentArrayValues,
+    ) -> SlowPathControl {
+        feedback::record_call(
+            vm,
+            instruction.call_feedback,
+            values.super_constructor,
+            call_feedback_flags::SAW_CONSTRUCT,
+        );
+        let control = calls::super_call_with_argument_array(vm, pc, instruction, values);
+        feedback::record_call_value_after(vm, control, instruction.call_feedback, || values.dst)
+    }
+
+    fn set_function_name(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::SetFunctionName,
+        values: &mut op::SetFunctionNameValues,
+    ) -> SlowPathControl {
+        calls::set_function_name(vm, pc, instruction, values)
+    }
+
+    fn new_function(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::NewFunction,
+        values: &mut op::NewFunctionValues,
+    ) -> SlowPathControl {
+        calls::new_function(vm, pc, instruction, values)
+    }
+
+    fn new_function_wide(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::NewFunctionWide,
+        values: &mut op::NewFunctionWideValues,
+    ) -> SlowPathControl {
+        calls::new_function_wide(vm, pc, instruction, values)
+    }
+
+    fn helper_handle_raw_native_exception(vm: u64, encoded_exception: u64) -> u64 {
+        let vm = vm_from_helper_argument(vm);
+        calls::handle_raw_native_exception(vm, Value::from_bits(encoded_exception)).0 as u64
+    }
+
+    // Literals, iterators, generators and control flow: control.rs.
+
+    fn debugger_check_breakpoint(vm: &Vm, pc: u32) {
+        control::debugger_check_breakpoint(vm, pc);
+    }
+
+    fn fallback_handler(vm: &Vm, pc: u32, _instruction: *const u8) -> SlowPathControl {
+        control::fallback_handler(vm, pc)
+    }
+
+    fn new_array(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::NewArray,
+        values: &mut op::NewArrayValues,
+        elements: &mut [Value],
+    ) -> SlowPathControl {
+        control::new_array(vm, pc, instruction, values, elements)
+    }
+
+    fn new_primitive_array(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::NewPrimitiveArray,
+        values: &mut op::NewPrimitiveArrayValues,
+    ) -> SlowPathControl {
+        control::new_primitive_array(vm, pc, instruction, values)
+    }
+
+    fn new_array_with_length(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::NewArrayWithLength,
+        values: &mut op::NewArrayWithLengthValues,
+    ) -> SlowPathControl {
+        control::new_array_with_length(vm, pc, values)
+    }
+
+    fn array_append(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::ArrayAppend,
+        values: &mut op::ArrayAppendValues,
+    ) -> SlowPathControl {
+        control::array_append(vm, pc, instruction, values)
+    }
+
+    fn get_template_object(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::GetTemplateObject,
+        values: &mut op::GetTemplateObjectValues,
+        strings: &mut [Value],
+    ) -> SlowPathControl {
+        control::get_template_object(vm, pc, instruction, values, strings)
+    }
+
+    fn new_regexp(vm: &Vm, pc: u32, instruction: &op::NewRegExp, values: &mut op::NewRegExpValues) -> SlowPathControl {
+        control::new_regexp(vm, pc, instruction, values)
+    }
+
+    fn new_reference_error(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::NewReferenceError,
+        values: &mut op::NewReferenceErrorValues,
+    ) -> SlowPathControl {
+        control::new_reference_error(vm, pc, instruction, values)
+    }
+
+    fn new_type_error(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::NewTypeError,
+        values: &mut op::NewTypeErrorValues,
+    ) -> SlowPathControl {
+        control::new_type_error(vm, pc, instruction, values)
+    }
+
+    fn get_iterator(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::GetIterator,
+        values: &mut op::GetIteratorValues,
+    ) -> SlowPathControl {
+        control::get_iterator(vm, pc, instruction, values)
+    }
+
+    fn iterator_close(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::IteratorClose,
+        values: &mut op::IteratorCloseValues,
+    ) -> SlowPathControl {
+        control::iterator_close_slow_path(vm, pc, instruction, values)
+    }
+
+    fn iterator_next(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::IteratorNext,
+        values: &mut op::IteratorNextValues,
+    ) -> SlowPathControl {
+        control::iterator_next_slow_path(vm, pc, values)
+    }
+
+    fn iterator_step(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::IteratorStep,
+        values: &mut op::IteratorStepValues,
+    ) -> SlowPathControl {
+        control::iterator_step_slow_path(vm, pc, values)
+    }
+
+    fn iterator_next_unpack(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::IteratorNextUnpack,
+        values: &mut op::IteratorNextUnpackValues,
+    ) -> SlowPathControl {
+        control::iterator_next_unpack(vm, pc, values)
+    }
+
+    fn iterator_to_array(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::IteratorToArray,
+        values: &mut op::IteratorToArrayValues,
+    ) -> SlowPathControl {
+        control::iterator_to_array(vm, pc, values)
+    }
+
+    fn create_async_from_sync_iterator(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::CreateAsyncFromSyncIterator,
+        values: &mut op::CreateAsyncFromSyncIteratorValues,
+    ) -> SlowPathControl {
+        control::create_async_from_sync_iterator_slow_path(vm, pc, values)
+    }
+
+    fn new_disposable_resource_stack(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::NewDisposableResourceStack,
+        values: &mut op::NewDisposableResourceStackValues,
+    ) -> SlowPathControl {
+        control::new_disposable_resource_stack(vm, pc, values)
+    }
+
+    fn add_disposable_resource(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::AddDisposableResource,
+        values: &mut op::AddDisposableResourceValues,
+    ) -> SlowPathControl {
+        control::add_disposable_resource(vm, pc, instruction, values)
+    }
+
+    fn dispose_resources(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::DisposeResources,
+        values: &mut op::DisposeResourcesValues,
+    ) -> SlowPathControl {
+        control::dispose_resources(vm, pc, values)
+    }
+
+    fn async_dispose_resources_step(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::AsyncDisposeResourcesStep,
+        values: &mut op::AsyncDisposeResourcesStepValues,
+    ) -> SlowPathControl {
+        control::async_dispose_resources_step(vm, pc, values)
+    }
+
+    fn get_completion_fields(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::GetCompletionFields,
+        values: &mut op::GetCompletionFieldsValues,
+    ) -> SlowPathControl {
+        control::get_completion_fields(vm, pc, values)
+    }
+
+    fn set_completion_type(
+        vm: &Vm,
+        pc: u32,
+        instruction: &op::SetCompletionType,
+        values: &mut op::SetCompletionTypeValues,
+    ) -> SlowPathControl {
+        control::set_completion_type(vm, pc, instruction, values)
+    }
+
+    fn debugger(vm: &Vm, pc: u32, _instruction: &op::Debugger, _values: &mut op::DebuggerValues) -> SlowPathControl {
+        control::debugger(vm, pc)
+    }
+
+    fn throw(vm: &Vm, pc: u32, _instruction: &op::Throw, values: &mut op::ThrowValues) -> SlowPathControl {
+        // A throw statement throws its value anew, even one that was thrown before and never caught by a catch clause.
+        vm.did_throw(values.src, pc);
+        handle_asm_exception(vm, pc, values.src)
+    }
+
+    fn throw_if_tdz(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::ThrowIfTDZ,
+        values: &mut op::ThrowIfTDZValues,
+    ) -> SlowPathControl {
+        control::throw_if_tdz(vm, pc, values)
+    }
+
+    fn throw_if_not_object(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::ThrowIfNotObject,
+        values: &mut op::ThrowIfNotObjectValues,
+    ) -> SlowPathControl {
+        control::throw_if_not_object(vm, pc, values)
+    }
+
+    fn throw_if_nullish(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::ThrowIfNullish,
+        values: &mut op::ThrowIfNullishValues,
+    ) -> SlowPathControl {
+        control::throw_if_nullish(vm, pc, values)
+    }
+
+    fn throw_const_assignment(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::ThrowConstAssignment,
+        _values: &mut op::ThrowConstAssignmentValues,
+    ) -> SlowPathControl {
+        control::throw_const_assignment(vm, pc)
+    }
+
+    fn throw_not_a_function(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::ThrowNotAFunction,
+        values: &mut op::ThrowNotAFunctionValues,
+    ) -> SlowPathControl {
+        control::throw_not_a_function(vm, pc, values)
+    }
+
+    fn get_argument_count(
+        vm: &Vm,
+        pc: u32,
+        _instruction: &op::GetArgumentCount,
+        values: &mut op::GetArgumentCountValues,
+    ) -> SlowPathControl {
+        control::get_argument_count(vm, pc, values)
+    }
+
+    fn r#await(vm: &Vm, _pc: u32, instruction: &op::Await, values: &mut op::AwaitValues) -> SlowPathControl {
+        control::r#await(vm, instruction, values)
+    }
+
+    fn r#yield(vm: &Vm, _pc: u32, instruction: &op::Yield, values: &mut op::YieldValues) -> SlowPathControl {
+        control::r#yield(vm, instruction, values)
+    }
+
+    fn yield_iterator_result(
+        vm: &Vm,
+        _pc: u32,
+        instruction: &op::YieldIteratorResult,
+        values: &mut op::YieldIteratorResultValues,
+    ) -> SlowPathControl {
+        control::yield_iterator_result(vm, instruction, values)
+    }
+}

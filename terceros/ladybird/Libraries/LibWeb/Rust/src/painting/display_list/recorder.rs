@@ -1,0 +1,1539 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+use super::builder::{DisplayListBuilder, HEADER_SIZE, OpenGroup, PendingInlineClip};
+use super::chunks::Chunk;
+use super::commands::*;
+use crate::layout::node_data::NodeSlotId;
+use crate::painting::display_list::ffi_bytes::FfiBytes;
+use crate::painting::force_dark::{ForceDarkResolver, ForceDarkRole, ForceDarkSettings};
+use libgfx_rust::*;
+
+pub struct CommandPayloadBuilder {
+    payload_start_offset: usize,
+    command_size: usize,
+    inline_payload: Vec<u8>,
+}
+
+impl CommandPayloadBuilder {
+    pub fn new<C: DisplayListCommand>(builder: &DisplayListBuilder) -> Self {
+        debug_assert_eq!(builder.byte_size() % super::builder::COMMAND_ALIGNMENT, 0);
+        Self {
+            payload_start_offset: builder.byte_size() + HEADER_SIZE,
+            command_size: std::mem::size_of::<C>(),
+            inline_payload: Vec::new(),
+        }
+    }
+
+    pub fn append_data(&mut self, bytes: &[u8], alignment: usize) -> DisplayListDataSpan {
+        let payload_relative_offset = self.pad_payload_to_alignment(alignment);
+        self.inline_payload.extend_from_slice(bytes);
+        self.data_span_from(payload_relative_offset)
+    }
+
+    pub fn append_objects<T: FfiBytes>(&mut self, objects: impl IntoIterator<Item = T>) -> DisplayListDataSpan {
+        let payload_relative_offset = self.pad_payload_to_alignment(std::mem::align_of::<T>());
+        let object_size = std::mem::size_of::<T>();
+        let objects = objects.into_iter();
+        self.inline_payload.reserve(objects.size_hint().0 * object_size);
+        for object in objects {
+            let object_start = self.inline_payload.len();
+            self.inline_payload.resize(object_start + object_size, 0);
+            object.write_ffi_bytes(&mut self.inline_payload[object_start..]);
+        }
+        self.data_span_from(payload_relative_offset)
+    }
+
+    fn payload_size(&self) -> usize {
+        self.command_size + self.inline_payload.len()
+    }
+
+    fn pad_payload_to_alignment(&mut self, alignment: usize) -> usize {
+        assert!(alignment > 0);
+        let absolute_offset = self.payload_start_offset + self.payload_size();
+        let padding = absolute_offset.next_multiple_of(alignment) - absolute_offset;
+        self.inline_payload.resize(self.inline_payload.len() + padding, 0);
+        self.payload_size()
+    }
+
+    fn data_span_from(&self, payload_relative_offset: usize) -> DisplayListDataSpan {
+        DisplayListDataSpan {
+            offset: u32::try_from(payload_relative_offset).expect("display list payload exceeds u32"),
+            size: u32::try_from(self.payload_size() - payload_relative_offset)
+                .expect("display list payload exceeds u32"),
+        }
+    }
+
+    pub fn append_f32s(&mut self, values: &[f32]) -> DisplayListDataSpan {
+        let mut bytes = Vec::with_capacity(values.len() * 4);
+        for value in values {
+            bytes.extend_from_slice(&value.to_ne_bytes());
+        }
+        self.append_data(&bytes, std::mem::align_of::<f32>())
+    }
+
+    pub fn append_colors(&mut self, colors: &[Color]) -> DisplayListDataSpan {
+        let mut bytes = Vec::with_capacity(colors.len() * 4);
+        for color in colors {
+            bytes.extend_from_slice(&color.0.to_ne_bytes());
+        }
+        self.append_data(&bytes, std::mem::align_of::<u32>())
+    }
+
+    pub fn inline_data(&self) -> &[u8] {
+        &self.inline_payload
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ColorStops {
+    pub colors: Vec<Color>,
+    pub positions: Vec<f32>,
+    pub repeating: bool,
+}
+
+impl ColorStops {
+    fn append_to(&self, payload: &mut CommandPayloadBuilder) -> DisplayListGradientColorStops {
+        assert_eq!(self.colors.len(), self.positions.len());
+        DisplayListGradientColorStops {
+            colors: payload.append_colors(&self.colors),
+            positions: payload.append_f32s(&self.positions),
+            repeating: self.repeating,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LinearGradientData {
+    pub gradient_angle: f32,
+    pub color_stops: ColorStops,
+    pub first_stop_position: f32,
+    pub repeat_length: f32,
+    pub interpolation_method: GradientInterpolationMethod,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ConicGradientData {
+    pub start_angle: f32,
+    pub color_stops: ColorStops,
+    /// The fraction of a turn the stops' positions start from, and how many turns they run, as for a linear
+    /// gradient's line.
+    pub first_stop_position: f32,
+    pub repeat_length: f32,
+    pub interpolation_method: GradientInterpolationMethod,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RadialGradientData {
+    pub color_stops: ColorStops,
+    pub interpolation_method: GradientInterpolationMethod,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum PaintStyle {
+    LinearGradient {
+        gradient_transform: OptionalAffineTransform,
+        spread_method: DisplayListGradientSpreadMethod,
+        color_space: InterpolationColorSpace,
+        color_stops: ColorStops,
+        start_point: FloatPoint,
+        end_point: FloatPoint,
+    },
+    RadialGradient {
+        gradient_transform: OptionalAffineTransform,
+        spread_method: DisplayListGradientSpreadMethod,
+        color_space: InterpolationColorSpace,
+        color_stops: ColorStops,
+        start_center: FloatPoint,
+        start_radius: f32,
+        end_center: FloatPoint,
+        end_radius: f32,
+    },
+    Pattern {
+        tile_records: std::sync::Arc<Vec<u8>>,
+        tile_rect: FloatRect,
+        content_scale: FloatSize,
+        pattern_transform: OptionalAffineTransform,
+    },
+}
+
+impl PaintStyle {
+    fn append_to(&self, payload: &mut CommandPayloadBuilder) -> DisplayListPaintStyle {
+        let mut style = DisplayListPaintStyle::default();
+        match self {
+            PaintStyle::LinearGradient {
+                gradient_transform,
+                spread_method,
+                color_space,
+                color_stops,
+                start_point,
+                end_point,
+            } => {
+                style.paint_style_type = DisplayListPaintStyleType::LinearGradient;
+                style.gradient = DisplayListGradientPaintStyle {
+                    gradient_transform: *gradient_transform,
+                    spread_method: *spread_method,
+                    color_space: *color_space,
+                    color_stops: color_stops.append_to(payload),
+                };
+                style.linear_gradient_start_point = *start_point;
+                style.linear_gradient_end_point = *end_point;
+            }
+            PaintStyle::RadialGradient {
+                gradient_transform,
+                spread_method,
+                color_space,
+                color_stops,
+                start_center,
+                start_radius,
+                end_center,
+                end_radius,
+            } => {
+                style.paint_style_type = DisplayListPaintStyleType::RadialGradient;
+                style.gradient = DisplayListGradientPaintStyle {
+                    gradient_transform: *gradient_transform,
+                    spread_method: *spread_method,
+                    color_space: *color_space,
+                    color_stops: color_stops.append_to(payload),
+                };
+                style.radial_gradient_start_center = *start_center;
+                style.radial_gradient_start_radius = *start_radius;
+                style.radial_gradient_end_center = *end_center;
+                style.radial_gradient_end_radius = *end_radius;
+            }
+            PaintStyle::Pattern {
+                tile_records,
+                tile_rect,
+                content_scale,
+                pattern_transform,
+            } => {
+                style.paint_style_type = DisplayListPaintStyleType::Pattern;
+                style.pattern_tile = payload.append_data(tile_records, super::builder::COMMAND_ALIGNMENT);
+                style.pattern_tile_rect = *tile_rect;
+                style.pattern_content_scale = *content_scale;
+                style.pattern_transform = *pattern_transform;
+            }
+        }
+        style
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum PaintStyleOrColor {
+    Color(Color),
+    PaintStyle(PaintStyle),
+}
+
+pub struct FillPathParams<'a> {
+    pub force_dark_role: ForceDarkRole,
+    pub path: &'a libgfx_rust::path::Path,
+    pub opacity: f32,
+    pub paint_style_or_color: PaintStyleOrColor,
+    pub winding_rule: WindingRule,
+    pub should_anti_alias: ShouldAntiAlias,
+}
+
+pub struct StrokePathParams<'a> {
+    pub force_dark_role: ForceDarkRole,
+    pub cap_style: CapStyle,
+    pub join_style: JoinStyle,
+    pub miter_limit: f32,
+    pub dash_array: Vec<f32>,
+    pub dash_offset: f32,
+    pub path: &'a libgfx_rust::path::Path,
+    pub opacity: f32,
+    pub paint_style_or_color: PaintStyleOrColor,
+    pub thickness: f32,
+    pub should_anti_alias: ShouldAntiAlias,
+}
+
+pub struct GlyphRunForRecording<Glyphs: IntoIterator<Item = DisplayListGlyph>> {
+    pub font_smoothing: u8,
+    pub font_id: FontResourceId,
+    pub glyphs: Glyphs,
+}
+
+pub struct IsolatedGroupEffects {
+    pub clip_rect: FloatRect,
+    pub opacity: f32,
+    pub filter: Option<std::sync::Arc<Vec<u8>>>,
+    pub compositing_and_blending_operator: CompositingAndBlendingOperator,
+    pub mask_kind: MaskKind,
+}
+
+/// The box and the part of its painting that recorded a record. What is recorded outside the boxes, such as the canvas
+/// and the inspector's overlays, names no box.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RecordOrigin {
+    pub(crate) owner: NodeSlotId,
+    pub(crate) phase: &'static str,
+}
+
+/// What a recording notes beside its records for the display list dump, by the offsets the records start at, in
+/// increasing order.
+#[derive(Default)]
+pub(crate) struct RecordNotes {
+    pub(crate) origins: Vec<(u32, RecordOrigin)>,
+    pub(crate) glyph_run_texts: Vec<(u32, String)>,
+}
+
+impl RecordNotes {
+    pub(crate) fn append_shifted_by(&mut self, other: RecordNotes, shift: u32) {
+        self.origins.extend(
+            other
+                .origins
+                .into_iter()
+                .map(|(offset, origin)| (offset + shift, origin)),
+        );
+        self.glyph_run_texts.extend(
+            other
+                .glyph_run_texts
+                .into_iter()
+                .map(|(offset, text)| (offset + shift, text)),
+        );
+    }
+
+    pub(crate) fn glyph_run_text_at(&self, record_offset: u32) -> Option<&str> {
+        let index = self
+            .glyph_run_texts
+            .binary_search_by_key(&record_offset, |(offset, _)| *offset)
+            .ok()?;
+        Some(&self.glyph_run_texts[index].1)
+    }
+
+    pub(crate) fn origin_at(&self, record_offset: u32) -> Option<RecordOrigin> {
+        let index = self
+            .origins
+            .binary_search_by_key(&record_offset, |(offset, _)| *offset)
+            .ok()?;
+        Some(self.origins[index].1)
+    }
+}
+
+#[derive(Default)]
+struct RecordNoting {
+    open_origins: Vec<RecordOrigin>,
+    glyph_run_text: Option<String>,
+    notes: RecordNotes,
+}
+
+pub struct DetachedRecords {
+    outer_builder: DisplayListBuilder,
+    // The notes of the outer records. The detached records are copied wherever they are drawn, and note nothing.
+    outer_record_notes: Option<RecordNotes>,
+    outer_ambient_inline_clips: Vec<PendingInlineClip>,
+    outer_ambient_inline_transform: Option<AffineTransform>,
+}
+
+pub struct OpenRecorderGroup {
+    group: OpenGroup,
+    context: ContextRef,
+    suspended_ambient_inline_clips: Vec<PendingInlineClip>,
+}
+
+#[derive(Default)]
+pub struct DisplayListRecorder {
+    builder: DisplayListBuilder,
+    // Present only while force-dark is on for this page; every color-bearing command resolves through it.
+    force_dark: Option<ForceDarkResolver>,
+    // The color behind whatever is being drawn right now, as authored: the element's own background, set around
+    // the draws whose force-dark result is judged against it (borders and selections). None outside those scopes.
+    contrast_backdrop: Option<Color>,
+    context: ContextRef,
+    ambient_inline_clips: Vec<PendingInlineClip>,
+    ambient_inline_transform: Option<AffineTransform>,
+    // Present only while a recording for the display list dump notes where its records come from.
+    record_noting: Option<Box<RecordNoting>>,
+}
+
+impl DisplayListRecorder {
+    /// Notes, for each record from now on, the box and phase that recorded it, and the text a glyph run draws.
+    pub(crate) fn note_record_origins(&mut self) {
+        self.record_noting = Some(Box::default());
+    }
+
+    pub(crate) fn notes_record_origins(&self) -> bool {
+        self.record_noting.is_some()
+    }
+
+    pub(crate) fn begin_record_origin(&mut self, owner: NodeSlotId, phase: &'static str) {
+        if let Some(noting) = &mut self.record_noting {
+            noting.open_origins.push(RecordOrigin { owner, phase });
+        }
+    }
+
+    pub(crate) fn end_record_origin(&mut self) {
+        if let Some(noting) = &mut self.record_noting {
+            noting.open_origins.pop();
+        }
+    }
+
+    /// The text the glyph runs recorded from now on draw, until another is set.
+    pub(crate) fn set_glyph_run_text(&mut self, text: Option<String>) {
+        if let Some(noting) = &mut self.record_noting {
+            noting.glyph_run_text = text;
+        }
+    }
+
+    /// The notes of the records recorded since the last chunk was taken, with offsets from where that chunk ended.
+    pub(crate) fn take_record_notes(&mut self) -> Option<RecordNotes> {
+        self.record_noting
+            .as_mut()
+            .map(|noting| std::mem::take(&mut noting.notes))
+    }
+
+    fn note_record_start(&mut self, draws_glyph_run: bool) {
+        let Some(noting) = &mut self.record_noting else {
+            return;
+        };
+        let offset = u32::try_from(self.builder.byte_size()).expect("display list exceeds u32");
+        if let Some(origin) = noting.open_origins.last() {
+            noting.notes.origins.push((offset, *origin));
+        }
+        if draws_glyph_run && let Some(text) = &noting.glyph_run_text {
+            noting.notes.glyph_run_texts.push((offset, text.clone()));
+        }
+    }
+
+    pub fn new(force_dark_settings: Option<ForceDarkSettings>) -> Self {
+        Self {
+            force_dark: force_dark_settings.map(ForceDarkResolver::new),
+            ..Self::default()
+        }
+    }
+
+    pub fn record_clipped_to(&mut self, clip: IntRect, record: impl FnOnce(&mut Self)) {
+        self.record_with_inline_clips(&[PendingInlineClip::intersecting_device_rect(clip)], record);
+    }
+
+    pub fn record_with_inline_clips(&mut self, inline_clips: &[PendingInlineClip], record: impl FnOnce(&mut Self)) {
+        let enclosing_scope_clip_count = self.ambient_inline_clip_depth();
+        self.push_ambient_inline_clips(inline_clips);
+        record(self);
+        self.truncate_ambient_inline_clips(enclosing_scope_clip_count);
+    }
+
+    pub fn ambient_inline_clip_depth(&self) -> usize {
+        self.ambient_inline_clips.len()
+    }
+
+    /// Output copied between frames must start and end here: no open group, and no inline
+    /// clip, transform or contrast backdrop carried over from an enclosing recording.
+    pub fn is_producer_boundary(&self) -> bool {
+        self.builder.open_group_depth() == 0
+            && self.ambient_inline_clips.is_empty()
+            && self.ambient_inline_transform.is_none()
+            && self.contrast_backdrop.is_none()
+    }
+
+    pub fn ambient_inline_transform(&self) -> Option<AffineTransform> {
+        self.ambient_inline_transform
+    }
+
+    pub fn set_ambient_inline_transform(&mut self, transform: Option<AffineTransform>) -> Option<AffineTransform> {
+        std::mem::replace(&mut self.ambient_inline_transform, transform)
+    }
+
+    pub fn push_ambient_inline_clips(&mut self, inline_clips: &[PendingInlineClip]) {
+        self.ambient_inline_clips.extend_from_slice(inline_clips);
+    }
+
+    /// Whether one of the ambient inline clips already keeps what is recorded under it within `rect`.
+    pub fn has_ambient_inline_clip_within(&self, rect: FloatRect) -> bool {
+        self.ambient_inline_clips.iter().any(|clip| clip.lies_within(rect))
+    }
+
+    /// Makes every ambient inline clip apply in `space`, whatever space the commands recorded under them draw in,
+    /// and hands back the clips as they were, for the caller to restore with [`Self::replace_ambient_inline_clips`].
+    pub fn move_ambient_inline_clips_to_space(&mut self, space: SpatialNodeIndex) -> Vec<PendingInlineClip> {
+        let clips_in_space = self
+            .ambient_inline_clips
+            .iter()
+            .map(|clip| clip.in_space(space))
+            .collect();
+        self.replace_ambient_inline_clips(clips_in_space)
+    }
+
+    pub fn replace_ambient_inline_clips(&mut self, inline_clips: Vec<PendingInlineClip>) -> Vec<PendingInlineClip> {
+        std::mem::replace(&mut self.ambient_inline_clips, inline_clips)
+    }
+
+    pub fn truncate_ambient_inline_clips(&mut self, enclosing_scope_clip_count: usize) {
+        self.ambient_inline_clips.truncate(enclosing_scope_clip_count);
+    }
+
+    pub fn resolve_color(&mut self, color: Color, force_dark_role: ForceDarkRole) -> Color {
+        let backdrop = self.contrast_backdrop;
+        match &mut self.force_dark {
+            Some(resolver) => resolver.resolve_against_backdrop(color, force_dark_role, backdrop),
+            None => color,
+        }
+    }
+
+    /// Swaps in the backdrop for a scope of draws and hands back what was there, for the caller to restore.
+    pub fn set_contrast_backdrop(&mut self, backdrop: Option<Color>) -> Option<Color> {
+        std::mem::replace(&mut self.contrast_backdrop, backdrop)
+    }
+
+    // Images use only this much of the role; what happens after is decided by classifying the image itself.
+    fn force_dark_applies(&self, force_dark_role: ForceDarkRole) -> bool {
+        self.force_dark.is_some() && force_dark_role != ForceDarkRole::None
+    }
+
+    /// Resolves a fill or stroke paint through force-dark; None means the authored paint goes out unchanged.
+    fn resolve_paint_style_or_color(
+        &mut self,
+        paint: &PaintStyleOrColor,
+        force_dark_role: ForceDarkRole,
+    ) -> Option<PaintStyleOrColor> {
+        match paint {
+            PaintStyleOrColor::Color(color) => {
+                Some(PaintStyleOrColor::Color(self.resolve_color(*color, force_dark_role)))
+            }
+            PaintStyleOrColor::PaintStyle(style) => self
+                .resolve_paint_style(style, force_dark_role)
+                .map(PaintStyleOrColor::PaintStyle),
+        }
+    }
+
+    /// A gradient paint style resolves stop by stop, like a gradient-painted rectangle; a pattern's colors live in
+    /// its tile records, which were already filtered when they were recorded.
+    fn resolve_paint_style(&mut self, style: &PaintStyle, force_dark_role: ForceDarkRole) -> Option<PaintStyle> {
+        match style {
+            PaintStyle::LinearGradient {
+                gradient_transform,
+                spread_method,
+                color_space,
+                color_stops,
+                start_point,
+                end_point,
+            } => Some(PaintStyle::LinearGradient {
+                gradient_transform: *gradient_transform,
+                spread_method: *spread_method,
+                color_space: *color_space,
+                color_stops: self.resolve_color_stops(color_stops, force_dark_role)?,
+                start_point: *start_point,
+                end_point: *end_point,
+            }),
+            PaintStyle::RadialGradient {
+                gradient_transform,
+                spread_method,
+                color_space,
+                color_stops,
+                start_center,
+                start_radius,
+                end_center,
+                end_radius,
+            } => Some(PaintStyle::RadialGradient {
+                gradient_transform: *gradient_transform,
+                spread_method: *spread_method,
+                color_space: *color_space,
+                color_stops: self.resolve_color_stops(color_stops, force_dark_role)?,
+                start_center: *start_center,
+                start_radius: *start_radius,
+                end_center: *end_center,
+                end_radius: *end_radius,
+            }),
+            PaintStyle::Pattern { .. } => None,
+        }
+    }
+
+    fn resolve_color_stops(&mut self, stops: &ColorStops, force_dark_role: ForceDarkRole) -> Option<ColorStops> {
+        if force_dark_role == ForceDarkRole::None {
+            return None;
+        }
+        let resolver = self.force_dark.as_mut()?;
+        Some(ColorStops {
+            colors: resolver.resolve_each(&stops.colors, force_dark_role),
+            positions: stops.positions.clone(),
+            repeating: stops.repeating,
+        })
+    }
+
+    pub fn into_builder(self) -> DisplayListBuilder {
+        debug_assert!(self.ambient_inline_clips.is_empty());
+        self.builder
+    }
+
+    pub fn byte_size(&self) -> usize {
+        self.builder.byte_size()
+    }
+
+    pub fn bytes(&self) -> &[u8] {
+        self.builder.bytes()
+    }
+
+    pub fn command_runs(&self) -> &[DisplayListCommandRun] {
+        self.builder.command_runs()
+    }
+
+    pub fn accumulated_visual_context(&self) -> ContextRef {
+        self.context
+    }
+
+    pub fn set_accumulated_visual_context(&mut self, context: ContextRef) {
+        self.context = context;
+    }
+
+    fn append_command<C: DisplayListCommand>(&mut self, command: &C, inline_data: &[u8]) {
+        self.note_record_start(matches!(
+            C::COMMAND_TYPE,
+            DisplayListCommandType::DrawGlyphRun | DisplayListCommandType::PaintTextShadow
+        ));
+        self.builder.append_with_inline_state(
+            command,
+            inline_data,
+            self.context,
+            &self.ambient_inline_clips,
+            self.ambient_inline_transform
+                .filter(|transform| !transform.is_identity()),
+        );
+    }
+
+    /// Takes everything recorded so far out as one chunk, named by what it holds. What is recorded next starts a run
+    /// of its own.
+    pub fn take_chunk(&mut self) -> Chunk {
+        self.builder.take_chunk()
+    }
+
+    pub fn fill_rect(&mut self, rect: IntRect, color: Color, force_dark_role: ForceDarkRole) {
+        if color.alpha() == 0 {
+            return;
+        }
+        self.fill_rect_with_compositing_and_blending_operator(
+            rect,
+            color,
+            CompositingAndBlendingOperator::Normal,
+            force_dark_role,
+        );
+    }
+
+    pub fn fill_rect_with_compositing_and_blending_operator(
+        &mut self,
+        rect: IntRect,
+        color: Color,
+        compositing_and_blending_operator: CompositingAndBlendingOperator,
+        force_dark_role: ForceDarkRole,
+    ) {
+        if rect.is_empty() {
+            return;
+        }
+        let color = self.resolve_color(color, force_dark_role);
+        self.append_command(
+            &FillRect {
+                rect,
+                color,
+                compositing_and_blending_operator,
+                background_color_animation_effect: EffectNodeIndex::NONE,
+            },
+            &[],
+        );
+    }
+
+    pub fn paint_caret(&mut self, rect: IntRect, color: Color, blink_cycle_start_time_ns: i64, should_blink: bool) {
+        if rect.is_empty() || color.alpha() == 0 {
+            return;
+        }
+        // A caret is text, so it always takes the foreground rule — no caller context could make it anything else.
+        let color = self.resolve_color(color, ForceDarkRole::Foreground);
+        self.append_command(
+            &PaintCaret {
+                rect,
+                color,
+                blink_cycle_start_time_ns,
+                should_blink,
+            },
+            &[],
+        );
+    }
+
+    pub fn fill_rect_transparent(&mut self, rect: IntRect) {
+        if rect.is_empty() {
+            return;
+        }
+        self.append_command(
+            &FillRect {
+                rect,
+                color: Color::TRANSPARENT,
+                compositing_and_blending_operator: CompositingAndBlendingOperator::Normal,
+                background_color_animation_effect: EffectNodeIndex::NONE,
+            },
+            &[],
+        );
+    }
+
+    fn resolve_paint(
+        payload: &mut CommandPayloadBuilder,
+        paint: &PaintStyleOrColor,
+    ) -> (PathPaintKind, Color, DisplayListPaintStyle) {
+        match paint {
+            PaintStyleOrColor::Color(color) => (PathPaintKind::Color, *color, DisplayListPaintStyle::default()),
+            PaintStyleOrColor::PaintStyle(style) => {
+                (PathPaintKind::PaintStyle, Color::default(), style.append_to(payload))
+            }
+        }
+    }
+
+    pub fn fill_path(&mut self, params: FillPathParams<'_>) {
+        self.fill_path_with_compositing_and_blending_operator(params, CompositingAndBlendingOperator::Normal);
+    }
+
+    pub fn fill_path_with_compositing_and_blending_operator(
+        &mut self,
+        params: FillPathParams<'_>,
+        compositing_and_blending_operator: CompositingAndBlendingOperator,
+    ) {
+        if compositing_and_blending_operator == CompositingAndBlendingOperator::Normal
+            && let PaintStyleOrColor::Color(color) = &params.paint_style_or_color
+            && color.alpha() == 0
+        {
+            return;
+        }
+        let path_bounding_rect = FloatRect::from_array(params.path.bounding_box());
+        if path_bounding_rect.is_empty() {
+            return;
+        }
+        let resolved = self.resolve_paint_style_or_color(&params.paint_style_or_color, params.force_dark_role);
+        let resolved_paint = resolved.as_ref().unwrap_or(&params.paint_style_or_color);
+        let mut payload = CommandPayloadBuilder::new::<FillPath>(&self.builder);
+        let path_data = payload.append_data(&params.path.serialize_to_bytes(), std::mem::align_of::<u32>());
+        let (paint_kind, color, paint_style) = Self::resolve_paint(&mut payload, resolved_paint);
+        let command = FillPath {
+            path_bounding_rect,
+            path_data,
+            opacity: params.opacity,
+            paint_kind,
+            color,
+            paint_style,
+            winding_rule: params.winding_rule,
+            should_anti_alias: params.should_anti_alias,
+            compositing_and_blending_operator,
+        };
+        self.append_command(&command, payload.inline_data());
+    }
+
+    pub fn stroke_path(&mut self, params: StrokePathParams<'_>) {
+        // Skia treats zero thickness as a special case and will draw a hairline, while we want to
+        // draw nothing.
+        if params.thickness == 0.0 {
+            return;
+        }
+        if let PaintStyleOrColor::Color(color) = &params.paint_style_or_color
+            && color.alpha() == 0
+        {
+            return;
+        }
+        let mut path_bounding_rect = FloatRect::from_array(params.path.bounding_box());
+        // Increase path bounding box by `thickness` to account for stroke.
+        path_bounding_rect = path_bounding_rect.inflated(params.thickness, params.thickness);
+        if path_bounding_rect.is_empty() {
+            return;
+        }
+        let resolved = self.resolve_paint_style_or_color(&params.paint_style_or_color, params.force_dark_role);
+        let resolved_paint = resolved.as_ref().unwrap_or(&params.paint_style_or_color);
+        let mut payload = CommandPayloadBuilder::new::<StrokePath>(&self.builder);
+        let path_data = payload.append_data(&params.path.serialize_to_bytes(), std::mem::align_of::<u32>());
+        let dash_array = payload.append_f32s(&params.dash_array);
+        let (paint_kind, color, paint_style) = Self::resolve_paint(&mut payload, resolved_paint);
+        let command = StrokePath {
+            cap_style: params.cap_style,
+            join_style: params.join_style,
+            miter_limit: params.miter_limit,
+            dash_array,
+            dash_offset: params.dash_offset,
+            path_bounding_rect,
+            path_data,
+            opacity: params.opacity,
+            paint_kind,
+            color,
+            paint_style,
+            thickness: params.thickness,
+            should_anti_alias: params.should_anti_alias,
+        };
+        self.append_command(&command, payload.inline_data());
+    }
+
+    pub fn draw_ellipse(&mut self, rect: IntRect, color: Color, thickness: i32, force_dark_role: ForceDarkRole) {
+        if rect.is_empty() || color.alpha() == 0 || thickness == 0 {
+            return;
+        }
+        let color = self.resolve_color(color, force_dark_role);
+        self.append_command(&DrawEllipse { rect, color, thickness }, &[]);
+    }
+
+    pub fn fill_rect_with_linear_gradient(
+        &mut self,
+        gradient_rect: IntRect,
+        data: &LinearGradientData,
+        compositing_and_blending_operator: CompositingAndBlendingOperator,
+        force_dark_role: ForceDarkRole,
+    ) {
+        if gradient_rect.is_empty() {
+            return;
+        }
+        let resolved_stops = self.resolve_color_stops(&data.color_stops, force_dark_role);
+        let stops = resolved_stops.as_ref().unwrap_or(&data.color_stops);
+        let mut payload = CommandPayloadBuilder::new::<PaintLinearGradient>(&self.builder);
+        let color_stops = stops.append_to(&mut payload);
+        let command = PaintLinearGradient {
+            gradient_rect,
+            gradient_angle: data.gradient_angle,
+            color_stops,
+            first_stop_position: data.first_stop_position,
+            repeat_length: data.repeat_length,
+            interpolation_method: data.interpolation_method,
+            compositing_and_blending_operator,
+        };
+        self.append_command(&command, payload.inline_data());
+    }
+
+    pub fn fill_rect_with_conic_gradient(
+        &mut self,
+        rect: IntRect,
+        data: &ConicGradientData,
+        position: IntPoint,
+        compositing_and_blending_operator: CompositingAndBlendingOperator,
+        force_dark_role: ForceDarkRole,
+    ) {
+        if rect.is_empty() {
+            return;
+        }
+        let resolved_stops = self.resolve_color_stops(&data.color_stops, force_dark_role);
+        let stops = resolved_stops.as_ref().unwrap_or(&data.color_stops);
+        let mut payload = CommandPayloadBuilder::new::<PaintConicGradient>(&self.builder);
+        let color_stops = stops.append_to(&mut payload);
+        let command = PaintConicGradient {
+            rect,
+            start_angle: data.start_angle,
+            color_stops,
+            first_stop_position: data.first_stop_position,
+            repeat_length: data.repeat_length,
+            interpolation_method: data.interpolation_method,
+            position,
+            compositing_and_blending_operator,
+        };
+        self.append_command(&command, payload.inline_data());
+    }
+
+    pub fn fill_rect_with_radial_gradient(
+        &mut self,
+        rect: IntRect,
+        data: &RadialGradientData,
+        center: IntPoint,
+        size: IntSize,
+        compositing_and_blending_operator: CompositingAndBlendingOperator,
+        force_dark_role: ForceDarkRole,
+    ) {
+        if rect.is_empty() {
+            return;
+        }
+        let resolved_stops = self.resolve_color_stops(&data.color_stops, force_dark_role);
+        let stops = resolved_stops.as_ref().unwrap_or(&data.color_stops);
+        let mut payload = CommandPayloadBuilder::new::<PaintRadialGradient>(&self.builder);
+        let color_stops = stops.append_to(&mut payload);
+        let command = PaintRadialGradient {
+            rect,
+            color_stops,
+            interpolation_method: data.interpolation_method,
+            center,
+            size,
+            compositing_and_blending_operator,
+        };
+        self.append_command(&command, payload.inline_data());
+    }
+
+    pub fn draw_rect(&mut self, rect: IntRect, color: Color, rough: bool, force_dark_role: ForceDarkRole) {
+        if rect.is_empty() || color.alpha() == 0 {
+            return;
+        }
+        let color = self.resolve_color(color, force_dark_role);
+        self.append_command(&DrawRect { rect, color, rough }, &[]);
+    }
+
+    pub fn draw_composited_context(
+        &mut self,
+        dst_rect: FloatRect,
+        child_context_id: CompositorContextId,
+        scaling_mode: ScalingMode,
+    ) {
+        if dst_rect.is_empty() {
+            return;
+        }
+        self.append_command(
+            &DrawCompositedContext {
+                dst_rect,
+                child_context_id,
+                scaling_mode,
+                spatial_node_index: self.context.spatial,
+                snap_origin_if_untransformed: self
+                    .ambient_inline_transform
+                    .is_none_or(|transform| transform.is_identity()),
+            },
+            &[],
+        );
+    }
+
+    pub fn draw_canvas(&mut self, dst_rect: IntRect, canvas_id: CanvasId, scaling_mode: ScalingMode) {
+        if dst_rect.is_empty() {
+            return;
+        }
+        self.append_command(
+            &DrawCanvas {
+                dst_rect,
+                canvas_id,
+                scaling_mode,
+            },
+            &[],
+        );
+    }
+
+    pub fn draw_video_frame(
+        &mut self,
+        dst_rect: IntRect,
+        video_sink_handle: VideoSinkHandle,
+        scaling_mode: ScalingMode,
+    ) {
+        if dst_rect.is_empty() {
+            return;
+        }
+        self.append_command(
+            &DrawVideoFrame {
+                dst_rect,
+                video_sink_handle,
+                scaling_mode,
+            },
+            &[],
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_scaled_decoded_image_frame(
+        &mut self,
+        dst_rect: FloatRect,
+        src_rect: Option<FloatRect>,
+        frame_id: ImageFrameResourceId,
+        scaling_mode: ScalingMode,
+        compositing_and_blending_operator: CompositingAndBlendingOperator,
+        isolated_backdrop_color: Option<Color>,
+        force_dark_role: ForceDarkRole,
+    ) {
+        if dst_rect.is_empty() {
+            return;
+        }
+        if src_rect.is_some_and(|src| src.is_empty()) {
+            return;
+        }
+        // The lone-layer backdrop paints as this element's background, so it resolves like one; the player then
+        // blends it as handed over and filters only the image.
+        let isolated_backdrop_color =
+            isolated_backdrop_color.map(|color| self.resolve_color(color, ForceDarkRole::Background));
+        let apply_force_dark = self.force_dark_applies(force_dark_role);
+        self.append_command(
+            &DrawScaledDecodedImageFrame {
+                dst_rect,
+                src_rect: OptionalFloatRect::from(src_rect),
+                frame_id,
+                scaling_mode,
+                compositing_and_blending_operator,
+                isolated_backdrop_color: OptionalColor::from(isolated_backdrop_color),
+                apply_force_dark,
+            },
+            &[],
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_repeated_decoded_image_frame(
+        &mut self,
+        dst_rect: IntRect,
+        clip_rect: IntRect,
+        frame_id: ImageFrameResourceId,
+        scaling_mode: ScalingMode,
+        repeat_x: bool,
+        repeat_y: bool,
+        compositing_and_blending_operator: CompositingAndBlendingOperator,
+        isolated_backdrop_color: Option<Color>,
+        force_dark_role: ForceDarkRole,
+    ) {
+        if dst_rect.is_empty() || clip_rect.is_empty() {
+            return;
+        }
+        // The lone-layer backdrop paints as this element's background, so it resolves like one; the player then
+        // blends it as handed over and filters only the image.
+        let isolated_backdrop_color =
+            isolated_backdrop_color.map(|color| self.resolve_color(color, ForceDarkRole::Background));
+        let apply_force_dark = self.force_dark_applies(force_dark_role);
+        self.append_command(
+            &DrawRepeatedDecodedImageFrame {
+                dst_rect,
+                clip_rect,
+                frame_id,
+                scaling_mode,
+                repeat: Repeat {
+                    x: repeat_x,
+                    y: repeat_y,
+                },
+                compositing_and_blending_operator,
+                isolated_backdrop_color: OptionalColor::from(isolated_backdrop_color),
+                apply_force_dark,
+            },
+            &[],
+        );
+    }
+
+    pub fn begin_isolated_group(&mut self) -> OpenRecorderGroup {
+        self.begin_group::<DrawIsolatedGroup>()
+    }
+
+    pub fn begin_mask_content(&mut self) -> OpenRecorderGroup {
+        self.begin_group::<DeclareMaskContent>()
+    }
+
+    pub fn finish_mask_content(&mut self, group: OpenRecorderGroup, effect: EffectNodeIndex, rect: IntRect) {
+        debug_assert_eq!(self.context, group.context);
+        let command = DeclareMaskContent {
+            rect,
+            effect,
+            content: self.builder.group_content_span(&group.group),
+        };
+        self.builder.finish_group(group.group, &command, group.context);
+        self.ambient_inline_clips = group.suspended_ambient_inline_clips;
+    }
+
+    pub fn begin_detached_records(&mut self) -> DetachedRecords {
+        DetachedRecords {
+            outer_builder: std::mem::take(&mut self.builder),
+            outer_record_notes: self.take_record_notes(),
+            outer_ambient_inline_clips: std::mem::take(&mut self.ambient_inline_clips),
+            outer_ambient_inline_transform: self.ambient_inline_transform.take(),
+        }
+    }
+
+    pub fn finish_detached_records(&mut self, detached: DetachedRecords) -> Vec<u8> {
+        debug_assert!(self.ambient_inline_clips.is_empty());
+        self.ambient_inline_transform = detached.outer_ambient_inline_transform;
+        self.ambient_inline_clips = detached.outer_ambient_inline_clips;
+        if let (Some(noting), Some(outer_record_notes)) = (&mut self.record_noting, detached.outer_record_notes) {
+            noting.notes = outer_record_notes;
+        }
+        std::mem::replace(&mut self.builder, detached.outer_builder)
+            .finish()
+            .bytes
+    }
+
+    /// The force-dark settings the recorder applies, which content it records while force dark is suspended has none of.
+    pub fn force_dark_settings(&self) -> Option<ForceDarkSettings> {
+        self.force_dark.as_ref().map(ForceDarkResolver::settings)
+    }
+
+    pub fn suspend_force_dark(&mut self) -> Option<ForceDarkResolver> {
+        self.force_dark.take()
+    }
+
+    pub fn restore_force_dark(&mut self, resolver: Option<ForceDarkResolver>) {
+        self.force_dark = resolver;
+    }
+
+    pub fn begin_repeated_tile(&mut self) -> OpenRecorderGroup {
+        self.begin_group::<DrawRepeatedTile>()
+    }
+
+    fn begin_group<C: DisplayListCommand>(&mut self) -> OpenRecorderGroup {
+        self.note_record_start(false);
+        let suspended_ambient_inline_clips = std::mem::take(&mut self.ambient_inline_clips);
+        OpenRecorderGroup {
+            group: self.builder.begin_group::<C>(suspended_ambient_inline_clips.clone()),
+            context: self.context,
+            suspended_ambient_inline_clips,
+        }
+    }
+
+    pub fn begin_group_mask(&mut self, group: &mut OpenRecorderGroup) {
+        self.builder.begin_group_mask(&mut group.group);
+    }
+
+    pub fn is_recording_inside_group(&self) -> bool {
+        self.builder.open_group_depth() > 0
+    }
+
+    pub fn finish_isolated_group(
+        &mut self,
+        group: OpenRecorderGroup,
+        clip_rect: FloatRect,
+        compositing_and_blending_operator: CompositingAndBlendingOperator,
+        mask_kind: MaskKind,
+    ) {
+        self.finish_group_with_effects(
+            group,
+            IsolatedGroupEffects {
+                clip_rect,
+                opacity: 1.0,
+                filter: None,
+                compositing_and_blending_operator,
+                mask_kind,
+            },
+        );
+    }
+
+    pub fn finish_group_with_effects(&mut self, mut group: OpenRecorderGroup, effects: IsolatedGroupEffects) {
+        debug_assert_eq!(self.context, group.context);
+        let content = self.builder.group_content_span(&group.group);
+        let mask = self.builder.group_mask_span(&group.group);
+        let filter = match &effects.filter {
+            Some(filter_bytes) => self.builder.append_group_inline_data(&mut group.group, filter_bytes),
+            None => DisplayListDataSpan::default(),
+        };
+        let command = DrawIsolatedGroup {
+            clip_rect: effects.clip_rect,
+            content,
+            mask,
+            filter,
+            opacity: effects.opacity,
+            compositing_and_blending_operator: effects.compositing_and_blending_operator,
+            mask_kind: effects.mask_kind,
+        };
+        self.builder.finish_group(group.group, &command, group.context);
+        self.ambient_inline_clips = group.suspended_ambient_inline_clips;
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn finish_repeated_tile(
+        &mut self,
+        group: OpenRecorderGroup,
+        dst_rect: FloatRect,
+        clip_rect: IntRect,
+        tile_size: IntSize,
+        tile_step: FloatSize,
+        scaling_mode: ScalingMode,
+        compositing_and_blending_operator: CompositingAndBlendingOperator,
+        repeat: Repeat,
+    ) {
+        debug_assert_eq!(self.context, group.context);
+        debug_assert!(!dst_rect.is_empty() && !clip_rect.is_empty());
+        debug_assert!(tile_size.width > 0 && tile_size.height > 0);
+        debug_assert!(tile_step.width > 0.0 && tile_step.height > 0.0);
+        let command = DrawRepeatedTile {
+            dst_rect,
+            clip_rect,
+            tile_size,
+            tile_step,
+            tile: self.builder.group_content_span(&group.group),
+            scaling_mode,
+            compositing_and_blending_operator,
+            repeat,
+        };
+        self.builder
+            .finish_group_clipped_to(group.group, &command, group.context, clip_rect);
+        self.ambient_inline_clips = group.suspended_ambient_inline_clips;
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_tiled_decoded_image_frame(
+        &mut self,
+        tile_rect: FloatRect,
+        clip_rect: IntRect,
+        src_rect: FloatRect,
+        tile_step: FloatSize,
+        frame_id: ImageFrameResourceId,
+        scaling_mode: ScalingMode,
+        tile_count_x: Option<u32>,
+        tile_count_y: Option<u32>,
+        force_dark_role: ForceDarkRole,
+    ) {
+        if tile_rect.is_empty() || clip_rect.is_empty() || src_rect.is_empty() {
+            return;
+        }
+        let apply_force_dark = self.force_dark_applies(force_dark_role);
+        self.append_command(
+            &DrawTiledDecodedImageFrame {
+                tile_rect,
+                clip_rect,
+                src_rect,
+                tile_step,
+                frame_id,
+                scaling_mode,
+                tile_count_x: OptionalU32::from(tile_count_x),
+                tile_count_y: OptionalU32::from(tile_count_y),
+                apply_force_dark,
+            },
+            &[],
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_line(
+        &mut self,
+        from: IntPoint,
+        to: IntPoint,
+        color: Color,
+        thickness: i32,
+        style: LineStyle,
+        alternate_color: Color,
+        force_dark_role: ForceDarkRole,
+    ) {
+        if color.alpha() == 0 || thickness == 0 {
+            return;
+        }
+        let color = self.resolve_color(color, force_dark_role);
+        let alternate_color = self.resolve_color(alternate_color, force_dark_role);
+        self.append_command(
+            &DrawLine {
+                color,
+                from,
+                to,
+                thickness,
+                style,
+                alternate_color,
+            },
+            &[],
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    // Streamlined text drawing routine that does no wrapping/elision/alignment.
+    pub fn draw_glyph_run(
+        &mut self,
+        baseline_start: FloatPoint,
+        run: GlyphRunForRecording<impl IntoIterator<Item = DisplayListGlyph>>,
+        color: Color,
+        stroke_width: f32,
+        rect: IntRect,
+        scale: f64,
+        orientation: GlyphRunOrientation,
+        glyph_bounding_rect: IntRect,
+        force_dark_role: ForceDarkRole,
+    ) {
+        if color.alpha() == 0 {
+            return;
+        }
+        let color = self.resolve_color(color, force_dark_role);
+        let mut payload = CommandPayloadBuilder::new::<DrawGlyphRun>(&self.builder);
+        let glyphs = payload.append_objects(run.glyphs);
+        let stroke_width = stroke_width.min(crate::css::css_pixels::max_dimension_value().to_float());
+        // A miter limit of 4 lets sharp glyph corners extend four half-widths beyond the fill bounds.
+        let margin = (stroke_width * 2.0).ceil() as i32;
+        let glyph_bounding_rect = glyph_bounding_rect.inflated_edges(margin, margin, margin, margin);
+        let command = DrawGlyphRun {
+            stroke_width,
+            font_smoothing: run.font_smoothing,
+            font_id: run.font_id,
+            glyphs,
+            rect,
+            glyph_bounding_rect,
+            translation: baseline_start,
+            scale: scale as f32,
+            color,
+            orientation,
+        };
+        self.append_command(&command, payload.inline_data());
+    }
+
+    pub fn backdrop_filter_region(&mut self, rect: IntRect) {
+        if rect.is_empty() {
+            return;
+        }
+        self.append_command(&BackdropFilterRegion { rect }, &[]);
+    }
+
+    pub fn paint_outer_box_shadow(&mut self, mut shadow: PaintOuterBoxShadow, force_dark_role: ForceDarkRole) {
+        shadow.color = self.resolve_color(shadow.color, force_dark_role);
+        self.append_command(&shadow, &[]);
+    }
+
+    /// Paints a box shadow cast from the shape `shape_path`, outside the shape, or inside it when `inner`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn paint_path_box_shadow(
+        &mut self,
+        color: Color,
+        blur_radius: i32,
+        spread_distance: f32,
+        offset: FloatPoint,
+        shape_path: &libgfx_rust::path::Path,
+        inner: bool,
+        force_dark_role: ForceDarkRole,
+    ) {
+        let color = self.resolve_color(color, force_dark_role);
+        let mut payload = CommandPayloadBuilder::new::<PaintPathBoxShadow>(&self.builder);
+        let shape_path_data = payload.append_data(&shape_path.serialize_to_bytes(), std::mem::align_of::<u32>());
+        let command = PaintPathBoxShadow {
+            color,
+            blur_radius,
+            spread_distance,
+            offset,
+            shape_path_bounding_rect: FloatRect::from_array(shape_path.bounding_box()),
+            shape_path_data,
+            inner,
+        };
+        self.append_command(&command, payload.inline_data());
+    }
+
+    pub fn paint_inner_box_shadow(&mut self, mut shadow: PaintInnerBoxShadow, force_dark_role: ForceDarkRole) {
+        shadow.color = self.resolve_color(shadow.color, force_dark_role);
+        self.append_command(&shadow, &[]);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn paint_text_shadow(
+        &mut self,
+        layers: &[TextShadowLayer],
+        shadows_bounding_rect: IntRect,
+        rect: IntRect,
+        translation: FloatPoint,
+        run: GlyphRunForRecording<impl IntoIterator<Item = DisplayListGlyph>>,
+        glyph_run_scale: f64,
+        orientation: GlyphRunOrientation,
+        force_dark_role: ForceDarkRole,
+    ) {
+        let mut payload = CommandPayloadBuilder::new::<PaintTextShadow>(&self.builder);
+        let glyphs = payload.append_objects(run.glyphs);
+        let layers = payload.append_objects(layers.iter().map(|layer| TextShadowLayer {
+            color: self.resolve_color(layer.color, force_dark_role),
+            ..*layer
+        }));
+        let command = PaintTextShadow {
+            font_smoothing: run.font_smoothing,
+            font_id: run.font_id,
+            glyphs,
+            layers,
+            shadows_bounding_rect,
+            rect,
+            translation,
+            scale: glyph_run_scale as f32,
+            orientation,
+        };
+        self.append_command(&command, payload.inline_data());
+    }
+
+    pub fn fill_rect_with_rounded_corners(
+        &mut self,
+        rect: IntRect,
+        color: Color,
+        corner_radii: CornerRadii,
+        force_dark_role: ForceDarkRole,
+    ) {
+        if rect.is_empty() || color.alpha() == 0 {
+            return;
+        }
+        if !corner_radii.has_any_radius() {
+            self.fill_rect(rect, color, force_dark_role);
+            return;
+        }
+        let color = self.resolve_color(color, force_dark_role);
+        self.append_command(
+            &FillRectWithRoundedCorners {
+                rect,
+                color,
+                corner_radii,
+                background_color_animation_effect: EffectNodeIndex::NONE,
+            },
+            &[],
+        );
+    }
+
+    /// Fills the band between `rect` with `corner_radii` and the same outline shrunk by `edge_widths`
+    /// (top, right, bottom, left), as a uniformly colored border covers it.
+    pub fn fill_rounded_rect_ring(
+        &mut self,
+        rect: IntRect,
+        corner_radii: CornerRadii,
+        edge_widths: [i32; 4],
+        color: Color,
+        force_dark_role: ForceDarkRole,
+    ) {
+        if rect.is_empty() || color.alpha() == 0 || edge_widths.iter().all(|width| *width <= 0) {
+            return;
+        }
+        let color = self.resolve_color(color, force_dark_role);
+        let [top_width, right_width, bottom_width, left_width] = edge_widths;
+        self.append_command(
+            &FillRoundedRectRing {
+                rect,
+                corner_radii,
+                top_width,
+                right_width,
+                bottom_width,
+                left_width,
+                color,
+            },
+            &[],
+        );
+    }
+
+    pub fn fill_animated_background_color(
+        &mut self,
+        rect: IntRect,
+        color: Color,
+        corner_radii: CornerRadii,
+        animation_effect: Option<EffectNodeIndex>,
+        force_dark_role: ForceDarkRole,
+    ) {
+        if rect.is_empty() || (color.alpha() == 0 && animation_effect.is_none()) {
+            return;
+        }
+        // NB: An effect means the player samples the animated color at play time, past this resolution. So while
+        // force-dark applies, Document::update_compositor_animations() keeps background colors off the compositor.
+        let animation_effect = animation_effect.unwrap_or(EffectNodeIndex::NONE);
+        let color = self.resolve_color(color, force_dark_role);
+        if !corner_radii.has_any_radius() {
+            self.append_command(
+                &FillRect {
+                    rect,
+                    color,
+                    compositing_and_blending_operator: CompositingAndBlendingOperator::Normal,
+                    background_color_animation_effect: animation_effect,
+                },
+                &[],
+            );
+            return;
+        }
+        self.append_command(
+            &FillRectWithRoundedCorners {
+                rect,
+                color,
+                corner_radii,
+                background_color_animation_effect: animation_effect,
+            },
+            &[],
+        );
+    }
+
+    pub fn fill_rect_with_uniform_rounded_corners(
+        &mut self,
+        rect: IntRect,
+        color: Color,
+        radius: i32,
+        force_dark_role: ForceDarkRole,
+    ) {
+        self.fill_rect_with_rounded_corners(rect, color, CornerRadii::uniform(radius), force_dark_role);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn paint_scrollbar(
+        &mut self,
+        scroll_node_index: SpatialNodeIndex,
+        gutter_rect: IntRect,
+        thumb_rect: IntRect,
+        track_rect: IntRect,
+        expanded_gutter_rect: IntRect,
+        scroll_size: f64,
+        thumb_color: Color,
+        thumb_outline_color: Color,
+        track_color: Color,
+        vertical: bool,
+        force_dark_role: ForceDarkRole,
+    ) {
+        let thumb_color = self.resolve_color(thumb_color, force_dark_role);
+        let thumb_outline_color = self.resolve_color(thumb_outline_color, force_dark_role);
+        let track_color = self.resolve_color(track_color, force_dark_role);
+        self.append_command(
+            &PaintScrollBar {
+                scroll_node_index,
+                gutter_rect,
+                thumb_rect,
+                track_rect,
+                expanded_gutter_rect,
+                scroll_size,
+                thumb_color,
+                thumb_outline_color,
+                track_color,
+                vertical,
+            },
+            &[],
+        );
+    }
+
+    /// Paints the records of the SVG image `vector_image_id` names, which were recorded at `recorded_size`, into
+    /// `rect`. The tape takes the records in where it is sent.
+    pub fn paint_vector_image_records(
+        &mut self,
+        vector_image_id: DisplayListResourceId,
+        rect: FloatRect,
+        recorded_size: IntSize,
+    ) {
+        self.append_command(
+            &PaintVectorImage {
+                vector_image_id,
+                rect,
+                recorded_size,
+                records: DisplayListDataSpan::default(),
+                requires_direct_replay: false,
+            },
+            &[],
+        );
+    }
+
+    pub fn compositor_wheel_hit_test_target(&mut self, target: CompositorWheelHitTestTarget) {
+        self.append_command(&target, &[]);
+    }
+
+    pub fn compositor_wheel_hit_test_target_with_corner_radii(
+        &mut self,
+        target: CompositorWheelHitTestTargetWithCornerRadii,
+    ) {
+        self.append_command(&target, &[]);
+    }
+
+    pub fn compositor_main_thread_wheel_event_region(&mut self, region: CompositorMainThreadWheelEventRegion) {
+        self.append_command(&region, &[]);
+    }
+
+    pub fn compositor_nested_context_wheel_region(&mut self, region: CompositorNestedContextWheelRegion) {
+        self.append_command(&region, &[]);
+    }
+
+    pub fn compositor_scrollbar(&mut self, scrollbar: CompositorScrollbar) {
+        self.append_command(&scrollbar, &[]);
+    }
+
+    pub fn compositor_blocking_wheel_event_region(&mut self, region: CompositorBlockingWheelEventRegion) {
+        self.append_command(&region, &[]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn noted_origins_name_the_innermost_open_origin_and_skip_detached_records() {
+        let mut recorder = DisplayListRecorder::new(None);
+        recorder.note_record_origins();
+        let (outer, inner) = (NodeSlotId::new(1, 1), NodeSlotId::new(2, 1));
+        let rect = IntRect::new(0, 0, 10, 10);
+        recorder.begin_record_origin(outer, "background");
+        recorder.fill_rect(rect, Color::from_rgb(1, 2, 3), ForceDarkRole::Background);
+        let group = recorder.begin_isolated_group();
+        recorder.begin_record_origin(inner, "foreground");
+        recorder.fill_rect(rect, Color::from_rgb(4, 5, 6), ForceDarkRole::Background);
+        recorder.end_record_origin();
+        recorder.finish_isolated_group(
+            group,
+            rect.to_float(),
+            CompositingAndBlendingOperator::Normal,
+            MaskKind::Alpha,
+        );
+        let detached = recorder.begin_detached_records();
+        recorder.fill_rect(rect, Color::from_rgb(7, 8, 9), ForceDarkRole::Background);
+        let _ = recorder.finish_detached_records(detached);
+        recorder.end_record_origin();
+
+        let notes = recorder.take_record_notes().unwrap();
+        let origin = |owner, phase| RecordOrigin { owner, phase };
+        let mut record_offsets = Vec::new();
+        crate::painting::display_list::nested_records::for_each_command_including_nested(
+            recorder.bytes(),
+            &mut |_, payload_offset, _| record_offsets.push((payload_offset - HEADER_SIZE) as u32),
+        );
+        assert_eq!(
+            notes.origins,
+            [
+                (record_offsets[0], origin(outer, "background")),
+                (record_offsets[1], origin(outer, "background")),
+                (record_offsets[2], origin(inner, "foreground")),
+            ]
+        );
+    }
+}

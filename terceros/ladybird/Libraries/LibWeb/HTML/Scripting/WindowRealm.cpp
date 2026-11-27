@@ -1,0 +1,32 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibWeb/Bindings/MainThreadVM.h>
+#include <LibWeb/Bindings/Wrappable.h>
+#include <LibWeb/HTML/BrowsingContext.h>
+#include <LibWeb/HTML/Scripting/WindowRealm.h>
+#include <LibWeb/HTML/Window.h>
+#include <LibWeb/HTML/WindowProxy.h>
+
+namespace Web::HTML {
+
+NonnullOwnPtr<JS::ExecutionContext> create_window_realm(GC::Ptr<Window>& window, BrowsingContext& browsing_context, CrossOriginIsolationMode agent_cluster_cross_origin_isolation_mode)
+{
+    return Bindings::create_a_new_javascript_realm(
+        Bindings::main_thread_vm(),
+        agent_cluster_cross_origin_isolation_mode,
+        [&](JS::Realm& realm) -> GC::Ref<JS::Object> {
+            // For the global object, create a new Window object.
+            window = Window::create();
+            return Bindings::create_global_object_wrapper(realm, GC::Ref { *window });
+        },
+        [&](JS::Realm&) -> GC::Ref<JS::Object> {
+            // For the global this binding, use browsingContext's WindowProxy object.
+            return browsing_context.window_proxy()->object();
+        });
+}
+
+}

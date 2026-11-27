@@ -1,0 +1,121 @@
+/*
+ * Copyright (c) 2024, Jelle Raaijmakers <jelle@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <LibJS/Forward.h>
+#include <LibMedia/TimeRanges.h>
+#include <LibMediaCodecs/DecoderCapabilities.h>
+#include <LibWeb/Bindings/MediaSource.h>
+#include <LibWeb/DOM/EventTarget.h>
+#include <LibWeb/Forward.h>
+
+namespace Web::MediaSourceExtensions {
+
+using EndOfStreamError = Bindings::EndOfStreamError;
+using ReadyState = Bindings::ReadyState;
+
+// https://w3c.github.io/media-source/#dom-mediasource
+class MediaSource : public DOM::EventTarget {
+    WEB_WRAPPABLE(MediaSource, DOM::EventTarget);
+    GC_DECLARE_ALLOCATOR(MediaSource);
+
+public:
+    [[nodiscard]] static GC::Ref<MediaSource> create(GC::Ref<DOM::EventTarget> relevant_global_object);
+    [[nodiscard]] static GC::Ref<MediaSource> create_for_constructor(JS::Object&);
+
+    void queue_a_media_source_task(GC::Ref<GC::Function<void()>>);
+
+    ReadyState ready_state() const { return m_ready_state; }
+    bool ready_state_is_closed() const;
+    void set_has_ever_been_attached();
+    void set_ready_state_to_open_and_fire_sourceopen_event();
+    JS::Object& relevant_global_object() const;
+    GC::Ref<DOM::Event> create_associated_event(Utf16FlyString const&) const;
+
+    GC::Ref<SourceBufferList> source_buffers();
+    GC::Ref<SourceBufferList> active_source_buffers();
+
+    Utf16String next_track_id();
+
+    // https://w3c.github.io/media-source/#active-source-buffer-changes
+    void selected_video_track_changed(Badge<HTML::VideoTrack>, GC::Ptr<SourceBuffer> previously_selected_track_source_buffer, GC::Ptr<SourceBuffer> newly_selected_track_source_buffer);
+    void audio_track_enabled_changed(Badge<HTML::AudioTrack>, SourceBuffer&, bool enabled);
+
+    // https://w3c.github.io/media-source/#dom-mediasource-canconstructindedicatedworker
+    static bool can_construct_in_dedicated_worker() { return false; }
+
+    void set_assigned_to_media_element(Badge<HTML::HTMLMediaElement>, HTML::HTMLMediaElement&);
+
+    // https://w3c.github.io/media-source/#mediasource-detach
+    void detach_from_media_element(Badge<HTML::HTMLMediaElement>);
+
+    GC::Ptr<HTML::HTMLMediaElement> media_element_assigned_to() { return m_media_element_assigned_to; }
+
+    void set_onsourceopen(GC::Ptr<WebIDL::CallbackType>);
+    GC::Ptr<WebIDL::CallbackType> onsourceopen();
+
+    void set_onsourceended(GC::Ptr<WebIDL::CallbackType>);
+    GC::Ptr<WebIDL::CallbackType> onsourceended();
+
+    void set_onsourceclose(GC::Ptr<WebIDL::CallbackType>);
+    GC::Ptr<WebIDL::CallbackType> onsourceclose();
+
+    WebIDL::ExceptionOr<GC::Ref<SourceBuffer>> add_source_buffer(Utf16String const& type);
+
+    WebIDL::ExceptionOr<void> end_of_stream(Optional<EndOfStreamError> const& error = {});
+
+    // https://w3c.github.io/media-source/#dom-mediasource-setliveseekablerange
+    WebIDL::ExceptionOr<void> set_live_seekable_range(double start, double end);
+
+    // https://w3c.github.io/media-source/#dom-mediasource-clearliveseekablerange
+    WebIDL::ExceptionOr<void> clear_live_seekable_range();
+    void run_end_of_stream_algorithm(Badge<SourceBuffer>, Optional<EndOfStreamError> const& error) { run_end_of_stream_algorithm(error); }
+
+    // https://w3c.github.io/media-source/#dom-mediasource-duration
+    double duration() const;
+    WebIDL::ExceptionOr<void> set_duration(double);
+
+    // https://w3c.github.io/media-source/#duration-change-algorithm
+    WebIDL::ExceptionOr<void> run_duration_change_algorithm(double new_duration);
+    void assign_duration_change(double new_duration);
+
+    static bool is_type_supported(Utf16View);
+    // Whether a byte stream format handles the type and every codec it lists; whether decoders exist is asked separately.
+    static bool mime_type_is_supported_in_a_byte_stream(MimeSniff::MimeType const&);
+
+protected:
+    MediaSource(GC::Ref<DOM::EventTarget> relevant_global_object);
+
+    virtual ~MediaSource() override;
+    virtual void visit_edges(Cell::Visitor&) override;
+
+private:
+    virtual GC::Ptr<Bindings::Wrappable> relevant_global_impl() const override;
+
+    // https://w3c.github.io/media-source/#end-of-stream-algorithm
+    void run_end_of_stream_algorithm(Optional<EndOfStreamError> const&);
+
+    ReadyState m_ready_state { ReadyState::Closed };
+    bool m_has_ever_been_attached { false };
+    GC::Ptr<HTML::HTMLMediaElement> m_media_element_assigned_to;
+
+    GC::Ref<SourceBufferList> m_source_buffers;
+    GC::Ref<SourceBufferList> m_active_source_buffers;
+
+    double m_duration { NAN };
+
+    // https://w3c.github.io/media-source/#dfn-live-seekable-range
+    // NB: The one range [[live seekable range]] holds, if any. The media element's playback manager gets a copy of it
+    //     whenever this MediaSource opens, since it computes the seekable ranges.
+    Optional<Media::TimeRanges::Range> m_live_seekable_range;
+
+    u64 m_next_track_id = 1;
+
+    GC::Ref<DOM::EventTarget> m_global_object;
+};
+
+}

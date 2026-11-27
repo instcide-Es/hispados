@@ -1,0 +1,11 @@
+// https://html.spec.whatwg.org/multipage/web-messaging.html#broadcastchannel
+[Exposed=(Window,Worker), ImplementedIn=Rust]
+interface BroadcastChannel : EventTarget {
+    constructor(DOMString name);
+
+    readonly attribute DOMString name;
+    undefined postMessage(any message);
+    undefined close();
+    attribute EventHandler onmessage;
+    attribute EventHandler onmessageerror;
+};

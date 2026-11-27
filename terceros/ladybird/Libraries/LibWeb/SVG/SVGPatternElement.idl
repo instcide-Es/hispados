@@ -1,0 +1,14 @@
+// https://svgwg.org/svg2-draft/pservers.html#InterfaceSVGPatternElement
+[Exposed=Window]
+interface SVGPatternElement : SVGElement {
+    [SameObject, ImplementedAs=pattern_units_for_bindings] readonly attribute SVGAnimatedEnumeration patternUnits;
+    [SameObject, ImplementedAs=pattern_content_units_for_bindings] readonly attribute SVGAnimatedEnumeration patternContentUnits;
+    [SameObject, ImplementedAs=pattern_transform_for_bindings] readonly attribute SVGAnimatedTransformList patternTransform;
+    [SameObject] readonly attribute SVGAnimatedLength x;
+    [SameObject] readonly attribute SVGAnimatedLength y;
+    [SameObject] readonly attribute SVGAnimatedLength width;
+    [SameObject] readonly attribute SVGAnimatedLength height;
+};
+
+SVGPatternElement includes SVGFitToViewBox;
+SVGPatternElement includes SVGURIReference;

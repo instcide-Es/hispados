@@ -1,0 +1,14 @@
+// https://streams.spec.whatwg.org/#readablestreamdefaultreader
+    [Exposed=*, ImplementedIn=Rust]
+interface ReadableStreamDefaultReader {
+    constructor(ReadableStream stream);
+
+    Promise<ReadableStreamReadResult> read();
+    undefined releaseLock();
+};
+ReadableStreamDefaultReader includes ReadableStreamGenericReader;
+
+dictionary ReadableStreamReadResult {
+    any value;
+    boolean done;
+};

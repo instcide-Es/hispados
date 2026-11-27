@@ -1,0 +1,249 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+use crate::painting::paint_read::{GeometryRead, PaintRead};
+use crate::painting::record::trace::Observer;
+
+use crate::css::css_pixels::{CssPixelRect, CssPixelSize};
+use crate::layout::node_data::{DomPaintFact, NodeSlotId};
+use crate::painting::chrome_geometry::{ChromeGeometry, maximum_scroll_offset, minimum_scroll_offset};
+use crate::painting::display_list::commands::*;
+use crate::painting::ffi::ScrollDirection;
+use crate::painting::paintable_geometry;
+use crate::painting::record::PaintRecorder;
+use crate::painting::style_queries;
+use crate::painting::visual_context::compositor_scroll_table::css_point_to_device_point;
+use libgfx_rust::{FloatRect, FloatSize};
+
+fn css_size_to_device_size(size: CssPixelSize, device_pixels_per_css_pixel: f64) -> FloatSize {
+    let scale = device_pixels_per_css_pixel as f32;
+    FloatSize {
+        width: size.width.to_float() * scale,
+        height: size.height.to_float() * scale,
+    }
+}
+
+fn css_rect_to_device_rect(rect: CssPixelRect, device_pixels_per_css_pixel: f64) -> FloatRect {
+    let location = css_point_to_device_point(rect.location(), device_pixels_per_css_pixel);
+    let size = css_size_to_device_size(rect.size(), device_pixels_per_css_pixel);
+    FloatRect {
+        x: location.x,
+        y: location.y,
+        width: size.width,
+        height: size.height,
+    }
+}
+
+impl<O: Observer> PaintRecorder<'_, O> {
+    pub(crate) fn has_compositor_scroll_node(&self, paintable: NodeSlotId) -> bool {
+        let index = self.data(paintable).own_scroll_node_index;
+        self.paint_state.visual_context_tree.as_ref().is_some_and(|tree| {
+            tree.compositor_scroll_table()
+                .nodes
+                .binary_search_by_key(&index, |node| node.scroll_node_index)
+                .is_ok()
+        })
+    }
+
+    fn wheel_hit_test_target_scroll_node_index_for(&mut self, paintable: NodeSlotId) -> SpatialNodeIndex {
+        let mut paintables_to_cache: Vec<NodeSlotId> = Vec::new();
+        let mut target = VISUAL_VIEWPORT_NODE_INDEX;
+        let mut current = paintable;
+        loop {
+            if let Some(cached) = self.scratch.wheel_hit_test_target_cache.get(&current) {
+                target = *cached;
+                break;
+            }
+
+            paintables_to_cache.push(current);
+            if self.has_compositor_scroll_node(current) {
+                target = self.data(current).own_scroll_node_index;
+                break;
+            }
+
+            let raw_containing_block = self.data(current).containing_block;
+            let mut containing_block = (!raw_containing_block.is_invalid()
+                && self.source.paintable_row_is_populated(raw_containing_block))
+            .then_some(raw_containing_block);
+            if let Some(block) = containing_block
+                && style_queries::is_fixed_position(self.source, block)
+            {
+                if self.has_compositor_scroll_node(block) {
+                    target = self.data(block).own_scroll_node_index;
+                }
+                if target != VISUAL_VIEWPORT_NODE_INDEX {
+                    break;
+                }
+                containing_block = None;
+            }
+
+            if let Some(block) = containing_block {
+                current = block;
+                continue;
+            }
+
+            let viewport = self.viewport;
+            if viewport.is_invalid() || viewport == current {
+                break;
+            }
+            current = viewport;
+        }
+
+        for slot in paintables_to_cache {
+            self.scratch.wheel_hit_test_target_cache.insert(slot, target);
+        }
+        target
+    }
+
+    fn record_wheel_hit_test_target(&mut self, paintable: NodeSlotId) {
+        // OPTIMIZATION: The compositor falls back to the viewport when there are no explicit
+        // targets. Avoid generating redundant per-box targets when no non-viewport scroller
+        // or nested context could need one.
+        if !self.records_per_box_wheel_hit_test_targets {
+            return;
+        }
+        if !self.is_visible(paintable) || !self.visible_for_hit_testing(paintable) {
+            return;
+        }
+        let scale = self.inputs.device_pixels_per_css_pixel;
+        for (border_box_rect, border_radii) in self.border_boxes_of_fragments(paintable) {
+            let rect = css_rect_to_device_rect(border_box_rect, scale);
+            if rect.is_empty() {
+                continue;
+            }
+            let target_scroll_node_index = self.wheel_hit_test_target_scroll_node_index_for(paintable);
+            let corner_radii = border_radii.as_corners(&self.converter);
+            if corner_radii.has_any_radius() {
+                self.recorder.compositor_wheel_hit_test_target_with_corner_radii(
+                    CompositorWheelHitTestTargetWithCornerRadii {
+                        target_scroll_node_index,
+                        rect,
+                        corner_radii,
+                    },
+                );
+                continue;
+            }
+            self.recorder
+                .compositor_wheel_hit_test_target(CompositorWheelHitTestTarget {
+                    target_scroll_node_index,
+                    rect,
+                });
+        }
+    }
+
+    fn record_blocking_wheel_event_region(&mut self, paintable: NodeSlotId) {
+        if self.inputs.uncaptured.has_blocking_wheel_event_region_covering_viewport {
+            return;
+        }
+        if !self.is_visible(paintable) || !self.visible_for_hit_testing(paintable) {
+            return;
+        }
+        if !self
+            .source
+            .node_has_dom_paint_fact(paintable, DomPaintFact::InsideBlockingWheelEventHandler)
+        {
+            return;
+        }
+        for border_box_rect in paintable_geometry::absolute_border_box_rects_of_fragments(self.source, paintable) {
+            let rect = css_rect_to_device_rect(border_box_rect, self.inputs.device_pixels_per_css_pixel);
+            if rect.is_empty() {
+                continue;
+            }
+            self.blocking_wheel_event_region_count += 1;
+            self.recorder
+                .compositor_blocking_wheel_event_region(CompositorBlockingWheelEventRegion { rect });
+        }
+    }
+
+    fn record_main_thread_wheel_event_region(&mut self, paintable: NodeSlotId) {
+        for border_box_rect in paintable_geometry::absolute_border_box_rects_of_fragments(self.source, paintable) {
+            let rect = css_rect_to_device_rect(border_box_rect, self.inputs.device_pixels_per_css_pixel);
+            if rect.is_empty() {
+                continue;
+            }
+            self.recorder
+                .compositor_main_thread_wheel_event_region(CompositorMainThreadWheelEventRegion { rect });
+        }
+    }
+
+    fn compositor_scrollbar_for(
+        &self,
+        paintable: NodeSlotId,
+        direction: ScrollDirection,
+    ) -> Option<CompositorScrollbar> {
+        let chrome_geometry = ChromeGeometry::for_recording(self.source, self.inputs);
+        let scrollbar = chrome_geometry.compute_scrollbar_data(paintable, direction, false)?;
+        let expanded = chrome_geometry
+            .compute_scrollbar_data(paintable, direction, true)
+            .expect("an enlarged scrollbar must exist when the regular scrollbar exists");
+        let scale = self.inputs.device_pixels_per_css_pixel;
+        let min_scroll_offset = css_point_to_device_point(minimum_scroll_offset(self.source, paintable), scale);
+        let max_scroll_offset = css_point_to_device_point(maximum_scroll_offset(self.source, paintable), scale);
+        let vertical = direction == ScrollDirection::Vertical;
+        Some(CompositorScrollbar {
+            scroll_node_index: self.data(paintable).own_scroll_node_index,
+            thumb_rect: self.converter.rounded_device_rect(scrollbar.thumb_rect),
+            track_rect: self.converter.rounded_device_rect(scrollbar.track_rect),
+            expanded_gutter_rect: self.converter.rounded_device_rect(expanded.gutter_rect),
+            expanded_thumb_rect: self.converter.rounded_device_rect(expanded.thumb_rect),
+            scroll_size: scrollbar.thumb_travel_to_scroll_ratio.to_double(),
+            expanded_scroll_size: expanded.thumb_travel_to_scroll_ratio.to_double(),
+            min_scroll_offset: if vertical {
+                min_scroll_offset.y
+            } else {
+                min_scroll_offset.x
+            },
+            max_scroll_offset: if vertical {
+                max_scroll_offset.y
+            } else {
+                max_scroll_offset.x
+            },
+            vertical,
+        })
+    }
+
+    // The compositor may drag a scrollbar only where the main thread would hit test that scrollbar, so
+    // this mirrors the conditions its chrome widget hit test items are recorded under.
+    pub(crate) fn record_compositor_scrollbar(&mut self, paintable: NodeSlotId, direction: ScrollDirection) {
+        if !self.has_compositor_scroll_node(paintable)
+            || !self.visibility_is_visible(paintable)
+            || !self.visible_for_hit_testing(paintable)
+        {
+            return;
+        }
+        let facts = self.hit_test_facts(paintable);
+        let could_be_scrolled_along_direction = match direction {
+            ScrollDirection::Horizontal => facts.could_be_scrolled_horizontally,
+            ScrollDirection::Vertical => facts.could_be_scrolled_vertically,
+        };
+        if !could_be_scrolled_along_direction {
+            return;
+        }
+        if let Some(scrollbar) = self.compositor_scrollbar_for(paintable, direction) {
+            self.recorder.compositor_scrollbar(scrollbar);
+        }
+    }
+
+    pub(crate) fn record_async_scrolling_metadata(&mut self, paintable: NodeSlotId) {
+        self.record_wheel_hit_test_target(paintable);
+        self.record_blocking_wheel_event_region(paintable);
+
+        if self
+            .source
+            .node_has_dom_paint_fact(paintable, DomPaintFact::NestedNavigableContainer)
+        {
+            // A nested context the compositor can reach records a region of its own where its content is painted.
+            let has_composited_context = self
+                .source
+                .replaced_paint_facts(paintable)
+                .and_then(|facts| facts.navigable_container())
+                .is_some_and(|facts| facts.has_composited_context);
+            if !has_composited_context {
+                self.record_main_thread_wheel_event_region(paintable);
+            }
+        }
+    }
+}

@@ -1,0 +1,25 @@
+// https://drafts.csswg.org/css-transitions-2/#interface-transitionevent-idl
+[Exposed=Window, ImplementedIn=Rust]
+interface TransitionEvent : Event {
+    constructor(CSSOMString type, optional TransitionEventInit transitionEventInitDict = {});
+    readonly attribute CSSOMString propertyName;
+    readonly attribute double elapsedTime;
+    readonly attribute CSSOMString pseudoElement;
+    readonly attribute CSSTransition? animation;
+};
+
+// https://drafts.csswg.org/css-transitions-2/#interface-transitionevent-idl
+dictionary TransitionEventInit : EventInit {
+    CSSOMString propertyName = "";
+    double elapsedTime = 0.0;
+    CSSOMString pseudoElement = "";
+    CSSTransition? animation = null;
+};
+
+// https://drafts.csswg.org/css-transitions/#interface-globaleventhandlers-idl
+partial interface mixin GlobalEventHandlers {
+    attribute EventHandler ontransitionrun;
+    attribute EventHandler ontransitionstart;
+    attribute EventHandler ontransitionend;
+    attribute EventHandler ontransitioncancel;
+};

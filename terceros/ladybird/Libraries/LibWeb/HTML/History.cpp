@@ -1,0 +1,256 @@
+/*
+ * Copyright (c) 2021, Luke Wilde <lukew@serenityos.org>
+ * Copyright (c) 2025, Sam Atkins <sam@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibGC/Heap.h>
+#include <LibJS/Runtime/VM.h>
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/HTML/History.h>
+#include <LibWeb/HTML/HistoryExecutor.h>
+#include <LibWeb/HTML/LocalTraversableNavigable.h>
+#include <LibWeb/HTML/Navigation.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HTML/SessionHistoryEntry.h>
+#include <LibWeb/HTML/StructuredSerialize.h>
+#include <LibWeb/HTML/Window.h>
+
+namespace Web::HTML {
+
+GC_DEFINE_ALLOCATOR(History);
+
+GC::Ref<History> History::create(DOM::Document& document)
+{
+    return GC::Heap::the().allocate<History>(document);
+}
+
+History::History(DOM::Document& document)
+    : m_document(document)
+{
+}
+
+History::~History() = default;
+
+void History::visit_edges(GC::Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_document);
+    visitor.visit(m_state);
+}
+
+// https://html.spec.whatwg.org/multipage/history.html#dom-history-pushstate
+// The pushState(data, unused, url) method steps are to run the shared history push/replace state steps given this, data, url, and "push".
+WebIDL::ExceptionOr<void> History::push_state(JS::Realm& realm, JS::Value data, Utf16View, Optional<Utf16String> const& url)
+{
+    return shared_history_push_replace_state(realm, data, url, HistoryHandlingBehavior::Push);
+}
+
+// https://html.spec.whatwg.org/multipage/history.html#dom-history-replacestate
+// The replaceState(data, unused, url) method steps are to run the shared history push/replace state steps given this, data, url, and "replace".
+WebIDL::ExceptionOr<void> History::replace_state(JS::Realm& realm, JS::Value data, Utf16View, Optional<Utf16String> const& url)
+{
+    return shared_history_push_replace_state(realm, data, url, HistoryHandlingBehavior::Replace);
+}
+
+// https://html.spec.whatwg.org/multipage/history.html#dom-history-length
+WebIDL::ExceptionOr<u64> History::length() const
+{
+    // 1. If this's relevant global object's associated Document is not fully active, then throw a "SecurityError" DOMException.
+    if (!m_document->is_fully_active())
+        return WebIDL::SecurityError::create("Cannot perform length on a document that isn't fully active."_utf16);
+
+    // 2. Return this's length.
+    return m_length;
+}
+
+// https://html.spec.whatwg.org/multipage/nav-history-apis.html#dom-history-state
+WebIDL::ExceptionOr<JS::Value> History::state() const
+{
+    // 1. If this's relevant global object's associated Document is not fully active, then throw a "SecurityError" DOMException.
+    if (!m_document->is_fully_active())
+        return WebIDL::SecurityError::create("Cannot perform state on a document that isn't fully active."_utf16);
+
+    // 2. Return this's state.
+    return m_state;
+}
+
+// https://html.spec.whatwg.org/multipage/nav-history-apis.html#delta-traverse
+WebIDL::ExceptionOr<void> History::delta_traverse(WebIDL::Long delta)
+{
+    // 1. Let document be history's relevant global object's associated Document.
+    auto& document = *m_document;
+
+    // 2. If document is not fully active, then throw a "SecurityError" DOMException.
+    if (!document.is_fully_active())
+        return WebIDL::SecurityError::create("Cannot perform go on a document that isn't fully active."_utf16);
+
+    // 3. If history's relevant global object's navigable's allowed to perform a navigation or history update returns
+    //    blocked, then return.
+    if (auto navigable = document.navigable(); navigable && navigable->allowed_to_perform_a_navigation_or_history_update() == LocalNavigable::NavigationOrHistoryUpdatePermission::Blocked)
+        return {};
+
+    // 4. If delta is 0, then reload document's node navigable, and return.
+    if (delta == 0) {
+        VERIFY(document.navigable());
+        document.navigable()->reload();
+        return {};
+    }
+
+    // 5. Traverse the history by a delta given document's node navigable's traversable navigable, delta, and with
+    //    sourceDocument set to document.
+    // NB: The UI process queues the operation on the traversable that hosts this page.
+    document.page().history_executor().traverse_the_history_by_delta(delta, document);
+
+    return {};
+}
+
+// https://html.spec.whatwg.org/multipage/history.html#dom-history-go
+WebIDL::ExceptionOr<void> History::go(WebIDL::Long delta = 0)
+{
+    // The go(delta) method steps are to delta traverse this given delta.
+    return delta_traverse(delta);
+}
+
+// https://html.spec.whatwg.org/multipage/history.html#dom-history-back
+WebIDL::ExceptionOr<void> History::back()
+{
+    // The back() method steps are to delta traverse this given −1.
+    return delta_traverse(-1);
+}
+
+// https://html.spec.whatwg.org/multipage/history.html#dom-history-forward
+WebIDL::ExceptionOr<void> History::forward()
+{
+    // The forward() method steps are to delta traverse this given +1.
+    return delta_traverse(1);
+}
+
+// https://html.spec.whatwg.org/multipage/nav-history-apis.html#can-have-its-url-rewritten
+bool can_have_its_url_rewritten(DOM::Document const& document, URL::URL const& target_url)
+{
+    // 1. Let documentURL be document's URL.
+    auto document_url = document.url();
+
+    // 2. If targetURL and documentURL differ in their scheme, username, password, host, or port components,
+    //    then return false.
+    if (target_url.scheme() != document_url.scheme()
+        || target_url.username() != document_url.username()
+        || target_url.password() != document_url.password()
+        || target_url.host() != document_url.host()
+        || target_url.port() != document_url.port())
+        return false;
+
+    // 3. If targetURL's scheme is an HTTP(S) scheme, then return true.
+    //    (Differences in path, query, and fragment are allowed for http: and https: URLs.)
+    if (target_url.scheme() == "http"sv || target_url.scheme() == "https"sv)
+        return true;
+
+    // 4. If targetURL's scheme is "file", then:
+    //    (Differences in query and fragment are allowed for file: URLs.)
+    if (target_url.scheme() == "file"sv) {
+        // 1. If targetURL and documentURL differ in their path component, then return false.
+        if (target_url.serialize_path() != document_url.serialize_path())
+            return false;
+
+        // 2. Return true.
+        return true;
+    }
+
+    // 5. If targetURL and documentURL differ in their path component or query components, then return false.
+    //    (Only differences in fragment are allowed for other types of URLs.)
+    if (target_url.serialize_path() != document_url.serialize_path() || target_url.query() != document_url.query())
+        return false;
+
+    // 6. Return true.
+    return true;
+}
+
+// https://html.spec.whatwg.org/multipage/history.html#shared-history-push/replace-state-steps
+WebIDL::ExceptionOr<void> History::shared_history_push_replace_state(JS::Realm& realm, JS::Value data, Optional<Utf16String> const& url, HistoryHandlingBehavior history_handling)
+{
+    // 1. Let document be history's relevant global object's associated Document.
+    auto& document = *m_document;
+
+    // 2. If document is not fully active, then throw a "SecurityError" DOMException.
+    if (!document.is_fully_active())
+        return WebIDL::SecurityError::create("Cannot perform pushState or replaceState on a document that isn't fully active."_utf16);
+
+    // 3. Let serializedData be StructuredSerializeForStorage(data). Rethrow any exceptions.
+    auto serialized_data = TRY(structured_serialize_session_history_state(realm.vm(), data));
+
+    // 4. Let newURL be document's URL.
+    auto new_url = document.url();
+
+    // 5. If url is not null or the empty string:
+    if (url.has_value() && !url->is_empty()) {
+        // 1. Set newURL to the result of encoding-parsing a URL given url, relative to the relevant settings object of
+        //    history.
+        auto parsed_url = document.relevant_settings_object().encoding_parse_url(url->utf16_view());
+
+        // 2. If newURL is failure, then throw a "SecurityError" DOMException.
+        if (!parsed_url.has_value())
+            return WebIDL::SecurityError::create("Cannot pushState or replaceState to incompatible URL"_utf16);
+        new_url = parsed_url.release_value();
+
+        // 3. If document cannot have its URL rewritten to newURL, then throw a "SecurityError" DOMException.
+        if (!can_have_its_url_rewritten(document, new_url))
+            return WebIDL::SecurityError::create("Cannot pushState or replaceState to incompatible URL"_utf16);
+    }
+
+    // 6. If history's relevant global object's navigable's allowed to perform a navigation or history update returns
+    //    blocked, then return.
+    if (auto navigable = document.navigable(); navigable && navigable->allowed_to_perform_a_navigation_or_history_update() == LocalNavigable::NavigationOrHistoryUpdatePermission::Blocked)
+        return {};
+
+    // 7. Let navigation be history's relevant global object's navigation API.
+    auto navigation = document.window()->navigation();
+
+    // 8. Let continue be the result of firing a push/replace/reload navigate event at navigation
+    //    with navigationType set to historyHandling, isSameDocument set to true, destinationURL set to newURL,
+    //    and classicHistoryAPIState set to serializedData.
+    auto navigation_type = history_handling == HistoryHandlingBehavior::Push ? NavigationType::Push : NavigationType::Replace;
+    auto continue_ = navigation->fire_a_push_replace_reload_navigate_event(navigation_type, new_url, true, UserNavigationInvolvement::None, {}, {}, {}, serialized_data);
+    // 9. If continue is false, then return.
+    if (!continue_)
+        return {};
+
+    // 10. Run the URL and history update steps given document and newURL, with serializedData set to
+    //     serializedData and historyHandling set to historyHandling.
+    perform_url_and_history_update_steps(document, new_url, serialized_data, history_handling);
+
+    return {};
+}
+
+// https://html.spec.whatwg.org/multipage/nav-history-apis.html#dom-history-scroll-restoration
+WebIDL::ExceptionOr<Bindings::ScrollRestoration> History::scroll_restoration() const
+{
+    // 1. If this's relevant global object's associated Document is not fully active, then throw a "SecurityError" DOMException.
+    if (!m_document->is_fully_active())
+        return WebIDL::SecurityError::create("Cannot obtain scroll restoration mode for a document that isn't fully active."_utf16);
+
+    // 2. Return this's relevant global object's navigable's active session history entry's scroll restoration mode.
+    return m_document->navigable()->active_session_history_entry()->scroll_restoration_mode() == ScrollRestorationMode::Auto
+        ? Bindings::ScrollRestoration::Auto
+        : Bindings::ScrollRestoration::Manual;
+}
+
+// https://html.spec.whatwg.org/multipage/nav-history-apis.html#dom-history-scroll-restoration
+WebIDL::ExceptionOr<void> History::set_scroll_restoration(Bindings::ScrollRestoration scroll_restoration)
+{
+    // 1. If this's relevant global object's associated Document is not fully active, then throw a "SecurityError" DOMException.
+    if (!m_document->is_fully_active())
+        return WebIDL::SecurityError::create("Cannot set scroll restoration mode for a document that isn't fully active."_utf16);
+
+    // 2. Set this's relevant global object's navigable's active session history entry's scroll restoration mode to the given value.
+    auto navigable = m_document->navigable();
+    auto active_session_history_entry = navigable->active_session_history_entry();
+    active_session_history_entry->set_scroll_restoration_mode(scroll_restoration == Bindings::ScrollRestoration::Auto ? ScrollRestorationMode::Auto : ScrollRestorationMode::Manual);
+
+    navigable->page().client().page_did_update_session_history_entry_scroll_restoration_mode(navigable->id(), session_history_entry_identity(*active_session_history_entry), active_session_history_entry->scroll_restoration_mode());
+
+    return {};
+}
+
+}

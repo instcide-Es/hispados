@@ -1,0 +1,56 @@
+/*
+ * Copyright (c) 2025, Tim Flynn <trflynn89@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Time.h>
+#include <LibIPC/Forward.h>
+#include <LibJS/Console.h>
+#include <LibJS/Forward.h>
+#include <LibWeb/Forward.h>
+#include <LibWeb/HTML/Scripting/DevToolsLoggedObjects.h>
+#include <LibWeb/HTML/Scripting/DevToolsObjectTable.h>
+#include <LibWebCommon/WebView/ConsoleOutput.h>
+#include <WebContent/Forward.h>
+#include <WebContent/WebContentConsoleClient.h>
+
+namespace WebContent {
+
+class DevToolsConsoleClient final : public WebContentConsoleClient {
+    GC_CELL(DevToolsConsoleClient, WebContentConsoleClient);
+    GC_DECLARE_ALLOCATOR(DevToolsConsoleClient);
+
+public:
+    static GC::Ref<DevToolsConsoleClient> create(JS::Realm&, JS::Console&, PageClient&);
+    static JsonValue serialize_value(JS::Realm&, JS::Value);
+    virtual ~DevToolsConsoleClient() override;
+
+    bool has_object(u64 object_id) const;
+    ErrorOr<WebView::DebuggerObjectProperties> properties_for_object(u64 object_id);
+    void forget_logged_objects() { m_logged_objects.clear(); }
+
+private:
+    DevToolsConsoleClient(JS::Console&, PageClient&, ConsoleGlobalEnvironmentExtensions&);
+
+    virtual void handle_result(JS::Value) override;
+    virtual void report_exception(Utf16View name, Utf16View message, JS::ErrorData const&, bool) override;
+    virtual void end_group() override;
+    virtual void clear() override { }
+
+    virtual JS::ThrowCompletionOr<JS::Value> printer(JS::Console::LogLevel, PrinterArguments) override;
+
+    virtual void visit_edges(JS::Cell::Visitor&) override;
+
+    void send_console_output(WebView::ConsoleOutput);
+
+    // The objects that the console's results hold, which DevTools may expand for as long as the document is shown.
+    Web::HTML::DevToolsObjectTable m_object_table { Web::HTML::DevToolsObjectTable::RootObjects::No };
+
+    // The objects of the messages that the page logged while a DevTools client was taking them.
+    Web::HTML::DevToolsLoggedObjects m_logged_objects;
+};
+
+}

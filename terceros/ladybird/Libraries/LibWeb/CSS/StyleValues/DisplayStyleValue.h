@@ -1,0 +1,37 @@
+/*
+ * Copyright (c) 2023, Emil Militzer <emil.militzer@posteo.de>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <LibWeb/CSS/Display.h>
+#include <LibWeb/CSS/StyleValues/StyleValue.h>
+#include <LibWeb/Export.h>
+
+namespace Web::CSS {
+
+class WEB_API DisplayStyleValue : public StyleValueWithDefaultOperators<DisplayStyleValue> {
+public:
+    static ValueComparingNonnullRefPtr<DisplayStyleValue const> create(Display const&);
+    virtual ~DisplayStyleValue() override = default;
+
+    Display display() const { return bit_cast<Display>(m_value->display.raw); }
+
+private:
+    friend class StyleValue;
+
+    explicit DisplayStyleValue(StyleValueFFI::StyleValueData const* data)
+        : StyleValueWithDefaultOperators(Type::Display, data)
+    {
+    }
+
+    explicit DisplayStyleValue(Display const& display)
+        : StyleValueWithDefaultOperators(Type::Display, StyleValueFFI::rust_style_value_create_display(bit_cast<u32>(display)))
+    {
+        static_assert(sizeof(Display) == sizeof(u32));
+    }
+};
+
+}

@@ -1,0 +1,774 @@
+/*
+ * Copyright (c) 2026, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/StdLibExtras.h>
+#include <AK/StringBuilder.h>
+#include <LibCore/ElapsedTimer.h>
+#include <LibCore/Environment.h>
+#include <LibGfx/CornerRadii.h>
+#include <LibGfx/GradientInterpolation.h>
+#include <LibGfx/Matrix4x4.h>
+#include <LibGfx/TextLayout.h>
+#include <LibWeb/Animations/RecordHandles.h>
+#include <LibWeb/CSS/Enums.h>
+#include <LibWeb/CSS/StyleValues/AbstractImageStyleValue.h>
+#include <LibWeb/CSS/VisualViewport.h>
+#include <LibWeb/Compositor/CompositorHost.h>
+#include <LibWeb/Compositor/NavigablePresenter.h>
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOM/Element.h>
+#include <LibWeb/DOM/Node.h>
+#include <LibWeb/DOM/Range.h>
+#include <LibWeb/DOM/ShadowRoot.h>
+#include <LibWeb/DOM/Text.h>
+#include <LibWeb/HTML/FormAssociatedElement.h>
+#include <LibWeb/HTML/HTMLBRElement.h>
+#include <LibWeb/HTML/HTMLCanvasElement.h>
+#include <LibWeb/HTML/HTMLHtmlElement.h>
+#include <LibWeb/HTML/HTMLImageElement.h>
+#include <LibWeb/HTML/HTMLInputElement.h>
+#include <LibWeb/HTML/HTMLVideoElement.h>
+#include <LibWeb/HTML/ImageRequest.h>
+#include <LibWeb/HTML/LocalNavigable.h>
+#include <LibWeb/HTML/NavigableContainer.h>
+#include <LibWeb/Layout/Box.h>
+#include <LibWeb/Layout/ImageProvider.h>
+#include <LibWeb/Layout/LayoutRustFFI.h>
+#include <LibWeb/Layout/Node.h>
+#include <LibWeb/Layout/TextNode.h>
+#include <LibWeb/Layout/Viewport.h>
+#include <LibWeb/Page/EventHandler.h>
+#include <LibWeb/Page/MiddleButtonScrollHandler.h>
+#include <LibWeb/Page/Page.h>
+#include <LibWeb/Painting/Blending.h>
+#include <LibWeb/Painting/BoxViews.h>
+#include <LibWeb/Painting/ChromeMetrics.h>
+#include <LibWeb/Painting/ChromeWidget.h>
+#include <LibWeb/Painting/DocumentPaintState.h>
+#include <LibWeb/Painting/ImagePaint.h>
+#include <LibWeb/Painting/PaintFacts.h>
+#include <LibWeb/Painting/PaintingRustBridge.h>
+#include <LibWeb/Painting/ResizeHandle.h>
+#include <LibWeb/Painting/ScrollSnap.h>
+#include <LibWeb/Painting/Scrolling.h>
+#include <LibWeb/Platform/FontPlugin.h>
+#include <LibWeb/SVG/SVGClipPathElement.h>
+#include <LibWeb/SVG/SVGDecodedImageData.h>
+#include <LibWeb/SVG/SVGFilterElement.h>
+#include <LibWeb/SVG/SVGGradientElement.h>
+#include <LibWeb/SVG/SVGGraphicsElement.h>
+#include <LibWeb/SVG/SVGImageElement.h>
+#include <LibWeb/SVG/SVGMaskElement.h>
+#include <LibWebCommon/CSS/SystemColor.h>
+
+namespace Web::Painting {
+
+static_assert(to_underlying(CSS::FontSmoothing::Auto) == to_underlying(Compositing::FontSmoothing::Auto));
+static_assert(to_underlying(CSS::FontSmoothing::None) == to_underlying(Compositing::FontSmoothing::None));
+static_assert(to_underlying(CSS::FontSmoothing::Antialiased) == to_underlying(Compositing::FontSmoothing::Antialiased));
+static_assert(to_underlying(CSS::FontSmoothing::SubpixelAntialiased) == to_underlying(Compositing::FontSmoothing::SubpixelAntialiased));
+
+static_assert(sizeof(Layout::RustFFI::ScrollDirection) == sizeof(ScrollDirection));
+static_assert(to_underlying(Layout::RustFFI::ScrollDirection::Horizontal) == to_underlying(ScrollDirection::Horizontal));
+static_assert(to_underlying(Layout::RustFFI::ScrollDirection::Vertical) == to_underlying(ScrollDirection::Vertical));
+
+namespace {
+
+template<typename T>
+struct RustOptionalLayout {
+    T value;
+    bool has_value;
+};
+
+}
+
+static_assert(sizeof(CSSPixelRect) == 16);
+
+static_assert(sizeof(RustOptionalLayout<CSSPixels>) == sizeof(Optional<CSSPixels>));
+static_assert(alignof(RustOptionalLayout<CSSPixels>) == alignof(Optional<CSSPixels>));
+static_assert(sizeof(RustOptionalLayout<CSSPixelRect>) == sizeof(Optional<CSSPixelRect>));
+static_assert(alignof(RustOptionalLayout<CSSPixelRect>) == alignof(Optional<CSSPixelRect>));
+static_assert(sizeof(RustOptionalLayout<Gfx::IntRect>) == sizeof(Optional<Gfx::IntRect>));
+static_assert(alignof(RustOptionalLayout<Gfx::IntRect>) == alignof(Optional<Gfx::IntRect>));
+static_assert(sizeof(RustOptionalLayout<float>) == sizeof(Optional<float>));
+static_assert(alignof(RustOptionalLayout<float>) == alignof(Optional<float>));
+static_assert(sizeof(RustOptionalLayout<Gfx::FloatPoint>) == sizeof(Optional<Gfx::FloatPoint>));
+static_assert(alignof(RustOptionalLayout<Gfx::FloatPoint>) == alignof(Optional<Gfx::FloatPoint>));
+static_assert(sizeof(RustOptionalLayout<Gfx::FloatSize>) == sizeof(Optional<Gfx::FloatSize>));
+static_assert(alignof(RustOptionalLayout<Gfx::FloatSize>) == alignof(Optional<Gfx::FloatSize>));
+static_assert(sizeof(RustOptionalLayout<i64>) == sizeof(Optional<i64>));
+static_assert(alignof(RustOptionalLayout<i64>) == alignof(Optional<i64>));
+static_assert(sizeof(RustOptionalLayout<size_t>) == sizeof(Optional<size_t>));
+static_assert(alignof(RustOptionalLayout<size_t>) == alignof(Optional<size_t>));
+
+static_assert(sizeof(Optional<CSSPixels>) == 8);
+static_assert(alignof(Optional<CSSPixels>) == 4);
+
+static_assert(sizeof(Compositing::ClipMode) == sizeof(u8));
+static_assert(to_underlying(Compositing::ClipMode::Intersect) == 0);
+static_assert(to_underlying(Compositing::ClipMode::Difference) == 1);
+
+#define VERIFY_SHARED_FFI_TYPE(type) static_assert(IsTriviallyCopyable<type>)
+VERIFY_SHARED_FFI_TYPE(CSSPixels);
+VERIFY_SHARED_FFI_TYPE(CSSPixelPoint);
+VERIFY_SHARED_FFI_TYPE(CSSPixelSize);
+VERIFY_SHARED_FFI_TYPE(CSSPixelRect);
+VERIFY_SHARED_FFI_TYPE(Gfx::IntPoint);
+VERIFY_SHARED_FFI_TYPE(Gfx::FloatPoint);
+VERIFY_SHARED_FFI_TYPE(Gfx::IntSize);
+VERIFY_SHARED_FFI_TYPE(Gfx::FloatSize);
+VERIFY_SHARED_FFI_TYPE(Gfx::FloatVector3);
+VERIFY_SHARED_FFI_TYPE(Gfx::IntRect);
+VERIFY_SHARED_FFI_TYPE(Gfx::FloatRect);
+VERIFY_SHARED_FFI_TYPE(Gfx::Color);
+VERIFY_SHARED_FFI_TYPE(Gfx::AffineTransform);
+VERIFY_SHARED_FFI_TYPE(Gfx::FloatMatrix4x4);
+VERIFY_SHARED_FFI_TYPE(Gfx::CornerRadius);
+VERIFY_SHARED_FFI_TYPE(Gfx::CornerRadii);
+VERIFY_SHARED_FFI_TYPE(Gfx::GradientInterpolationMethod);
+VERIFY_SHARED_FFI_TYPE(Gfx::WindingRule);
+VERIFY_SHARED_FFI_TYPE(Gfx::MaskKind);
+VERIFY_SHARED_FFI_TYPE(Gfx::CompositingAndBlendingOperator);
+VERIFY_SHARED_FFI_TYPE(Gfx::ScalingMode);
+VERIFY_SHARED_FFI_TYPE(Gfx::InterpolationColorSpace);
+VERIFY_SHARED_FFI_TYPE(Compositing::ClipMode);
+VERIFY_SHARED_FFI_TYPE(ChromeMetrics);
+static_assert(sizeof(ChromeMetrics) == 7 * sizeof(CSSPixels));
+static_assert(offsetof(ChromeMetrics, scroll_thumb_min_length) == 0);
+static_assert(offsetof(ChromeMetrics, scroll_thumb_padding_thin) == sizeof(CSSPixels));
+static_assert(offsetof(ChromeMetrics, scroll_thumb_thickness_thin) == 2 * sizeof(CSSPixels));
+static_assert(offsetof(ChromeMetrics, scroll_thumb_thickness) == 3 * sizeof(CSSPixels));
+static_assert(offsetof(ChromeMetrics, scroll_gutter_thickness) == 4 * sizeof(CSSPixels));
+static_assert(offsetof(ChromeMetrics, resize_gripper_size) == 5 * sizeof(CSSPixels));
+static_assert(offsetof(ChromeMetrics, resize_gripper_padding) == 6 * sizeof(CSSPixels));
+VERIFY_SHARED_FFI_TYPE(Optional<CSSPixels>);
+VERIFY_SHARED_FFI_TYPE(Optional<CSSPixelRect>);
+VERIFY_SHARED_FFI_TYPE(Optional<Gfx::IntRect>);
+VERIFY_SHARED_FFI_TYPE(Optional<Gfx::FloatPoint>);
+VERIFY_SHARED_FFI_TYPE(Optional<Gfx::FloatSize>);
+VERIFY_SHARED_FFI_TYPE(Optional<Gfx::FloatRect>);
+VERIFY_SHARED_FFI_TYPE(Optional<Gfx::Color>);
+VERIFY_SHARED_FFI_TYPE(Optional<Gfx::AffineTransform>);
+VERIFY_SHARED_FFI_TYPE(Optional<i64>);
+VERIFY_SHARED_FFI_TYPE(Optional<size_t>);
+VERIFY_SHARED_FFI_TYPE(Optional<u32>);
+VERIFY_SHARED_FFI_TYPE(Optional<float>);
+#undef VERIFY_SHARED_FFI_TYPE
+
+namespace {
+
+static bool rust_painting_timing_enabled()
+{
+    static bool enabled = [] {
+        auto value = Core::Environment::get("LADYBIRD_RUST_PAINTING_TIMING"sv);
+        return value.has_value() && !value->is_empty() && *value != "0"sv;
+    }();
+    return enabled;
+}
+
+static Layout::NodeWithStyle::ImageObserver const* layer_image_observer(Layout::NodeWithStyle const& layout_node, Layout::RustFFI::FfiLayerImageList list, u32 computed_index)
+{
+    switch (list) {
+    case Layout::RustFFI::FfiLayerImageList::Background:
+        return layout_node.background_image_observer(computed_index);
+    case Layout::RustFFI::FfiLayerImageList::Mask:
+        return layout_node.mask_image_observer(computed_index);
+    case Layout::RustFFI::FfiLayerImageList::BorderImageSource:
+        return layout_node.border_image_source_observer();
+    case Layout::RustFFI::FfiLayerImageList::MaskBorderSource:
+        return layout_node.mask_border_source_observer();
+    }
+    VERIFY_NOT_REACHED();
+}
+
+}
+
+Compositing::RustFFI::FfiVisualContextTreeInputs visual_context_tree_inputs(DOM::Document& document)
+{
+    Compositing::RustFFI::FfiVisualContextTreeInputs inputs {};
+    inputs.device_pixels_per_css_pixel = document.page().client().device_pixels_per_css_pixel();
+    auto const& visual_viewport = *document.visual_viewport();
+    auto offset = visual_viewport.offset().to_type<double>();
+    inputs.visual_viewport_offset_x = offset.x();
+    inputs.visual_viewport_offset_y = offset.y();
+    inputs.visual_viewport_scale = visual_viewport.scale();
+    return inputs;
+}
+
+static Layout::RustFFI::DocumentHost* document_host(DOM::Document const& document)
+{
+    return const_cast<DOM::Document&>(document).layout_node_arena().host();
+}
+
+bool rust_background_color_can_be_compositor_animated(Layout::Node const& layout_node)
+{
+    if (!has_committed_box(layout_node))
+        return false;
+    return Layout::RustFFI::render_state_background_color_can_be_compositor_animated(
+        layout_node.document_host(), committed_row_slot(layout_node));
+}
+
+Layout::RustFFI::FfiPhysicalOverflowDirections rust_physical_overflow_directions(Layout::Node const& box)
+{
+    return Layout::RustFFI::render_state_physical_overflow_directions(box.document_host(), committed_row_slot(box));
+}
+
+void register_geometry_host(Layout::NodeArena& arena)
+{
+    Layout::RustFFI::FfiGeometryHostCallbacks callbacks {
+        .context = &arena,
+        .set_scroll_offset = [](void* context, Layout::BegunRead const* read, Compositing::RustFFI::NodeSlotId slot, CSSPixelPoint offset) {
+            auto* layout_node = static_cast<Layout::NodeArena*>(context)->node_if_live(*read, slot);
+            VERIFY(layout_node);
+            // NB: The compositor keeps the box in the same scroll range as it takes in the frame of this layout, from
+            //     wherever the user has scrolled it since. A jump to the offset this thread knows would take that
+            //     scroll back.
+            (void)set_scroll_offset(*layout_node, offset, CompositorScrollRequest::None); },
+    };
+    Layout::RustFFI::document_host_set_geometry_host(arena.host(), callbacks);
+}
+
+void rust_update_visual_viewport_transform(Layout::BegunRead const& read, DOM::Document& document)
+{
+    Layout::RustFFI::render_state_update_visual_viewport_transform(document.layout_node_arena().host(), &read, visual_context_tree_inputs(document));
+}
+
+// Describes the row in the slot as its layout node describes itself, for a dump or a trace.
+static void push_debug_description(DOM::Document const& document, Compositing::RustFFI::NodeSlotId slot, void* description_sink)
+{
+    Layout::ForcedReadScope read { document };
+    auto const* layout_node = const_cast<DOM::Document&>(document).layout_node_arena().node_if_live(read, slot);
+    VERIFY(layout_node);
+    auto description = layout_node->debug_description();
+    auto bytes = description.bytes();
+    Layout::RustFFI::layout_arena_paint_push_bytes(description_sink, bytes.data(), bytes.size());
+}
+
+Utf16String serialize_painting_dump(Layout::BegunRead const& read, DOM::Document const& document, DisplayListDumpOptions const& options)
+{
+    struct DumpContext {
+        GC::Ref<DOM::Document const> document;
+        Utf16String dump;
+    } context { document, {} };
+
+    Layout::RustFFI::FfiPaintingDumpCallbacks callbacks {
+        .context = &context,
+        .debug_description = [](void* context_pointer, Compositing::RustFFI::NodeSlotId slot, void* description_sink) { push_debug_description(*static_cast<DumpContext*>(context_pointer)->document, slot, description_sink); },
+        .append_text = [](void* context_pointer, u8 const* bytes, size_t byte_count) { static_cast<DumpContext*>(context_pointer)->dump = Utf16String::from_utf8_without_validation(StringView { bytes, byte_count }); },
+        .describe_font = [](void*, void const* font_pointer, void* description_sink) {
+            auto const& font = *static_cast<Gfx::Font const*>(font_pointer);
+            auto description = ByteString::formatted("{} {}px {}", font.family(), font.pixel_size(), font.weight());
+            Layout::RustFFI::layout_arena_paint_push_bytes(description_sink, reinterpret_cast<u8 const*>(description.characters()), description.length()); },
+    };
+    auto navigable = document.navigable();
+    Gfx::IntRect device_viewport_rect { {}, navigable ? navigable->viewport_size_in_device_pixels() : Gfx::IntSize {} };
+    Layout::RustFFI::FfiDisplayListDumpOptions ffi_options {
+        .owners = options.owners,
+        .text = options.text,
+        .fonts = options.fonts,
+        .record_ids = options.record_ids,
+        .chunks = options.chunks,
+        .raw_node_indices = options.raw_node_indices,
+        .jsonl = options.jsonl,
+    };
+    Layout::RustFFI::painting_dump(document_host(document), &read, viewport_row_slot(read, document), device_viewport_rect, ffi_options, callbacks);
+    return move(context.dump);
+}
+
+OwnersOfVisualContextNodes describe_owners_of_visual_context_nodes(DOM::Document const& document, ReadonlySpan<u32> spatial_node_indices, ReadonlySpan<u32> effect_node_indices)
+{
+    struct DescribeContext {
+        GC::Ref<DOM::Document const> document;
+        Vector<String> owners;
+    } context { document, {} };
+    context.owners.resize(spatial_node_indices.size() + effect_node_indices.size());
+
+    Layout::ForcedReadScope read_scope { document };
+    Layout::BegunRead const& read = read_scope;
+    // NB: Bringing the tree up to date describes the paint servers it paints with, which the elements its boxes refer to
+    //     have to have styles for. With style work pending, those can be elements no style update has styled yet, so
+    //     this answers for no tree, which the view asks of again with the next frame, rather than updating style for a
+    //     debugging aid.
+    if (!document.has_committed_viewport_box() || document.has_style_work(read))
+        return { .structural_epoch = 0, .owners = move(context.owners) };
+
+    Layout::RustFFI::FfiVisualContextNodeOwnerCallbacks callbacks {
+        .context = &context,
+        .debug_description = [](void* context_pointer, Compositing::RustFFI::NodeSlotId slot, void* description_sink) { push_debug_description(*static_cast<DescribeContext*>(context_pointer)->document, slot, description_sink); },
+        .take_owner = [](void* context_pointer, size_t position, u8 const* bytes, size_t byte_count) {
+            auto& context = *static_cast<DescribeContext*>(context_pointer);
+            VERIFY(position < context.owners.size());
+            context.owners[position] = String::from_utf8_with_replacement_character(StringView { bytes, byte_count }); },
+    };
+    auto structural_epoch = Layout::RustFFI::painting_describe_owners_of_visual_context_nodes(document_host(document), &read, viewport_row_slot(read, document),
+        spatial_node_indices.data(), spatial_node_indices.size(), effect_node_indices.data(), effect_node_indices.size(), callbacks);
+    return { .structural_epoch = structural_epoch, .owners = move(context.owners) };
+}
+
+Utf16String display_list_dump_changes(Optional<StringView> previous_jsonl, StringView jsonl)
+{
+    Utf16String changes;
+    Layout::RustFFI::painting_dump_changes(
+        previous_jsonl.has_value() ? reinterpret_cast<u8 const*>(previous_jsonl->characters_without_null_termination()) : nullptr,
+        previous_jsonl.has_value() ? previous_jsonl->length() : 0,
+        previous_jsonl.has_value(),
+        reinterpret_cast<u8 const*>(jsonl.characters_without_null_termination()),
+        jsonl.length(),
+        &changes,
+        [](void* context, u8 const* bytes, size_t byte_count) { *static_cast<Utf16String*>(context) = Utf16String::from_utf8_without_validation(StringView { bytes, byte_count }); });
+    return changes;
+}
+
+static void append_bytes_to_string_builder(void* context, u8 const* bytes, size_t byte_count)
+{
+    static_cast<StringBuilder*>(context)->append(StringView { bytes, byte_count });
+}
+
+void dump_stacking_context_tree(Layout::BegunRead const& read, StringBuilder& builder, DOM::Document const& document)
+{
+    struct DumpContext {
+        GC::Ref<DOM::Document const> document;
+        StringBuilder& builder;
+    } context { document, builder };
+    Layout::RustFFI::FfiStackingContextDumpCallbacks callbacks {
+        .context = &context,
+        .debug_description = [](void* context_pointer, Compositing::RustFFI::NodeSlotId slot, void* description_sink) { push_debug_description(*static_cast<DumpContext*>(context_pointer)->document, slot, description_sink); },
+        .append_text = [](void* context_pointer, u8 const* bytes, size_t byte_count) { static_cast<DumpContext*>(context_pointer)->builder.append(StringView { bytes, byte_count }); },
+    };
+    Layout::RustFFI::render_state_dump_stacking_context_tree(
+        document_host(document), &read, viewport_row_slot(read, document), callbacks);
+}
+
+static void push_bytes_to_dump_sink(void* sink, ReadonlyBytes bytes)
+{
+    Layout::RustFFI::layout_arena_paint_push_bytes(sink, bytes.data(), bytes.size());
+}
+
+static void dump_layout_tree(Layout::Node const& root, size_t initial_indent, bool interactive, void* output_context, void (*append_text)(void*, u8 const*, size_t))
+{
+    Layout::RustFFI::FfiLayoutTreeDumpCallbacks callbacks {
+        .context = output_context,
+        .document = &const_cast<DOM::Document&>(root.document()),
+        .describe_dom_node = [](void* document, Layout::RustFFI::FfiNodeIdentity node, void* tag_name_sink, void* identifier_sink) {
+            // A row whose node has been removed no longer names one, and the dump says so.
+            auto dom_node = node_identity_of(node).resolve(*static_cast<DOM::Document*>(document));
+            if (!dom_node) {
+                push_bytes_to_dump_sink(tag_name_sink, "(detached)"sv.bytes());
+                return;
+            }
+            auto const* element = as_if<DOM::Element>(*dom_node);
+            StringBuilder tag_name_builder;
+            tag_name_builder.append(element ? element->local_name() : dom_node->node_name());
+            push_bytes_to_dump_sink(tag_name_sink, tag_name_builder.string_view().bytes());
+            if (!element)
+                return;
+            StringBuilder identifier_builder;
+            if (element->id().has_value() && !element->id()->is_empty()) {
+                identifier_builder.append('#');
+                identifier_builder.append(*element->id());
+            }
+            for (auto const& class_name : element->class_names()) {
+                identifier_builder.append('.');
+                identifier_builder.append(class_name);
+            }
+            push_bytes_to_dump_sink(identifier_sink, identifier_builder.string_view().bytes()); },
+        .navigable_container_content_document = [](void* document, Layout::RustFFI::FfiNodeIdentity node, void* url_sink) -> Layout::RustFFI::FfiNestedLayoutRoot {
+            auto const* container = as_if<HTML::NavigableContainer>(node_identity_of(node).resolve(*static_cast<DOM::Document*>(document)).ptr());
+            auto const* content_document = container ? container->content_document_without_origin_check() : nullptr;
+            if (!content_document)
+                return { .has_document = false, .layout_root = nullptr };
+            auto serialized_url = content_document->url().serialize();
+            push_bytes_to_dump_sink(url_sink, serialized_url.bytes());
+            // The nested document's tree is the dump's own read of that document's render state.
+            Layout::ForcedReadScope read { *content_document };
+            return { .has_document = true, .layout_root = const_cast<Layout::Viewport*>(content_document->layout_node(read)) }; },
+        .svg_as_image_layout_root = [](void* document, Layout::RustFFI::FfiNodeIdentity node) -> void* {
+            auto const* image_element = as_if<HTML::HTMLImageElement>(node_identity_of(node).resolve(*static_cast<DOM::Document*>(document)).ptr());
+            if (!image_element)
+                return nullptr;
+            auto const* svg_image_data = as_if<SVG::SVGDecodedImageData>(image_element->current_request().image_data().ptr());
+            if (!svg_image_data)
+                return nullptr;
+            // The image's tree is the dump's own read of its document's render state.
+            Layout::ForcedReadScope read { svg_image_data->svg_document() };
+            return const_cast<Layout::Viewport*>(svg_image_data->svg_document().unsafe_layout_node(read)); },
+        .dump_nested_layout_tree = [](void*, void* layout_root, size_t indent, bool interactive, void* output_sink) { dump_layout_tree(*static_cast<Layout::Node const*>(layout_root), indent, interactive, output_sink, Layout::RustFFI::layout_arena_paint_push_bytes); },
+        .append_text = append_text,
+    };
+    Layout::RustFFI::render_state_dump_layout_tree(root.document_host(), Layout::Node::slot_id(&root), initial_indent, interactive, callbacks);
+}
+
+void dump_layout_tree(StringBuilder& builder, Layout::Node const& root, bool interactive)
+{
+    dump_layout_tree(root, 0, interactive, &builder, append_bytes_to_string_builder);
+}
+
+namespace {
+
+// What an SVG-as-image render of a recording's publication is found from: the document's host, through which a layout
+// node of the recording is reached.
+struct RecordingPublishContext {
+    Layout::RustFFI::DocumentHost* host;
+    Layout::BegunRead const& read;
+};
+
+static Layout::RustFFI::FfiRecordingPublishCallbacks recording_publish_callbacks(RecordingPublishContext& context)
+{
+    return {
+        .context = &context,
+        .render_vector_image = [](void* context_pointer, Layout::RustFFI::FfiVectorImageRenderRequest const* request) -> Layout::RustFFI::DocumentHost const* {
+            auto& context = *static_cast<RecordingPublishContext*>(context_pointer);
+            auto const* layout_node = static_cast<Layout::NodeWithStyle const*>(Layout::RustFFI::render_state_node_shell_if_live(context.host, &context.read, request->owner));
+            if (!layout_node)
+                return nullptr;
+            GC::Ptr<HTML::DecodedImageData> decoded_image_data;
+            // A recording that lands after its boxes' elements were removed may draw a box whose element is gone.
+            if (request->is_replaced_content) {
+                if (layout_node->kind() == Layout::RustFFI::NodeKind::ImageBox) {
+                    if (auto const* image_provider = static_cast<Layout::Box const&>(*layout_node).image_provider_if_any())
+                        decoded_image_data = image_provider->decoded_image_data();
+                } else if (auto const* image = as_if<SVG::SVGImageElement>(layout_node->dom_node())) {
+                    decoded_image_data = image->decoded_image_data();
+                }
+            } else if (auto const* observer = layer_image_observer(*layout_node, request->list, request->computed_index)) {
+                decoded_image_data = observer->decoded_image_data();
+            }
+            auto const* svg_image_data = as_if<SVG::SVGDecodedImageData>(decoded_image_data.ptr());
+            if (!svg_image_data)
+                return nullptr;
+            // The image's content darkens with the page that draws it, so a force-dark page renders it force-dark too.
+            HTML::PaintConfig paint_config;
+            paint_config.force_dark_enabled = request->force_dark_enabled;
+            paint_config.force_dark_foreground_threshold = request->force_dark_foreground_threshold;
+            paint_config.force_dark_background_threshold = request->force_dark_background_threshold;
+            return svg_image_data->render_at_scale({ { request->css_width, request->css_height }, request->raster_scale, static_cast<CSS::PreferredColorScheme>(request->color_scheme), paint_config });
+        },
+    };
+}
+
+// The platform default font at an overlay label's CSS size and at that size in device pixels, kept alive for the
+// recording call.
+struct OverlayLabelFonts {
+    RefPtr<Gfx::Font> css_font;
+    RefPtr<Gfx::Font> device_font;
+
+    Layout::RustFFI::FfiOverlayLabelFonts ffi() const { return { .css_font = css_font.ptr(), .device_font = device_font.ptr() }; }
+};
+
+static OverlayLabelFonts overlay_label_fonts(float css_size, double device_pixels_per_css_pixel)
+{
+    OverlayLabelFonts fonts {
+        .css_font = Platform::FontPlugin::the().default_font(css_size),
+        .device_font = Platform::FontPlugin::the().default_font(css_size * static_cast<float>(device_pixels_per_css_pixel)),
+    };
+    VERIFY(fonts.css_font && fonts.device_font);
+    return fonts;
+}
+
+}
+
+void take_recording_trace_if_pending(Layout::BegunRead const& read, DOM::Document& document)
+{
+    struct TraceContext {
+        GC::Ref<DOM::Document const> document;
+        StringBuilder trace;
+    } context { document, {} };
+    bool has_pending_trace = Layout::RustFFI::render_state_take_recording_trace(
+        document_host(document), &read, &context,
+        [](void* context_pointer, Compositing::RustFFI::NodeSlotId slot, void* description_sink) { push_debug_description(*static_cast<TraceContext*>(context_pointer)->document, slot, description_sink); },
+        [](void* context_pointer, u8 const* bytes, size_t byte_count) { static_cast<TraceContext*>(context_pointer)->trace.append(StringView { bytes, byte_count }); });
+    if (has_pending_trace)
+        document.paint_state().append_recording_trace(MUST(context.trace.to_string()));
+}
+
+// The time of the document's timeline its rendering update sampled the animations at: the frames sampled after the
+// update's never show them before it.
+static double rendering_update_timestamp(DOM::Document& document)
+{
+    if (auto time = document.timeline().current_time(); time.has_value() && time->type == Animations::RustFFI::TimeValueType::Milliseconds)
+        return time->value;
+    return -AK::Infinity<double>;
+}
+
+void commit_unrecorded_frame(Layout::BegunRead const& read, DOM::Document& document, Compositor::FlightPresentation presentation)
+{
+    bool const sends_visual_context_tree = presentation.sealed.sends_visual_context_tree;
+    presentation.presenter->lend_seal(presentation.sealed, [&](Layout::RustFFI::FfiSeal const& seal) {
+        Layout::RustFFI::render_state_commit_unrecorded_frame(document_host(document), &read, sends_visual_context_tree, rendering_update_timestamp(document), &seal);
+    });
+}
+
+Optional<DisplayListRecording> start_rust_display_list_recording(Layout::BegunRead const& read, DOM::Document& document, u64 visual_context_tree_structural_epoch, Optional<Gfx::Color> surface_clear_color, PaintCommandCacheMode cache_mode, HTML::PaintConfig const& config, InspectorOverlayInputs const& overlay_inputs, Optional<Compositor::FlightPresentation> committed)
+{
+    auto* host = document_host(document);
+    auto device_pixels_per_css_pixel = document.page().client().device_pixels_per_css_pixel();
+    auto navigable_of_document = document.navigable();
+    auto device_viewport_rect = navigable_of_document ? navigable_of_document->present_viewport_rect() : Gfx::IntRect {};
+    auto wheel_event_region_state = document.paint_state().collect_root_blocking_wheel_event_regions(document);
+    Layout::RustFFI::FfiRecordingInputs inputs {};
+    Vector<Layout::RustFFI::FfiTextFragmentIndicationRange> text_fragment_indications;
+    if (!document.text_fragment_ranges().is_empty()) {
+        document.for_each_shadow_including_inclusive_descendant([&](DOM::Node& node) {
+            auto* text = as_if<DOM::Text>(&node);
+            if (!text)
+                return TraversalDecision::Continue;
+            auto* layout_text = as_if<Layout::TextNode>(text->unsafe_layout_node(read));
+            if (!layout_text)
+                return TraversalDecision::Continue;
+
+            for (auto const& range : document.text_fragment_ranges()) {
+                if (!range->intersects_node(*text))
+                    continue;
+                auto start = range->start_container().ptr() == text ? static_cast<size_t>(range->start_offset()) : 0;
+                auto end = range->end_container().ptr() == text ? static_cast<size_t>(range->end_offset()) : text->length();
+                if (start < end) {
+                    text_fragment_indications.append({
+                        .text_node = committed_row_slot(*layout_text),
+                        .start = start,
+                        .end = end,
+                    });
+                }
+            }
+            return TraversalDecision::Continue;
+        });
+    }
+    inputs.text_fragment_indications = text_fragment_indications.data();
+    inputs.text_fragment_indication_count = text_fragment_indications.size();
+    auto mark_color_scheme = document.page().preferred_color_scheme();
+    inputs.mark_color = CSS::SystemColor::mark(mark_color_scheme);
+    inputs.mark_text_color = CSS::SystemColor::mark_text(mark_color_scheme);
+    if (overlay_inputs.highlighted_layout_node) {
+        inputs.has_inspector_highlight = true;
+        inputs.inspector_highlight_paintable = committed_row_slot(*overlay_inputs.highlighted_layout_node);
+    }
+    inputs.tooltip_color = overlay_inputs.tooltip_color;
+    inputs.tooltip_text_color = overlay_inputs.tooltip_text_color;
+    inputs.tooltip_border_color = overlay_inputs.tooltip_border_color;
+    Vector<Layout::RustFFI::FfiGridOverlayInput> ffi_grid_overlays;
+    OverlayLabelFonts grid_label_fonts;
+    if (!overlay_inputs.grid_highlights.is_empty()) {
+        grid_label_fonts = overlay_label_fonts(10.0f, device_pixels_per_css_pixel);
+        inputs.grid_label_fonts = grid_label_fonts.ffi();
+    }
+    for (auto const& highlight : overlay_inputs.grid_highlights) {
+        ffi_grid_overlays.append({
+            .paintable = committed_row_slot(*highlight.layout_node),
+            .color = highlight.options.color,
+            .label_foreground_color = highlight.options.color.with_alpha(235).suggested_foreground_color(),
+            .label_css_pixel_size = grid_label_fonts.css_font->pixel_size(),
+            .show_area_names = highlight.options.show_area_names,
+            .show_line_numbers = highlight.options.show_line_numbers,
+            .show_track_sizes = highlight.options.show_track_sizes,
+            .show_infinite_lines = highlight.options.show_infinite_lines,
+        });
+    }
+    inputs.grid_overlays = ffi_grid_overlays.data();
+    inputs.grid_overlay_count = ffi_grid_overlays.size();
+    Vector<Layout::RustFFI::FfiFlexOverlayInput> ffi_flex_overlays;
+    for (auto const& highlight : overlay_inputs.flex_highlights) {
+        ffi_flex_overlays.append({
+            .paintable = committed_row_slot(*highlight.layout_node),
+            .color = highlight.options.color,
+        });
+    }
+    inputs.flex_overlays = ffi_flex_overlays.data();
+    inputs.flex_overlay_count = ffi_flex_overlays.size();
+    inputs.caret_debug_rect = overlay_inputs.caret_debug_rect;
+    ByteString inspector_highlight_label_text;
+    OverlayLabelFonts inspector_label_fonts;
+    if (overlay_inputs.highlighted_layout_node) {
+        auto const& layout_node = *overlay_inputs.highlighted_layout_node;
+        auto border_rect = absolute_border_box_rect(layout_node);
+        inspector_highlight_label_text = ByteString::formatted("{} {}x{} @ {},{}", layout_node.debug_description(), border_rect.width(), border_rect.height(), border_rect.x(), border_rect.y());
+        inspector_label_fonts = overlay_label_fonts(12.0f, device_pixels_per_css_pixel);
+        inputs.inspector_highlight_label = {
+            .fonts = inspector_label_fonts.ffi(),
+            .text = inspector_highlight_label_text.bytes().data(),
+            .text_byte_count = inspector_highlight_label_text.length(),
+        };
+    }
+    inputs.device_viewport_rect = device_viewport_rect;
+    if (auto navigable = document.navigable())
+        inputs.css_viewport_rect = navigable->viewport_rect();
+    inputs.should_show_line_box_borders = config.should_show_line_box_borders;
+    inputs.force_dark_enabled = config.force_dark_enabled;
+    inputs.force_dark_foreground_threshold = config.force_dark_foreground_threshold;
+    inputs.force_dark_background_threshold = config.force_dark_background_threshold;
+    inputs.should_paint_overlay = config.paint_overlay;
+    inputs.records_in_finest_runs = config.records_in_finest_runs;
+    inputs.records_whole_document = config.records_whole_document;
+    inputs.notes_record_origins = config.notes_record_origins;
+    inputs.has_blocking_wheel_event_region_covering_viewport = wheel_event_region_state.has_blocking_wheel_event_region_covering_viewport;
+    inputs.wheel_event_listener_state_generation = document.page().wheel_event_listener_state_generation();
+    inputs.chrome_metrics = document.page().chrome_metrics();
+    inputs.paint_viewport_scrollbars = should_paint_viewport_scrollbars();
+    if (auto navigable = document.navigable()) {
+        if (auto handler = navigable->event_handler().middle_button_scroll_handler(); handler.has_value()) {
+            inputs.middle_button_scroll_active = true;
+            inputs.middle_button_scroll_origin = handler->origin();
+        }
+    }
+    inputs.publishes_recording = cache_mode == PaintCommandCacheMode::ReadWrite;
+    {
+        auto navigable = document.navigable();
+        inputs.window_is_focused = navigable && navigable->is_focused();
+        inputs.outline_auto_color = CSS::SystemColor::accent_color(CSS::PreferredColorScheme::Auto);
+        auto palette = document.page().palette();
+        inputs.palette_is_dark = palette.is_dark();
+        auto palette_color_scheme = palette.is_dark() ? CSS::PreferredColorScheme::Dark : CSS::PreferredColorScheme::Light;
+        inputs.selection_background_from_palette = CSS::SystemColor::transform_selection_background_color(palette.selection(), palette_color_scheme);
+        inputs.selection_background_light = CSS::SystemColor::transform_selection_background_color(palette.light_selection(), CSS::PreferredColorScheme::Light);
+        inputs.selection_background_dark = CSS::SystemColor::transform_selection_background_color(palette.dark_selection(), CSS::PreferredColorScheme::Dark);
+        inputs.inactive_selection_background_from_palette = CSS::SystemColor::transform_selection_background_color(palette.inactive_selection(), palette_color_scheme);
+        inputs.inactive_selection_background_light = CSS::SystemColor::transform_selection_background_color(CSS::SystemColor::inactive_highlight(CSS::PreferredColorScheme::Light), CSS::PreferredColorScheme::Light);
+        inputs.inactive_selection_background_dark = CSS::SystemColor::transform_selection_background_color(CSS::SystemColor::inactive_highlight(CSS::PreferredColorScheme::Dark), CSS::PreferredColorScheme::Dark);
+        if (auto schemes = document.supported_color_schemes(); schemes.has_value())
+            inputs.document_supports_light_or_dark = schemes->contains_slow("light"_utf16) || schemes->contains_slow("dark"_utf16);
+        inputs.image_fallback_color_scheme = to_underlying(document.svg_image_color_scheme().value_or(document.page().preferred_color_scheme()));
+        inputs.records_without_visual_contexts = document.is_decoded_svg() && !document.decoded_svg_holds_foreign_content();
+        // The AT focus ring paints as an outline on one paintable, whether or not that element has a CSS outline of
+        // its own. So the recorder learns which paintable that is here, up front — its paint-phase mask would
+        // otherwise skip that paintable's outline phase as empty.
+        auto const* accessibility_focus_target = document.accessibility_focus_target();
+        inputs.accessibility_focus_target = Layout::Node::slot_id(accessibility_focus_target ? accessibility_focus_target->layout_node(read) : nullptr);
+    }
+    inputs.caret = resolve_document_caret_paint(read, document);
+    inputs.focused_text_control = resolve_focused_text_control_selection(read, document);
+    inputs.focused_area_outline = resolve_focused_area_outline(read, document);
+    {
+        auto color_scheme = document.canvas_color_scheme(read);
+        bool opaque_canvas = false;
+        // NB: The container's document is laid out ahead of the document of the navigable it hosts, and its box is read
+        //     as it last laid it out, as the embedding document's own read.
+        if (auto container_element = document.navigable()->container()) {
+            Layout::ForcedReadScope container_read { container_element->document() };
+            if (auto const* container_node = container_element->unsafe_layout_node(container_read)) {
+                auto container_scheme = container_node->color_scheme();
+                if (container_scheme == CSS::PreferredColorScheme::Auto)
+                    container_scheme = CSS::PreferredColorScheme::Light;
+                opaque_canvas = container_scheme != color_scheme;
+            }
+        } else if (document.navigable()->parent()) {
+            // NB: The container of a local root lives in another process, which replicates its used color scheme.
+            opaque_canvas = document.navigable()->container_state().used_color_scheme != color_scheme;
+        }
+        inputs.canvas_fill_rect = config.canvas_fill_rect;
+        inputs.canvas_color = CSS::SystemColor::canvas(color_scheme);
+        inputs.opaque_canvas = opaque_canvas;
+        Gfx::IntRect bitmap_rect { {}, device_viewport_rect.size() };
+        inputs.bitmap_rect = bitmap_rect;
+        inputs.background_color = document.background_color(read);
+    }
+    inputs.has_navigable_container_with_composited_context = reconcile_navigable_container_paint_facts(read, document);
+    inputs.surface_clear_color = surface_clear_color;
+    if (auto navigable = document.navigable()) {
+        bool viewport_keeps_horizontal_scrolls = false;
+        bool viewport_keeps_vertical_scrolls = false;
+        if (auto* viewport_box = document.layout_node(read)) {
+            viewport_keeps_horizontal_scrolls = Painting::box_ending_scroll_chain(*viewport_box, 1, 0) == viewport_box;
+            viewport_keeps_vertical_scrolls = Painting::box_ending_scroll_chain(*viewport_box, 0, 1) == viewport_box;
+        }
+        inputs.has_async_scrolling_metadata = true;
+        inputs.async_scrolling_metadata = {
+            .has_document_id = true,
+            .document_id = document.unique_id().value(),
+            .viewport_rect = device_viewport_rect,
+            .wheel_event_listener_state_generation = navigable->page().wheel_event_listener_state_generation(),
+            .has_blocking_wheel_event_listeners = wheel_event_region_state.has_blocking_wheel_event_listeners,
+            .has_blocking_wheel_event_region_covering_viewport = wheel_event_region_state.has_blocking_wheel_event_region_covering_viewport,
+            .viewport_keeps_horizontal_scrolls = viewport_keeps_horizontal_scrolls,
+            .viewport_keeps_vertical_scrolls = viewport_keeps_vertical_scrolls,
+            .device_pixels_per_css_pixel = device_pixels_per_css_pixel,
+        };
+    }
+    DisplayListRecording recording {
+        .visual_context_tree_structural_epoch = visual_context_tree_structural_epoch,
+        .cache_mode = cache_mode,
+        .in_flight = false,
+    };
+    // The recording copies what it reads of the overlay arrays and buffers, which live until here.
+    auto viewport = viewport_row_slot(read, document);
+    // A committed frame hands the render owner what it presents with.
+    if (committed.has_value()) {
+        recording.in_flight = true;
+        committed->presenter->lend_seal(committed->sealed, [&](Layout::RustFFI::FfiSeal const& seal) {
+            Layout::RustFFI::render_state_commit_recorded_frame(host, &read, viewport, inputs, rendering_update_timestamp(document), &seal);
+        });
+        return recording;
+    }
+    if (Layout::RustFFI::render_state_record_display_list(host, &read, viewport, inputs) == Layout::RustFFI::FfiRecordingStart::NothingToRecord)
+        return {};
+    return recording;
+}
+
+void render_vector_images(Layout::BegunRead const& read, DOM::Document& document)
+{
+    RecordingPublishContext publish_context { document_host(document), read };
+    Layout::RustFFI::render_state_render_vector_images(publish_context.host, recording_publish_callbacks(publish_context));
+}
+
+void publish_rust_display_list_recording(Layout::BegunRead const& read, DOM::Document& document)
+{
+    RecordingPublishContext publish_context { document_host(document), read };
+    auto rust_timer = Core::ElapsedTimer::start_new(Core::TimerType::Precise);
+    Layout::RustFFI::render_state_publish_recording(publish_context.host, recording_publish_callbacks(publish_context));
+    take_recording_trace_if_pending(read, document);
+    if (rust_painting_timing_enabled())
+        dbgln("PAINT_RECORD rust={} µs", rust_timer.elapsed_time().to_microseconds());
+}
+
+Layout::RustFFI::FfiVectorImageKey vector_image_key_to_ffi(VectorImageKey const& key)
+{
+    return {
+        .css_width = key.css_size.width(),
+        .css_height = key.css_size.height(),
+        .raster_scale = key.raster_scale,
+        .color_scheme = static_cast<u8>(key.color_scheme),
+        .force_dark_enabled = key.paint_config.force_dark_enabled,
+        .force_dark_foreground_threshold = key.paint_config.force_dark_foreground_threshold,
+        .force_dark_background_threshold = key.paint_config.force_dark_background_threshold,
+    };
+}
+
+bool rasterize_image_paint(Compositor::CompositorHost const& compositor_host, ImagePaint const& paint, ImagePaintRequest const& request, double device_pixels_per_css_pixel, NonnullRefPtr<Gfx::Bitmap> target)
+{
+    Layout::RustFFI::FfiImageRasterization image {};
+    image.dest_rect = request.dest_rect;
+    image.device_pixels_per_css_pixel = device_pixels_per_css_pixel;
+    auto gradient_stop_color_resolution_style = request.gradient_stop_color_resolution_style.to_ffi();
+    paint.value.visit(
+        [&](ImagePaint::DecodedFrame const& decoded_frame) {
+            image.kind = Layout::RustFFI::FfiImageRasterizationKind::DecodedFrame;
+            image.image_frame = &decoded_frame.frame;
+            image.scaling_mode = CSS::to_gfx_scaling_mode(request.image_rendering, decoded_frame.natural_size, request.dest_rect.to_rounded<int>().size());
+        },
+        [&](ImagePaint::VectorImage const& vector_image) {
+            image.kind = Layout::RustFFI::FfiImageRasterizationKind::VectorImage;
+            image.vector_image_host = vector_image.host;
+            image.vector_image_key = vector_image_key_to_ffi(vector_image.key);
+            image.vector_image_size = vector_image.list_size;
+        },
+        [&](ImagePaint::Gradient const& gradient) {
+            image.kind = Layout::RustFFI::FfiImageRasterizationKind::Gradient;
+            image.gradient_style_value = gradient.style_value->rust_style_value_data();
+            image.gradient_tile_size = request.dest_rect.size().to_type<CSSPixels>();
+            image.gradient_stop_color_resolution_style = &gradient_stop_color_resolution_style;
+        });
+    return compositor_host.rasterize_image(image, move(target));
+}
+
+bool rasterize_image_frame(Compositor::CompositorHost const& compositor_host, Gfx::DecodedImageFrame const& frame, Gfx::FloatRect const& dest_rect, Gfx::ScalingMode scaling_mode, NonnullRefPtr<Gfx::Bitmap> target)
+{
+    Layout::RustFFI::FfiImageRasterization image {};
+    image.kind = Layout::RustFFI::FfiImageRasterizationKind::DecodedFrame;
+    image.dest_rect = dest_rect;
+    image.device_pixels_per_css_pixel = 1;
+    image.image_frame = &frame;
+    image.scaling_mode = scaling_mode;
+    return compositor_host.rasterize_image(image, move(target));
+}
+
+}

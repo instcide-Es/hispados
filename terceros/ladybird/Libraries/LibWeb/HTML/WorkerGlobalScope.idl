@@ -1,0 +1,19 @@
+// https://html.spec.whatwg.org/multipage/workers.html#workerglobalscope
+[Exposed=Worker]
+interface WorkerGlobalScope : EventTarget {
+    readonly attribute WorkerGlobalScope self;
+    readonly attribute WorkerLocation location;
+    readonly attribute WorkerNavigator navigator;
+    // FIXME: urls should be (TrustedScriptURL or USVString).
+    undefined importScripts(USVString... urls);
+
+    attribute OnErrorEventHandler onerror;
+    attribute EventHandler onlanguagechange;
+    attribute EventHandler onoffline;
+    attribute EventHandler ononline;
+    attribute EventHandler onrejectionhandled;
+    attribute EventHandler onunhandledrejection;
+};
+
+WorkerGlobalScope includes FontFaceSource;
+WorkerGlobalScope includes WindowOrWorkerGlobalScope;

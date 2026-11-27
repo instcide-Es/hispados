@@ -1,0 +1,231 @@
+/*
+ * Copyright (c) 2023, Sam Atkins <atkinssj@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/Array.h>
+#include <AK/Base64.h>
+#include <AK/CharacterTypes.h>
+#include <AK/Find.h>
+#include <AK/GenericLexer.h>
+#include <AK/StringBuilder.h>
+#include <AK/Vector.h>
+#include <LibCrypto/Hash/Hash.h>
+#include <LibWeb/SRI/SRI.h>
+#include <LibWebCommon/Infra/CharacterTypes.h>
+
+namespace Web::SRI {
+
+constexpr Array supported_hash_functions {
+    // These are sorted by strength, low to high.
+    // NOTE: We are specifically told to refuse MD5 and SHA1.
+    //       https://w3c.github.io/webappsec-subresource-integrity/#hash-functions
+    "sha256"sv,
+    "sha384"sv,
+    "sha512"sv,
+};
+
+// https://w3c.github.io/webappsec-subresource-integrity/#valid-sri-hash-algorithm-token
+static bool is_valid_sri_hash_algorithm_token(Utf16View string)
+{
+    // A string is a valid SRI hash algorithm token if its ASCII lowercase is contained in the valid SRI hash algorithm
+    // token set.
+    for (auto supported_hash_function : supported_hash_functions) {
+        if (string.equals_ignoring_ascii_case(supported_hash_function))
+            return true;
+    }
+    return false;
+}
+
+// https://w3c.github.io/webappsec-subresource-integrity/#getprioritizedhashfunction
+static StringView get_prioritized_hash_function(StringView a, StringView b)
+{
+    if (a == b)
+        return ""sv;
+
+    auto a_priority = supported_hash_functions.first_index_of(a).value();
+    auto b_priority = supported_hash_functions.first_index_of(b).value();
+    if (a_priority > b_priority)
+        return a;
+    return b;
+}
+
+// https://w3c.github.io/webappsec-subresource-integrity/#apply-algorithm-to-response
+ErrorOr<String> apply_algorithm_to_bytes(StringView algorithm, ByteBuffer const& bytes)
+{
+    auto hash_kind = [&] {
+        if (algorithm == "sha256"sv)
+            return Crypto::Hash::HashKind::SHA256;
+        if (algorithm == "sha384"sv)
+            return Crypto::Hash::HashKind::SHA384;
+        if (algorithm == "sha512"sv)
+            return Crypto::Hash::HashKind::SHA512;
+        VERIFY_NOT_REACHED();
+    }();
+
+    // 1. Let result be the result of applying algorithm to bytes.
+    auto result = Crypto::Hash::digest(hash_kind, bytes);
+
+    // 2. Return the result of base64 encoding result.
+    return encode_base64(result.bytes());
+}
+
+// https://w3c.github.io/webappsec-subresource-integrity/#parse-metadata
+ErrorOr<Vector<Metadata>> parse_metadata(Utf16View metadata)
+{
+    // 1. Let result be the empty set.
+    Vector<Metadata> result;
+
+    // 2. For each item returned by splitting metadata on spaces:
+    // AD-HOC: "spaces" is undefined, so split on ASCII whitespace.
+    //         https://github.com/w3c/webappsec-subresource-integrity/issues/84
+    Utf16GenericLexer lexer { metadata };
+    while (!lexer.is_eof()) {
+        lexer.ignore_while(Infra::is_ascii_whitespace);
+        auto item = lexer.consume_until(Infra::is_ascii_whitespace);
+        if (item.is_empty())
+            continue;
+
+        // 1. Let expression-and-options be the result of splitting item on U+003F (?).
+        // 2. Let algorithm-expression be expression-and-options[0].
+        auto algorithm_expression = item.substring_view(0, item.find_code_unit_offset(u'?').value_or(item.length_in_code_units()));
+
+        // 3. Let base64-value be the empty string.
+        Utf16View base64_value;
+
+        // 4. Let algorithm-and-value be the result of splitting algorithm-expression on U+002D (-).
+        // 5. Let algorithm be algorithm-and-value[0].
+        auto separator = algorithm_expression.find_code_unit_offset(u'-');
+        auto algorithm = algorithm_expression.substring_view(0, separator.value_or(algorithm_expression.length_in_code_units()));
+
+        // 6. If algorithm is not a valid SRI hash algorithm token, then continue.
+        if (!is_valid_sri_hash_algorithm_token(algorithm))
+            continue;
+
+        // 7. If algorithm-and-value[1] exists, set base64-value to algorithm-and-value[1].
+        // INTEROP: A base64url-encoded value contains "-" itself, so like other engines, take everything after the
+        //          first "-" as the value.
+        if (separator.has_value())
+            base64_value = algorithm_expression.substring_view(*separator + 1);
+
+        // NB: Integrity metadata uses CSP's base64-value grammar: at least one alphabet character and at most two
+        //     trailing padding characters. https://w3c.github.io/webappsec-csp/#grammardef-base64-value
+        // INTEROP: Firefox validates this grammar; Chromium only checks for an empty digest or invalid alphabet characters.
+        auto base64_data = base64_value;
+        for (size_t padding = 0; padding < 2 && base64_data.ends_with(u'='); ++padding)
+            base64_data = base64_data.substring_view(0, base64_data.length_in_code_units() - 1);
+        if (base64_data.is_empty() || !all_of(base64_data, [](u32 character) {
+                return is_ascii_alphanumeric(character) || character == '+' || character == '/' || character == '-'
+                    || character == '_';
+            }))
+            continue;
+
+        // 8. Let metadata be the ordered map «["alg" → algorithm, "val" → base64-value]».
+        //    Note: Since no options are defined (see the §3.1 Integrity metadata), a corresponding entry is not set in metadata.
+        //    If options are defined in a future version, expression-and-options[1] can be utilized as options.
+        // AD-HOC: Store algorithm in ASCII lowercase, since later steps look it up in the valid SRI hash algorithm token
+        //         set, which only contains lowercase tokens.
+        auto metadata = Metadata {
+            .algorithm = algorithm.to_ascii_lowercase().to_utf8(),
+            .base64_value = TRY(base64_value.to_utf8()),
+            .options = {},
+        };
+
+        // 9. Append metadata to result.
+        TRY(result.try_append(move(metadata)));
+    }
+
+    // 3. Return result.
+    return result;
+}
+
+// https://w3c.github.io/webappsec-subresource-integrity/#get-the-strongest-metadata
+ErrorOr<Vector<Metadata>> get_strongest_metadata_from_set(Vector<Metadata> const& set)
+{
+    // 1. Let result be the empty set and strongest be the empty string.
+    Vector<Metadata> result;
+    Optional<Metadata> strongest;
+
+    // 2. For each item in set:
+    for (auto const& item : set) {
+        // 1. If result is the empty set, add item to result and set strongest to item, skip to the next item.
+        if (result.is_empty()) {
+            TRY(result.try_append(item));
+            strongest = item;
+            continue;
+        }
+
+        // 2. Let currentAlgorithm be the alg component of strongest.
+        auto& current_algorithm = strongest->algorithm;
+
+        // 3. Let newAlgorithm be the alg component of item.
+        auto& new_algorithm = item.algorithm;
+
+        // 4. If the result of getPrioritizedHashFunction(currentAlgorithm, newAlgorithm) is the empty string, add item to result.
+        auto prioritized_hash_function = get_prioritized_hash_function(current_algorithm, new_algorithm);
+        if (prioritized_hash_function.is_empty()) {
+            TRY(result.try_append(item));
+        }
+        //    If the result is newAlgorithm, set strongest to item, set result to the empty set, and add item to result.
+        else if (prioritized_hash_function == new_algorithm) {
+            strongest = item;
+            result.clear_with_capacity();
+            TRY(result.try_append(item));
+        }
+    }
+
+    // 3. Return result.
+    return result;
+}
+
+// Converts a base64 or base64url-encoded value to base64 without padding, so values in either encoding compare equal.
+static String normalize_base64_value(StringView value)
+{
+    StringBuilder builder;
+    for (auto character : value.trim("="sv, TrimMode::Right)) {
+        if (character == '-')
+            builder.append('+');
+        else if (character == '_')
+            builder.append('/');
+        else
+            builder.append(character);
+    }
+    return builder.to_string_without_validation();
+}
+
+// https://w3c.github.io/webappsec-subresource-integrity/#does-response-match-metadatalist
+ErrorOr<bool> do_bytes_match_metadata_list(ByteBuffer const& bytes, Utf16View metadata_list)
+{
+    // 1. Let parsedMetadata be the result of parsing metadataList.
+    auto parsed_metadata = TRY(parse_metadata(metadata_list));
+
+    // 2. If parsedMetadata is empty set, return true.
+    if (parsed_metadata.is_empty())
+        return true;
+
+    // 3. Let metadata be the result of getting the strongest metadata from parsedMetadata.
+    auto metadata = TRY(get_strongest_metadata_from_set(parsed_metadata));
+
+    // 4. For each item in metadata:
+    for (auto const& item : metadata) {
+        // 1. Let algorithm be the item["alg"].
+        auto& algorithm = item.algorithm;
+
+        // 2. Let expectedValue be the item["val"].
+        auto& expected_value = item.base64_value;
+
+        // 3. Let actualValue be the result of applying algorithm to bytes.
+        auto actual_value = TRY(apply_algorithm_to_bytes(algorithm, bytes));
+
+        // 4. If actualValue is a case-sensitive match for expectedValue, return true.
+        // INTEROP: Other engines also accept an expectedValue that is base64url-encoded or that lacks its padding.
+        if (normalize_base64_value(actual_value) == normalize_base64_value(expected_value))
+            return true;
+    }
+
+    // 5. Return false.
+    return false;
+}
+
+}

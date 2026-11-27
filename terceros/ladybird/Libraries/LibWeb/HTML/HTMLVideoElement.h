@@ -1,0 +1,143 @@
+/*
+ * Copyright (c) 2020, the SerenityOS developers.
+ * Copyright (c) 2026, Gregory Bertilson <gregory@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Optional.h>
+#include <LibGfx/DecodedImageFrame.h>
+#include <LibGfx/Forward.h>
+#include <LibWeb/DOM/DocumentLoadEventDelayer.h>
+#include <LibWeb/Forward.h>
+#include <LibWeb/HTML/HTMLMediaElement.h>
+#include <LibWeb/WebIDL/ExceptionOr.h>
+
+namespace Web::HTML {
+
+struct VideoFrame {
+    RefPtr<Gfx::Bitmap> frame;
+    double position { 0.0 };
+};
+
+class HTMLVideoElement final : public HTMLMediaElement {
+    WEB_WRAPPABLE(HTMLVideoElement, HTMLMediaElement);
+    GC_DECLARE_ALLOCATOR(HTMLVideoElement);
+
+public:
+    virtual ~HTMLVideoElement() override;
+
+    void set_intrinsic_video_dimensions(Optional<Gfx::Size<u32>>);
+    u32 video_width() const;
+    u32 video_height() const;
+
+    virtual void update_representation() override;
+    Optional<Gfx::Size<u32>> natural_media_size() const;
+    Optional<CSSPixelSize> natural_element_size() const;
+
+    Optional<Gfx::DecodedImageFrame> const& poster_frame() const { return m_poster_frame; }
+
+    // https://html.spec.whatwg.org/multipage/media.html#the-video-element:the-video-element-7
+    // NB: We combine the values of...
+    //      - The last frame of the video to have been rendered
+    //      - The frame of video corresponding to the current playback position
+    //     ...into the value of VideoFrame below, as the playback system itself implements
+    //     the details of the selection of a video frame to match the specification in this
+    //     respect.
+    enum class Representation : u8 {
+        VideoFrame,
+        FirstVideoFrame,
+        PosterFrame,
+        TransparentBlack,
+    };
+    Representation current_representation() const;
+
+    GC::Ref<WebIDL::Promise> request_picture_in_picture();
+    // Whether requestPictureInPicture() would enter Picture-in-Picture if it were given a user activation.
+    bool can_enter_picture_in_picture() const;
+
+    GC::Ptr<PictureInPicture::PictureInPictureWindow> picture_in_picture_window() const { return m_picture_in_picture_window; }
+    void set_picture_in_picture_window(GC::Ptr<PictureInPicture::PictureInPictureWindow> window) { m_picture_in_picture_window = window; }
+
+    bool has_pending_picture_in_picture_promise(WebIDL::Promise const&) const;
+    bool take_pending_picture_in_picture_promise(WebIDL::Promise const&);
+
+    // The element whose frames this element shows in place of its own, such as in a Picture-in-Picture window.
+    GC::Ptr<HTMLVideoElement> visual_source() const { return m_visual_source; }
+    void set_visual_source(GC::Ptr<HTMLVideoElement>);
+    void for_each_visual_clone(Function<void(HTMLVideoElement&)> const&) const;
+    void clear_visual_clones();
+
+    GC::Ref<VideoPlaybackQuality> get_video_playback_quality();
+
+    WebIDL::UnsignedLong request_video_frame_callback(GC::Ref<WebIDL::CallbackType>);
+    void cancel_video_frame_callback(WebIDL::UnsignedLong handle);
+    bool has_video_frame_request_callbacks() const { return !m_list_of_video_frame_request_callbacks.is_empty(); }
+    void run_the_video_frame_request_callbacks(HighResolutionTime::DOMHighResTimeStamp now);
+    virtual void request_rendering_update_for_video_frame_callbacks() override;
+
+    WebIDL::CallbackType* onenterpictureinpicture();
+    void set_onenterpictureinpicture(WebIDL::CallbackType*);
+    WebIDL::CallbackType* onleavepictureinpicture();
+    void set_onleavepictureinpicture(WebIDL::CallbackType*);
+
+private:
+    HTMLVideoElement(DOM::Document&, DOM::QualifiedName);
+    virtual void finalize() override;
+    virtual void visit_edges(Cell::Visitor&) override;
+    virtual void adopted_from(DOM::Document&) override;
+
+    virtual void attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_) override;
+
+    // https://html.spec.whatwg.org/multipage/media.html#the-video-element:dimension-attributes
+    virtual bool supports_dimension_attributes() const override { return true; }
+
+    virtual bool is_html_video_element() const override { return true; }
+    virtual bool is_shown_elsewhere() const override;
+    virtual HTMLMediaElement& media_element_for_controls() override;
+
+    virtual CSS::ElementBoxKind box_kind() const override;
+
+    WebIDL::ExceptionOr<void> determine_element_poster_frame(Optional<Utf16String> const& poster);
+    void run_disable_picture_in_picture_steps();
+
+    GC::Ptr<HTML::VideoTrack> m_video_track;
+    VideoFrame m_current_frame;
+    Optional<Gfx::DecodedImageFrame> m_poster_frame;
+
+    Optional<Gfx::Size<u32>> m_intrinsic_video_dimensions;
+    Optional<CSSPixelSize> m_natural_dimensions;
+    Optional<Representation> m_representation;
+    Optional<u64> m_represented_poster_frame_id;
+
+    GC::Ptr<Fetch::Infrastructure::FetchController> m_fetch_controller;
+    Optional<DOM::DocumentLoadEventDelayer> m_load_event_delayer;
+
+    GC::Ptr<PictureInPicture::PictureInPictureWindow> m_picture_in_picture_window;
+    Vector<GC::Ref<WebIDL::Promise>> m_pending_picture_in_picture_promises;
+
+    GC::Ptr<HTMLVideoElement> m_visual_source;
+    Vector<GC::Weak<HTMLVideoElement>> m_visual_clones;
+
+    struct VideoFrameRequestCallback {
+        WebIDL::UnsignedLong handle { 0 };
+        GC::Ptr<WebIDL::CallbackType> callback;
+    };
+    // https://wicg.github.io/video-rvfc/#list-of-video-frame-request-callbacks
+    Vector<VideoFrameRequestCallback> m_list_of_video_frame_request_callbacks;
+    // NB: The callbacks being run, which cancelVideoFrameCallback() also cancels by clearing their callback.
+    Vector<VideoFrameRequestCallback> m_running_video_frame_request_callbacks;
+    // https://wicg.github.io/video-rvfc/#last-presented-frame-identifier
+    u64 m_last_presented_frame_identifier { 0 };
+};
+
+}
+
+namespace Web::DOM {
+
+template<>
+inline bool Node::fast_is<HTML::HTMLVideoElement>() const { return is_html_video_element(); }
+
+}

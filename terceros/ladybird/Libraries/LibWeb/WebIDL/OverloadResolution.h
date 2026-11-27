@@ -1,0 +1,33 @@
+/*
+ * Copyright (c) 2022, Sam Atkins <atkinssj@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Optional.h>
+#include <AK/Span.h>
+#include <AK/Vector.h>
+#include <LibGC/RootVector.h>
+#include <LibJS/Runtime/VM.h>
+#include <LibWeb/Export.h>
+#include <LibWeb/WebIDL/OverloadTypes.h>
+
+namespace Web::WebIDL {
+
+struct ResolvedOverload {
+    // Corresponds to "the special value “missing”" in the overload resolution algorithm.
+    struct Missing {
+        GC_HOLDS_NO_CELL_EDGES;
+    };
+    using Argument = Variant<JS::Value, Missing>;
+
+    int callable_id;
+    GC::RootVector<Argument> arguments;
+};
+
+// https://webidl.spec.whatwg.org/#es-overloads
+WEB_API JS::ThrowCompletionOr<ResolvedOverload> resolve_overload(JS::VM&, EffectiveOverloadSet&, ReadonlySpan<StringView> interface_dictionaries);
+
+}

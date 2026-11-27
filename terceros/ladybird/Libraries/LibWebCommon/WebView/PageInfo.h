@@ -1,0 +1,24 @@
+/*
+ * Copyright (c) 2024, Tim Flynn <trflynn89@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/EnumBits.h>
+
+namespace WebView {
+
+enum class PageInfoType {
+    Text = 1 << 0,
+    LayoutTree = 1 << 2,
+    GCGraph = 1 << 4,
+    StackingContextTree = 1 << 5,
+    AccessibilityTree = 1 << 6,
+    DisplayList = 1 << 7,
+};
+
+AK_ENUM_BITWISE_OPERATORS(PageInfoType);
+
+}

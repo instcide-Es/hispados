@@ -1,0 +1,370 @@
+/*
+ * Copyright (c) 2023, Kenneth Myhra <kennethmyhra@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/Random.h>
+#include <AK/StringBuilder.h>
+#include <AK/Utf16StringBuilder.h>
+#include <AK/Utf8View.h>
+#include <LibJS/HostClassBuilder.h>
+#include <LibTextCodec/Encoder.h>
+#include <LibWeb/FileAPI/File.h>
+#include <LibWeb/HTML/FormControlInfrastructure.h>
+#include <LibWeb/HTML/FormDataEvent.h>
+#include <LibWeb/HTML/HTMLButtonElement.h>
+#include <LibWeb/HTML/HTMLDataListElement.h>
+#include <LibWeb/HTML/HTMLFormElement.h>
+#include <LibWeb/HTML/HTMLInputElement.h>
+#include <LibWeb/HTML/HTMLOptionElement.h>
+#include <LibWeb/HTML/HTMLSelectElement.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HighResolutionTime/TimeOrigin.h>
+
+namespace Web::HTML {
+
+extern "C" {
+
+// Defined in Bindings/Rust/src/xhr/exports.rs.
+XHR::FormDataEntryABI web_html_create_an_entry(JSVM*, FlatPtr name, FileAPI::Blob* blob, FlatPtr string);
+}
+
+// https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#create-an-entry
+XHR::FormDataEntry create_entry(Utf16View name, Variant<GC::Ref<FileAPI::Blob>, Utf16String> const& value)
+{
+    auto* blob = value.visit([](GC::Ref<FileAPI::Blob> blob) { return blob.ptr(); }, [](Utf16String const&) -> FileAPI::Blob* { return nullptr; });
+    auto string = value.visit([](GC::Ref<FileAPI::Blob>) { return Utf16String {}; }, [](Utf16String const& string) { return string; });
+    return XHR::form_data_entry_from_abi(web_html_create_an_entry(JS::HostABI::vm_to_abi(JS::VM::the()), Utf16String::from_utf16(name).into_raw(), blob, move(string).into_raw()));
+}
+
+// https://html.spec.whatwg.org/multipage/custom-elements.html#face-entry-construction
+static void construct_face_entry(GC::Ref<HTMLElement const> form_associated_custom_element, GC::RootVector<XHR::FormDataEntry>& entry_list)
+{
+    // 1. If element's submission value is a list of entries, then append each item of element's submission value to
+    //    entry list, and return.
+    // NOTE: In this case, user agent does not refer to the name content attribute value. An implementation of
+    //       form-associated custom element is responsible to decide names of entries. They can be the name
+    //       content attribute value, they can be strings based on the name content attribute value, or they
+    //       can be unrelated to the name content attribute.
+    auto const& submission_value = form_associated_custom_element->face_submission_value();
+    if (auto const* form_data_entries = submission_value.get_pointer<GC::RootVector<XHR::FormDataEntry>>()) {
+        entry_list.extend(*form_data_entries);
+        return;
+    }
+
+    // 2. If the element does not have a name attribute specified, or its name attribute's value is the empty string, then return.
+    if (!form_associated_custom_element->name().has_value() || form_associated_custom_element->name()->is_empty())
+        return;
+
+    // 3. If the element's submission value is not null, create an entry with the name attribute value and the submission value, and append it to entry list.
+    if (submission_value.has<Empty>())
+        return;
+
+    auto name = form_associated_custom_element->name().value();
+    auto entry_submission_value = submission_value.visit(
+        [](GC::Ref<FileAPI::File> file) -> Variant<GC::Ref<FileAPI::Blob>, Utf16String> {
+            return GC::Ref<FileAPI::Blob> { file };
+        },
+        [](Utf16String const& string) -> Variant<GC::Ref<FileAPI::Blob>, Utf16String> {
+            return string;
+        },
+        [](auto&) -> Variant<GC::Ref<FileAPI::Blob>, Utf16String> {
+            // The other types were handled above.
+            VERIFY_NOT_REACHED();
+        });
+
+    auto entry = create_entry(name.view(), entry_submission_value);
+    entry_list.append(entry);
+}
+
+// https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#constructing-the-form-data-set
+Optional<GC::RootVector<XHR::FormDataEntry>> construct_entry_list(HTMLFormElement& form, GC::Ptr<HTMLElement> submitter, Optional<Utf16String> encoding)
+{
+    // 1. If form's constructing entry list is true, then return null.
+    if (form.constructing_entry_list())
+        return OptionalNone {};
+
+    // 2. Set form's constructing entry list to true.
+    form.set_constructing_entry_list(true);
+
+    // 3. Let controls be a list of all the submittable elements whose form owner is form, in tree order.
+    auto controls = form.get_submittable_elements();
+
+    // 4. Let entry list be a new empty entry list.
+    GC::RootVector<XHR::FormDataEntry> entry_list;
+
+    // 5. For each element field in controls, in tree order:
+    for (auto const& control : controls) {
+        auto const& control_as_form_associated_element = as<FormAssociatedElement>(*control);
+
+        // 1. If any of the following is true, then continue:
+        // - The field element has a datalist element ancestor.
+        if (control->first_ancestor_of_type<HTML::HTMLDataListElement>())
+            continue;
+        // - The field element is disabled.
+        if (control->is_actually_disabled())
+            continue;
+        // - The field element is a button but it is not submitter.
+        if (control_as_form_associated_element.is_button() && control.ptr() != submitter.ptr())
+            continue;
+        // - The field element is an input element whose type attribute is in the Checkbox state and whose checkedness is false.
+        // - The field element is an input element whose type attribute is in the Radio Button state and whose checkedness is false.
+        if (auto* input_element = as_if<HTMLInputElement>(*control)) {
+            if ((input_element->type_state() == HTMLInputElement::TypeAttributeState::Checkbox || input_element->type_state() == HTMLInputElement::TypeAttributeState::RadioButton) && !input_element->checked())
+                continue;
+        }
+
+        // 2. If the field element is an input element whose type attribute is in the Image Button state, then:
+        if (auto* input_element = as_if<HTML::HTMLInputElement>(*control); input_element && input_element->type_state() == HTMLInputElement::TypeAttributeState::ImageButton) {
+            // 1. If the field element is not submitter, then continue.
+            if (input_element != submitter.ptr())
+                continue;
+
+            // 2. If the field element has a name attribute specified and its value is not the empty string, let name be
+            //    that value followed by U+002E (.). Otherwise, let name be the empty string.
+            Utf16String name;
+            if (auto value = input_element->get_attribute(AttributeNames::name); value.has_value() && !value->is_empty())
+                name = Utf16String::formatted("{}.", *value);
+
+            // 3. Let namex be the concatenation of name and U+0078 (x).
+            auto name_x = Utf16String::formatted("{}x", name);
+
+            // 4. Let namey be the concatenation of name and U+0079 (y).
+            auto name_y = Utf16String::formatted("{}y", name);
+
+            // 5. Let (x, y) be the selected coordinate.
+            auto [x, y] = input_element->selected_coordinate();
+
+            // 6. Create an entry with namex and x, and append it to entry list.
+            entry_list.append(create_entry(name_x.utf16_view(), Utf16String::number(x)));
+
+            // 7. Create an entry with namey and y, and append it to entry list.
+            entry_list.append(create_entry(name_y.utf16_view(), Utf16String::number(y)));
+
+            // 8. Continue.
+            continue;
+        }
+
+        // 3. If the field is a form-associated custom element, then perform the entry construction algorithm given field and entry list, then continue.
+        if (control_as_form_associated_element.form_associated_element_to_html_element().is_form_associated_custom_element()) {
+            construct_face_entry(control_as_form_associated_element.form_associated_element_to_html_element(), entry_list);
+            continue;
+        }
+
+        // 4. If either the field element does not have a name attribute specified, or its name attribute's value is the empty string, then continue.
+        if (!control->name().has_value() || control->name()->is_empty())
+            continue;
+
+        // 5. Let name be the value of the field element's name attribute.
+        auto name = control->name().value();
+
+        // 6. If the field element is a select element, then for each option element in the select element's list of options whose selectedness is true and that is not disabled, create an entry with name and the value of the option element, and append it to entry list.
+        if (auto* select_element = as_if<HTMLSelectElement>(*control)) {
+            for (auto const& option_element : select_element->list_of_options()) {
+                if (option_element->selected() && !option_element->disabled()) {
+                    entry_list.append(create_entry(name.view(), option_element->value()));
+                }
+            }
+        }
+        // 7. Otherwise, if the field element is an input element whose type attribute is in the Checkbox state or the Radio Button state, then:
+        else if (auto* checkbox_or_radio_element = as_if<HTMLInputElement>(*control); checkbox_or_radio_element && (checkbox_or_radio_element->type_state() == HTMLInputElement::TypeAttributeState::Checkbox || checkbox_or_radio_element->type_state() == HTMLInputElement::TypeAttributeState::RadioButton) && checkbox_or_radio_element->checked()) {
+            //  1. If the field element has a value attribute specified, then let value be the value of that attribute; otherwise, let value be the string "on".
+            auto value = checkbox_or_radio_element->value();
+            if (value.is_empty())
+                value = "on"_utf16;
+
+            // 2. Create an entry with name and value, and append it to entry list.
+            auto checkbox_or_radio_element_name = checkbox_or_radio_element->name();
+            entry_list.append(create_entry(checkbox_or_radio_element_name->view(), value));
+        }
+        // 8. Otherwise, if the field element is an input element whose type attribute is in the File Upload state, then:
+        else if (auto* file_element = as_if<HTMLInputElement>(*control); file_element && file_element->type_state() == HTMLInputElement::TypeAttributeState::FileUpload) {
+            // 1. If there are no selected files, then create an entry with name and a new File object with an empty name, application/octet-stream as type, and an empty body, and append it to entry list.
+            if (file_element->files()->length() == 0) {
+                auto file = FileAPI::File::create({}, {}, "application/octet-stream"_utf16);
+                entry_list.append(create_entry(name.view(), Variant<GC::Ref<FileAPI::Blob>, Utf16String> { GC::Ref<FileAPI::Blob> { file } }));
+            }
+            // 2. Otherwise, for each file in selected files, create an entry with name and a File object representing the file, and append it to entry list.
+            else {
+                for (size_t i = 0; i < file_element->files()->length(); i++) {
+                    auto file = GC::Ref { *file_element->files()->item(i) };
+                    entry_list.append(create_entry(name.view(), Variant<GC::Ref<FileAPI::Blob>, Utf16String> { GC::Ref<FileAPI::Blob> { file } }));
+                }
+            }
+        }
+        // 9. Otherwise, if the field element is an input element whose type attribute is in the Hidden state and name is an ASCII case-insensitive match for "_charset_":
+        else if (auto* hidden_input = as_if<HTMLInputElement>(*control); hidden_input && hidden_input->type_state() == HTMLInputElement::TypeAttributeState::Hidden && name.equals_ignoring_ascii_case(u"_charset_"sv)) {
+            // 1. Let charset be the name of encoding if encoding is given, and "UTF-8" otherwise.
+            auto charset = encoding.value_or("UTF-8"_utf16);
+
+            // 2. Create an entry with name and charset, and append it to entry list.
+            entry_list.append(create_entry(name.view(), charset));
+        }
+        // 10. Otherwise, create an entry with name and the value of the field element, and append it to entry list.
+        else {
+            entry_list.append(create_entry(name.view(), control_as_form_associated_element.form_value()));
+        }
+
+        // 11. If the element has a dirname attribute, that attribute's value is not the empty string, and the element is an auto-directionality form-associated element:
+        if (auto attribute = control->get_attribute(HTML::AttributeNames::dirname); attribute.has_value() && !attribute.value().is_empty() && control->is_auto_directionality_form_associated_element()) {
+            // 1. Let dirname be the value of the element's dirname attribute.
+            auto dirname = attribute.value();
+
+            // 2. Let dir be the string "ltr" if the directionality of the element is 'ltr', and "rtl" otherwise (i.e., when the directionality of the element is 'rtl').
+            Utf16String dir = control->directionality() == DOM::Element::Directionality::Ltr ? "ltr"_utf16 : "rtl"_utf16;
+
+            // 3. Create an entry with dirname and dir, and append it to entry list.
+            entry_list.append(create_entry(dirname.utf16_view(), dir));
+        }
+    }
+    // 6. Let form data be a new FormData object associated with entry list.
+    auto form_data = XHR::FormData::create(move(entry_list));
+
+    // 7. Fire an event named formdata at form using FormDataEvent, with the formData attribute initialized to form data and the bubbles attribute initialized to true.
+    auto form_data_event = create_form_data_event(relevant_realm(form), HTML::EventNames::formdata, { .bubbles = true }, *form_data);
+    form.dispatch_event(form_data_event);
+
+    // 8. Set form's constructing entry list to false.
+    form.set_constructing_entry_list(false);
+
+    // 9. Return a clone of entry list.
+    return form_data->entry_list();
+}
+
+ErrorOr<Utf16String> normalize_line_breaks(Utf16View value)
+{
+    // Replace every occurrence of U+000D (CR) not followed by U+000A (LF), and every occurrence of U+000A (LF) not
+    // preceded by U+000D (CR) by a string consisting of a U+000D (CR) and U+000A (LF).
+    Utf16StringBuilder builder { value.length_in_code_units() };
+    size_t chunk_start = 0;
+    for (size_t i = 0; i < value.length_in_code_units();) {
+        auto code_unit = value.code_unit_at(i);
+        if (code_unit != '\r' && code_unit != '\n') {
+            ++i;
+            continue;
+        }
+
+        builder.append(value.substring_view(chunk_start, i - chunk_start));
+        if ((code_unit == '\r' && (i + 1 == value.length_in_code_units() || value.code_unit_at(i + 1) != '\n')) || code_unit == '\n') {
+            builder.append("\r\n"_utf16);
+            ++i;
+        } else {
+            builder.append(value.substring_view(i, 2));
+            i += 2;
+        }
+        chunk_start = i;
+    }
+    builder.append(value.substring_view(chunk_start));
+    return builder.to_string();
+}
+
+// https://encoding.spec.whatwg.org/#encode
+ErrorOr<ByteBuffer> encode(Utf16View input, StringView encoding)
+{
+    // 1. Let encoder be the result of getting an encoder from encoding.
+    auto encoder = TextCodec::encoder_for(encoding);
+    VERIFY(encoder.has_value());
+
+    // 2. Process a queue with encoder, ioQueue, output, and "html".
+    auto input_utf8 = TRY(input.to_utf8());
+    StringBuilder output;
+    TRY(encoder->process(Utf8View { input_utf8 }, [&](ReadonlyBytes bytes) { return output.try_append(bytes); }, [&](u32 code_point) { return output.try_appendff("&#{};", code_point); }));
+
+    // 3. Return output.
+    return output.to_byte_buffer();
+}
+
+// https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#multipart/form-data-encoding-algorithm
+ErrorOr<SerializedFormData> serialize_to_multipart_form_data(GC::RootVector<XHR::FormDataEntry> const& entry_list, StringView encoding)
+{
+    // For field names and filenames for file fields, the result of the encoding in the previous bullet point must be
+    // escaped by replacing any 0x0A (LF) bytes with the byte sequence `%0A`, 0x0D (CR) with `%0D` and 0x22 (") with `%22`.
+    // The user agent must not perform any other escapes.
+    auto escape_line_feed_carriage_return_double_quote = [](ReadonlyBytes value) -> ErrorOr<ByteBuffer> {
+        StringBuilder builder { value.size() };
+        size_t chunk_start = 0;
+        for (size_t i = 0; i < value.size(); ++i) {
+            auto byte = value[i];
+            if (byte != '\r' && byte != '\n' && byte != '"')
+                continue;
+
+            TRY(builder.try_append(value.slice(chunk_start, i - chunk_start)));
+            switch (byte) {
+            case '\r':
+                TRY(builder.try_append("%0D"sv));
+                break;
+            case '\n':
+                TRY(builder.try_append("%0A"sv));
+                break;
+            case '"':
+                TRY(builder.try_append("%22"sv));
+                break;
+            default:
+                VERIFY_NOT_REACHED();
+            }
+            chunk_start = i + 1;
+        }
+        TRY(builder.try_append(value.slice(chunk_start)));
+        return builder.to_byte_buffer();
+    };
+
+    // The boundary used by the user agent in generating the return value of this algorithm is the multipart/form-data boundary string.
+    auto boundary = Utf16String::formatted("---------------------------{}", get_random<u64>());
+    auto boundary_utf8 = boundary.to_utf8();
+    StringBuilder builder;
+    // 1. For each entry of entry list:
+    for (auto const& entry : entry_list) {
+        TRY(builder.try_append(TRY(String::formatted("--{}\r\n", boundary_utf8))));
+
+        // Replace every occurrence of U+000D (CR) not followed by U+000A (LF), and every occurrence of U+000A (LF) not preceded by U+000D (CR) by a string consisting of a U+000D (CR) and U+000A (LF).
+        auto normalized_name = TRY(normalize_line_breaks(entry.name.utf16_view()));
+        // Field names, field values for non-file fields, and filenames for file fields, in the generated multipart/form-data
+        // resource must be set to the result of encoding the corresponding entry's name or value with encoding, converted to a byte sequence.
+        auto encoded_name = TRY(encode(normalized_name.utf16_view(), encoding));
+        auto escaped_name = TRY(escape_line_feed_carriage_return_double_quote(encoded_name));
+        TRY(builder.try_append("Content-Disposition: form-data; name=\""sv));
+        TRY(builder.try_append(escaped_name));
+        TRY(builder.try_append('"'));
+
+        TRY(entry.value.visit(
+            [&](GC::Ref<FileAPI::File> file) -> ErrorOr<void> {
+                auto file_name = file->name();
+                auto encoded_filename = TRY(encode(file_name.utf16_view(), encoding));
+                auto escaped_filename = TRY(escape_line_feed_carriage_return_double_quote(encoded_filename));
+                TRY(builder.try_append("; filename=\""sv));
+                TRY(builder.try_append(escaped_filename));
+                TRY(builder.try_append("\"\r\n"sv));
+                // The parts of the generated multipart/form-data resource that correspond to file fields must have a `Content-Type` header specified.
+                // RFC7578: If the contents of a file are to be sent, the file data SHOULD be labeled with an appropriate media type, if known, or
+                //          "application/octet-stream".
+                if (!file->type().is_empty()) {
+                    auto type = file->type().to_utf8();
+                    TRY(builder.try_append(TRY(String::formatted("Content-Type: {}\r\n\r\n", type))));
+                } else {
+                    TRY(builder.try_append("Content-Type: application/octet-stream\r\n\r\n"sv));
+                }
+                TRY(builder.try_append(file->raw_bytes()));
+                TRY(builder.try_append("\r\n"sv));
+                return {};
+            },
+            [&](Utf16String const& string) -> ErrorOr<void> {
+                // Replace every occurrence of U+000D (CR) not followed by U+000A (LF), and every occurrence of U+000A (LF) not preceded by U+000D (CR) by a string consisting of a U+000D (CR) and U+000A (LF).
+                auto normalized_value = TRY(normalize_line_breaks(string.utf16_view()));
+                TRY(builder.try_append("\r\n\r\n"sv));
+                TRY(builder.try_append(TRY(encode(normalized_value.utf16_view(), encoding))));
+                TRY(builder.try_append("\r\n"sv));
+                return {};
+            }));
+    }
+    TRY(builder.try_append(TRY(String::formatted("--{}--\r\n", boundary_utf8))));
+
+    // 2. Return the byte sequence resulting from encoding the entry list using the rules described by RFC 7578, Returning Values from Forms: multipart/form-data, given the following conditions: [RFC7578]
+    auto serialized_data = TRY(builder.to_byte_buffer());
+    return SerializedFormData {
+        .boundary = move(boundary),
+        .serialized_data = move(serialized_data)
+    };
+}
+
+}

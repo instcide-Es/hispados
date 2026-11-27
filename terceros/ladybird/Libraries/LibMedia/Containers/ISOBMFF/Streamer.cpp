@@ -1,0 +1,70 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibMediaCodecs/Limits.h>
+
+#include "Streamer.h"
+
+namespace Media::ISOBMFF {
+
+Streamer::Streamer(NonnullRefPtr<MediaStreamCursor> const& stream_cursor)
+    : m_stream_cursor(stream_cursor)
+{
+}
+
+Streamer::~Streamer() = default;
+
+DecoderErrorOr<FourCC> Streamer::read_four_cc()
+{
+    return FourCC { TRY(read<u32>()) };
+}
+
+DecoderErrorOr<double> Streamer::read_fixed_point_16_16()
+{
+    return static_cast<double>(TRY(read<u32>())) / 65536.0;
+}
+
+DecoderErrorOr<String> Streamer::read_null_terminated_string(size_t maximum_size)
+{
+    if (maximum_size == 0)
+        return String {};
+    if (maximum_size > MAX_METADATA_STRING_SIZE)
+        return DecoderError::corrupted("String is too large"sv);
+    auto bytes = TRY(read_bytes(maximum_size));
+    auto length = maximum_size;
+    for (size_t i = 0; i < maximum_size; i++) {
+        if (bytes[i] == 0) {
+            length = i;
+            break;
+        }
+    }
+    // Files in the wild hold names in legacy encodings, and a name is only metadata, so it must not fail the file.
+    return String::from_utf8_with_replacement_character(StringView { bytes.data(), length });
+}
+
+DecoderErrorOr<FixedArray<u8>> Streamer::read_bytes(size_t size)
+{
+    return m_stream_cursor->read_bytes(size);
+}
+
+DecoderErrorOr<void> Streamer::skip(size_t size)
+{
+    if (size > NumericLimits<i64>::max())
+        return DecoderError::corrupted("Cannot skip past the end of the stream"sv);
+    return m_stream_cursor->skip(static_cast<i64>(size));
+}
+
+size_t Streamer::position() const
+{
+    return m_stream_cursor->position();
+}
+
+DecoderErrorOr<void> Streamer::seek_to_position(size_t position)
+{
+    return m_stream_cursor->seek_to_position(position);
+}
+
+}

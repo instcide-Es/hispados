@@ -1,0 +1,110 @@
+/*
+ * Copyright (c) 2025, Tim Ledbetter <tim.ledbetter@gmail.com>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include "SVGFEImageElement.h"
+#include <LibWeb/Bindings/SVGFEImageElement.h>
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/HTML/PotentialCORSRequest.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HTML/SharedResourceRequest.h>
+#include <LibWeb/Namespace.h>
+
+namespace Web::SVG {
+
+GC_DEFINE_ALLOCATOR(SVGFEImageElement);
+
+SVGFEImageElement::SVGFEImageElement(DOM::Document& document, DOM::QualifiedName qualified_name)
+    : SVGElement(document, qualified_name)
+{
+}
+
+void SVGFEImageElement::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    SVGFilterPrimitiveStandardAttributes::visit_edges(visitor);
+    SVGURIReferenceMixin::visit_edges(visitor);
+    visitor.visit(m_resource_request);
+    visitor.visit(m_preserve_aspect_ratio);
+}
+
+// https://drafts.fxtf.org/filter-effects/#dom-svgfeimageelement-preserveaspectratio
+GC::Ref<SVGAnimatedPreserveAspectRatio> SVGFEImageElement::preserve_aspect_ratio_for_bindings()
+{
+    if (!m_preserve_aspect_ratio)
+        m_preserve_aspect_ratio = SVGAnimatedPreserveAspectRatio::create(*this);
+    return *m_preserve_aspect_ratio;
+}
+
+void SVGFEImageElement::attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_)
+{
+    Base::attribute_changed(name, old_value, value, namespace_);
+
+    if (name == SVG::AttributeNames::href) {
+        if (namespace_ == Namespace::XLink && has_attribute_ns(Optional<Utf16FlyString> {}, name))
+            return;
+
+        auto href = value;
+        if (!namespace_.has_value() && !href.has_value())
+            href = get_attribute_ns(Namespace::XLink, SVG::AttributeNames::href);
+
+        process_href(href);
+    }
+}
+
+void SVGFEImageElement::adopted_from(DOM::Document& old_document)
+{
+    Base::adopted_from(old_document);
+
+    // NB: See process_href().
+    if (old_document.is_temporary_document_for_fragment_parsing()) {
+        auto href = get_attribute_ns(Optional<Utf16FlyString> {}, SVG::AttributeNames::href);
+        if (!href.has_value())
+            href = get_attribute_ns(Namespace::XLink, SVG::AttributeNames::href);
+        process_href(href);
+    }
+}
+
+void SVGFEImageElement::process_href(Optional<Utf16String> const& href)
+{
+    // AD-HOC: An element in a temporary document for fragment parsing does not fetch anything, so that markup parsed
+    //         into such a document, for example by the Sanitizer API, causes no network requests for elements that
+    //         are never inserted anywhere. The URL is processed once the element is adopted into another document.
+    if (document().is_temporary_document_for_fragment_parsing())
+        return;
+
+    if (!href.has_value()) {
+        m_href = {};
+        return;
+    }
+
+    m_href = document().encoding_parse_url(*href);
+    if (!m_href.has_value())
+        return;
+
+    m_resource_request = HTML::SharedResourceRequest::get_or_create(document(), *m_href, HTML::CORSSettingAttribute::NoCORS);
+    m_resource_request->add_callbacks(
+        GC::create_function(GC::Heap::the(), GC::captures(*this), [](SVGFEImageElement& self) {
+            self.document().note_svg_paint_resources_changed();
+            self.document().schedule_full_accumulated_visual_context_rebuild(Layout::RustFFI::VisualContextUpdateScope::EveryBox);
+            self.document().set_needs_repaint(Badge<SVGFEImageElement> {}, InvalidateDisplayList::PaintCommands);
+        }),
+        nullptr);
+
+    if (m_resource_request->needs_fetching()) {
+        auto request = HTML::create_potential_CORS_request(*m_href, Fetch::Infrastructure::Request::Destination::Image, HTML::CORSSettingAttribute::NoCORS);
+        request->set_client(document().relevant_settings_object().address());
+        m_resource_request->fetch_resource(request);
+    }
+}
+
+GC::Ptr<HTML::DecodedImageData> SVGFEImageElement::image_data() const
+{
+    if (!m_resource_request)
+        return {};
+    return m_resource_request->image_data();
+}
+
+}

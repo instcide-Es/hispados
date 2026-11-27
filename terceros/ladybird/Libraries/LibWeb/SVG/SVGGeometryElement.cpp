@@ -1,0 +1,276 @@
+/*
+ * Copyright (c) 2020, Matthew Olsson <mattco@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/Math.h>
+#include <LibGC/Heap.h>
+#include <LibWeb/Bindings/DOMPointReadOnly.h>
+#include <LibWeb/CSS/CSSStyleProperties.h>
+#include <LibWeb/CSS/ElementBoxKind.h>
+#include <LibWeb/CSS/RustDeclarationBlock.h>
+#include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleEngineInput.h>
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/Geometry/DOMMatrix.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HTML/Window.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
+#include <LibWeb/SVG/AttributeNames.h>
+#include <LibWeb/SVG/AttributeParsing.h>
+#include <LibWeb/SVG/SVGGeometryElement.h>
+#include <LibWeb/WebIDL/DOMException.h>
+
+namespace Web::SVG {
+
+SVGGeometryElement::SVGGeometryElement(DOM::Document& document, DOM::QualifiedName qualified_name)
+    : SVGGraphicsElement(document, move(qualified_name))
+{
+}
+
+void SVGGeometryElement::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_path_length);
+}
+
+CSS::ElementBoxKind SVGGeometryElement::box_kind() const
+{
+    return CSS::ElementBoxKind::SvgGeometry;
+}
+
+// The style of an element outside the document, where no rule reaches it: the style engine cascades its own
+// presentation attributes and inline style over the initial values, or none where the engine computes none.
+static CSS::InstalledStyle declared_only_style(Layout::BegunRead const& read, CSS::StyleComputer& style_computer, DOM::Document const& document, SVGGeometryElement& element)
+{
+    auto hints = CSS::StyleComputer::collect_presentational_hint_properties({ element });
+    Vector<CSS::Parser::ValueParserFFI::FfiDeclaredProperty> declarations;
+    declarations.ensure_capacity(hints.size());
+    for (auto const& hint : hints) {
+        declarations.unchecked_append({
+            .property_id = to_underlying(hint.property_id),
+            .important = hint.important == CSS::Important::Yes,
+            .value = hint.value->rust_style_value_data(),
+            .name = {},
+        });
+    }
+    return CSS::InstalledStyle::adopt(CSS::StyleEngineFFI::style_engine_declared_only_record(
+        style_computer.style_engine().host(),
+        &read, document.style_node_id().value(),
+        CSS::element_box_type_adjustment_facts(element),
+        CSS::StyleEngineFFI::FfiElementDeclarationKind::SvgPresentationAttribute,
+        declarations.data(),
+        declarations.size(),
+        element.inline_style_declarations()));
+}
+
+// The geometry of the element in user units, which the geometry queries such as getTotalLength() measure. It is empty
+// for an element without style.
+bool SVGGeometryElement::with_computed_values(Function<void(CSSPixelSize viewport_size, CSS::ComputedValues const&)> const& callback)
+{
+    // NB: Update layout so that the viewport size is resolved correctly
+    Layout::ForcedReadScope read { document() };
+    document().update_layout(DOM::UpdateLayoutReason::SVGPathLength);
+
+    auto viewport_size = viewport_size_for_percentage_resolution(read);
+
+    // NB: Update style for the element so that the correct computed values are used to generate the path - this is done
+    //     separately from the layout update above since it may have been skipped if the element was display: none.
+    document().update_style_for_element(*this);
+
+    if (auto computed_values = computed_style()) {
+        callback({ viewport_size.width(), viewport_size.height() }, *computed_values);
+        return true;
+    }
+
+    // NB: An element with no style is either in a subtree that is not rendered, which the style engine answers
+    //     without installing anything, or outside the document, where no rule reaches it. The engine of the window's
+    //     document computes the latter, as an element's own document may never have been styled, like the one
+    //     holding a template's contents, whose elements have no style even where they are connected.
+    auto const computes_in_own_document = style_node_id() != CSS::StyleNodeID {} && !document().created_for_appropriate_template_contents();
+    auto& style_document = computes_in_own_document ? document() : HTML::relevant_window(*this).associated_document();
+    // NB: The engine of the window's document owns that document from its first style update, which may not have run.
+    if (!computes_in_own_document)
+        style_document.update_style();
+    auto& style_computer = style_document.style_computer();
+    // The style comes from the engine of the document that computes it, as that document's read.
+    Layout::ForcedReadScope style_read { style_document };
+    auto style = computes_in_own_document
+        ? CSS::InstalledStyle { style_computer.style_engine().answer_record_demand(style_read, style_node_id(), CSS::StyleEngine::RecordDemand::ElementRead).record.host_record }
+        : declared_only_style(style_read, style_computer, style_document, *this);
+    if (!style)
+        return false;
+    auto view = style_computer.computed_style_record_view(style);
+    callback({ viewport_size.width(), viewport_size.height() }, *view);
+    return true;
+}
+
+// The shape element whose geometry `measure` measures, with what the element parses and the given computed values,
+// which Rust builds the geometry from with the same shape builders layout uses.
+template<typename Measure>
+static auto measure_geometry(SVGGeometryElement const& element, CSSPixelSize viewport_size, CSS::ComputedValues const& computed_values, Measure measure)
+{
+    // NB: The groups are laid out as a style record's are, so the shape reads them as the element's style.
+    Array<void const*, to_underlying(CSS::StyleGroupIndex::Count)> payloads;
+    for (size_t index = 0; index < payloads.size(); ++index)
+        payloads[index] = computed_values.style_group_payload(static_cast<CSS::StyleGroupIndex>(index));
+    CSS::StyleRecordGroupsOverPayloads groups { payloads, computed_values.inherited_set_values(), computed_values.reset_bits() };
+    auto points = Layout::svg_shape_points(element);
+    static_assert(sizeof(Gfx::FloatPoint) == sizeof(Layout::RustFFI::FfiFloatPoint));
+    Layout::RustFFI::FfiSvgGeometryElementShape shape {
+        .geometry = Layout::svg_geometry_facts(element),
+        .style = &groups,
+        .points = reinterpret_cast<Layout::RustFFI::FfiFloatPoint const*>(points.data()),
+        .point_count = points.size(),
+        .viewport_size = viewport_size,
+    };
+    return measure(shape);
+}
+
+Vector<PathVertex> SVGGeometryElement::equivalent_path_vertices()
+{
+    Vector<PathVertex> vertices;
+    with_computed_values([&](CSSPixelSize viewport_size, CSS::ComputedValues const& computed_values) {
+        measure_geometry(*this, viewport_size, computed_values, [&](auto const& shape) {
+            Layout::RustFFI::svg_geometry_element_vertices(&shape, &vertices, append_path_vertices);
+        });
+    });
+    return vertices;
+}
+
+// https://svgwg.org/svg2-draft/types.html#__svg__SVGGeometryElement__isPointInFill
+WebIDL::ExceptionOr<bool> SVGGeometryElement::is_point_in_fill(Bindings::DOMPointInit const& point)
+{
+    // The isPointInFill method, when invoked, must return true if the point given by point passed to the method, in
+    // the coordinate space of an element, is inside the intended path as determined by the winding rule indicated by
+    // the fill-rule property of an element; and must return false otherwise. Open subpaths must be implicitly closed
+    // when computing the area inside the path, without affecting the actual subpaths. Points on the path itself must be
+    // considered to be inside the path.
+    // NB: svg_geometry_element_fill_contains() closes open subpaths and counts points on the path as inside.
+
+    // The returned value is independent of any visual CSS property but fill-rule
+    // If either of the x or y properties on point are infinite or NaN, then the method must return false.
+    if (!isfinite(point.x) || !isfinite(point.y))
+        return false;
+
+    // If current element is a non-rendered element, and the UA is not able to compute the geometry of the element,
+    // then throw an InvalidStateError.
+    bool is_point_in_fill = false;
+    auto has_geometry = with_computed_values([&](CSSPixelSize viewport_size, CSS::ComputedValues const& computed_values) {
+        is_point_in_fill = measure_geometry(*this, viewport_size, computed_values, [&](auto const& shape) {
+            return Layout::RustFFI::svg_geometry_element_fill_contains(&shape, static_cast<float>(point.x), static_cast<float>(point.y));
+        });
+    });
+    if (!has_geometry)
+        return WebIDL::InvalidStateError::create(HTML::relevant_realm(*this), "The element's geometry cannot be computed"_utf16);
+    return is_point_in_fill;
+}
+
+// https://svgwg.org/svg2-draft/types.html#__svg__SVGGeometryElement__isPointInStroke
+WebIDL::ExceptionOr<bool> SVGGeometryElement::is_point_in_stroke(Bindings::DOMPointInit const& point)
+{
+    // The isPointInStroke method, when invoked, must return true if the point given by point passed to the method, in
+    // the coordinate space of an element, is in or on the outline path of an applied stroke on an element; and must
+    // return false otherwise.
+    // The outline path must take the stroke properties stroke-width, stroke-linecap, stroke-linejoin,
+    // stroke-miterlimit, stroke-dasharray, stroke-dashoffset and vector-effect of an element into account.
+    // The returned value is independent of any visual CSS property but the listed stroke properties.
+    // If either of the x or y properties on point are infinite or NaN, then the method must return false.
+    if (!isfinite(point.x) || !isfinite(point.y))
+        return false;
+
+    // NB: The host coordinate space of a non-scaling stroke is the coordinate space of the element's viewport.
+    // FIXME: A single scale factor is only right for a uniform scale. Stroke a non-scaling stroke in the host
+    //        coordinate space instead, so that a non-uniform scale or a skew is accounted for.
+    float host_scale = 1;
+    if (auto ctm = get_ctm()) {
+        auto elements = ctm->elements();
+        host_scale = AK::sqrt(AK::fabs(static_cast<float>((elements[0] * elements[5]) - (elements[1] * elements[4]))));
+    }
+
+    // If current element is a non-rendered element, and the UA is not able to compute the geometry of the element,
+    // then throw an InvalidStateError.
+    bool is_point_in_stroke = false;
+    auto has_geometry = with_computed_values([&](CSSPixelSize viewport_size, CSS::ComputedValues const& computed_values) {
+        is_point_in_stroke = measure_geometry(*this, viewport_size, computed_values, [&](auto const& shape) {
+            // https://svgwg.org/svg2-draft/paths.html#PathLengthAttribute
+            // The user agent will scale all distance-along-a-path computations by the ratio of ‘pathLength’ to the
+            // user agent's own computed value for total path length.
+            // A value of zero is valid and must be treated as a scaling factor of infinity.
+            float dash_scale = 1;
+            if (auto path_length = author_path_length(); path_length.has_value() && *path_length == 0)
+                dash_scale = AK::Infinity<float>;
+            else if (path_length.has_value() && *path_length > 0)
+                dash_scale = Layout::RustFFI::svg_geometry_element_total_length(&shape) / *path_length;
+            return Layout::RustFFI::svg_geometry_element_stroke_contains(&shape, dash_scale, host_scale, static_cast<float>(point.x), static_cast<float>(point.y));
+        });
+    });
+    if (!has_geometry)
+        return WebIDL::InvalidStateError::create(HTML::relevant_realm(*this), "The element's geometry cannot be computed"_utf16);
+    return is_point_in_stroke;
+}
+
+// https://w3c.github.io/svgwg/svg2-draft/types.html#__svg__SVGGeometryElement__getTotalLength
+WebIDL::ExceptionOr<float> SVGGeometryElement::get_total_length()
+{
+    // When getTotalLength() is called, the user agent's computed value for the total length of the path, in user units,
+    // is returned.
+    float total_length = 0;
+    with_computed_values([&](CSSPixelSize viewport_size, CSS::ComputedValues const& computed_values) {
+        total_length = measure_geometry(*this, viewport_size, computed_values, [](auto const& shape) {
+            return Layout::RustFFI::svg_geometry_element_total_length(&shape);
+        });
+    });
+    return total_length;
+}
+
+// https://w3c.github.io/svgwg/svg2-draft/types.html#__svg__SVGGeometryElement__getPointAtLength
+WebIDL::ExceptionOr<GC::Ref<Geometry::DOMPoint>> SVGGeometryElement::get_point_at_length(float distance)
+{
+    // When getPointAtLength(distance) is called, the following steps are run:
+    // 1. If current element is a non-rendered element, and the UA is not able to compute the total length of the path,
+    //    then throw an InvalidStateError.
+    // NB: Like other engines, throw for an empty path whether or not the element is rendered.
+    Optional<Gfx::FloatPoint> point_along_path;
+    with_computed_values([&](CSSPixelSize viewport_size, CSS::ComputedValues const& computed_values) {
+        measure_geometry(*this, viewport_size, computed_values, [&](auto const& shape) {
+            Layout::RustFFI::FfiFloatPoint point;
+            if (Layout::RustFFI::svg_geometry_element_point_at_length(&shape, distance, &point))
+                point_along_path = Gfx::FloatPoint { point.x, point.y };
+        });
+    });
+    if (!point_along_path.has_value())
+        return WebIDL::InvalidStateError::create(HTML::relevant_realm(*this), "The element's path is empty"_utf16);
+
+    // 2. Let length be the user agent's computed value for the total length of the path, in user units.
+    // 3. Clamp distance to [0, length].
+    // 4. Let (x, y) be the point on the path at distance distance.
+    // NB: svg_geometry_element_point_at_length() clamps the distance to the ends of the path.
+
+    // 5. Return a newly created, detached DOMPoint object representing the point (x, y).
+    return Geometry::DOMPoint::create(point_along_path->x(), point_along_path->y(), 0, 1);
+}
+
+void SVGGeometryElement::attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_)
+{
+    Base::attribute_changed(name, old_value, value, namespace_);
+
+    // The pathLength scales the dashes of the stroke, which layout reads with the element's geometry.
+    if (name == AttributeNames::pathLength && !namespace_.has_value() && old_value != value)
+        set_needs_layout_update(DOM::SetNeedsLayoutReason::StyleChange);
+}
+
+Optional<float> SVGGeometryElement::author_path_length() const
+{
+    return parse_number(get_attribute_value(AttributeNames::pathLength));
+}
+
+GC::Ref<SVGAnimatedNumber> SVGGeometryElement::path_length()
+{
+    if (!m_path_length)
+        m_path_length = SVGAnimatedNumber::create(*this, DOM::QualifiedName { AttributeNames::pathLength, OptionalNone {}, OptionalNone {} }, 0.f);
+    return *m_path_length;
+}
+
+}

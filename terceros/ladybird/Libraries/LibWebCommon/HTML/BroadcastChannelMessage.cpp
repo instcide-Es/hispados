@@ -1,0 +1,69 @@
+/*
+ * Copyright (c) 2026, Shannon Booth <shannon@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibIPC/Decoder.h>
+#include <LibIPC/Encoder.h>
+#include <LibURL/URL.h>
+#include <LibWebCommon/HTML/BroadcastChannelMessage.h>
+
+namespace IPC {
+
+template<>
+ErrorOr<void> encode(Encoder& encoder, Web::HTML::BroadcastChannelMessage const& message)
+{
+    TRY(encoder.encode(message.storage_key));
+    TRY(encoder.encode(message.channel_name));
+    TRY(encoder.encode(message.source_origin));
+    TRY(encoder.encode(message.serialized_message));
+    TRY(encoder.encode(message.shared_store_lifeline));
+    return {};
+}
+
+template<>
+ErrorOr<Web::HTML::BroadcastChannelMessage> decode(Decoder& decoder)
+{
+    auto storage_key = TRY(decoder.decode<Web::StorageAPI::StorageKey>());
+    auto channel_name = TRY(decoder.decode<Utf16FlyString>());
+    auto source_origin = TRY(decoder.decode<URL::Origin>());
+    auto serialized_message = TRY(decoder.decode<Web::HTML::IPCSerializationRecord>());
+    auto shared_store_lifeline = TRY(decoder.decode<Web::HTML::SharedStoreLifeline>());
+
+    return Web::HTML::BroadcastChannelMessage {
+        .storage_key = move(storage_key),
+        .channel_name = move(channel_name),
+        .source_origin = move(source_origin),
+        .serialized_message = move(serialized_message),
+        .shared_store_lifeline = move(shared_store_lifeline),
+    };
+}
+
+template<>
+ErrorOr<void> encode(Encoder& encoder, Web::HTML::PostedBroadcastChannelMessage const& message)
+{
+    TRY(encoder.encode(message.environment_id));
+    TRY(encoder.encode(message.channel_name));
+    TRY(encoder.encode(message.serialized_message));
+    TRY(encoder.encode(message.shared_store_lifeline));
+    return {};
+}
+
+template<>
+ErrorOr<Web::HTML::PostedBroadcastChannelMessage> decode(Decoder& decoder)
+{
+    auto environment_id = TRY(decoder.decode<Web::HTML::EnvironmentId>());
+    auto channel_name = TRY(decoder.decode<Utf16FlyString>());
+    auto serialized_message = TRY(decoder.decode<Web::HTML::IPCSerializationRecord>());
+    auto shared_store_lifeline = TRY(decoder.decode<Web::HTML::SharedStoreLifeline>());
+
+    return Web::HTML::PostedBroadcastChannelMessage {
+        .environment_id = move(environment_id),
+        .channel_name = move(channel_name),
+        .serialized_message = move(serialized_message),
+        .shared_store_lifeline = move(shared_store_lifeline),
+    };
+}
+
+}

@@ -1,0 +1,191 @@
+/*
+ * Copyright (c) 2022, Ben Abraham <ben.d.abraham@gmail.com>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/Debug.h>
+#include <LibGC/Heap.h>
+#include <LibWeb/Bindings/MessagePort.h>
+#include <LibWeb/HTML/MessagePort.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HTML/Scripting/WindowEnvironmentSettingsObject.h>
+#include <LibWeb/HTML/SharedWorker.h>
+#include <LibWeb/HTML/StructuredSerialize.h>
+#include <LibWeb/HTML/Worker.h>
+#include <LibWeb/TrustedTypes/RequireTrustedTypesForDirective.h>
+#include <LibWeb/TrustedTypes/TrustedTypePolicy.h>
+
+namespace Web::HTML {
+
+// The outside port's transport read hook roots the port while it can receive
+// messages; that port retains the Worker's event target until the worker closes.
+GC_DEFINE_ALLOCATOR(Worker);
+
+// https://html.spec.whatwg.org/multipage/workers.html#dedicated-workers-and-the-worker-interface
+Worker::Worker(String const& script_url, WorkerOptions const& options)
+    : DOM::EventTarget()
+    , m_script_url(script_url)
+    , m_options(options)
+{
+}
+
+void Worker::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_outside_port);
+    visitor.visit(m_agent);
+}
+
+// https://html.spec.whatwg.org/multipage/workers.html#dom-worker
+WebIDL::ExceptionOr<GC::Ref<Worker>> Worker::create(WindowOrWorkerGlobalScopeMixin& global_scope, TrustedTypes::TrustedScriptURLOrString const& script_url, WorkerOptions const& options)
+{
+    // Returns a new Worker object. scriptURL will be fetched and executed in the background,
+    // creating a new global environment for which worker represents the communication channel.
+    // options can be used to define the name of that global environment via the name option,
+    // primarily for debugging purposes. It can also ensure this new global environment supports
+    // JavaScript modules (specify type: "module"), and if that is specified, can also be used
+    // to specify how scriptURL is fetched through the credentials option.
+
+    // 1. Let compliantScriptURL be the result of invoking the Get Trusted Type compliant string algorithm with
+    //    TrustedScriptURL, this's relevant global object, scriptURL, "Worker constructor", and "script".
+    auto const compliant_script_url = TRY(TrustedTypes::get_trusted_type_compliant_string(
+        TrustedTypes::TrustedTypeName::TrustedScriptURL,
+        HTML::relevant_global_object(global_scope),
+        script_url,
+        TrustedTypes::InjectionSink::Worker_constructor,
+        TrustedTypes::Script.view()));
+
+    dbgln_if(WEB_WORKER_DEBUG, "Worker: Creating worker with compliant_script_url = {}", compliant_script_url);
+
+    // 2. Let outsideSettings be this's relevant settings object.
+    auto& outside_settings = HTML::relevant_settings_object(global_scope);
+
+    // 3. Let workerURL be the result of encoding-parsing a URL given compliantScriptURL, relative to outsideSettings.
+    auto worker_url = outside_settings.encoding_parse_url(compliant_script_url.utf16_view());
+
+    // 4. If workerURL is failure, then throw a "SyntaxError" DOMException.
+    if (!worker_url.has_value()) {
+        dbgln_if(WEB_WORKER_DEBUG, "Worker: Invalid URL loaded '{}'.", compliant_script_url);
+        return WebIDL::SyntaxError::create("url is not valid"_utf16);
+    }
+
+    // 5. Let outsidePort be a new MessagePort in outsideSettings's realm.
+    auto outside_port = MessagePort::create(outside_settings.realm());
+
+    // 8. Let worker be this.
+    // AD-HOC: AD-HOC: We do this first so that we can use `this`.
+    auto worker = GC::Heap::the().allocate<Worker>(compliant_script_url.to_utf8_but_should_be_ported_to_utf16(), options);
+
+    // 6. Set outsidePort's message event target to this.
+    outside_port->set_message_event_target(*worker);
+
+    // 7. Set this's outside port to outsidePort.
+    worker->m_outside_port = outside_port;
+
+    // 8. Let worker be this.
+    // NB: This is done earlier.
+
+    // 9. Run this step in parallel:
+    // 1. Run a worker given worker, workerURL, outsideSettings, outsidePort, and options.
+    run_a_worker(worker, worker_url.value(), outside_settings, *outside_port, options);
+
+    return worker;
+}
+
+WebIDL::ExceptionOr<GC::Ref<Worker>> Worker::create_for_constructor(JS::Object& relevant_global_object, TrustedTypes::TrustedScriptURLOrString const& script_url, WorkerOptions const& options)
+{
+    return create(HTML::relevant_window_or_worker_global_scope(relevant_global_object), script_url, options);
+}
+
+// https://html.spec.whatwg.org/multipage/workers.html#run-a-worker
+void run_a_worker(Variant<GC::Ref<Worker>, GC::Ref<SharedWorker>> worker, URL::URL& url, EnvironmentSettingsObject& outside_settings, GC::Ptr<MessagePort> port, WorkerOptions const& options)
+{
+    // 1. Let is shared be true if worker is a SharedWorker object, and false otherwise.
+    AgentType agent_type = worker.has<GC::Ref<SharedWorker>>() ? AgentType::SharedWorker : AgentType::DedicatedWorker;
+
+    // FIXME: 2. Let owner be the relevant owner to add given outside settings.
+
+    // 3. Let unsafeWorkerCreationTime be the unsafe shared current time.
+
+    // 4. Let agent be the result of obtaining a dedicated/shared worker agent given outside settings and is shared.
+    //    Run the rest of these steps in that agent.
+
+    auto event_target = worker.visit([](auto& worker) -> GC::Ref<DOM::EventTarget> { return worker; });
+
+    // NB: Only SharedWorkerOptions has an extendedLifetime member.
+    auto extended_lifetime = worker.visit(
+        [](GC::Ref<Worker>) { return false; },
+        [](GC::Ref<SharedWorker> shared_worker) { return shared_worker->options().extended_lifetime; });
+
+    // Note: This spawns a new process to act as the 'agent' for the worker.
+    auto agent = WorkerAgentParent::create(url, options, extended_lifetime, port, outside_settings, event_target, agent_type);
+    worker.visit([&](auto worker) { worker->set_agent(agent); });
+}
+
+// https://html.spec.whatwg.org/multipage/workers.html#dom-worker-terminate
+WebIDL::ExceptionOr<void> Worker::terminate()
+{
+    // The terminate() method steps are to terminate a worker given this's worker.
+
+    // 1. Set the worker's WorkerGlobalScope object's closing flag to true.
+    // 2. If there are any tasks queued in the WorkerGlobalScope object's relevant agent's event loop's task queues,
+    //    discard them without processing them.
+    // 3. Abort the script currently running in the worker.
+    // 4. If the worker's WorkerGlobalScope object is actually a DedicatedWorkerGlobalScope object (i.e. the worker is
+    //    a dedicated worker), then empty the port message queue of the port that the worker's implicit port is
+    //    entangled with.
+    // AD-HOC: Discarding pending messages empties the outside port's message queue. Closing the outside port prevents
+    //         any new messages from being delivered to this Worker. Terminating the agent closes the dedicated worker
+    //         process, which aborts its script and discards its event loop.
+    m_outside_port->discard_pending_messages();
+    m_outside_port->close();
+    if (m_agent) {
+        m_agent->terminate();
+        m_agent = nullptr;
+    }
+
+    return {};
+}
+
+// https://html.spec.whatwg.org/multipage/workers.html#dom-worker-postmessage
+WebIDL::ExceptionOr<void> Worker::post_message(JS::Realm& realm, JS::Value message, StructuredSerializeOptions const& options)
+{
+    dbgln_if(WEB_WORKER_DEBUG, "Worker: Post Message: {}", message);
+
+    // The postMessage(message, transfer) and postMessage(message, options) methods on Worker objects act as if,
+    // when invoked, they immediately invoked the respective postMessage(message, transfer) and
+    // postMessage(message, options) on the port, with the same arguments, and returned the same return value.
+
+    return m_outside_port->post_message(realm, message, options.transfer);
+}
+
+WebIDL::ExceptionOr<void> Worker::post_message(JS::Realm& realm, JS::Value message, Bindings::StructuredSerializeOptions const& options)
+{
+    return post_message(realm, message, StructuredSerializeOptions { .transfer = options.transfer });
+}
+
+// https://html.spec.whatwg.org/multipage/workers.html#dom-worker-postmessage
+WebIDL::ExceptionOr<void> Worker::post_message(JS::Realm& realm, JS::Value message, GC::RootVector<GC::Ref<JS::Object>> const& transfer)
+{
+    // The postMessage(message, transfer) and postMessage(message, options) methods on Worker objects act as if,
+    // when invoked, they immediately invoked the respective postMessage(message, transfer) and
+    // postMessage(message, options) on the port, with the same arguments, and returned the same return value.
+
+    return m_outside_port->post_message(realm, message, transfer);
+}
+
+#undef __ENUMERATE
+#define __ENUMERATE(attribute_name, event_name)                    \
+    void Worker::set_##attribute_name(WebIDL::CallbackType* value) \
+    {                                                              \
+        set_event_handler_attribute(event_name, move(value));      \
+    }                                                              \
+    WebIDL::CallbackType* Worker::attribute_name()                 \
+    {                                                              \
+        return event_handler_attribute(event_name);                \
+    }
+ENUMERATE_WORKER_EVENT_HANDLERS(__ENUMERATE)
+#undef __ENUMERATE
+
+} // namespace Web::HTML

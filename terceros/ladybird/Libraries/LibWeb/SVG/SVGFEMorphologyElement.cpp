@@ -1,0 +1,83 @@
+/*
+ * Copyright (c) 2025, Tim Ledbetter <tim.ledbetter@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibWeb/SVG/AttributeNames.h>
+#include <LibWeb/SVG/SVGFEMorphologyElement.h>
+
+namespace Web::SVG {
+
+GC_DEFINE_ALLOCATOR(SVGFEMorphologyElement);
+
+SVGFEMorphologyElement::SVGFEMorphologyElement(DOM::Document& document, DOM::QualifiedName qualified_name)
+    : SVGElement(document, qualified_name)
+{
+}
+
+void SVGFEMorphologyElement::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    SVGFilterPrimitiveStandardAttributes::visit_edges(visitor);
+    visitor.visit(m_in1);
+    visitor.visit(m_radius_x);
+    visitor.visit(m_radius_y);
+}
+
+void SVGFEMorphologyElement::attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& new_value, Optional<Utf16FlyString> const& namespace_)
+{
+    Base::attribute_changed(name, old_value, new_value, namespace_);
+
+    if (name == SVG::AttributeNames::operator_) {
+        if (!new_value.has_value()) {
+            m_morphology_operator = Gfx::MorphologyOperator::Dilate;
+            return;
+        }
+        if (new_value->equals_ignoring_ascii_case("erode"sv)) {
+            m_morphology_operator = Gfx::MorphologyOperator::Erode;
+        } else if (new_value->equals_ignoring_ascii_case("dilate"sv)) {
+            m_morphology_operator = Gfx::MorphologyOperator::Dilate;
+        } else {
+            m_morphology_operator = Gfx::MorphologyOperator::Dilate;
+        }
+    }
+}
+
+GC::Ref<SVGAnimatedString> SVGFEMorphologyElement::in1()
+{
+    if (!m_in1)
+        m_in1 = SVGAnimatedString::create(*this, DOM::QualifiedName { AttributeNames::in, OptionalNone {}, OptionalNone {} });
+
+    return *m_in1;
+}
+
+// https://drafts.fxtf.org/filter-effects/#dom-svgfemorphologyelement-operator
+GC::Ref<SVGAnimatedEnumeration> SVGFEMorphologyElement::operator_for_bindings()
+{
+    static constexpr Array keywords {
+        SVGAnimatedEnumeration::Keyword { "erode"sv, SVG_MORPHOLOGY_OPERATOR_ERODE },
+        SVGAnimatedEnumeration::Keyword { "dilate"sv, SVG_MORPHOLOGY_OPERATOR_DILATE },
+    };
+    return svg_animated_enumeration_for_attribute(AttributeNames::operator_, keywords, SVG_MORPHOLOGY_OPERATOR_ERODE);
+}
+
+GC::Ref<SVGAnimatedNumber> SVGFEMorphologyElement::radius_x()
+{
+    if (!m_radius_x)
+        m_radius_x = SVGAnimatedNumber::create(*this, DOM::QualifiedName { SVG::AttributeNames::radius, OptionalNone {}, OptionalNone {} }, 0.0,
+            SVGAnimatedNumber::SupportsSecondValue::Yes, SVGAnimatedNumber::ValueRepresented::First);
+
+    return *m_radius_x;
+}
+
+GC::Ref<SVGAnimatedNumber> SVGFEMorphologyElement::radius_y()
+{
+    if (!m_radius_y)
+        m_radius_y = SVGAnimatedNumber::create(*this, DOM::QualifiedName { SVG::AttributeNames::radius, OptionalNone {}, OptionalNone {} }, 0.0,
+            SVGAnimatedNumber::SupportsSecondValue::Yes, SVGAnimatedNumber::ValueRepresented::Second);
+
+    return *m_radius_y;
+}
+
+}

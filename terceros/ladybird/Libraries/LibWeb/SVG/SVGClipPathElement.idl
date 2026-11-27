@@ -1,0 +1,8 @@
+// https://drafts.fxtf.org/css-masking/#InterfaceSVGClipPathElement
+[Exposed=Window]
+interface SVGClipPathElement : SVGElement {
+
+    [ImplementedAs=clip_path_units_for_bindings] readonly attribute SVGAnimatedEnumeration clipPathUnits;
+    [FIXME] readonly attribute SVGAnimatedTransformList transform;
+
+};

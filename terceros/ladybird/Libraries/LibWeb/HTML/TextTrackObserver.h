@@ -1,0 +1,37 @@
+/*
+ * Copyright (c) 2025, Tim Flynn <trflynn89@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <LibGC/Cell.h>
+#include <LibGC/Function.h>
+#include <LibGC/Ptr.h>
+#include <LibJS/Forward.h>
+#include <LibWeb/HTML/TextTrack.h>
+
+namespace Web::HTML {
+
+class TextTrackObserver final : public GC::Cell {
+    GC_CELL(TextTrackObserver, GC::Cell);
+    GC_DECLARE_ALLOCATOR(TextTrackObserver);
+
+public:
+    [[nodiscard]] static GC::Ref<TextTrackObserver> create(TextTrack&);
+
+    [[nodiscard]] GC::Ptr<GC::Function<void(TextTrack::ReadinessState)>> track_readiness_observer() const { return m_track_readiness_observer; }
+    void set_track_readiness_observer(GC::Ptr<GC::Function<void(TextTrack::ReadinessState)>>);
+
+private:
+    explicit TextTrackObserver(TextTrack&);
+
+    virtual void visit_edges(GC::Cell::Visitor&) override;
+    virtual void finalize() override;
+
+    GC::Ref<TextTrack> m_text_track;
+    GC::Ptr<GC::Function<void(TextTrack::ReadinessState)>> m_track_readiness_observer;
+};
+
+}

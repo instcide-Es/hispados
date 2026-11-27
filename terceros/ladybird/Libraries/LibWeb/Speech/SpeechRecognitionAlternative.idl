@@ -1,0 +1,6 @@
+// https://wicg.github.io/speech-api/#speechrecognitionalternative
+[SecureContext, Exposed=Window, ImplementedIn=Rust]
+interface SpeechRecognitionAlternative {
+    readonly attribute DOMString transcript;
+    readonly attribute float confidence;
+};

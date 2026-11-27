@@ -1,0 +1,6 @@
+// https://drafts.csswg.org/filter-effects-1/#InterfaceSVGFEMergeElement
+[Exposed=Window]
+interface SVGFEMergeElement : SVGElement {
+};
+
+SVGFEMergeElement includes SVGFilterPrimitiveStandardAttributes;

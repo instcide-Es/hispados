@@ -1,0 +1,934 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+use crate::css::computed_value_types::ComputedStyleValueHandle;
+use crate::css::style_value::BorderImageSlicePayload;
+use crate::painting::paint_read::PaintRead;
+use crate::painting::record::trace::Observer;
+
+use crate::css::computed_value_views::{ComputedValuesView, LengthPercentageRef};
+use crate::css::css_enums::border_image_repeat;
+use crate::css::css_pixels::{CssPixelFraction, CssPixels};
+use crate::css::css_pixels::{CssPixelRect, CssPixelSize};
+use crate::css::style_value::StyleValueData;
+use crate::layout::node_data::NodeSlotId;
+use crate::painting::display_list::commands::{ImageFrameResourceId, Repeat};
+use crate::painting::force_dark::ForceDarkRole;
+use crate::painting::host::FfiLayerImageList;
+use crate::painting::image_content::ImageContent;
+use crate::painting::paintable_data::{PIECE_EDGE_BOTTOM, PIECE_EDGE_LEFT, PIECE_EDGE_RIGHT, PIECE_EDGE_TOP};
+use crate::painting::record::PaintRecorder;
+use crate::painting::record::paint::background::to_gfx_scaling_mode;
+use crate::painting::record::paint::gradient_resolution::{
+    ResolvedGradientPaint, record_resolved_gradient_fill, resolve_gradient_paint,
+};
+use crate::painting::record::vector_images::{
+    VectorImageRenderRequest, VectorImageSource, vector_image_render_geometry,
+};
+use crate::painting::style_queries;
+use libgfx_rust::{AffineTransform, CompositingAndBlendingOperator, FloatRect, FloatSize, IntRect, IntSize};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Track {
+    Start,
+    Center,
+    End,
+}
+
+const TRACKS: [Track; 3] = [Track::Start, Track::Center, Track::End];
+
+#[derive(Clone, Copy)]
+struct Axis([CssPixels; 4]);
+
+impl Axis {
+    fn track_start(self, track: Track) -> CssPixels {
+        match track {
+            Track::Start => self.0[0],
+            Track::Center => self.0[1],
+            Track::End => self.0[2],
+        }
+    }
+
+    fn track_end(self, track: Track) -> CssPixels {
+        match track {
+            Track::Start => self.0[1],
+            Track::Center => self.0[2],
+            Track::End => self.0[3],
+        }
+    }
+
+    fn track_size(self, track: Track) -> CssPixels {
+        self.track_end(track) - self.track_start(track)
+    }
+}
+
+fn scale_source_length_to_destination(
+    source_length: CssPixels,
+    source_reference: CssPixels,
+    destination_reference: CssPixels,
+) -> CssPixels {
+    if source_reference <= CssPixels::from_raw(0) {
+        return source_length;
+    }
+    let wide = source_length.raw_value() as i64 * destination_reference.raw_value() as i64;
+    let scaled_length = CssPixels::from_raw(
+        (wide / source_reference.raw_value() as i64).clamp(i32::MIN as i64, i32::MAX as i64) as i32,
+    );
+    CssPixels::from_raw(1).max(scaled_length)
+}
+
+fn rounded_repeated_border_image_tile_size(
+    mut tile_size: FloatSize,
+    dest_rect: IntRect,
+    repeat_x: u8,
+    repeat_y: u8,
+) -> FloatSize {
+    if repeat_x == border_image_repeat::STRETCH {
+        tile_size.width = dest_rect.width as f32;
+    } else if repeat_x == border_image_repeat::ROUND && tile_size.width > 0.0 {
+        let tile_count = 1.max((dest_rect.width as f64 / tile_size.width as f64).round_ties_even() as i32);
+        tile_size.width = dest_rect.width as f32 / tile_count as f32;
+    }
+    if repeat_y == border_image_repeat::STRETCH {
+        tile_size.height = dest_rect.height as f32;
+    } else if repeat_y == border_image_repeat::ROUND && tile_size.height > 0.0 {
+        let tile_count = 1.max((dest_rect.height as f64 / tile_size.height as f64).round_ties_even() as i32);
+        tile_size.height = dest_rect.height as f32 / tile_count as f32;
+    }
+    tile_size
+}
+
+/// Where the tiles of one piece of a border image go: the first tile, the step from one tile to the next, and how many
+/// tiles there are in each axis where that's limited.
+struct SliceTiling {
+    first_tile: FloatRect,
+    step: FloatSize,
+    count_x: Option<u32>,
+    count_y: Option<u32>,
+}
+
+fn slice_tiling(dest_rect: IntRect, device_tile_size: FloatSize, repeat_x: u8, repeat_y: u8) -> Option<SliceTiling> {
+    if dest_rect.is_empty() {
+        return None;
+    }
+
+    let device_tile_size = rounded_repeated_border_image_tile_size(device_tile_size, dest_rect, repeat_x, repeat_y);
+    if device_tile_size.width <= 0.0 || device_tile_size.height <= 0.0 {
+        return None;
+    }
+
+    let mut start_x = dest_rect.x as f32;
+    let mut start_y = dest_rect.y as f32;
+    let mut tile_step = device_tile_size;
+    let mut tile_count_x: Option<u32> = None;
+    let mut tile_count_y: Option<u32> = None;
+
+    if repeat_x == border_image_repeat::STRETCH {
+        tile_count_x = Some(1);
+    }
+    if repeat_y == border_image_repeat::STRETCH {
+        tile_count_y = Some(1);
+    }
+
+    if repeat_x == border_image_repeat::SPACE || repeat_y == border_image_repeat::SPACE {
+        let whole_tiles_x = if repeat_x == border_image_repeat::SPACE {
+            (dest_rect.width as f32 / device_tile_size.width).floor() as i32
+        } else {
+            1
+        };
+        let whole_tiles_y = if repeat_y == border_image_repeat::SPACE {
+            (dest_rect.height as f32 / device_tile_size.height).floor() as i32
+        } else {
+            1
+        };
+        if whole_tiles_x <= 0 || whole_tiles_y <= 0 {
+            return None;
+        }
+
+        let gap_x = if repeat_x == border_image_repeat::SPACE {
+            (dest_rect.width as f32 - whole_tiles_x as f32 * device_tile_size.width) / (whole_tiles_x + 1) as f32
+        } else {
+            0.0
+        };
+        let gap_y = if repeat_y == border_image_repeat::SPACE {
+            (dest_rect.height as f32 - whole_tiles_y as f32 * device_tile_size.height) / (whole_tiles_y + 1) as f32
+        } else {
+            0.0
+        };
+
+        if repeat_x == border_image_repeat::SPACE {
+            start_x = dest_rect.x as f32 + gap_x;
+            tile_step.width = device_tile_size.width + gap_x;
+            tile_count_x = Some(whole_tiles_x as u32);
+        } else {
+            tile_count_x = Some(1);
+        }
+
+        if repeat_y == border_image_repeat::SPACE {
+            start_y = dest_rect.y as f32 + gap_y;
+            tile_step.height = device_tile_size.height + gap_y;
+            tile_count_y = Some(whole_tiles_y as u32);
+        } else {
+            tile_count_y = Some(1);
+        }
+    } else {
+        if repeat_x == border_image_repeat::REPEAT {
+            start_x += (dest_rect.width as f32 - device_tile_size.width) / 2.0;
+            while start_x > dest_rect.x as f32 {
+                start_x -= device_tile_size.width;
+            }
+        }
+        if repeat_y == border_image_repeat::REPEAT {
+            start_y += (dest_rect.height as f32 - device_tile_size.height) / 2.0;
+            while start_y > dest_rect.y as f32 {
+                start_y -= device_tile_size.height;
+            }
+        }
+    }
+
+    Some(SliceTiling {
+        first_tile: FloatRect::new(start_x, start_y, device_tile_size.width, device_tile_size.height),
+        step: tile_step,
+        count_x: tile_count_x,
+        count_y: tile_count_y,
+    })
+}
+
+fn tile_size_for_scaling(tiling: &SliceTiling) -> (i32, i32) {
+    (
+        1.max(tiling.first_tile.width.round_ties_even() as i32),
+        1.max(tiling.first_tile.height.round_ties_even() as i32),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn paint_border_image_slice<O: Observer>(
+    recorder: &mut PaintRecorder<'_, O>,
+    frame_id: ImageFrameResourceId,
+    source_rect: FloatRect,
+    dest_rect: IntRect,
+    device_tile_size: FloatSize,
+    image_rendering: u8,
+    repeat_x: u8,
+    repeat_y: u8,
+) {
+    if source_rect.is_empty() {
+        return;
+    }
+    let Some(tiling) = slice_tiling(dest_rect, device_tile_size, repeat_x, repeat_y) else {
+        return;
+    };
+    let source_size = (
+        source_rect.width.round_ties_even() as i32,
+        source_rect.height.round_ties_even() as i32,
+    );
+    let scaling_mode = to_gfx_scaling_mode(image_rendering, source_size, tile_size_for_scaling(&tiling));
+    let force_dark_role = crate::painting::force_dark::role_for_image(
+        ForceDarkRole::Border,
+        tiling.first_tile.width,
+        tiling.first_tile.height,
+        recorder.inputs.device_pixels_per_css_pixel,
+        source_size,
+    );
+    recorder.recorder.draw_tiled_decoded_image_frame(
+        tiling.first_tile,
+        dest_rect,
+        source_rect,
+        tiling.step,
+        frame_id,
+        scaling_mode,
+        tiling.count_x,
+        tiling.count_y,
+        force_dark_role,
+    );
+}
+
+/// The most device pixels used to rasterize one piece of a generated border image.
+const MAXIMUM_BORDER_IMAGE_TILE_AREA: f32 = 2048.0 * 2048.0;
+
+/// A vector border image, and the size it's sliced at.
+struct VectorBorderImage {
+    source: VectorImageSource,
+    content_identity: u64,
+    has_active_view_box: bool,
+    width: f32,
+    height: f32,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn paint_vector_border_image_slice<O: Observer>(
+    recorder: &mut PaintRecorder<'_, O>,
+    image: &VectorBorderImage,
+    source_rect: FloatRect,
+    dest_rect: IntRect,
+    device_tile_size: FloatSize,
+    image_rendering: u8,
+    repeat_x: u8,
+    repeat_y: u8,
+) {
+    if source_rect.is_empty() {
+        return;
+    }
+    let Some(tiling) = slice_tiling(dest_rect, device_tile_size, repeat_x, repeat_y) else {
+        return;
+    };
+    // NB: The image is rendered at one scale in both axes, the larger of the two the slice needs, and the tile it's
+    //     recorded into is then drawn stretched to the tile's exact size. Rendering it at a different scale in each
+    //     axis would only stretch an image that scales its contents to its viewport that way. A slice stretched far
+    //     along one axis is rendered at a lower scale than that, so that its tile stays a reasonable size.
+    let scale = (tiling.first_tile.width / source_rect.width)
+        .max(tiling.first_tile.height / source_rect.height)
+        .min((MAXIMUM_BORDER_IMAGE_TILE_AREA / (source_rect.width * source_rect.height)).sqrt());
+    let geometry = vector_image_render_geometry(
+        FloatRect::new(0.0, 0.0, image.width, image.height),
+        FloatSize {
+            width: scale,
+            height: scale,
+        },
+        image.has_active_view_box,
+        recorder.inputs.device_pixels_per_css_pixel as f32,
+    );
+    let rendered_scale = FloatSize {
+        width: geometry.list_size.width as f32 / image.width,
+        height: geometry.list_size.height as f32 / image.height,
+    };
+    let (tile_width, tile_height) = (
+        1.max((source_rect.width * rendered_scale.width).round() as i32),
+        1.max((source_rect.height * rendered_scale.height).round() as i32),
+    );
+    let display_list_id = recorder.vector_image_placeholder(VectorImageRenderRequest::new(
+        image.source,
+        geometry.css_width,
+        geometry.css_height,
+        geometry.raster_scale,
+        image.content_identity,
+        recorder.vector_image_color_scheme(image.source.owner()),
+        recorder.vector_image_force_dark(),
+    ));
+    let group = recorder.recorder.begin_repeated_tile();
+    // The tile holds the whole image, offset so that the slice fills it, and clips away the rest.
+    recorder.recorder.paint_vector_image_records(
+        display_list_id,
+        FloatRect::new(
+            -source_rect.x * rendered_scale.width,
+            -source_rect.y * rendered_scale.height,
+            geometry.list_size.width as f32,
+            geometry.list_size.height as f32,
+        ),
+        geometry.list_size,
+    );
+    recorder.recorder.finish_repeated_tile(
+        group,
+        tiling.first_tile,
+        dest_rect,
+        IntSize {
+            width: tile_width,
+            height: tile_height,
+        },
+        tiling.step,
+        to_gfx_scaling_mode(
+            image_rendering,
+            (tile_width, tile_height),
+            tile_size_for_scaling(&tiling),
+        ),
+        CompositingAndBlendingOperator::Normal,
+        // NB: The clip to the piece's destination stops a repeat at either end of it.
+        Repeat {
+            x: tiling.count_x != Some(1),
+            y: tiling.count_y != Some(1),
+        },
+    );
+}
+
+enum BorderImageContent {
+    Raster(ImageFrameResourceId),
+    Vector(VectorBorderImage),
+    Gradient(ResolvedGradientPaint),
+}
+
+#[allow(clippy::too_many_arguments)]
+fn paint_gradient_border_image_slice<O: Observer>(
+    recorder: &mut PaintRecorder<'_, O>,
+    gradient: &ResolvedGradientPaint,
+    source_size: CssPixelSize,
+    source_rect: FloatRect,
+    dest_rect: IntRect,
+    device_tile_size: FloatSize,
+    image_rendering: u8,
+    repeat_x: u8,
+    repeat_y: u8,
+) {
+    if source_rect.is_empty() {
+        return;
+    }
+    let Some(tiling) = slice_tiling(dest_rect, device_tile_size, repeat_x, repeat_y) else {
+        return;
+    };
+    let image_size = recorder.converter.rounded_device_size(source_size);
+    if image_size.width <= 0 || image_size.height <= 0 {
+        return;
+    }
+    let tile = tiling.first_tile;
+    let scale = (MAXIMUM_BORDER_IMAGE_TILE_AREA / (tile.width * tile.height))
+        .sqrt()
+        .min(1.0)
+        .min(16384.0 / tile.width)
+        .min(16384.0 / tile.height);
+    let tile_size = IntSize {
+        width: (tile.width * scale).ceil().max(1.0) as i32,
+        height: (tile.height * scale).ceil().max(1.0) as i32,
+    };
+    let source_scale_x = image_size.width as f32 / source_size.width.to_float();
+    let source_scale_y = image_size.height as f32 / source_size.height.to_float();
+    let scale_x = tile_size.width as f32 / (source_rect.width * source_scale_x);
+    let scale_y = tile_size.height as f32 / (source_rect.height * source_scale_y);
+    let transform = AffineTransform::new(
+        scale_x,
+        0.0,
+        0.0,
+        scale_y,
+        -source_rect.x * source_scale_x * scale_x,
+        -source_rect.y * source_scale_y * scale_y,
+    );
+    let group = recorder.recorder.begin_repeated_tile();
+    let previous_transform = recorder.recorder.set_ambient_inline_transform(Some(transform));
+    // Resolve the gradient for the whole image, then clip and stretch its slice into the tile. Resolving it at the
+    // tile's size would move its stops and change radial and conic geometry when the slice stretches unevenly.
+    record_resolved_gradient_fill(
+        &mut recorder.recorder,
+        recorder.converter,
+        gradient,
+        FloatRect::new(0.0, 0.0, image_size.width as f32, image_size.height as f32),
+        CompositingAndBlendingOperator::Normal,
+        ForceDarkRole::Border,
+    );
+    recorder.recorder.set_ambient_inline_transform(previous_transform);
+    recorder.recorder.finish_repeated_tile(
+        group,
+        tiling.first_tile,
+        dest_rect,
+        tile_size,
+        tiling.step,
+        to_gfx_scaling_mode(
+            image_rendering,
+            (tile_size.width, tile_size.height),
+            tile_size_for_scaling(&tiling),
+        ),
+        CompositingAndBlendingOperator::Normal,
+        Repeat {
+            x: tiling.count_x != Some(1),
+            y: tiling.count_y != Some(1),
+        },
+    );
+}
+
+fn component_items(value: &StyleValueData) -> Vec<&StyleValueData> {
+    if let StyleValueData::ValueList { values, .. } = value {
+        return values.as_slice().iter().map(|item| item.data()).collect();
+    }
+    vec![value]
+}
+
+// The values of a property that sets the top, right, bottom and left sides from one to four values, in that order.
+fn four_side_items(value: &StyleValueData) -> [&StyleValueData; 4] {
+    match component_items(value).as_slice() {
+        [all] => [*all; 4],
+        [vertical, horizontal] => [*vertical, *horizontal, *vertical, *horizontal],
+        [top, horizontal, bottom] => [*top, *horizontal, *bottom, *horizontal],
+        [top, right, bottom, left, ..] => [*top, *right, *bottom, *left],
+        [] => unreachable!("a four-sided value has at least one value"),
+    }
+}
+
+// https://drafts.csswg.org/css-backgrounds-3/#border-image-slice
+fn resolve_slice_px(value: &StyleValueData, reference_length: CssPixels, number_scale: f64) -> CssPixels {
+    // Computed values larger than the size of the image are interpreted as 100%.
+    match value {
+        StyleValueData::Number { value } => CssPixels::nearest_value_for(*value * number_scale),
+        StyleValueData::Integer { value } => CssPixels::nearest_value_for(*value as f64 * number_scale),
+        StyleValueData::Percentage { value } => {
+            CssPixels::nearest_value_for(reference_length.to_double() * (*value * 0.01))
+        }
+        StyleValueData::Calculated { .. } => {
+            if let Some(percentage) = crate::css::calc::resolve_calculated_percentage_without_context(value) {
+                CssPixels::nearest_value_for(reference_length.to_double() * (percentage * 0.01))
+            } else {
+                CssPixels::nearest_value_for(
+                    crate::css::calc::resolve_calculated_number_without_context(value)
+                        .expect("computed border-image-slice calc resolves to a number")
+                        * number_scale,
+                )
+            }
+        }
+        _ => unreachable!("computed border-image-slice holds an unknown value"),
+    }
+    .min(reference_length)
+}
+
+fn resolve_outset_px(value: &StyleValueData, border_width: CssPixels) -> CssPixels {
+    match value {
+        StyleValueData::Number { value } => CssPixels::nearest_value_for(border_width.to_double() * *value),
+        StyleValueData::Integer { value } => CssPixels::nearest_value_for(border_width.to_double() * *value as f64),
+        StyleValueData::Calculated { .. }
+            if crate::css::calc::resolve_calculated_number_without_context(value).is_some() =>
+        {
+            let number =
+                crate::css::calc::resolve_calculated_number_without_context(value).expect("checked just above");
+            CssPixels::nearest_value_for(border_width.to_double() * number)
+        }
+        other => LengthPercentageRef::over(other).absolute_length_to_px(),
+    }
+}
+
+/// https://drafts.csswg.org/css-backgrounds-3/#border-image-width
+fn resolve_width_px(
+    value: &StyleValueData,
+    border_width: CssPixels,
+    reference_length: CssPixels,
+    auto_width: CssPixels,
+) -> CssPixels {
+    match value {
+        StyleValueData::Keyword { .. } => auto_width,
+        StyleValueData::Number { value } => CssPixels::nearest_value_for(border_width.to_double() * *value),
+        StyleValueData::Integer { value } => CssPixels::nearest_value_for(border_width.to_double() * *value as f64),
+        StyleValueData::Calculated { .. }
+            if crate::css::calc::resolve_calculated_number_without_context(value).is_some() =>
+        {
+            let number =
+                crate::css::calc::resolve_calculated_number_without_context(value).expect("checked just above");
+            CssPixels::nearest_value_for(border_width.to_double() * number)
+        }
+        other => LengthPercentageRef::over(other).to_px(reference_length),
+    }
+}
+
+fn shrink_opposite_sides_to_fit(first: &mut CssPixels, second: &mut CssPixels, available: CssPixels) {
+    let total = *first + *second;
+    if total <= available {
+        return;
+    }
+    let factor = CssPixelFraction::ratio_of(available, total);
+    *first = first.mul_by_fraction(factor);
+    *second = second.mul_by_fraction(factor);
+}
+
+struct ResolvedBorderImageGeometry {
+    source_columns: Axis,
+    source_rows: Axis,
+    destination_columns: Axis,
+    destination_rows: Axis,
+    source_slices: [CssPixels; 4],
+    widths: [CssPixels; 4],
+}
+
+fn sides_present(present_edges: u8) -> [bool; 4] {
+    [PIECE_EDGE_TOP, PIECE_EDGE_RIGHT, PIECE_EDGE_BOTTOM, PIECE_EDGE_LEFT].map(|edge| present_edges & edge != 0)
+}
+
+/// The computed values of an image painted in nine pieces: the border image, or the mask border image.
+#[derive(Clone, Copy)]
+pub(crate) struct NinePieceImageValues<'a> {
+    source: &'a ComputedStyleValueHandle,
+    slice: &'a ComputedStyleValueHandle,
+    width: &'a ComputedStyleValueHandle,
+    outset: &'a ComputedStyleValueHandle,
+    repeat: &'a ComputedStyleValueHandle,
+    image_list: FfiLayerImageList,
+}
+
+pub(crate) fn border_image_values(style: ComputedValuesView<'_>) -> NinePieceImageValues<'_> {
+    let border = style.border();
+    NinePieceImageValues {
+        source: &border.border_image_source,
+        slice: &border.border_image_slice,
+        width: &border.border_image_width,
+        outset: &border.border_image_outset,
+        repeat: &border.border_image_repeat,
+        image_list: FfiLayerImageList::BorderImageSource,
+    }
+}
+
+// https://drafts.csswg.org/css-masking-1/#mask-borders
+pub(crate) fn mask_border_values(style: ComputedValuesView<'_>) -> NinePieceImageValues<'_> {
+    let mask = style.mask();
+    NinePieceImageValues {
+        source: &mask.mask_border_source,
+        slice: &mask.mask_border_slice,
+        width: &mask.mask_border_width,
+        outset: &mask.mask_border_outset,
+        repeat: &mask.mask_border_repeat,
+        image_list: FfiLayerImageList::MaskBorderSource,
+    }
+}
+
+pub(crate) fn paints_border_image(style: ComputedValuesView<'_>) -> bool {
+    style_queries::handle_value(&style.border().border_image_source).is_some_and(|source| source.is_image())
+}
+
+pub(crate) fn border_image_outsets(
+    style: ComputedValuesView<'_>,
+    border_widths: [CssPixels; 4],
+    present_edges: u8,
+) -> [CssPixels; 4] {
+    nine_piece_image_outsets(border_image_values(style), border_widths, present_edges)
+}
+
+pub(crate) fn nine_piece_image_outsets(
+    values: NinePieceImageValues<'_>,
+    border_widths: [CssPixels; 4],
+    present_edges: u8,
+) -> [CssPixels; 4] {
+    let outset_value = style_queries::handle_value(values.outset).expect("computed image outset lost its style value");
+    let outset_items = four_side_items(outset_value);
+    let side_is_present = sides_present(present_edges);
+    std::array::from_fn(|side| {
+        if side_is_present[side] {
+            resolve_outset_px(outset_items[side], border_widths[side])
+        } else {
+            CssPixels::default()
+        }
+    })
+}
+
+// https://drafts.csswg.org/css-backgrounds-3/#border-image-area
+// https://drafts.csswg.org/css-masking-1/#mask-border-image-area
+pub(crate) fn nine_piece_image_area(
+    values: NinePieceImageValues<'_>,
+    border_box_rect: CssPixelRect,
+    border_width: [CssPixels; 4],
+    present_edges: u8,
+) -> CssPixelRect {
+    let resolved_outset = nine_piece_image_outsets(values, border_width, present_edges);
+    let mut border_image_rect = border_box_rect;
+    border_image_rect.inflate(
+        resolved_outset[0],
+        resolved_outset[1],
+        resolved_outset[2],
+        resolved_outset[3],
+    );
+    border_image_rect
+}
+
+fn resolve_border_image_geometry(
+    slice_values: [&StyleValueData; 4],
+    width_items: [&StyleValueData; 4],
+    source_size: CssPixelSize,
+    border_image_rect: CssPixelRect,
+    border_width: [CssPixels; 4],
+    present_edges: u8,
+    number_scale: f64,
+) -> ResolvedBorderImageGeometry {
+    let side_is_present = sides_present(present_edges);
+    let source_width = source_size.width;
+    let source_height = source_size.height;
+
+    let [slice_top, slice_right, slice_bottom, slice_left] = slice_values;
+    let source_slices = [
+        resolve_slice_px(slice_top, source_height, number_scale),
+        resolve_slice_px(slice_right, source_width, number_scale),
+        resolve_slice_px(slice_bottom, source_height, number_scale),
+        resolve_slice_px(slice_left, source_width, number_scale),
+    ];
+
+    // https://drafts.csswg.org/css-backgrounds-3/#border-image-process
+    let mut widths: [CssPixels; 4] = std::array::from_fn(|side| {
+        if !side_is_present[side] {
+            return CssPixels::default();
+        }
+        let reference_length = if side % 2 == 0 {
+            border_image_rect.height
+        } else {
+            border_image_rect.width
+        };
+        resolve_width_px(
+            width_items[side],
+            border_width[side],
+            reference_length,
+            source_slices[side],
+        )
+    });
+    {
+        let [top, right, bottom, left] = &mut widths;
+        shrink_opposite_sides_to_fit(left, right, border_image_rect.width);
+        shrink_opposite_sides_to_fit(top, bottom, border_image_rect.height);
+    }
+
+    let zero = CssPixels::from_raw(0);
+    ResolvedBorderImageGeometry {
+        source_columns: Axis([zero, source_slices[3], source_width - source_slices[1], source_width]),
+        source_rows: Axis([zero, source_slices[0], source_height - source_slices[2], source_height]),
+        destination_columns: Axis([
+            border_image_rect.left(),
+            border_image_rect.left() + widths[3],
+            border_image_rect.right() - widths[1],
+            border_image_rect.right(),
+        ]),
+        destination_rows: Axis([
+            border_image_rect.top(),
+            border_image_rect.top() + widths[0],
+            border_image_rect.bottom() - widths[2],
+            border_image_rect.bottom(),
+        ]),
+        source_slices,
+        widths,
+    }
+}
+
+pub(crate) fn paint_border_image<O: Observer>(
+    recorder: &mut PaintRecorder<'_, O>,
+    paintable: NodeSlotId,
+    css_border_widths: [CssPixels; 4],
+    present_edges: u8,
+    border_box_rect: CssPixelRect,
+) -> bool {
+    let layout_arena = recorder.source;
+    let Some(style) = layout_arena.node_style_if_live(paintable) else {
+        return false;
+    };
+    paint_nine_piece_image(
+        recorder,
+        paintable,
+        style,
+        border_image_values(style),
+        css_border_widths,
+        present_edges,
+        border_box_rect,
+    )
+}
+
+/// Paints the nine pieces of the image `values` describe, and returns whether it painted it.
+#[expect(clippy::too_many_arguments)]
+pub(crate) fn paint_nine_piece_image<O: Observer>(
+    recorder: &mut PaintRecorder<'_, O>,
+    paintable: NodeSlotId,
+    style: ComputedValuesView<'_>,
+    values: NinePieceImageValues<'_>,
+    css_border_widths: [CssPixels; 4],
+    present_edges: u8,
+    border_box_rect: CssPixelRect,
+) -> bool {
+    let Some(source) = style_queries::handle_value(values.source) else {
+        return false;
+    };
+    let image_rendering = style.image_rendering();
+    let facts = recorder.source.layer_image_paint_facts(paintable, values.image_list, 0);
+    let source = if let StyleValueData::ImageSet(payload) = source {
+        let Some(index) = facts.as_ref().and_then(|facts| facts.image_set_selected_option_index) else {
+            return false;
+        };
+        let Some(option) = payload.options.as_slice().get(index as usize) else {
+            return false;
+        };
+        option.values()[0].data()
+    } else {
+        source
+    };
+    let is_gradient = matches!(
+        source,
+        StyleValueData::LinearGradient { .. }
+            | StyleValueData::RadialGradient { .. }
+            | StyleValueData::ConicGradient { .. }
+    );
+
+    let slice_value = style_queries::handle_value(values.slice).expect("computed image slice lost its style value");
+    let (slice_values, fill) = match slice_value {
+        StyleValueData::BorderImageSlice(border_image_slice_payload) => {
+            let BorderImageSlicePayload {
+                top,
+                right,
+                bottom,
+                left,
+                fill,
+            } = &**border_image_slice_payload;
+            ([top.data(), right.data(), bottom.data(), left.data()], *fill)
+        }
+        // NB: Typed OM can supply a single numeric slice directly, without the parser's four-sided wrapper.
+        StyleValueData::Number { .. }
+        | StyleValueData::Integer { .. }
+        | StyleValueData::Percentage { .. }
+        | StyleValueData::Calculated { .. } => ([slice_value; 4], false),
+        _ => unreachable!("computed border-image-slice holds a slice or numeric value"),
+    };
+    let width_value = style_queries::handle_value(values.width).expect("computed image width lost its style value");
+    let repeat_value = style_queries::handle_value(values.repeat).expect("computed image repeat lost its style value");
+    let repeat_items = component_items(repeat_value);
+    let repeat_keyword = |item: &StyleValueData| {
+        let StyleValueData::Keyword { keyword } = item else {
+            unreachable!("computed border-image-repeat holds a keyword");
+        };
+        crate::css::css_enums::keyword_to_border_image_repeat(*keyword).unwrap_or(border_image_repeat::STRETCH)
+    };
+    let repeat_x = repeat_keyword(repeat_items[0]);
+    let repeat_y = repeat_keyword(repeat_items[1 % repeat_items.len()]);
+
+    let border_image_rect = nine_piece_image_area(values, border_box_rect, css_border_widths, present_edges);
+    let (content, source_size) = if is_gradient {
+        // https://drafts.csswg.org/css-backgrounds-3/#border-image-slice
+        // Gradients have no natural size, so their concrete size is the border image area.
+        let size = CssPixelSize::new(border_image_rect.width, border_image_rect.height);
+        if size.width <= CssPixels::default() || size.height <= CssPixels::default() {
+            return false;
+        }
+        (
+            BorderImageContent::Gradient(resolve_gradient_paint(style, source, size)),
+            size,
+        )
+    } else {
+        let Some(facts) = facts else {
+            return false;
+        };
+        match facts.content {
+            ImageContent::Raster(Some(frame)) => (
+                BorderImageContent::Raster(recorder.register_image_frame(&frame)),
+                CssPixelSize::new(
+                    CssPixels::from_integer(i64::from(frame.width())),
+                    CssPixels::from_integer(i64::from(frame.height())),
+                ),
+            ),
+            ImageContent::Vector {
+                content_identity,
+                has_active_view_box,
+            } => {
+                // https://drafts.csswg.org/css-backgrounds-3/#border-image-source
+                // An image without a natural size is sized to the border image area.
+                let size = CssPixelSize::new(
+                    facts.natural.width.unwrap_or(border_image_rect.width),
+                    facts.natural.height.unwrap_or(border_image_rect.height),
+                );
+                if size.width <= CssPixels::default() || size.height <= CssPixels::default() {
+                    return false;
+                }
+                (
+                    BorderImageContent::Vector(VectorBorderImage {
+                        source: VectorImageSource::Layer {
+                            owner: paintable,
+                            list: values.image_list,
+                            computed_index: 0,
+                        },
+                        content_identity,
+                        has_active_view_box,
+                        width: size.width.to_float(),
+                        height: size.height.to_float(),
+                    }),
+                    size,
+                )
+            }
+            ImageContent::None | ImageContent::Raster(None) => return false,
+        }
+    };
+    // Numeric gradient slices use CSS coordinates; the generated image and percentage slices already include zoom.
+    let number_scale = if is_gradient {
+        f64::from(style.effective_zoom())
+    } else {
+        1.0
+    };
+    let geometry = resolve_border_image_geometry(
+        slice_values,
+        four_side_items(width_value),
+        source_size,
+        border_image_rect,
+        css_border_widths,
+        present_edges,
+        number_scale,
+    );
+    let source_columns = geometry.source_columns;
+    let source_rows = geometry.source_rows;
+    let destination_columns = geometry.destination_columns;
+    let destination_rows = geometry.destination_rows;
+    let source_slices = geometry.source_slices;
+    let widths = geometry.widths;
+    let scale = recorder.converter.device_pixels_per_css_pixel() as f32;
+
+    // A tile keeps the source region's aspect ratio at the scale forced by the border thickness.
+    let natural_tile_size = |column: Track, row: Track, destination_rect: CssPixelRect| -> CssPixelSize {
+        let source_width = source_columns.track_size(column);
+        let source_height = source_rows.track_size(row);
+        let mut tile_width = destination_rect.width;
+        let mut tile_height = destination_rect.height;
+        if column == Track::Center && row != Track::Center {
+            tile_width = scale_source_length_to_destination(source_width, source_height, destination_rect.height);
+        } else if row == Track::Center && column != Track::Center {
+            tile_height = scale_source_length_to_destination(source_height, source_width, destination_rect.width);
+        } else if column == Track::Center && row == Track::Center {
+            // The centre fill is scaled horizontally like the top edge and vertically like the left edge.
+            tile_width = scale_source_length_to_destination(source_width, source_slices[0], widths[0]);
+            tile_height = scale_source_length_to_destination(source_height, source_slices[3], widths[3]);
+        }
+        CssPixelSize::new(tile_width, tile_height)
+    };
+
+    for row in TRACKS {
+        for column in TRACKS {
+            if column == Track::Center && row == Track::Center && !fill {
+                // The centre is only painted when the 'fill' keyword is present.
+                continue;
+            }
+            // Only the centre track of an axis honours border-image-repeat; the edges always stretch.
+            let source_rect = FloatRect::new(
+                source_columns.track_start(column).to_float(),
+                source_rows.track_start(row).to_float(),
+                source_columns.track_size(column).to_float(),
+                source_rows.track_size(row).to_float(),
+            );
+            let destination_rect = CssPixelRect::new(
+                destination_columns.track_start(column),
+                destination_rows.track_start(row),
+                destination_columns.track_size(column),
+                destination_rows.track_size(row),
+            );
+            let destination_device_rect = recorder.converter.rounded_device_rect(destination_rect);
+            let tile_size = natural_tile_size(column, row, destination_rect);
+            let tile_device_size = FloatSize {
+                width: tile_size.width.to_float() * scale,
+                height: tile_size.height.to_float() * scale,
+            };
+            let horizontal_repeat = if column == Track::Center {
+                repeat_x
+            } else {
+                border_image_repeat::STRETCH
+            };
+            let vertical_repeat = if row == Track::Center {
+                repeat_y
+            } else {
+                border_image_repeat::STRETCH
+            };
+            match &content {
+                BorderImageContent::Raster(frame_id) => paint_border_image_slice(
+                    recorder,
+                    *frame_id,
+                    source_rect,
+                    destination_device_rect,
+                    tile_device_size,
+                    image_rendering,
+                    horizontal_repeat,
+                    vertical_repeat,
+                ),
+                BorderImageContent::Vector(image) => paint_vector_border_image_slice(
+                    recorder,
+                    image,
+                    source_rect,
+                    destination_device_rect,
+                    tile_device_size,
+                    image_rendering,
+                    horizontal_repeat,
+                    vertical_repeat,
+                ),
+                BorderImageContent::Gradient(gradient) => paint_gradient_border_image_slice(
+                    recorder,
+                    gradient,
+                    source_size,
+                    source_rect,
+                    destination_device_rect,
+                    tile_device_size,
+                    image_rendering,
+                    horizontal_repeat,
+                    vertical_repeat,
+                ),
+            }
+        }
+    }
+    true
+}

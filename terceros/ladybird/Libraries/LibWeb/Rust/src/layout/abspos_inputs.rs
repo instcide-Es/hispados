@@ -1,0 +1,260 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+use super::*;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct StaticPositionRect {
+    pub(crate) rect: geometry::LogicalRect,
+    pub(crate) inline_alignment: AxisEdge,
+    pub(crate) block_alignment: AxisEdge,
+    pub(crate) alignment_derives_from_own_computed_values: bool,
+}
+
+impl StaticPositionRect {
+    /// The rect, laid out in frame `from` within a box whose physical size is `container_size`, as frame `to` sees
+    /// it.
+    pub(crate) fn in_frame(
+        mut self,
+        from: geometry::Frame,
+        to: geometry::Frame,
+        container_size: crate::css::css_pixels::FfiCssPixelSize,
+    ) -> Self {
+        if from == to {
+            return self;
+        }
+        let rect = crate::css::css_pixels::CssPixelRect {
+            x: self.rect.offset.inline_offset,
+            y: self.rect.offset.block_offset,
+            width: self.rect.size.inline_size,
+            height: self.rect.size.block_size,
+        };
+        let rect = from.rect_in(rect, to, container_size);
+        self.rect = geometry::LogicalRect {
+            offset: geometry::LogicalOffset {
+                inline_offset: rect.x,
+                block_offset: rect.y,
+            },
+            size: geometry::LogicalSize {
+                inline_size: rect.width,
+                block_size: rect.height,
+            },
+        };
+        // NB: An alignment is towards the left or top of an axis of the frame, which may run along the other
+        //     physical axis, or the other way along it, in another frame.
+        let along_physical_axis = |frame: geometry::Frame, alignment: AxisEdge, horizontal: bool| {
+            let reversed = if horizontal {
+                frame.horizontal_axis_is_reversed()
+            } else {
+                frame.vertical_axis_is_reversed()
+            };
+            if reversed { alignment.reversed() } else { alignment }
+        };
+        let (physical_horizontal, physical_vertical) = {
+            let horizontal = along_physical_axis(from, self.inline_alignment, true);
+            let vertical = along_physical_axis(from, self.block_alignment, false);
+            if from.is_transposed() {
+                (vertical, horizontal)
+            } else {
+                (horizontal, vertical)
+            }
+        };
+        let (frame_horizontal, frame_vertical) = if to.is_transposed() {
+            (physical_vertical, physical_horizontal)
+        } else {
+            (physical_horizontal, physical_vertical)
+        };
+        self.inline_alignment = along_physical_axis(to, frame_horizontal, true);
+        self.block_alignment = along_physical_axis(to, frame_vertical, false);
+        self
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AbsposAxisMode {
+    StaticPosition,
+    InsetFromRect,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AbsposAxisAlignment {
+    /// The box keeps the place its insets give it in its inset-modified containing block, as for normal, stretch and
+    /// baseline alignment.
+    Stretch,
+    Edge(AxisEdge),
+    /// https://drafts.csswg.org/css-anchor-position-1/#anchor-center
+    /// Centers the box over its default anchor box, which starts at `anchor_start` in the containing block rect.
+    AnchorCenter {
+        anchor_start: CssPixels,
+        anchor_size: CssPixels,
+    },
+}
+
+/// How an absolutely positioned box is placed along one axis of its containing block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AxisPlacement {
+    pub(crate) mode: AbsposAxisMode,
+    /// The alignment that a grid area, a position area or anchor-center gives the axis, whatever its insets are.
+    pub(crate) alignment: Option<AbsposAxisAlignment>,
+}
+
+impl AxisPlacement {
+    /// The placement that the insets `start` and `end` of the box give it, at its static position where both are auto.
+    pub(crate) fn of_own_insets(start: style_values::InsetValue<'_>, end: style_values::InsetValue<'_>) -> Self {
+        Self {
+            mode: if start.is_auto() && end.is_auto() {
+                AbsposAxisMode::StaticPosition
+            } else {
+                AbsposAxisMode::InsetFromRect
+            },
+            alignment: None,
+        }
+    }
+
+    fn is_placed_by_own_insets(self) -> bool {
+        self.mode == AbsposAxisMode::InsetFromRect && self.alignment.is_none()
+    }
+
+    fn is_anchor_centered(self) -> bool {
+        matches!(self.alignment, Some(AbsposAxisAlignment::AnchorCenter { .. }))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AbsposContainingBlockInfo {
+    pub(crate) rect: geometry::LogicalRect,
+    pub(crate) inline_placement: AxisPlacement,
+    pub(crate) block_placement: AxisPlacement,
+    /// Whether a position area made this the box's containing block.
+    pub(crate) is_position_area: bool,
+}
+
+impl AbsposContainingBlockInfo {
+    /// The containing block rect `rect`, along whose axes the box styled `style` is placed by its own insets.
+    pub(crate) fn of_own_insets(rect: geometry::LogicalRect, style: StyleValues<'_>) -> Self {
+        Self {
+            rect,
+            inline_placement: AxisPlacement::of_own_insets(style.inset_left(), style.inset_right()),
+            block_placement: AxisPlacement::of_own_insets(style.inset_top(), style.inset_bottom()),
+            is_position_area: false,
+        }
+    }
+
+    // NB: A grid area, a position area and anchor-center give an axis an alignment, and set its mode whatever the
+    //     insets are. They may size or align the box against the static position rect.
+    pub(crate) fn axes_placed_by_own_insets(&self) -> (bool, bool) {
+        (
+            self.inline_placement.is_placed_by_own_insets(),
+            self.block_placement.is_placed_by_own_insets(),
+        )
+    }
+
+    /// Whether a grid area, a position area or anchor-center, which the box's own computed values ask for, places it.
+    pub(crate) fn derives_from_own_computed_values(&self) -> bool {
+        self.inline_placement.alignment.is_some() || self.block_placement.alignment.is_some()
+    }
+
+    /// Whether a position area or anchor-center aligns the box in the inline and the block axis.
+    /// https://drafts.csswg.org/css-anchor-position-1/#position-area
+    /// https://drafts.csswg.org/css-anchor-position-1/#anchor-center
+    pub(crate) fn anchor_aligned_axes(&self) -> (bool, bool) {
+        (
+            self.is_position_area || self.inline_placement.is_anchor_centered(),
+            self.is_position_area || self.block_placement.is_anchor_centered(),
+        )
+    }
+}
+
+/// The default anchor whose scroll a box compensates for, and in which physical axes.
+/// https://drafts.csswg.org/css-anchor-position-1/#scroll
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct DefaultScrollShift {
+    pub(crate) anchor: super::formatting_context::Node,
+    pub(crate) compensates_for_horizontal_scroll: bool,
+    pub(crate) compensates_for_vertical_scroll: bool,
+}
+
+/// The position option a box was laid out with: an entry of its position options list.
+/// https://drafts.csswg.org/css-anchor-position-1/#last-successful-position-option
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct PositionOptionChoice {
+    /// 0 for the base styles, or one more than the index of the position-try-fallbacks entry that made the option.
+    pub(crate) option: u32,
+    /// The @position-try rule the entry names.
+    /// NB: A choice whose rule was replaced since is no longer the box's last successful position option.
+    pub(crate) rule: crate::css::style::position_try::PositionTryRuleID,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AbsposLayoutInputs {
+    pub(crate) containing_block: super::formatting_context::Node,
+    pub(crate) inline_containing_block: super::formatting_context::Node,
+    /// Where the box would have been in flow, in the axes its layout reads that. An axis the box's own insets place it
+    /// in holds nothing, so that the inputs stay the same as the static position moves along that axis.
+    pub(crate) static_position_rect: StaticPositionRect,
+    pub(crate) containing_block_info: AbsposContainingBlockInfo,
+    pub(crate) resolved_anchor_insets: Option<super::formatting_context::ResolvedAnchorInsets>,
+    pub(crate) resolved_anchor_sizes: super::style_values::ResolvedAnchorSizes,
+    /// The position option the box is laid out with, or none for a box without position options.
+    pub(crate) position_option: Option<PositionOptionChoice>,
+    /// The frame in which the containing block lays out its contents, in which the box is laid out and its resolved
+    /// anchor sizes lie.
+    pub(crate) frame: super::geometry::Frame,
+}
+
+impl AbsposLayoutInputs {
+    pub(crate) fn without_static_position_in_axes_placed_by_own_insets(mut self) -> Self {
+        let (inline_placed_by_insets, block_placed_by_insets) = self.containing_block_info.axes_placed_by_own_insets();
+        let rect = &mut self.static_position_rect.rect;
+        if inline_placed_by_insets {
+            rect.offset.inline_offset = CssPixels::default();
+            rect.size.inline_size = CssPixels::default();
+        }
+        if block_placed_by_insets {
+            rect.offset.block_offset = CssPixels::default();
+            rect.size.block_size = CssPixels::default();
+        }
+        self
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ContainingBlockSearch {
+    pub(crate) is_fixed_position: bool,
+    pub(crate) containing_block: super::formatting_context::Node,
+    pub(crate) inline_containing_block: super::formatting_context::Node,
+    pub(crate) frontier: super::formatting_context::Node,
+}
+
+impl ContainingBlockSearch {
+    pub(crate) fn starting_at(out_of_flow_box: super::formatting_context::Node, is_fixed_position: bool) -> Self {
+        Self {
+            is_fixed_position,
+            containing_block: super::node_data::NodeSlotId::INVALID,
+            inline_containing_block: super::node_data::NodeSlotId::INVALID,
+            frontier: out_of_flow_box,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PendingAbsposChild {
+    pub(crate) child_box: super::formatting_context::Node,
+    pub(crate) coordinate_space_box: super::formatting_context::Node,
+    pub(crate) static_position_rect: StaticPositionRect,
+    pub(crate) containing_block_info_override: Option<AbsposContainingBlockInfo>,
+    pub(crate) containing_block_search: ContainingBlockSearch,
+}
+
+impl PendingAbsposChild {
+    pub(crate) fn containing_block(&self) -> super::formatting_context::Node {
+        self.containing_block_search.containing_block
+    }
+
+    pub(crate) fn inline_containing_block(&self) -> super::formatting_context::Node {
+        self.containing_block_search.inline_containing_block
+    }
+}

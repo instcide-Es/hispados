@@ -1,0 +1,350 @@
+/*
+ * Copyright (c) 2020, the SerenityOS developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibWeb/CSS/Invalidation/FormControlInvalidator.h>
+#include <LibWeb/CSS/PseudoElement.h>
+#include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOM/Event.h>
+#include <LibWeb/DOM/Node.h>
+#include <LibWeb/DOM/ShadowRoot.h>
+#include <LibWeb/HTML/CommandEvent.h>
+#include <LibWeb/HTML/HTMLButtonElement.h>
+#include <LibWeb/HTML/HTMLFormElement.h>
+#include <LibWeb/HTML/HTMLInputElement.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HighResolutionTime/TimeOrigin.h>
+#include <LibWeb/Namespace.h>
+
+namespace Web::HTML {
+
+GC_DEFINE_ALLOCATOR(HTMLButtonElement);
+
+HTMLButtonElement::HTMLButtonElement(DOM::Document& document, DOM::QualifiedName qualified_name)
+    : HTMLElement(document, move(qualified_name))
+{
+}
+
+HTMLButtonElement::~HTMLButtonElement() = default;
+
+HTMLButtonElement::TypeAttributeState HTMLButtonElement::parse_type_attribute(Optional<Utf16String> const& value)
+{
+    if (value.has_value() && value->equals_ignoring_ascii_case(u"submit"sv))
+        return HTMLButtonElement::TypeAttributeState::Submit;
+    if (value.has_value() && value->equals_ignoring_ascii_case(u"reset"sv))
+        return HTMLButtonElement::TypeAttributeState::Reset;
+    if (value.has_value() && value->equals_ignoring_ascii_case(u"button"sv))
+        return HTMLButtonElement::TypeAttributeState::Button;
+    if (value.has_value() && value->equals_ignoring_ascii_case(u"auto"sv))
+        return HTMLButtonElement::TypeAttributeState::Auto;
+
+    // The attribute's missing value default and invalid value default are both the Auto state.
+    // https://html.spec.whatwg.org/multipage/form-elements.html#attr-button-type-auto-state
+    return HTMLButtonElement::TypeAttributeState::Auto;
+}
+
+// https://html.spec.whatwg.org/multipage/form-elements.html#dom-button-type
+Utf16FlyString HTMLButtonElement::type_for_bindings() const
+{
+    // The type getter steps are:
+    // 1. If this is a submit button, then return "submit".
+    if (is_submit_button())
+        return "submit"_utf16_fly_string;
+
+    // 2. Let state be this's type attribute.
+    auto state = type_state();
+
+    // 3. Assert: state is not in the Submit Button state.
+    VERIFY(state != TypeAttributeState::Submit);
+
+    // 4. If state is in the Auto state, then return "button".
+    if (state == TypeAttributeState::Auto)
+        return "button"_utf16_fly_string;
+
+    // 5. Return the keyword value corresponding to state.
+    switch (state) {
+#define __ENUMERATE_HTML_BUTTON_TYPE_ATTRIBUTE(keyword, state) \
+    case TypeAttributeState::state:                            \
+        return #keyword##_utf16_fly_string;
+        ENUMERATE_HTML_BUTTON_TYPE_ATTRIBUTES
+#undef __ENUMERATE_HTML_BUTTON_TYPE_ATTRIBUTE
+    }
+    VERIFY_NOT_REACHED();
+}
+
+// https://html.spec.whatwg.org/multipage/form-elements.html#dom-button-type
+void HTMLButtonElement::set_type_for_bindings(Utf16View type)
+{
+    // The type setter steps are to set the type content attribute to the given value.
+    set_attribute_value(HTML::AttributeNames::type, type);
+}
+
+void HTMLButtonElement::form_associated_element_attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const&, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_)
+{
+    PopoverTargetAttributes::associated_attribute_changed(name, value, namespace_);
+
+    if (name == AttributeNames::type && !namespace_.has_value()) {
+        m_type_state = parse_type_attribute(value);
+        // The type decides whether the button is a candidate for constraint validation.
+        CSS::Invalidation::invalidate_style_after_validity_change(*this);
+    }
+
+    if (name.is_one_of(AttributeNames::type, AttributeNames::command, AttributeNames::commandfor)) {
+        submit_button_state_changed();
+        if (auto* form = this->form())
+            form->default_button_state_maybe_changed();
+    }
+}
+
+void HTMLButtonElement::visit_edges(Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    PopoverTargetAttributes::visit_edges(visitor);
+    visitor.visit(m_command_for_element);
+}
+
+// https://html.spec.whatwg.org/multipage/interaction.html#dom-tabindex
+i32 HTMLButtonElement::default_tab_index_value() const
+{
+    // See the base function for the spec comments.
+    return 0;
+}
+
+// https://html.spec.whatwg.org/multipage/forms.html#concept-submit-button
+// https://html.spec.whatwg.org/multipage/form-elements.html#the-button-element:concept-submit-button
+bool HTMLButtonElement::is_submit_button() const
+{
+    // A button element is said to be a submit button if any of the following are true:
+    switch (type_state()) {
+        // - the type attribute is in the Auto state and both the command and commandfor content attributes are not present; or
+    case TypeAttributeState::Auto:
+        return !has_attribute(AttributeNames::command) && !has_attribute(AttributeNames::commandfor);
+        // - the type attribute is in the Submit Button state.
+    case TypeAttributeState::Submit:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// https://html.spec.whatwg.org/multipage/form-elements.html#the-button-element:concept-fe-value
+Utf16String HTMLButtonElement::value() const
+{
+    // The element's value is the value of the element's value attribute, if there is one; otherwise the empty string.
+    if (auto value = attribute(AttributeNames::value); value.has_value())
+        return value.release_value();
+    return {};
+}
+
+// https://html.spec.whatwg.org/multipage/form-elements.html#the-button-element:concept-fe-optional-value
+Optional<Utf16String> HTMLButtonElement::optional_value() const
+{
+    // The element's optional value is the value of the element's value attribute, if there is one; otherwise null.
+    return attribute(AttributeNames::value);
+}
+
+bool HTMLButtonElement::has_activation_behavior() const
+{
+    return true;
+}
+
+// https://html.spec.whatwg.org/multipage/form-elements.html#determine-if-command-is-valid
+static bool determine_if_a_command_is_valid_for_a_target(Utf16View command, GC::Ptr<Web::DOM::Element> target)
+{
+    // 1. If command is in the Unknown state, then return false.
+    if (command.is_empty())
+        return false;
+
+    // 2. If command is in the Custom state, then return true.
+    if (command.starts_with(u"--"sv))
+        return true;
+
+    // 3. If target is not an HTML element, then return false.
+    auto target_element = as_if<HTMLElement>(target.ptr());
+    if (!target_element)
+        return false;
+
+    // 4. If command is in any of the following states:
+    //    - Toggle Popover
+    //    - Show Popover
+    //    - Hide Popover
+    //    then return true.
+    if (command == u"toggle-popover"sv || command == u"show-popover"sv || command == u"hide-popover"sv)
+        return true;
+
+    // 5. If this standard does not define is valid command steps for target's local name, then return false.
+    // 6. Otherwise, return the result of running target's corresponding is valid command steps given command.
+    return target_element->is_valid_command(command);
+}
+
+// https://html.spec.whatwg.org/multipage/form-elements.html#the-button-element:activation-behaviour
+void HTMLButtonElement::activation_behavior(DOM::Event const& event)
+{
+    // 1. If element is disabled, then return.
+    if (!enabled())
+        return;
+
+    // 2. If element's node document is not fully active, then return.
+    if (!this->document().is_fully_active())
+        return;
+
+    if (associated_shadow_host_pseudo_element() == CSS::PseudoElement::WebkitSearchCancelButton) {
+        if (auto root = containing_shadow_root())
+            static_cast<HTMLInputElement&>(*root->host()).clear_search_value({});
+        return;
+    }
+
+    // 3. If element has a form owner:
+    if (form() != nullptr) {
+        // 1. If element is a submit button, then submit element's form owner from element with userInvolvement set to event's user navigation involvement, and return.
+        if (is_submit_button()) {
+            form()->submit_form(*this, { .user_involvement = user_navigation_involvement(event) }).release_value_but_fixme_should_propagate_errors();
+            return;
+        }
+        // 2. If element's type attribute is in the Reset Button state, then reset element's form owner, and return.
+        if (type_state() == TypeAttributeState::Reset) {
+            form()->reset_form();
+            return;
+        }
+        // 3. If element's type attribute is in the Auto state, then return.
+        if (type_state() == TypeAttributeState::Auto)
+            return;
+    }
+
+    // 4. Let target be the result of running element's get the commandfor-associated element.
+    auto target = get_the_attribute_associated_element(AttributeNames::commandfor, m_command_for_element);
+
+    // 5. If target is not null:
+    if (target) {
+        // 1. Let command be element's command attribute.
+        auto command = this->command();
+
+        // 2. If the result of determining if a command is valid for a target given command and target is false, then return.
+        if (!determine_if_a_command_is_valid_for_a_target(command, target))
+            return;
+
+        // 3. Let continue be the result of firing an event named command at target, using CommandEvent, with its
+        //    command attribute initialized to command, its source attribute initialized to element, and its cancelable
+        //    attribute initialized to true.
+        // NOTE: DOM standard issue #1328 tracks how to better standardize associated event data in a way which makes
+        //       sense on Events. Currently an event attribute initialized to a value cannot also have a getter, and so
+        //       an internal slot (or map of additional fields) is required to properly specify this.
+        auto event = create_command_event(relevant_realm(*this), HTML::EventNames::command, { .cancelable = true }, *this, command);
+        auto continue_ = target->dispatch_event(event);
+
+        // 4. If continue is false, then return.
+        if (!continue_)
+            return;
+
+        // 5. If target is not connected, then return.
+        if (!target->is_connected())
+            return;
+
+        // 6. If command is in the Custom state, then return.
+        if (command.starts_with(u"--"sv))
+            return;
+
+        auto target_element = as<HTMLElement>(target.ptr());
+
+        // 7. If command is in the Hide Popover state:
+        if (command == u"hide-popover"sv) {
+            // 1. If the result of running check popover validity given target, true, false, and null is true,
+            //    then run the hide popover algorithm given target, true, true, false, and element.
+            if (MUST(target_element->check_popover_validity(ExpectedToBeShowing::Yes, ThrowExceptions::No, nullptr, IgnoreDomState::No))) {
+                MUST(target_element->hide_popover(FocusPreviousElement::Yes, FireEvents::Yes, ThrowExceptions::No, IgnoreDomState::No, this));
+            }
+        }
+
+        // 8. Otherwise, if command is in the Toggle Popover state:
+        else if (command == u"toggle-popover"sv) {
+            // 1. If the result of running check popover validity given target, false, false, and null is true,
+            //    then run the show popover algorithm given target, false, and element.
+            if (MUST(target_element->check_popover_validity(ExpectedToBeShowing::No, ThrowExceptions::No, nullptr, IgnoreDomState::No))) {
+                MUST(target_element->show_popover(ThrowExceptions::No, this));
+            }
+
+            // 2. Otherwise, if the result of running check popover validity given target, true, false, and null is true,
+            //    then run the hide popover algorithm given target, true, true, false and element.
+            else if (MUST(target_element->check_popover_validity(ExpectedToBeShowing::Yes, ThrowExceptions::No, nullptr, IgnoreDomState::No))) {
+                MUST(target_element->hide_popover(FocusPreviousElement::Yes, FireEvents::Yes, ThrowExceptions::No, IgnoreDomState::No, this));
+            }
+        }
+
+        // 9. Otherwise, if command is in the Show Popover state:
+        else if (command == u"show-popover"sv) {
+            // 1. If the result of running check popover validity given target, false, false, and null is true,
+            //    then run the show popover algorithm given target, false, and element.
+            if (MUST(target_element->check_popover_validity(ExpectedToBeShowing::No, ThrowExceptions::No, nullptr, IgnoreDomState::No))) {
+                MUST(target_element->show_popover(ThrowExceptions::No, this));
+            }
+        }
+
+        // 10. Otherwise, if this standard defines command steps for target's local name,
+        //     then run the corresponding command steps given target, element, and command.
+        else {
+            target_element->command_steps(*this, command);
+        }
+    }
+
+    // 6. Otherwise, run the popover target attribute activation behavior given element and event's target.
+    else if (auto target = event.target()) {
+        if (auto* target_node = as_if<DOM::Node>(*target))
+            PopoverTargetAttributes::popover_target_activation_behaviour(*this, *target_node);
+    }
+}
+
+bool HTMLButtonElement::is_focusable() const
+{
+    return associated_shadow_host_pseudo_element() != CSS::PseudoElement::WebkitSearchCancelButton && enabled() && meets_focusable_area_rendering_requirements();
+}
+
+// https://html.spec.whatwg.org/multipage/form-elements.html#dom-button-command
+Utf16String HTMLButtonElement::command() const
+{
+    // 1. Let command be this's command attribute.
+    auto command = get_attribute(AttributeNames::command);
+
+    // https://html.spec.whatwg.org/multipage/form-elements.html#attr-button-command
+    // The command attribute is an enumerated attribute with the following keywords and states:
+    // Keyword                  State          Brief description
+    // toggle-popover           Toggle Popover Shows or hides the targeted popover element.
+    // show-popover             Show Popover   Shows the targeted popover element.
+    // hide-popover             Hide Popover   Hides the targeted popover element.
+    // close                    Close          Closes the targeted dialog element.
+    // request-close            Request Close  Requests to close the targeted dialog element.
+    // show-modal               Show Modal     Opens the targeted dialog element as modal.
+    // A custom command keyword Custom         Only dispatches the command event on the targeted element.
+    Array valid_values { u"toggle-popover"sv, u"show-popover"sv, u"hide-popover"sv, u"close"sv, u"request-close"sv, u"show-modal"sv };
+
+    // 2. If command is in the Custom state, then return command's value.
+    //    A custom command keyword is a string that starts with "--".
+    if (command.has_value() && command.value().starts_with(u"--"sv)) {
+        return command.value();
+    }
+
+    // NOTE: Steps are re-ordered a bit.
+
+    // 4. Return the keyword corresponding to the value of command.return
+    if (command.has_value()) {
+        for (auto const& value : valid_values) {
+            if (command.value().equals_ignoring_ascii_case(value)) {
+                return Utf16String::from_utf16(value);
+            }
+        }
+    }
+
+    // 3. If command is in the Unknown state, then return the empty string.
+    //    The attribute's missing value default and invalid value default are both the Unknown state.
+    return {};
+}
+
+// https://html.spec.whatwg.org/multipage/form-elements.html#the-button-element:dom-button-command-2
+void HTMLButtonElement::set_command(Utf16View value)
+{
+    set_attribute_value(AttributeNames::command, value);
+}
+
+}

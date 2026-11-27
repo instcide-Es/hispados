@@ -1,0 +1,125 @@
+/*
+ * Copyright (c) 2021, Luke Wilde <lukew@serenityos.org>
+ * Copyright (c) 2022, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibGC/Heap.h>
+#include <LibGC/WeakInlines.h>
+#include <LibJS/Runtime/Error.h>
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOM/LiveNodeList.h>
+#include <LibWeb/DOM/Node.h>
+
+namespace Web::DOM {
+
+GC_DEFINE_ALLOCATOR(LiveNodeList);
+
+GC::Ref<NodeList> LiveNodeList::create(Node const& root, Scope scope, Filter filter, Kind kind)
+{
+    return GC::Heap::the().allocate<LiveNodeList>(root, scope, filter, kind);
+}
+
+LiveNodeList::LiveNodeList(Node const& root, Scope scope, Filter filter, Kind kind)
+    : NodeList()
+    , GC::WeakContainer(heap())
+    , m_root(root)
+    , m_filter(filter)
+    , m_scope(scope)
+    , m_kind(kind)
+{
+}
+
+LiveNodeList::~LiveNodeList() = default;
+
+void LiveNodeList::visit_edges(GC::Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_root);
+    visitor.visit(m_filter);
+}
+
+GC::Cell const& LiveNodeList::owner_cell(Badge<GC::Heap>) const
+{
+    return *this;
+}
+
+void LiveNodeList::remove_dead_cells(Badge<GC::Heap>)
+{
+    m_cached_nodes.remove_dead_cells(heap());
+}
+
+void LiveNodeList::update_cache_if_needed() const
+{
+    auto& document = m_root->document();
+    auto invalidation_version = this->invalidation_version(document);
+    if (m_cached_document.ptr().ptr() == &document
+        && m_cached_dom_tree_version == m_root->dom_tree_version()
+        && m_cached_invalidation_version == invalidation_version) {
+        return;
+    }
+
+    m_cached_nodes.clear_with_capacity();
+    if (m_scope == Scope::Descendants) {
+        m_root->for_each_in_subtree([&](auto& node) {
+            if ((*m_filter)(node))
+                m_cached_nodes.append(const_cast<Node&>(node));
+            return TraversalDecision::Continue;
+        });
+    } else {
+        m_root->for_each_child([&](auto& node) {
+            if ((*m_filter)(node))
+                m_cached_nodes.append(const_cast<Node&>(node));
+            return IterationDecision::Continue;
+        });
+    }
+
+    if (m_cached_nodes.is_empty() || m_cached_nodes.size() < m_cached_nodes.capacity() / 4)
+        m_cached_nodes.shrink_to_fit();
+
+    m_cached_document = document;
+    m_cached_dom_tree_version = m_root->dom_tree_version();
+    m_cached_invalidation_version = invalidation_version;
+}
+
+u64 LiveNodeList::invalidation_version(Document const& document) const
+{
+    switch (m_kind) {
+    case Kind::Generic:
+        return 0;
+    case Kind::Labels:
+    case Kind::FormControls:
+        return document.form_controls_version();
+    }
+    VERIFY_NOT_REACHED();
+}
+
+Node* LiveNodeList::first_matching(Function<bool(Node const&)> const& filter) const
+{
+    update_cache_if_needed();
+    for (auto& node : m_cached_nodes) {
+        if (filter(node))
+            return &node;
+    }
+    return nullptr;
+}
+
+// https://dom.spec.whatwg.org/#dom-nodelist-length
+u32 LiveNodeList::length() const
+{
+    update_cache_if_needed();
+    return m_cached_nodes.size();
+}
+
+// https://dom.spec.whatwg.org/#dom-nodelist-item
+Node const* LiveNodeList::item(u32 index) const
+{
+    // The item(index) method must return the indexth node in the collection. If there is no indexth node in the collection, then the method must return null.
+    update_cache_if_needed();
+    if (index >= m_cached_nodes.size())
+        return nullptr;
+    return &m_cached_nodes[index];
+}
+
+}

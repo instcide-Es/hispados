@@ -1,0 +1,71 @@
+/*
+ * Copyright (c) 2018-2020, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2021, Tobias Christiansen <tobyase@serenityos.org>
+ * Copyright (c) 2021-2024, Sam Atkins <sam@ladybird.org>
+ * Copyright (c) 2022-2023, MacDue <macdue@dueutil.tech>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Utf16FlyString.h>
+#include <LibGfx/Color.h>
+#include <LibWeb/CSS/StyleValues/RustStyleValueHandle.h>
+#include <LibWeb/CSS/StyleValues/StyleValue.h>
+
+namespace Web::CSS {
+
+enum class ColorSyntax : u8 {
+    Legacy,
+    Modern,
+};
+
+class ColorStyleValue : public StyleValue {
+public:
+    static ValueComparingNonnullRefPtr<ColorStyleValue const> create_from_color(Color color, ColorSyntax color_syntax, Optional<Utf16FlyString> name = {});
+    virtual ~ColorStyleValue() override = default;
+
+    enum class ColorType {
+        RGB, // This is used by RGBColorStyleValue for rgb(...) and rgba(...).
+        A98RGB,
+        DisplayP3,
+        DisplayP3Linear,
+        HSL,
+        HWB,
+        Lab,
+        LCH,
+        OKLab,
+        OKLCH,
+        sRGB, // This is used by ColorFunctionStyleValue for color(srgb ...).
+        sRGBLinear,
+        ProPhotoRGB,
+        Rec2020,
+        XYZD50,
+        XYZD65,
+        Alpha, // This is used for alpha(from ...), whose result is in the color space of its origin color.
+    };
+    Optional<ColorType> color_type() const
+    {
+        auto const& base = color_base();
+        if (!base.has_color_type)
+            return {};
+        return static_cast<ColorType>(base.color_type);
+    }
+    ColorSyntax color_syntax() const { return static_cast<ColorSyntax>(color_base().color_syntax); }
+
+protected:
+    friend class StyleValue;
+
+    StyleValueFFI::ColorBase const& color_base() const;
+
+    explicit ColorStyleValue(StyleValueFFI::StyleValueData const* value)
+        : StyleValue(Type::Color, value)
+    {
+    }
+
+    // Packs the optional color type for a color creator's ColorBase arguments.
+    static u8 color_type_byte(Optional<ColorType> color_type) { return color_type.has_value() ? static_cast<u8>(to_underlying(*color_type)) : 0; }
+};
+
+}

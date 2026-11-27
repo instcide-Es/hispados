@@ -1,0 +1,26 @@
+/*
+ * Copyright (c) 2021, the SerenityOS developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibGC/Heap.h>
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOM/ProcessingInstruction.h>
+
+namespace Web::DOM {
+
+GC_DEFINE_ALLOCATOR(ProcessingInstruction);
+
+ProcessingInstruction::ProcessingInstruction(Document& document, Utf16String data, Utf16FlyString const& target)
+    : CharacterData(document, NodeType::PROCESSING_INSTRUCTION_NODE, move(data))
+    , m_target(target)
+{
+}
+
+GC::Ref<ProcessingInstruction> ProcessingInstruction::create(Document& document, Utf16String data, Utf16FlyString const& target)
+{
+    return GC::Heap::the().allocate<ProcessingInstruction>(document, move(data), target);
+}
+
+}

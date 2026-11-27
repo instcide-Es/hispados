@@ -1,0 +1,4 @@
+dictionary IdleRequestOptions {
+    unsigned long timeout;
+};
+callback IdleRequestCallback = undefined (IdleDeadline deadline);

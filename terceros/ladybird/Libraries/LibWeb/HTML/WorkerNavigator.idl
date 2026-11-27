@@ -1,0 +1,21 @@
+// https://html.spec.whatwg.org/multipage/workers.html#workernavigator
+[Exposed=Worker]
+interface WorkerNavigator {
+    // https://w3c.github.io/media-capabilities/#dom-workernavigator-mediacapabilities
+    [SameObject] readonly attribute MediaCapabilities mediaCapabilities;
+
+    // https://w3c.github.io/ServiceWorker/#navigator-serviceworker
+    [SecureContext, SameObject, Experimental] readonly attribute ServiceWorkerContainer serviceWorker;
+
+    // https://w3c.github.io/permissions/#navigator-and-workernavigator-extension
+    [SameObject] readonly attribute Permissions permissions;
+};
+
+Navigator includes GlobalPrivacyControl;
+WorkerNavigator includes NavigatorID;
+WorkerNavigator includes NavigatorLanguage;
+WorkerNavigator includes NavigatorOnLine;
+WorkerNavigator includes NavigatorConcurrentHardware;
+WorkerNavigator includes NavigatorStorage;
+WorkerNavigator includes NavigatorLocks;
+WorkerNavigator includes NavigatorDeviceMemory;

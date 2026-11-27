@@ -1,0 +1,35 @@
+/*
+ * Copyright (c) 2022, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/FlyString.h>
+#include <AK/Utf16FlyString.h>
+#include <AK/Utf16String.h>
+#include <LibWeb/Bindings/FocusEvent.h>
+#include <LibWeb/UIEvents/UIEvent.h>
+#include <LibWebCommon/HighResolutionTime/DOMHighResTimeStamp.h>
+
+namespace Web::UIEvents {
+
+using FocusEventInit = Bindings::FocusEventInit;
+
+class FocusEvent final : public UIEvent {
+    WEB_WRAPPABLE(FocusEvent, UIEvent);
+    GC_DECLARE_ALLOCATOR(FocusEvent);
+
+public:
+    [[nodiscard]] static GC::Ref<FocusEvent> create(FlyString const& event_name, FocusEventInit const&, HighResolutionTime::DOMHighResTimeStamp);
+    [[nodiscard]] static GC::Ref<FocusEvent> create(Utf16String const& event_name, FocusEventInit const&, HighResolutionTime::DOMHighResTimeStamp);
+
+    virtual ~FocusEvent() override;
+
+private:
+    FocusEvent(FlyString const& event_name, FocusEventInit const&, HighResolutionTime::DOMHighResTimeStamp);
+    FocusEvent(Utf16FlyString const& event_name, FocusEventInit const&, HighResolutionTime::DOMHighResTimeStamp);
+};
+
+}

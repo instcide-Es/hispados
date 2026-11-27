@@ -1,0 +1,31 @@
+/*
+ * Copyright (c) 2022-2024, Sam Atkins <sam@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <LibWeb/CSS/Resolution.h>
+#include <LibWeb/CSS/StyleValues/DimensionStyleValue.h>
+
+namespace Web::CSS {
+
+class ResolutionStyleValue : public DimensionStyleValue {
+public:
+    virtual ~ResolutionStyleValue() override = default;
+
+    Resolution resolution() const { return Resolution(m_value->resolution.value, static_cast<ResolutionUnit>(m_value->resolution.unit)); }
+    virtual double raw_value() const override { return m_value->resolution.value; }
+    virtual Utf16FlyString unit_name() const override { return resolution().unit_name(); }
+
+private:
+    friend class StyleValue;
+
+    explicit ResolutionStyleValue(StyleValueFFI::StyleValueData const* data)
+        : DimensionStyleValue(Type::Resolution, data)
+    {
+    }
+};
+
+}

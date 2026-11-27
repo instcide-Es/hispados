@@ -1,0 +1,591 @@
+/*
+ * Copyright (c) 2021-2022, Dex♪ <dexes.ttp@gmail.com>
+ * Copyright (c) 2023, Kenneth Myhra <kennethmyhra@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/ByteBuffer.h>
+#include <AK/QuickSort.h>
+#include <LibGC/Heap.h>
+#include <LibJS/Runtime/ArrayBuffer.h>
+#include <LibJS/Runtime/FunctionObject.h>
+#include <LibJS/Runtime/VM.h>
+#include <LibRequests/RequestClient.h>
+#include <LibURL/Origin.h>
+#include <LibWeb/Bindings/PrincipalHostDefined.h>
+#include <LibWeb/Bindings/Wrappable.h>
+#include <LibWeb/Bindings/WrapperWorld.h>
+#include <LibWeb/ContentSecurityPolicy/BlockingAlgorithms.h>
+#include <LibWeb/ContentSecurityPolicy/FetchIntegration.h>
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOM/Event.h>
+#include <LibWeb/DOM/EventDispatcher.h>
+#include <LibWeb/DOM/IDLEventListener.h>
+#include <LibWeb/DOMURL/DOMURL.h>
+#include <LibWeb/Fetch/Fetching/ClientContextSnapshots.h>
+#include <LibWeb/Fetch/Fetching/Fetching.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/Requests.h>
+#include <LibWeb/Fetch/Infrastructure/NetworkPartitionKey.h>
+#include <LibWeb/Fetch/Infrastructure/PortBlocking.h>
+#include <LibWeb/FileAPI/Blob.h>
+#include <LibWeb/HTML/CloseEvent.h>
+#include <LibWeb/HTML/EventHandler.h>
+#include <LibWeb/HTML/EventNames.h>
+#include <LibWeb/HTML/MessageEvent.h>
+#include <LibWeb/HTML/PolicyContainers.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HTML/WindowOrWorkerGlobalScope.h>
+#include <LibWeb/HighResolutionTime/TimeOrigin.h>
+#include <LibWeb/Loader/LoaderConfig.h>
+#include <LibWeb/Loader/ResourceLoader.h>
+#include <LibWeb/MixedContent/AbstractOperations.h>
+#include <LibWeb/Page/Page.h>
+#include <LibWeb/Platform/EventLoopPlugin.h>
+#include <LibWeb/UpgradeInsecureRequests/AbstractOperations.h>
+#include <LibWeb/WebIDL/AbstractOperations.h>
+#include <LibWeb/WebIDL/Buffers.h>
+#include <LibWeb/WebIDL/DOMException.h>
+#include <LibWeb/WebIDL/ExceptionOr.h>
+#include <LibWeb/WebSockets/WebSocket.h>
+
+namespace Web::WebSockets {
+
+GC_DEFINE_ALLOCATOR(WebSocket);
+
+// https://websockets.spec.whatwg.org/#dom-websocket-websocket
+WebIDL::ExceptionOr<GC::Ref<WebSocket>> WebSocket::create(HTML::WindowOrWorkerGlobalScopeMixin& global_scope, Utf16String const& url, Optional<Variant<Utf16String, Vector<Utf16String>>> const& protocols)
+{
+    auto web_socket = GC::Heap::the().allocate<WebSocket>(global_scope.this_impl());
+    global_scope.register_web_socket({}, web_socket);
+    auto& relevant_settings_object = HTML::relevant_settings_object(global_scope);
+
+    // 1. Let baseURL be this's relevant settings object's API base URL.
+    auto base_url = relevant_settings_object.api_base_url();
+
+    // 2. Let urlRecord be the result of applying the URL parser to url with baseURL.
+    auto url_record = DOMURL::parse(url.utf16_view(), base_url);
+
+    // 3. If urlRecord is failure, then throw a "SyntaxError" DOMException.
+    if (!url_record.has_value())
+        return WebIDL::SyntaxError::create("Invalid URL"_utf16);
+
+    // 4. If urlRecord’s scheme is "http", then set urlRecord’s scheme to "ws".
+    if (url_record->scheme() == "http"sv)
+        url_record->set_scheme("ws"sv);
+    // 5. Otherwise, if urlRecord’s scheme is "https", set urlRecord’s scheme to "wss".
+    else if (url_record->scheme() == "https"sv)
+        url_record->set_scheme("wss"sv);
+
+    // 6. If urlRecord’s scheme is not "ws" or "wss", then throw a "SyntaxError" DOMException.
+    if (!url_record->scheme().is_one_of("ws"sv, "wss"sv))
+        return WebIDL::SyntaxError::create("Invalid protocol"_utf16);
+
+    // 7. If urlRecord’s fragment is non-null, then throw a "SyntaxError" DOMException.
+    if (url_record->fragment().has_value())
+        return WebIDL::SyntaxError::create("Presence of URL fragment is invalid"_utf16);
+
+    Vector<Utf16String> protocols_sequence;
+    // 8. If protocols is a string, set protocols to a sequence consisting of just that string.
+    if (protocols.has_value() && protocols->has<Utf16String>())
+        protocols_sequence = { protocols.value().get<Utf16String>() };
+    else if (protocols.has_value() && protocols->has<Vector<Utf16String>>())
+        protocols_sequence = protocols.value().get<Vector<Utf16String>>();
+    else
+        protocols_sequence = {};
+
+    // 9. If any of the values in protocols occur more than once or otherwise fail to match the requirements for elements that comprise
+    //    the value of `Sec-WebSocket-Protocol` fields as defined by The WebSocket protocol, then throw a "SyntaxError" DOMException. [WSP]
+    auto sorted_protocols = protocols_sequence;
+    quick_sort(sorted_protocols);
+    for (size_t i = 0; i < sorted_protocols.size(); i++) {
+        // https://datatracker.ietf.org/doc/html/rfc6455
+        // The elements that comprise this value MUST be non-empty strings with characters in the range U+0021 to U+007E not including
+        // separator characters as defined in [RFC2616] and MUST all be unique strings.
+        auto protocol = sorted_protocols[i];
+        if (protocol.is_empty())
+            return WebIDL::SyntaxError::create("Found empty protocol name"_utf16);
+        if (i < sorted_protocols.size() - 1 && protocol == sorted_protocols[i + 1])
+            return WebIDL::SyntaxError::create("Found a duplicate protocol name in the specified list"_utf16);
+        for (auto code_point : protocol.utf16_view()) {
+            if (code_point < '\x21' || code_point > '\x7E')
+                return WebIDL::SyntaxError::create("Found invalid character in subprotocol name"_utf16);
+        }
+    }
+
+    // 10. Set this's url to urlRecord.
+    web_socket->set_url(*url_record);
+
+    // 11. Let client be this’s relevant settings object.
+    // 12. Run this step in parallel:
+    Platform::EventLoopPlugin::the().deferred_invoke(GC::create_function(GC::Heap::the(), GC::captures(web_socket, url_record, move(protocols_sequence), GC::Ref { relevant_settings_object }), [](auto& web_socket, auto& url_record, auto& protocols_sequence, auto& client) {
+        // 1. Establish a WebSocket connection given urlRecord, protocols, and client. [FETCH]
+        // AD-HOC: We don't yet implement this method to spec, so it's possible for the connection to fail before we
+        //         make a Requests::WebSocket. If so, we need to manually error and close it.
+        if (web_socket->establish_web_socket_connection(*url_record, protocols_sequence, *client).is_error()) {
+            web_socket->on_error();
+            web_socket->on_close(to_underlying(::WebSocket::CloseStatusCode::AbnormalClosure), Utf16String {}, false);
+        }
+    }));
+
+    return web_socket;
+}
+
+WebIDL::ExceptionOr<GC::Ref<WebSocket>> WebSocket::create_for_constructor(JS::Object& relevant_global_object, Utf16String const& url, Optional<Variant<Utf16String, Vector<Utf16String>>> const& protocols)
+{
+    auto& global_scope = HTML::relevant_window_or_worker_global_scope(relevant_global_object);
+    return create(global_scope, url, protocols);
+}
+
+WebSocket::WebSocket(GC::Ref<DOM::EventTarget> relevant_global_object)
+    : EventTarget()
+    , m_global_object(relevant_global_object)
+{
+}
+
+WebSocket::~WebSocket() = default;
+
+JS::Object& WebSocket::relevant_global_object() const
+{
+    return HTML::relevant_global_object(relevant_global_scope());
+}
+
+void WebSocket::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_global_object);
+}
+
+// https://html.spec.whatwg.org/multipage/server-sent-events.html#garbage-collection
+void WebSocket::finalize()
+{
+    Base::finalize();
+
+    auto ready_state = this->ready_state();
+
+    // If a WebSocket object is garbage collected while its connection is still open, the user agent must start the
+    // WebSocket closing handshake, with no status code for the Close message. [WSP]
+    if (m_websocket && ready_state != Requests::WebSocket::ReadyState::Closing && ready_state != Requests::WebSocket::ReadyState::Closed) {
+        // FIXME: LibProtocol does not yet support sending empty Close messages, so we use default values for now
+        m_websocket->close(1000);
+    }
+
+    relevant_global_scope().unregister_web_socket({}, *this);
+}
+
+HTML::WindowOrWorkerGlobalScopeMixin& WebSocket::relevant_global_scope() const
+{
+    return HTML::relevant_window_or_worker_global_scope(*m_global_object);
+}
+
+ErrorOr<void> WebSocket::establish_web_socket_connection(URL::URL const& url_record, Vector<Utf16String> const& protocols, HTML::EnvironmentSettingsObject& client)
+{
+    // 1. Let requestURL be a copy of url, with its scheme set to "http", if url's scheme is "ws"; otherwise to "https".
+    auto request_url = url_record;
+    request_url.set_scheme(url_record.scheme() == "ws"sv ? "http"sv : "https"sv);
+
+    // 2. Let request be a new request, whose URL is requestURL, client is client, service-workers mode is "none",
+    //    referrer is "no-referrer", mode is "websocket", credentials mode is "include", cache mode is "no-store", and
+    //    redirect mode is "error".
+    auto request = Fetch::Infrastructure::Request::create();
+    request->set_url(move(request_url));
+    request->set_client(client.address());
+    request->set_service_workers_mode(Fetch::Infrastructure::Request::ServiceWorkersMode::None);
+    request->set_referrer(Fetch::Infrastructure::Request::Referrer::NoReferrer);
+    request->set_mode(Fetch::Infrastructure::Request::Mode::WebSocket);
+    request->set_credentials_mode(Fetch::Infrastructure::Request::CredentialsMode::Include);
+    request->set_cache_mode(HTTP::CacheMode::NoStore);
+    request->set_redirect_mode(Fetch::Infrastructure::Request::RedirectMode::Error);
+
+    // FIXME: Fetch request as per the remaining steps of https://websockets.spec.whatwg.org/#concept-websocket-establish
+    // AD-HOC: Until the opening handshake goes through fetch, append `Accept-Language` and run the blocking checks
+    //         and the HSTS upgrade of main fetch here.
+    auto loader_config = current_loader_config();
+    Fetch::Fetching::append_accept_language_header_if_missing(*request, loader_config->config);
+
+    request->set_policy_container(client.policy_container()->clone());
+    request->set_client_snapshot(Fetch::Fetching::snapshot_client_context(client));
+    auto report_violation = ContentSecurityPolicy::violation_reporter_for_request(client.realm(), request);
+    ContentSecurityPolicy::report_content_security_policy_violations_for_request(request, report_violation);
+    UpgradeInsecureRequests::upgrade_request_to_a_potentially_trustworthy_url_if_appropriate(request);
+    if (Fetch::Infrastructure::block_bad_port(request) == Fetch::Infrastructure::RequestOrResponseBlocking::Blocked
+        || MixedContent::should_fetching_request_be_blocked_as_mixed_content(request) == Fetch::Infrastructure::RequestOrResponseBlocking::Blocked
+        || ContentSecurityPolicy::should_request_be_blocked_by_content_security_policy(request, report_violation) == ContentSecurityPolicy::Directives::Directive::Result::Blocked) {
+        return Error::from_string_literal("WebSocket connection was blocked");
+    }
+
+    Fetch::Fetching::upgrade_request_to_https_for_known_hsts_host_if_appropriate(Bindings::principal_host_defined_page(client.realm()), *request);
+
+    if (m_ready_state != Requests::WebSocket::ReadyState::Connecting)
+        return Error::from_string_literal("The WebSocket was closed before it connected");
+
+    // AD-HOC: Connect to the URL that the request was upgraded to, if any, with its scheme mapped back to "ws" or
+    //         "wss".
+    auto connection_url = request->current_url();
+    connection_url.set_scheme(connection_url.scheme() == "http"sv ? "ws"sv : "wss"sv);
+
+    if (m_has_disappeared)
+        return Error::from_string_literal("The document of the WebSocket was unloaded before it connected");
+
+    auto* window_or_worker = HTML::window_or_worker_global_scope_from_global_object(client.global_object());
+    VERIFY(window_or_worker);
+    auto origin_string = window_or_worker->origin().to_byte_string();
+
+    Vector<ByteString> protocol_byte_strings;
+    for (auto const& protocol : protocols)
+        TRY(protocol_byte_strings.try_append(protocol.to_utf8().to_byte_string()));
+
+    auto user_agent = Fetch::Infrastructure::default_user_agent_value(loader_config->config, request);
+    request->header_list()->append({ "User-Agent"sv, user_agent.to_byte_string() });
+
+    if (ResourceLoader::proxy_autoconfig_url().has_value()) {
+        dbgln("FIXME: Evaluate the PAC file to find the proxy for {}; failing the WebSocket connection", url_record);
+        return Error::from_string_literal("PAC proxy configurations are not supported");
+    }
+
+    auto network_isolation_key = Fetch::Infrastructure::determine_the_network_partition_key(client);
+    auto request_client = ResourceLoader::the().request_client_for(network_isolation_key);
+
+    // FIXME: We could put this request in a queue until the client connection is re-established.
+    if (!request_client)
+        return Error::from_string_literal("RequestServer is currently unavailable");
+
+    // NB: As for its requests, a worker's page has no top-level traversable or browser page ID.
+    auto& page = Bindings::principal_host_defined_page(client.realm());
+    auto originating_page_id = page.has_top_level_traversable() ? page.client().id().value() : 0;
+
+    m_websocket = request_client->websocket_connect(connection_url, move(network_isolation_key), origin_string, protocol_byte_strings, {}, *request->header_list(), originating_page_id, { .status = request->same_site_status(), .is_safe_method = true });
+
+    m_websocket->on_open = GC::weak_callback(*this, [](auto& self) {
+        self.on_open();
+    });
+    m_websocket->on_message = GC::weak_callback(*this, [](auto& self, auto message) {
+        self.on_message(move(message.data), message.is_text);
+    });
+    m_websocket->on_message_bytes_transmitted = GC::weak_callback(*this, [](auto& self, u64 byte_count) {
+        self.on_message_bytes_transmitted(byte_count);
+    });
+    m_websocket->on_close = GC::weak_callback(*this, [](auto& self, auto code, auto reason, bool was_clean) {
+        self.on_close(code, Utf16String::from_utf8(StringView { reason.bytes() }), was_clean);
+    });
+    m_websocket->on_error = GC::weak_callback(*this, [](auto& self, auto) {
+        self.on_error();
+    });
+    m_websocket->on_ready_state_change = GC::weak_callback(*this, [](auto& self) {
+        if (self.m_websocket->ready_state() == Requests::WebSocket::ReadyState::Closing)
+            self.on_closing_handshake_started();
+    });
+
+    return {};
+}
+
+bool WebSocket::should_be_kept_alive() const
+{
+    if (m_has_disappeared)
+        return false;
+
+    auto state = ready_state();
+    if (state == Requests::WebSocket::ReadyState::Connecting) {
+        return has_event_listener(HTML::EventNames::open)
+            || has_event_listener(HTML::EventNames::message)
+            || has_event_listener(HTML::EventNames::error)
+            || has_event_listener(HTML::EventNames::close);
+    }
+    if (state == Requests::WebSocket::ReadyState::Open) {
+        return has_event_listener(HTML::EventNames::message)
+            || has_event_listener(HTML::EventNames::error)
+            || has_event_listener(HTML::EventNames::close);
+    }
+    if (state == Requests::WebSocket::ReadyState::Closing) {
+        return has_event_listener(HTML::EventNames::error)
+            || has_event_listener(HTML::EventNames::close);
+    }
+    return false;
+}
+
+void WebSocket::update_pending_activity()
+{
+    relevant_global_scope().set_has_pending_activity(*this, should_be_kept_alive());
+}
+
+void WebSocket::event_listener_list_changed()
+{
+    update_pending_activity();
+}
+
+// https://websockets.spec.whatwg.org/#dom-websocket-readystate
+Requests::WebSocket::ReadyState WebSocket::ready_state() const
+{
+    return m_ready_state;
+}
+
+void WebSocket::set_ready_state(Requests::WebSocket::ReadyState ready_state)
+{
+    m_ready_state = ready_state;
+    update_pending_activity();
+}
+
+// https://websockets.spec.whatwg.org/#dom-websocket-extensions
+Utf16String WebSocket::extensions() const
+{
+    if (!m_websocket)
+        return {};
+    // https://websockets.spec.whatwg.org/#feedback-from-the-protocol
+    // FIXME: Change the extensions attribute's value to the extensions in use, if it is not the null value.
+    return {};
+}
+
+// https://websockets.spec.whatwg.org/#dom-websocket-protocol
+WebIDL::ExceptionOr<Utf16String> WebSocket::protocol() const
+{
+    if (!m_websocket)
+        return Utf16String {};
+    auto subprotocol = m_websocket->subprotocol_in_use();
+    return Utf16String::from_utf8(StringView { subprotocol.bytes() });
+}
+
+// https://websockets.spec.whatwg.org/#dom-websocket-close
+WebIDL::ExceptionOr<void> WebSocket::close(Optional<u16> code, Optional<Utf16String> reason)
+{
+    // 1. If code is present, but is neither an integer equal to 1000 nor an integer in the range 3000 to 4999, inclusive, throw an "InvalidAccessError" DOMException.
+    if (code.has_value() && *code != 1000 && (*code < 3000 || *code > 4999))
+        return WebIDL::InvalidAccessError::create("The close error code is invalid"_utf16);
+    // 2. If reason is present, then run these substeps:
+    String encoded_reason;
+    if (reason.has_value()) {
+        // 1. Let reasonBytes be the result of encoding reason.
+        encoded_reason = reason->to_utf8();
+
+        // 2. If reasonBytes is longer than 123 bytes, then throw a "SyntaxError" DOMException.
+        if (encoded_reason.bytes().size() > 123)
+            return WebIDL::SyntaxError::create("The close reason is longer than 123 bytes"_utf16);
+    }
+    // 3. Run the first matching steps from the following list:
+    auto state = ready_state();
+    // -> If this's ready state is CLOSING (2) or CLOSED (3)
+    if (state == Requests::WebSocket::ReadyState::Closing || state == Requests::WebSocket::ReadyState::Closed)
+        return {};
+    // -> If the WebSocket connection is not yet established [WSP]
+    // -> If the WebSocket closing handshake has not yet been started [WSP]
+    // -> Otherwise
+    // NB: All of these are handled by the WebSocket Protocol when calling close(). We still set the ready state to
+    //     CLOSING now though (which every case above expects), to prevent handling any messages from the remote server
+    //     in the meantime.
+    set_ready_state(Requests::WebSocket::ReadyState::Closing);
+
+    // FIXME: LibProtocol does not yet support sending empty Close messages, so we use default values for now
+    if (m_websocket)
+        m_websocket->close(code.value_or(1000), encoded_reason.to_byte_string());
+    return {};
+}
+
+// https://websockets.spec.whatwg.org/#dom-websocket-bufferedamount
+u64 WebSocket::buffered_amount() const
+{
+    // The bufferedAmount getter steps are to return the number of bytes of application data (UTF-8 text and binary
+    // data) that have been queued using send() but that, as of the last time the event loop reached step 1, had not
+    // yet been transmitted to the network. (This thus includes any text sent during the execution of the current task,
+    // regardless of whether the user agent is able to transmit text in the background in parallel with script
+    // execution.) This does not include framing overhead incurred by the protocol, or buffering done by the operating
+    // system or network hardware.
+    return m_buffered_amount;
+}
+
+void WebSocket::on_message_bytes_transmitted(u64 byte_count)
+{
+    // Applied in a task of its own, so that bufferedAmount never changes while a task runs.
+    HTML::queue_a_task(HTML::Task::Source::WebSocket, nullptr, nullptr, GC::create_function(GC::Heap::the(), GC::captures(GC::Ref { *this }, byte_count), [](auto& self, auto& byte_count) {
+        self->m_buffered_amount -= min(byte_count, self->m_buffered_amount);
+    }));
+}
+
+// https://websockets.spec.whatwg.org/#dom-websocket-send
+WebIDL::ExceptionOr<void> WebSocket::send(WebSocketSendData const& data)
+{
+    // 1. If this's ready state is CONNECTING, then throw an "InvalidStateError" DOMException.
+    auto state = ready_state();
+    if (state == Requests::WebSocket::ReadyState::Connecting)
+        return WebIDL::InvalidStateError::create("Websocket is still CONNECTING"_utf16);
+
+    // 2. Run the appropriate set of steps from the following list:
+    // NB: Every kind of data is sent if the WebSocket connection is established and the WebSocket closing handshake
+    //     has not yet started, and increases the bufferedAmount attribute by the number of bytes that make up the
+    //     message.
+    bool is_open = state == Requests::WebSocket::ReadyState::Open;
+    u64 message_size = 0;
+    data.visit(
+        [&](Utf16String const& string) {
+            auto encoded_string = string.to_utf8();
+            message_size = encoded_string.bytes().size();
+            if (is_open)
+                m_websocket->send(encoded_string);
+        },
+        [&](auto const& buffer_source_value) {
+            WebIDL::BufferSource buffer_source { WebIDL::BufferSourceVariant { buffer_source_value } };
+            auto array_buffer = buffer_source.viewed_array_buffer();
+            bool has_bytes = array_buffer && !array_buffer->is_detached() && !buffer_source.is_out_of_bounds();
+            message_size = has_bytes ? buffer_source.byte_length() : 0;
+            if (!is_open)
+                return;
+
+            ByteBuffer buffer;
+            if (has_bytes) {
+                buffer = MUST(ByteBuffer::create_uninitialized(buffer_source.byte_length()));
+                array_buffer->copy_to(buffer_source.byte_offset(), buffer);
+            }
+            m_websocket->send(buffer.bytes(), false);
+        },
+        [&](GC::Ref<FileAPI::Blob> blob) {
+            auto bytes = blob->raw_bytes();
+            message_size = bytes.size();
+            if (is_open)
+                m_websocket->send(bytes, false);
+        });
+    // TODO: If the data cannot be sent, e.g. because it would need to be buffered but the buffer is full, the user
+    //       agent must flag the WebSocket as full and then close the WebSocket connection.
+
+    m_buffered_amount += message_size;
+
+    return {};
+}
+
+// https://websockets.spec.whatwg.org/#feedback-from-the-protocol
+void WebSocket::on_open()
+{
+    // When the WebSocket connection is established, the user agent must queue a task to run these steps:
+    HTML::queue_a_task(HTML::Task::Source::WebSocket, nullptr, nullptr, GC::create_function(GC::Heap::the(), GC::captures(*this), [](auto& self) {
+        // AD-HOC: Matching other engines, do not fire an open event if close() was called before this task ran.
+        if (self.m_ready_state != Requests::WebSocket::ReadyState::Connecting)
+            return;
+
+        // 1. Change the ready state to OPEN (1).
+        self.set_ready_state(Requests::WebSocket::ReadyState::Open);
+
+        // 2. Change the extensions attribute's value to the extensions in use, if it is not the null value. [WSP]
+        // 3. Change the protocol attribute's value to the subprotocol in use, if it is not the null value. [WSP]
+        // 4. Fire an event named open at the WebSocket object.
+        self.dispatch_event(DOM::Event::create(HTML::EventNames::open, HighResolutionTime::current_high_resolution_time(self.relevant_global_object())));
+    }));
+}
+
+// https://websockets.spec.whatwg.org/#feedback-from-the-protocol
+void WebSocket::on_message(ByteBuffer message, bool is_text)
+{
+    // When a WebSocket message has been received with type type and data data, the user agent must queue a task to follow these steps:
+    HTML::queue_a_task(HTML::Task::Source::WebSocket, nullptr, nullptr, GC::create_function(GC::Heap::the(), GC::captures(*this, move(message), is_text), [](auto& self, auto& message, auto& is_text) {
+        // 1. If ready state is not OPEN (1), then return.
+        if (self.m_ready_state != Requests::WebSocket::ReadyState::Open)
+            return;
+
+        auto& realm = HTML::relevant_realm(self.relevant_global_object());
+
+        // 2. Let dataForEvent be determined by switching on type and binary type:
+        auto data_for_event = [&]() -> JS::Value {
+            // -> type indicates that the data is Text
+            if (is_text) {
+                // a new DOMString containing data
+                return JS::PrimitiveString::create(realm.vm(), Utf16String::from_utf8(message));
+            }
+            // -> type indicates that the data is Binary and binary type is "blob"
+            if (self.m_binary_type == Bindings::BinaryType::Blob) {
+                // a new Blob object, created in the relevant Realm of the WebSocket object, that represents data as its raw data [FILEAPI]
+                return Bindings::wrap(Bindings::host_defined_wrapper_world(realm), realm, FileAPI::Blob::create(move(message), Utf16String {}));
+            }
+            // -> type indicates that the data is Binary and binary type is "arraybuffer"
+            if (self.m_binary_type == Bindings::BinaryType::Arraybuffer) {
+                // a new ArrayBuffer object, created in the relevant Realm of the WebSocket object, whose contents are data
+                return JS::ArrayBuffer::create(realm, move(message));
+            }
+
+            VERIFY_NOT_REACHED();
+        }();
+
+        // 3. Fire an event named message at the WebSocket object, using MessageEvent, with the origin attribute
+        //    initialized to the serialization of the WebSocket object’s url’s origin, and the data attribute
+        //    initialized to dataForEvent.
+        HTML::MessageEventInit event_init;
+        event_init.data = data_for_event;
+
+        self.dispatch_event(HTML::create_message_event(realm, HTML::EventNames::message, event_init, self.m_url.origin()));
+    }));
+}
+
+// https://websockets.spec.whatwg.org/#feedback-from-the-protocol
+void WebSocket::on_closing_handshake_started()
+{
+    // When the WebSocket closing handshake is started, the user agent must queue a task to change the ready state to
+    // CLOSING (2). (If the close() method was called, the ready state will already be set to CLOSING (2) when this task
+    // runs.) [WSP]
+    HTML::queue_a_task(HTML::Task::Source::WebSocket, nullptr, nullptr, GC::create_function(GC::Heap::the(), GC::captures(*this), [](auto& self) {
+        // AD-HOC: Matching other engines, a WebSocket that an error event has already closed stays CLOSED.
+        if (self.m_ready_state == Requests::WebSocket::ReadyState::Closed)
+            return;
+        self.set_ready_state(Requests::WebSocket::ReadyState::Closing);
+    }));
+}
+
+// https://websockets.spec.whatwg.org/#feedback-from-the-protocol
+void WebSocket::on_error()
+{
+    // When the WebSocket connection is closed, possibly cleanly, the user agent must queue a task to run the following substeps:
+    HTML::queue_a_task(HTML::Task::Source::WebSocket, nullptr, nullptr, GC::create_function(GC::Heap::the(), GC::captures(*this), [](auto& self) {
+        // 1. Change the ready state to CLOSED (3).
+        self.set_ready_state(Requests::WebSocket::ReadyState::Closed);
+
+        // 2. If the user agent was required to fail the WebSocket connection, or if the WebSocket connection was
+        //    closed after being flagged as full, fire an event named error at the WebSocket object. [WSP]
+        self.dispatch_event(DOM::Event::create(HTML::EventNames::error, HighResolutionTime::current_high_resolution_time(self.relevant_global_object())));
+    }));
+}
+
+// https://websockets.spec.whatwg.org/#feedback-from-the-protocol
+void WebSocket::on_close(u16 code, Utf16String reason, bool was_clean)
+{
+    // When the WebSocket connection is closed, possibly cleanly, the user agent must queue a task to run the following substeps:
+    HTML::queue_a_task(HTML::Task::Source::WebSocket, nullptr, nullptr, GC::create_function(GC::Heap::the(), GC::captures(*this, code, move(reason), was_clean), [](auto& self, auto& code, auto& reason, auto& was_clean) {
+        // 1. Change the ready state to CLOSED (3).
+        self.set_ready_state(Requests::WebSocket::ReadyState::Closed);
+
+        // 2. If [needed], fire an event named error at the WebSocket object. This is handled by the Protocol's WebSocket
+        HTML::CloseEventInit event_init {};
+        event_init.was_clean = was_clean;
+        event_init.code = code;
+        event_init.reason = reason;
+        self.dispatch_event(HTML::CloseEvent::create(HTML::EventNames::close, event_init, HighResolutionTime::current_high_resolution_time(self.relevant_global_object())));
+    }));
+}
+
+// https://websockets.spec.whatwg.org/#make-disappear
+void WebSocket::make_disappear()
+{
+    m_has_disappeared = true;
+    update_pending_activity();
+
+    // -> If the WebSocket connection is not yet established [WSP]
+    //    - Fail the WebSocket connection. [WSP]
+    // -> If the WebSocket closing handshake has not yet been started [WSP]
+    //    - Start the WebSocket closing handshake, with the status code to use in the WebSocket Close message being 1001. [WSP]
+    // -> Otherwise
+    //    - Do nothing.
+    // NOTE: All of these are handled by the WebSocket Protocol when calling close()
+    auto ready_state = this->ready_state();
+    if (!m_websocket || ready_state == Requests::WebSocket::ReadyState::Closing || ready_state == Requests::WebSocket::ReadyState::Closed)
+        return;
+
+    m_websocket->close(1001);
+}
+
+#undef __ENUMERATE
+#define __ENUMERATE(attribute_name, event_name)                       \
+    void WebSocket::set_##attribute_name(WebIDL::CallbackType* value) \
+    {                                                                 \
+        set_event_handler_attribute(event_name, value);               \
+    }                                                                 \
+    WebIDL::CallbackType* WebSocket::attribute_name()                 \
+    {                                                                 \
+        return event_handler_attribute(event_name);                   \
+    }
+ENUMERATE_WEBSOCKET_EVENT_HANDLERS(__ENUMERATE)
+#undef __ENUMERATE
+
+}

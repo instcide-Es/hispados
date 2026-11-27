@@ -1,0 +1,18 @@
+// https://dom.spec.whatwg.org/#interface-treewalker
+[Exposed=Window]
+interface TreeWalker {
+    [DirectGetter, SameObject] readonly attribute Node root;
+    readonly attribute unsigned long whatToShow;
+
+    [ImplementedInBindings, ReturnsJSValue] readonly attribute NodeFilter? filter;
+
+    attribute Node currentNode;
+
+    [ImplementedInBindings] Node? parentNode();
+    [ImplementedInBindings] Node? firstChild();
+    [ImplementedInBindings] Node? lastChild();
+    [ImplementedInBindings] Node? previousSibling();
+    [ImplementedInBindings] Node? nextSibling();
+    [ImplementedInBindings] Node? previousNode();
+    [ImplementedInBindings] Node? nextNode();
+};

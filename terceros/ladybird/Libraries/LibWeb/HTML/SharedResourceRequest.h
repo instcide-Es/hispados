@@ -1,0 +1,157 @@
+/*
+ * Copyright (c) 2023, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Utf16String.h>
+#include <LibGC/Function.h>
+#include <LibGC/Ptr.h>
+#include <LibJS/Heap/Cell.h>
+#include <LibURL/URL.h>
+#include <LibWeb/DOM/DocumentLoadEventDelayer.h>
+#include <LibWeb/Forward.h>
+#include <LibWeb/HTML/CORSSettingAttribute.h>
+#include <LibWebCommon/ReferrerPolicy/ReferrerPolicy.h>
+
+namespace Web::HTML {
+
+class SharedResourceRequest final : public JS::Cell {
+    GC_CELL(SharedResourceRequest, JS::Cell);
+    GC_DECLARE_ALLOCATOR(SharedResourceRequest);
+
+public:
+    // NB: Only requests with the same mode, credentials mode, integrity metadata and referrer policy share a
+    //     resource. The origin is the same for every request of a document.
+    struct Key {
+        URL::URL url;
+        Fetch::Infrastructure::Request::Mode mode;
+        Fetch::Infrastructure::Request::CredentialsMode credentials_mode;
+        Utf16String integrity_metadata;
+        ReferrerPolicy::ReferrerPolicy referrer_policy { ReferrerPolicy::ReferrerPolicy::EmptyString };
+
+        [[nodiscard]] bool operator==(Key const&) const = default;
+    };
+
+    [[nodiscard]] static GC::Ref<SharedResourceRequest> get_or_create(DOM::Document&, URL::URL const&, CORSSettingAttribute);
+    [[nodiscard]] static GC::Ref<SharedResourceRequest> get_or_create(DOM::Document&, Fetch::Infrastructure::Request const&);
+
+    // Creates a private request that decodes a raster image from the body of a response,
+    // instead of fetching it. No fetch checks this resource against the policies of the document, so it is only for
+    // the element that presents it, and get_or_create() never returns it.
+    // Calls on_body_read once reading the body has ended, whether or not that succeeded.
+    [[nodiscard]] static GC::Ref<SharedResourceRequest> create_from_image_response_body(DOM::Document&, URL::URL const&, Fetch::Infrastructure::Body const&, bool is_cors_cross_origin, GC::Ptr<GC::Function<void()>> on_body_read);
+
+    // Ends a request created from a response body whose fetch was stopped or is no longer wanted, as that body will
+    // never be read to its end. Does nothing once the request has finished.
+    void response_body_fetch_was_stopped();
+
+    virtual ~SharedResourceRequest() override;
+
+    URL::URL const& url() const { return m_key.url; }
+    Key const& key() const { return m_key; }
+    Optional<String> const& image_mime_type() const { return m_image_mime_type; }
+    [[nodiscard]] bool can_be_shared() const { return m_can_be_shared; }
+
+    [[nodiscard]] GC::Ptr<DecodedImageData> image_data() const;
+    [[nodiscard]] bool can_be_pruned_from_memory_cache() const;
+    [[nodiscard]] u64 cache_touch_serial() const { return m_cache_touch_serial; }
+    void touch_memory_cache_entry();
+
+    [[nodiscard]] GC::Ptr<Fetch::Infrastructure::FetchController> fetch_controller();
+    void set_fetch_controller(GC::Ptr<Fetch::Infrastructure::FetchController>);
+
+    void fetch_resource(NonnullRefPtr<Fetch::Infrastructure::Request>);
+
+    // Records a user that waits for the fetch without callbacks, so that the fetch delays the load event for it.
+    void wait_without_callbacks();
+
+    void add_callbacks(GC::Ptr<GC::Function<void()>> on_finish, GC::Ptr<GC::Function<void()>> on_fail, GC::Ptr<GC::Function<void()>> on_stop = {});
+
+    enum class DelaysLoadEvent : u8 {
+        No,
+        Yes,
+    };
+
+    // Returns an ID for remove_callbacks(), or nothing if the callbacks already ran.
+    Optional<u64> add_removable_callbacks(GC::Ptr<GC::Function<void()>> on_finish, GC::Ptr<GC::Function<void()>> on_fail, GC::Ptr<GC::Function<void()>> on_stop = {}, DelaysLoadEvent = DelaysLoadEvent::Yes);
+    void remove_callbacks(u64 id);
+
+    bool is_fetching() const;
+    bool needs_fetching() const;
+
+private:
+    [[nodiscard]] static GC::Ref<SharedResourceRequest> get_or_create(DOM::Document&, Key);
+
+    explicit SharedResourceRequest(GC::Ref<Page>, Key, GC::Ref<DOM::Document>);
+
+    virtual void finalize() override;
+    virtual void visit_edges(JS::Cell::Visitor&) override;
+
+    enum class IsSVGImage {
+        No,
+        Yes,
+    };
+
+    void handle_successful_fetch(URL::URL const&, IsSVGImage, ByteBuffer data, bool image_data_is_cors_cross_origin);
+    void handle_failed_fetch();
+    void handle_stopped_fetch();
+    void handle_successful_resource_load();
+    void remove_from_document();
+
+    enum class State {
+        New,
+        Fetching,
+        Finished,
+        Failed,
+        Stopped,
+    };
+
+    State m_state { State::New };
+    Optional<String> m_image_mime_type;
+
+    GC::Ref<Page> m_page;
+
+    struct Callbacks {
+        // NB: Zero when nothing waits for these callbacks anymore.
+        u64 id { 0 };
+        DelaysLoadEvent delays_load_event { DelaysLoadEvent::Yes };
+        GC::Ptr<GC::Function<void()>> on_finish;
+        GC::Ptr<GC::Function<void()>> on_fail;
+        GC::Ptr<GC::Function<void()>> on_stop;
+    };
+    Vector<Callbacks> m_callbacks;
+    u64 m_next_callbacks_id { 1 };
+
+    // NB: Set once a user waits for the fetch without callbacks.
+    bool m_fetch_has_user_without_callbacks { false };
+
+    Key m_key;
+    bool m_can_be_shared { true };
+    GC::Ptr<DecodedImageData> m_image_data;
+    GC::Ptr<Fetch::Infrastructure::FetchController> m_fetch_controller;
+    u64 m_cache_touch_serial { 0 };
+
+    GC::Ptr<DOM::Document> m_document;
+
+    Optional<DOM::DocumentLoadEventDelayer> m_load_event_delayer;
+};
+
+}
+
+namespace AK {
+
+template<>
+struct Traits<Web::HTML::SharedResourceRequest::Key> : public DefaultTraits<Web::HTML::SharedResourceRequest::Key> {
+    static unsigned hash(Web::HTML::SharedResourceRequest::Key const& key)
+    {
+        auto hash = pair_int_hash(Traits<URL::URL>::hash(key.url), to_underlying(key.mode));
+        hash = pair_int_hash(hash, to_underlying(key.credentials_mode));
+        hash = pair_int_hash(hash, key.integrity_metadata.hash());
+        return pair_int_hash(hash, to_underlying(key.referrer_policy));
+    }
+};
+
+}

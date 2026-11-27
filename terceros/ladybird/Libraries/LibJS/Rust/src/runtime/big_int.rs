@@ -1,0 +1,96 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+use ak::Utf16String;
+use libjs_runtime_macros::Trace;
+use num_bigint::Sign;
+use num_traits::FromPrimitive;
+
+use crate::gc::class::{GcCell, define_cell};
+use crate::interpreter::vm::Vm;
+use crate::layout::cell::{CellHeader, Gc};
+use crate::layout::value::Value;
+use crate::runtime::completion::ThrowCompletionOr;
+use crate::runtime::error::ErrorKind;
+use crate::runtime::error_types::ErrorType;
+
+/// The arbitrary-precision integer a BigInt holds, in place of Crypto::SignedBigInteger.
+pub use num_bigint::BigInt as SignedBigInteger;
+
+#[repr(C)]
+#[derive(Trace)]
+pub struct BigInt {
+    header: CellHeader,
+    big_integer: SignedBigInteger,
+}
+
+define_cell!(BigInt, BigInt);
+
+impl BigInt {
+    fn new(big_integer: SignedBigInteger) -> Self {
+        Self {
+            header: CellHeader::for_class(Self::CLASS),
+            big_integer,
+        }
+    }
+
+    pub fn create(vm: &Vm, big_integer: SignedBigInteger) -> Gc<BigInt> {
+        vm.heap().allocate(|_| Self::new(big_integer))
+    }
+
+    pub fn create_from_i64(vm: &Vm, value: i64) -> Gc<BigInt> {
+        Self::create(vm, SignedBigInteger::from(value))
+    }
+
+    pub fn create_from_u64(vm: &Vm, value: u64) -> Gc<BigInt> {
+        Self::create(vm, SignedBigInteger::from(value))
+    }
+
+    /// The BigInt with the sign and the magnitude, big-endian, which can have leading zeros.
+    pub fn create_from_magnitude_bytes_be(vm: &Vm, is_negative: bool, magnitude: &[u8]) -> Gc<BigInt> {
+        let sign = if is_negative { Sign::Minus } else { Sign::Plus };
+        Self::create(vm, SignedBigInteger::from_bytes_be(sign, magnitude))
+    }
+
+    pub fn big_integer(&self) -> &SignedBigInteger {
+        &self.big_integer
+    }
+
+    pub fn is_negative(&self) -> bool {
+        self.big_integer.sign() == Sign::Minus
+    }
+
+    /// The magnitude of the value, big-endian and without leading zeros, which has no bytes for zero.
+    pub fn magnitude_to_bytes_be(&self) -> Vec<u8> {
+        if self.big_integer.sign() == Sign::NoSign {
+            return Vec::new();
+        }
+        self.big_integer.magnitude().to_bytes_be()
+    }
+
+    /// The value, if it is an integer in the range of u64.
+    pub fn to_u64_if_exact(&self) -> Option<u64> {
+        u64::try_from(&self.big_integer).ok()
+    }
+
+    pub fn to_utf16_string(&self) -> Utf16String {
+        Utf16String::from_utf8(&format!("{}n", self.big_integer))
+    }
+}
+
+// 21.2.1.1.1 NumberToBigInt ( number ), https://tc39.es/ecma262/#sec-numbertobigint
+pub fn number_to_bigint(vm: &Vm, number: Value) -> ThrowCompletionOr<Gc<BigInt>> {
+    assert!(number.is_number());
+
+    // 1. If IsIntegralNumber(number) is false, throw a RangeError exception.
+    if !number.is_integral_number() {
+        return vm.throw_completion(ErrorKind::RangeError, ErrorType::BigIntFromNonIntegral, &[]);
+    }
+
+    // 2. Return the BigInt value that represents ℝ(number).
+    let big_integer = SignedBigInteger::from_f64(number.as_f64()).expect("an integral number is finite");
+    Ok(BigInt::create(vm, big_integer))
+}

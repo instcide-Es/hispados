@@ -1,0 +1,39 @@
+/*
+ * Copyright (c) 2022, Sam Atkins <atkinssj@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibWeb/Layout/Node.h>
+#include <LibWeb/SVG/AttributeNames.h>
+#include <LibWeb/SVG/AttributeParsing.h>
+#include <LibWeb/SVG/SVGLineElement.h>
+
+namespace Web::SVG {
+
+GC_DEFINE_ALLOCATOR(SVGLineElement);
+
+SVGLineElement::SVGLineElement(DOM::Document& document, DOM::QualifiedName qualified_name)
+    : SVGGeometryElement(document, qualified_name)
+{
+}
+
+void SVGLineElement::attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_)
+{
+    Base::attribute_changed(name, old_value, value, namespace_);
+
+    if (name == SVG::AttributeNames::x1) {
+        m_x1 = parse_number_percentage(value.value_or({}));
+    } else if (name == SVG::AttributeNames::y1) {
+        m_y1 = parse_number_percentage(value.value_or({}));
+    } else if (name == SVG::AttributeNames::x2) {
+        m_x2 = parse_number_percentage(value.value_or({}));
+    } else if (name == SVG::AttributeNames::y2) {
+        m_y2 = parse_number_percentage(value.value_or({}));
+    }
+
+    if (name.is_one_of(SVG::AttributeNames::x1, SVG::AttributeNames::y1, SVG::AttributeNames::x2, SVG::AttributeNames::y2))
+        set_needs_layout_update(DOM::SetNeedsLayoutReason::StyleChange);
+}
+
+}

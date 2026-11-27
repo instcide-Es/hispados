@@ -1,0 +1,36 @@
+/*
+ * Copyright (c) 2023, Shannon Booth <shannon@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <LibWeb/DOM/HTMLCollection.h>
+
+namespace Web::HTML {
+
+class HTMLFormElement;
+
+class HTMLFormControlsCollection : public DOM::HTMLCollection {
+    WEB_WRAPPABLE(HTMLFormControlsCollection, DOM::HTMLCollection);
+    GC_DECLARE_ALLOCATOR(HTMLFormControlsCollection);
+
+public:
+    [[nodiscard]] static GC::Ref<HTMLFormControlsCollection> create(DOM::ParentNode& root, Scope, HTMLFormElement& form, Filter filter);
+
+    virtual ~HTMLFormControlsCollection() override;
+
+    Variant<Empty, GC::Ref<DOM::Element>, GC::Ref<RadioNodeList>> named_item_or_radio_node_list(Utf16View name) const;
+
+private:
+    HTMLFormControlsCollection(DOM::ParentNode& root, Scope, HTMLFormElement& form, Filter filter);
+
+    virtual void collect_elements_into(GC::RootVector<GC::Ref<DOM::Element>>&) const override;
+
+    virtual void visit_edges(GC::Cell::Visitor&) override;
+
+    GC::Ref<HTMLFormElement> m_form;
+};
+
+}

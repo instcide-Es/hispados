@@ -1,0 +1,214 @@
+/*
+ * Copyright (c) 2020, the SerenityOS developers.
+ * Copyright (c) 2021-2022, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2022, Luke Wilde <lukew@serenityos.org>
+ * Copyright (c) 2023, Bastiaan van der Plaat <bastiaan.v.d.plaat@gmail.com>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Utf16View.h>
+#include <LibWeb/Export.h>
+#include <LibWeb/HTML/AutocompleteElement.h>
+#include <LibWeb/HTML/HTMLElement.h>
+#include <LibWeb/HTML/HTMLOptionsCollection.h>
+#include <LibWebCommon/HTML/SelectItem.h>
+#include <LibWebCommon/UIEvents/KeyCode.h>
+#include <LibWebCommon/WebIDL/Types.h>
+
+namespace Web::HTML {
+
+class WEB_API HTMLSelectElement final
+    : public HTMLElement
+    , public AutocompleteElement {
+    WEB_WRAPPABLE(HTMLSelectElement, HTMLElement);
+    GC_DECLARE_ALLOCATOR(HTMLSelectElement);
+    AUTOCOMPLETE_ELEMENT(HTMLElement, HTMLSelectElement);
+
+public:
+    virtual ~HTMLSelectElement() override;
+
+    virtual bool is_html_select_element() const final { return true; }
+
+    WebIDL::UnsignedLong size() const;
+    void set_size(WebIDL::UnsignedLong);
+
+    GC::Ptr<HTMLOptionsCollection> const& options() const;
+
+    WebIDL::UnsignedLong length();
+    WebIDL::ExceptionOr<void> set_length(WebIDL::UnsignedLong);
+    HTMLOptionElement* item(WebIDL::UnsignedLong index);
+    HTMLOptionElement* named_item(Utf16String const& name);
+    WebIDL::ExceptionOr<void> add(HTMLOptionOrOptGroupElement element, NullableHTMLElementOrElementIndex before = { Empty {} });
+    WebIDL::ExceptionOr<void> set_value_of_indexed_property(u32, Optional<GC::Ref<DOM::Element>>);
+    void remove();
+    void remove(WebIDL::Long);
+
+    GC::Ref<DOM::HTMLCollection> selected_options();
+    GC::Ref<DOM::HTMLCollection> selected_options() const { return const_cast<HTMLSelectElement*>(this)->selected_options(); }
+
+    WebIDL::Long selected_index() const;
+    WebIDL::ExceptionOr<void> set_selected_index(WebIDL::Long);
+
+    Utf16String value() const;
+    virtual Utf16String form_value() const override { return value(); }
+    WebIDL::ExceptionOr<void> set_value(Utf16View);
+
+    bool is_open() const { return m_is_open; }
+    void set_is_open(bool);
+
+    WebIDL::ExceptionOr<void> show_picker();
+
+    Vector<GC::Root<HTMLOptionElement>> list_of_options() const;
+
+    // ^EventTarget
+    // https://html.spec.whatwg.org/multipage/interaction.html#the-tabindex-attribute:the-select-element
+    // https://html.spec.whatwg.org/multipage/interaction.html#focusable-area
+    // https://html.spec.whatwg.org/multipage/semantics-other.html#concept-element-disabled
+    virtual bool is_focusable() const override;
+
+    // ^FormAssociatedElement
+    virtual bool is_form_associated_element() const override { return true; }
+
+    // ^FormAssociatedElement
+    // https://html.spec.whatwg.org/multipage/forms.html#category-listed
+    virtual bool is_listed() const override { return true; }
+
+    // https://html.spec.whatwg.org/multipage/forms.html#category-submit
+    virtual bool is_submittable() const override { return true; }
+
+    // https://html.spec.whatwg.org/multipage/forms.html#category-reset
+    virtual bool is_resettable() const override { return true; }
+
+    // https://html.spec.whatwg.org/multipage/forms.html#category-autocapitalize
+    virtual bool is_autocapitalize_and_autocorrect_inheriting() const override { return true; }
+
+    // ^HTMLElement
+    // https://html.spec.whatwg.org/multipage/forms.html#category-label
+    virtual bool is_labelable() const override { return true; }
+
+    // https://html.spec.whatwg.org/multipage/rendering.html#the-select-element-2
+    // When the element renders as a list box, it is a devolvable widget [...]
+    // When the element renders as a drop-down box, it is a devolvable widget [...]
+    virtual bool is_devolvable_widget() const override { return true; }
+
+    virtual void reset_algorithm() override;
+
+    Utf16FlyString type() const;
+
+    virtual Optional<ARIA::Role> default_role() const override;
+
+    virtual bool has_activation_behavior() const override;
+    virtual void activation_behavior(DOM::Event const&) override;
+
+    virtual void form_associated_element_was_inserted() override;
+
+    virtual bool is_presentational_hint(Utf16FlyString const&) const override;
+    virtual void apply_presentational_hints(Vector<CSS::StyleProperty>&) const override;
+    virtual void form_associated_element_attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_) override;
+
+    void did_select_item(Optional<u32> const& id);
+
+    // NB: Returns whether the selectedness changed, in which case the select's selectedcontent was also updated.
+    bool update_selectedness();
+
+    // https://html.spec.whatwg.org/multipage/form-elements.html#reset-a-select%27s-selectedness
+    enum class HasChanged : u8 {
+        No,
+        Yes,
+    };
+    void reset_selectedness(HasChanged);
+
+    void clone_selected_option_into_select_button();
+
+    // https://html.spec.whatwg.org/multipage/rendering.html#the-select-element-2
+    bool renders_as_list_box() const;
+    void list_box_options_did_change();
+    bool handle_list_box_key(UIEvents::KeyCode, u32 modifiers);
+
+    bool can_skip_selectedness_update_for_inserted_option(HTMLOptionElement const&) const;
+
+    bool user_validity() const { return m_user_validity; }
+    void set_user_validity(bool);
+
+    // https://html.spec.whatwg.org/multipage/form-elements.html#placeholder-label-option
+    HTMLOptionElement* placeholder_label_option() const;
+
+    // https://html.spec.whatwg.org/multipage/form-elements.html#select-enabled-selectedcontent
+    GC::Ptr<HTMLSelectedContentElement> enabled_selectedcontent() const;
+
+    // https://html.spec.whatwg.org/multipage/form-elements.html#clear-a-select%27s-non-primary-selectedcontent-elements
+    void clear_non_primary_selectedcontent();
+
+    // https://html.spec.whatwg.org/multipage/form-elements.html#update-a-select%27s-selectedcontent
+    WebIDL::ExceptionOr<void> update_selectedcontent();
+
+    // https://html.spec.whatwg.org/multipage/form-elements.html#the-select-element%3Asuffering-from-being-missing
+    virtual bool suffering_from_being_missing() const override;
+
+    virtual bool is_mutable() const override;
+
+private:
+    friend class HTMLOptionElement;
+
+    HTMLSelectElement(DOM::Document&, DOM::QualifiedName);
+    virtual void visit_edges(Cell::Visitor&) override;
+
+    // ^DOM::Element
+    virtual i32 default_tab_index_value() const override;
+
+    virtual void computed_properties_changed() override;
+
+    virtual void children_changed(ChildrenChangedMetadata const&) override;
+
+    void update_cached_list_of_options() const;
+    void show_the_picker_if_applicable();
+
+    void create_shadow_tree_if_needed();
+    // https://html.spec.whatwg.org/multipage/form-elements.html#send-select-update-notifications
+    void send_select_update_notifications();
+
+    u32 display_size() const;
+
+    mutable Vector<GC::Ref<HTMLOptionElement>> m_cached_list_of_options;
+    size_t m_number_of_selected_options { 0 };
+
+    mutable GC::Ptr<HTMLOptionsCollection> m_options;
+    GC::Ptr<DOM::HTMLCollection> m_selected_options;
+    bool m_is_open { false };
+    Vector<GC::Ref<HTMLOptionElement>> m_select_item_option_elements;
+    GC::Ptr<DOM::Element> m_inner_text_element;
+    GC::Ptr<DOM::Element> m_selected_label_element;
+    GC::Ptr<DOM::Element> m_label_sizer_element;
+    GC::Ptr<DOM::Element> m_chevron_icon_element;
+    bool m_chevron_icon_hidden { false };
+
+    void create_list_box_shadow_tree(DOM::ShadowRoot&);
+    void update_list_box();
+    void handle_list_box_mousedown(UIEvents::MouseEvent&);
+    void choose_list_box_row(size_t index, bool extend);
+
+    GC::Ptr<DOM::Element> m_list_box_element;
+    GC::Ptr<HTMLSlotElement> m_list_box_slot;
+    Vector<GC::Ref<HTMLOptionElement>> m_list_box_options;
+    Optional<size_t> m_list_box_anchor_index;
+    Optional<size_t> m_list_box_focus_index;
+    bool m_list_box_update_queued { false };
+
+    // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#user-validity
+    bool m_user_validity { false };
+};
+
+GC::Ptr<HTMLSelectElement> get_nearest_ancestor_select(DOM::Element&);
+GC::Ptr<HTMLSelectElement const> get_nearest_ancestor_select(DOM::Element const&);
+
+}
+
+namespace Web::DOM {
+
+template<>
+inline bool Node::fast_is<HTML::HTMLSelectElement>() const { return is_html_select_element(); }
+
+}

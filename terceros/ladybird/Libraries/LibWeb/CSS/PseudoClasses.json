@@ -1,0 +1,250 @@
+{
+  "-webkit-autofill": {
+    "legacy-alias-for": "autofill"
+  },
+  "active": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "any-link": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "autofill": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "buffering": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "checked": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "current": {
+    "argument": ""
+  },
+  "default": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "defined": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "dir": {
+    "argument": "<ident>"
+  },
+  "disabled": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "empty": {
+    "argument": ""
+  },
+  "enabled": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "even-less-good-value": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "first-child": {
+    "argument": ""
+  },
+  "first-of-type": {
+    "argument": ""
+  },
+  "focus": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "focus-visible": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "focus-within": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "fullscreen": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "has": {
+    "argument": "<relative-selector-list>"
+  },
+  "heading": {
+    "argument": "<level>#?"
+  },
+  "high-value": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "host": {
+    "argument": "<compound-selector>?"
+  },
+  "hover": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "indeterminate": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "invalid": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "is": {
+    "argument": "<forgiving-selector-list>"
+  },
+  "lang": {
+    "argument": "<language-ranges>"
+  },
+  "last-child": {
+    "argument": ""
+  },
+  "last-of-type": {
+    "argument": ""
+  },
+  "link": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "local-link": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "low-value": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "modal": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "muted": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "not": {
+    "argument": "<selector-list>"
+  },
+  "nth-child": {
+    "argument": "<a-n-plus-b-of>"
+  },
+  "nth-last-child": {
+    "argument": "<a-n-plus-b-of>"
+  },
+  "nth-last-of-type": {
+    "argument": "<a-n-plus-b>"
+  },
+  "nth-of-type": {
+    "argument": "<a-n-plus-b>"
+  },
+  "only-child": {
+    "argument": ""
+  },
+  "only-of-type": {
+    "argument": ""
+  },
+  "open": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "optimal-value": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "optional": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "popover-open": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "paused": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "picture-in-picture": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "placeholder-shown": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "playing": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "read-only": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "read-write": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "required": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "root": {
+    "argument": ""
+  },
+  "scope": {
+    "argument": ""
+  },
+  "seeking": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "stalled": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "state": {
+    "argument": "<ident>"
+  },
+  "suboptimal-value": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "target": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "unchecked": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "user-invalid": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "user-valid": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "valid": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "visited": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "volume-locked": {
+    "argument": "",
+    "style-engine-state": true
+  },
+  "where": {
+    "argument": "<forgiving-selector-list>"
+  }
+}

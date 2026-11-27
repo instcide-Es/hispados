@@ -1,0 +1,103 @@
+/*
+ * Copyright (c) 2020, the SerenityOS developers.
+ * Copyright (c) 2022, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Badge.h>
+#include <AK/Utf16View.h>
+#include <LibWeb/Export.h>
+#include <LibWeb/HTML/HTMLElement.h>
+
+namespace Web::HTML {
+
+class WEB_API HTMLOptionElement final : public HTMLElement {
+    WEB_WRAPPABLE(HTMLOptionElement, HTMLElement);
+    GC_DECLARE_ALLOCATOR(HTMLOptionElement);
+
+public:
+    virtual ~HTMLOptionElement() override;
+
+    bool selected() const { return m_selected; }
+    void set_selected(bool);
+    void set_selected_internal(bool);
+    [[nodiscard]] u64 selectedness_update_index() const { return m_selectedness_update_index; }
+
+    Utf16String value() const;
+    virtual Utf16String form_value() const override { return value(); }
+    void set_value(Utf16View);
+
+    Utf16String text() const;
+    void set_text(Utf16View);
+
+    [[nodiscard]] Utf16String label() const;
+    void set_label(Utf16View);
+
+    void descendant_text_content_changed(Badge<DOM::Element>) { update_selection_label(); }
+
+    int index() const;
+
+    bool disabled() const;
+
+    GC::Ptr<HTML::HTMLFormElement const> form() const;
+
+    virtual Optional<ARIA::Role> default_role() const override;
+
+    GC::Ptr<HTMLSelectElement> nearest_select_element() { return m_cached_nearest_select_element; }
+    GC::Ptr<HTMLSelectElement const> nearest_select_element() const { return m_cached_nearest_select_element; }
+
+    // https://html.spec.whatwg.org/multipage/form-elements.html#the-option-element:clone-an-option-into-a-selectedcontent
+    WebIDL::ExceptionOr<void> maybe_clone_into_selectedcontent();
+    // https://html.spec.whatwg.org/multipage/form-elements.html#clone-an-option-into-a-selectedcontent
+    WebIDL::ExceptionOr<void> clone_into_selectedcontent(GC::Ref<HTMLSelectedContentElement>);
+
+private:
+    friend class HTMLSelectElement;
+
+    HTMLOptionElement(DOM::Document&, DOM::QualifiedName);
+
+    virtual bool is_html_option_element() const final { return true; }
+    virtual void visit_edges(Cell::Visitor&) override;
+
+    virtual void attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_) override;
+
+    virtual void inserted() override;
+    virtual void removed_from(IsSubtreeRoot, Node* old_ancestor, Node& old_root) override;
+    virtual void moved_from(IsSubtreeRoot, GC::Ptr<Node> old_ancestor) override;
+    virtual void children_changed(ChildrenChangedMetadata const&) override;
+
+    void ask_for_a_reset();
+    void update_selection_label();
+    void update_label_sizer_text();
+    void update_list_box_label();
+    Utf16String display_label() const;
+
+    // https://html.spec.whatwg.org/multipage/form-elements.html#update-an-option's-nearest-ancestor-select
+    void update_nearest_select_element();
+
+    // https://html.spec.whatwg.org/multipage/form-elements.html#concept-option-selectedness
+    bool m_selected { false };
+
+    // https://html.spec.whatwg.org/multipage/form-elements.html#concept-option-dirtiness
+    bool m_dirty { false };
+
+    u64 m_selectedness_update_index { 0 };
+
+    // https://html.spec.whatwg.org/multipage/form-elements.html#cached-nearest-ancestor-select-element
+    GC::Ptr<HTMLSelectElement> m_cached_nearest_select_element;
+
+    // The text in this option's row in its select's label sizer, which sizes the select to fit its widest option.
+    GC::Ptr<DOM::Text> m_label_sizer_text;
+};
+
+}
+
+namespace Web::DOM {
+
+template<>
+inline bool Node::fast_is<HTML::HTMLOptionElement>() const { return is_html_option_element(); }
+
+}

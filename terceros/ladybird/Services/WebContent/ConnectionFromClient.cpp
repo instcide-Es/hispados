@@ -1,0 +1,4153 @@
+/*
+ * Copyright (c) 2020-2023, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2021-2025, Sam Atkins <sam@ladybird.org>
+ * Copyright (c) 2021-2023, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2022, Tobias Christiansen <tobyase@serenityos.org>
+ * Copyright (c) 2022, Tim Flynn <trflynn89@serenityos.org>
+ * Copyright (c) 2023-2024, Andrew Kaster <akaster@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/Debug.h>
+#include <AK/JsonArray.h>
+#include <AK/JsonObject.h>
+#include <AK/Math.h>
+#include <AK/OwnPtr.h>
+#include <AK/QuickSort.h>
+#include <AK/Utf16FlyString.h>
+#include <AK/Utf16String.h>
+#include <AK/Utf16StringBuilder.h>
+#include <LibCompositing/FontServiceClient.h>
+#include <LibCore/EventLoop.h>
+#include <LibCore/Process.h>
+#include <LibCore/StatsLog.h>
+#include <LibDevTools/IndexedDBSerialization.h>
+#include <LibGC/Heap.h>
+#include <LibGC/Internals.h>
+#include <LibGfx/Bitmap.h>
+#include <LibGfx/Color.h>
+#include <LibGfx/Font/Font.h>
+#include <LibGfx/FourCC.h>
+#include <LibGfx/Palette.h>
+#include <LibIPC/Transport.h>
+#include <LibJS/Runtime/ConsoleObject.h>
+#include <LibJS/Runtime/Date.h>
+#include <LibJS/Runtime/HostObject.h>
+#include <LibJS/Runtime/Object.h>
+#include <LibUnicode/TimeZone.h>
+#include <LibWeb/Bindings/MainThreadVM.h>
+#include <LibWeb/CSS/CustomPropertyData.h>
+#include <LibWeb/CSS/Parser/ErrorReporter.h>
+#include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleScope.h>
+#include <LibWeb/CSS/StyleSheetState.h>
+#include <LibWeb/CSS/VisualViewport.h>
+#include <LibWeb/Compositor/CompositorConnection.h>
+#include <LibWeb/Compositor/CompositorHost.h>
+#include <LibWeb/CookieStore/CookieStore.h>
+#include <LibWeb/DOM/AbstractElement.h>
+#include <LibWeb/DOM/Attr.h>
+#include <LibWeb/DOM/CharacterData.h>
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOM/Element.h>
+#include <LibWeb/DOM/ElementFactory.h>
+#include <LibWeb/DOM/Node.h>
+#include <LibWeb/DOM/Range.h>
+#include <LibWeb/DOM/ShadowRoot.h>
+#include <LibWeb/DOM/Text.h>
+#include <LibWeb/DOMURL/DOMURL.h>
+#include <LibWeb/Dump.h>
+#include <LibWeb/Fetch/Fetching/Fetching.h>
+#include <LibWeb/FileAPI/BlobURLStore.h>
+#include <LibWeb/Gamepad/GamepadRegistry.h>
+#include <LibWeb/HTML/AutoplaySettings.h>
+#include <LibWeb/HTML/BroadcastChannel.h>
+#include <LibWeb/HTML/BrowsingContext.h>
+#include <LibWeb/HTML/EventLoop/EventLoop.h>
+#include <LibWeb/HTML/Focus.h>
+#include <LibWeb/HTML/FormAssociatedElement.h>
+#include <LibWeb/HTML/HTMLIFrameElement.h>
+#include <LibWeb/HTML/HTMLInputElement.h>
+#include <LibWeb/HTML/HTMLOptionElement.h>
+#include <LibWeb/HTML/HTMLTextAreaElement.h>
+#include <LibWeb/HTML/HistoryExecutor.h>
+#include <LibWeb/HTML/LocalNavigable.h>
+#include <LibWeb/HTML/LocalTraversableNavigable.h>
+#include <LibWeb/HTML/NavigableContainer.h>
+#include <LibWeb/HTML/RemoteNavigable.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
+#include <LibWeb/HTML/SessionHistoryEntry.h>
+#include <LibWeb/HTML/Storage.h>
+#include <LibWeb/HTML/Window.h>
+#include <LibWeb/HTML/WorkerAgentParent.h>
+#include <LibWeb/Layout/Node.h>
+#include <LibWeb/Layout/Viewport.h>
+#include <LibWeb/Loader/ContentBlocker.h>
+#include <LibWeb/Loader/LoaderConfig.h>
+#include <LibWeb/Loader/ResourceLoader.h>
+#include <LibWeb/Loader/SourceHighlighter.h>
+#include <LibWeb/Namespace.h>
+#include <LibWeb/Page/RenderingStats.h>
+#include <LibWeb/Painting/BoxViews.h>
+#include <LibWeb/Painting/DocumentPaintState.h>
+#include <LibWeb/Painting/FlexboxInspectorOverlay.h>
+#include <LibWeb/Painting/PaintingRustBridge.h>
+#include <LibWeb/PermissionsAPI/PermissionStore.h>
+#include <LibWeb/PictureInPicture/PictureInPictureController.h>
+#include <LibWeb/Platform/EventLoopPlugin.h>
+#include <LibWeb/Platform/FontPlugin.h>
+#include <LibWeb/Platform/RemoteImageCodecPlugin.h>
+#include <LibWeb/Selection/Selection.h>
+#include <LibWeb/UIEvents/InputTypes.h>
+#include <LibWebCommon/HTML/SelectedFile.h>
+#include <LibWebCommon/Infra/Strings.h>
+#include <LibWebCommon/Loader/UserAgent.h>
+#include <LibWebCommon/WebDriver/Error.h>
+#include <LibWebCommon/WebView/AccessibilityNodeData.h>
+#include <LibWebCommon/WebView/Attribute.h>
+#include <LibWebCommon/WebView/DictionaryLookup.h>
+#include <WebContent/ConnectionFromClient.h>
+#include <WebContent/DevToolsDebugger.h>
+#include <WebContent/DevToolsIndexedDB.h>
+#include <WebContent/PageClient.h>
+#include <WebContent/PageHost.h>
+#include <WebContent/TestConnection.h>
+#include <WebContent/WebContentClientEndpoint.h>
+#include <WebContent/WebContentCompositorHost.h>
+#include <WebContent/WebDriverBiDi.h>
+#include <WebContent/Worker/WorkerThread.h>
+
+namespace WebContent {
+
+ConnectionFromClient::ConnectionFromClient(NonnullOwnPtr<IPC::Transport> transport, bool enable_test_mode)
+    : IPC::ConnectionFromClient<WebContentClientEndpoint, WebContentServerEndpoint>(*this, move(transport), 1)
+    , m_page_host(PageHost::create(*this))
+    , m_enable_test_mode(enable_test_mode)
+{
+    Web::StorageAPI::set_storage_area_mirror_client(this);
+}
+
+ConnectionFromClient::~ConnectionFromClient()
+{
+    Web::StorageAPI::set_storage_area_mirror_client(nullptr);
+}
+
+Web::Compositor::CompositorConnection* ConnectionFromClient::compositor_process_connection() const
+{
+    if (!m_compositor_connection || !m_compositor_connection->is_open())
+        return nullptr;
+    return m_compositor_connection.ptr();
+}
+
+void ConnectionFromClient::did_destroy_compositor_context(Web::CompositorContextId context_id)
+{
+    async_did_destroy_compositor_context(context_id);
+}
+
+void ConnectionFromClient::die()
+{
+    Core::Process::terminate_immediately(0);
+}
+
+// What the main thread and each worker thread give up when the process is short of memory.
+static void release_memory_of_this_thread()
+{
+    Web::Fetch::Fetching::clear_http_memory_cache();
+    // NB: This comes last, so that what the steps before it let go of goes back to the system as well.
+    GC::Heap::the().collect_garbage_and_return_memory_to_system();
+}
+
+// The browser asks for this when the process is near its memory limit, or when its tabs were hidden for a while. The
+// process gives up everything it can work without. What it gives up may cost time to make again.
+void ConnectionFromClient::release_memory()
+{
+    // NB: The browser asks for more than one reason, and one release serves all requests that wait for it.
+    static bool is_pending = false;
+    if (is_pending)
+        return;
+    is_pending = true;
+
+    Web::CSS::StyleScope::release_kept_data();
+    Web::CSS::StyleScope::release_shaped_texts();
+
+    WebWorker::post_to_worker_threads(release_memory_of_this_thread);
+    // NB: This is deferred so that garbage collection runs with as little on the stack as possible.
+    Core::deferred_invoke([] {
+        is_pending = false;
+        release_memory_of_this_thread();
+    });
+}
+
+void ConnectionFromClient::set_font_service(IPC::TransportHandle handle, IPC::File catalog, u64 catalog_size, u64 generation)
+{
+    auto* font_provider = MUST(Compositing::install_font_service(move(handle), move(catalog), catalog_size, generation));
+    Web::Platform::FontPlugin::install(*new Web::Platform::FontPlugin(m_enable_test_mode, font_provider));
+}
+
+void ConnectionFromClient::initialize(Web::PageId initial_page_id, Vector<Web::HTML::RemoteNavigableDescriptor> remote_navigables, Web::HTML::CrossProcessId root_navigable_id, Web::HTML::CrossProcessIdAllocator cross_process_id_allocator, Web::HTML::SessionHistoryEntryDescriptor initial_history_entry, Web::HTML::CrossProcessId initial_document_id, Web::HTML::VisibilityState system_visibility_state)
+{
+    m_page_host->initialize(initial_page_id, move(remote_navigables), root_navigable_id, cross_process_id_allocator, move(initial_history_entry), initial_document_id, system_visibility_state);
+}
+
+void ConnectionFromClient::create_representing_page(Web::PageId page_id, Vector<Web::HTML::RemoteNavigableDescriptor> remote_navigables)
+{
+    auto& page = m_page_host->create_page(page_id);
+    page.page().create_remote_navigable_graph(move(remote_navigables));
+}
+
+void ConnectionFromClient::create_embedded_page(Web::PageId page_id, Vector<Web::HTML::RemoteNavigableDescriptor> remote_navigables, Web::HTML::CrossProcessId root_navigable_id, Web::HTML::SessionHistoryEntryDescriptor initial_history_entry, Web::HTML::VisibilityState system_visibility_state)
+{
+    auto& page = m_page_host->create_page(page_id);
+    page.page().set_system_visibility_state(system_visibility_state);
+    page.page().create_remote_navigable_graph(move(remote_navigables));
+    page.page().begin_hosting(root_navigable_id, initial_history_entry);
+}
+
+void ConnectionFromClient::media_session_action(Web::PageId page_id, Web::Bindings::MediaSessionAction action, Optional<double> seek_offset, Optional<double> seek_time, Optional<bool> fast_seek)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().handle_media_session_action(action, seek_offset, seek_time, fast_seek);
+}
+
+void ConnectionFromClient::insert_remote_navigable(Web::PageId page_id, Web::HTML::RemoteNavigableDescriptor navigable)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().insert_remote_navigable(move(navigable));
+}
+
+void ConnectionFromClient::remove_remote_navigable(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().remove_remote_navigable(navigable_id);
+}
+
+void ConnectionFromClient::update_remote_navigable(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id, Web::HTML::ReplicatedNavigableState state)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().update_remote_navigable(navigable_id, move(state));
+}
+
+void ConnectionFromClient::content_navigable_completely_finished_loading(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().content_navigable_completely_finished_loading(navigable_id);
+}
+
+void ConnectionFromClient::update_local_root_container_state(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id, Web::HTML::ReplicatedContainerState state)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+    auto* navigable = as_if<Web::HTML::LocalNavigable>(page->page().navigable_with_id(navigable_id).ptr());
+    if (!navigable || !navigable->is_local_root())
+        return;
+    navigable->set_root_container_state(move(state));
+}
+
+void ConnectionFromClient::begin_hosting_navigable(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id, Web::HTML::SessionHistoryEntryDescriptor current_history_entry, Web::HTML::VisibilityState system_visibility_state)
+{
+    if (auto page = this->page(page_id); page.has_value()) {
+        page->page().set_system_visibility_state(system_visibility_state);
+        // The container can have destroyed the navigable before the request arrived.
+        if (auto navigable = Web::HTML::remote_navigable_with_id(page->page(), navigable_id); navigable && !navigable->has_been_destroyed())
+            page->page().begin_hosting(navigable_id, current_history_entry);
+    }
+}
+
+void ConnectionFromClient::discard_provisional_navigable(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().discard_provisional_navigable(navigable_id);
+}
+
+void ConnectionFromClient::stop_hosting_navigable(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id, Web::HTML::ReplicatedNavigableState replicated_state)
+{
+    if (auto page = this->page(page_id); page.has_value()) {
+        page->page().stop_hosting(navigable_id, move(replicated_state));
+        page->page().client().request_frame();
+    }
+}
+
+void ConnectionFromClient::set_rendering_stats_displayed(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id, bool displayed)
+{
+    if (!Core::StatsLog::the())
+        return;
+    if (auto page = this->page(page_id); page.has_value()) {
+        auto* navigable = as_if<Web::HTML::LocalNavigable>(page->page().navigable_with_id(navigable_id).ptr());
+        if (navigable && navigable->is_local_root())
+            Web::set_rendering_pending_ancestors_displayed(*navigable, displayed);
+    }
+}
+
+void ConnectionFromClient::set_hosted_root_viewport(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id, Web::DevicePixelSize size, Web::DevicePixelRect viewport_intersection, double device_pixel_ratio)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->set_hosted_root_viewport(navigable_id, size, viewport_intersection, device_pixel_ratio);
+}
+
+void ConnectionFromClient::set_viewport_is_fullscreen(Web::PageId page_id, Web::ViewportIsFullscreen is_fullscreen)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().set_viewport_is_fullscreen(is_fullscreen);
+}
+
+void ConnectionFromClient::deny_fullscreen_window(Web::PageId page_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().did_deny_fullscreen_window();
+}
+
+void ConnectionFromClient::set_ongoing_navigation(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id, Utf16String navigation_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->set_ongoing_navigation(navigable_id, move(navigation_id));
+}
+
+void ConnectionFromClient::navigate_to_a_fragment(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id, URL::URL url, Web::HTML::HistoryHandlingBehavior history_handling, Web::HTML::UserNavigationInvolvement user_involvement, Utf16String navigation_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->navigate_to_a_fragment(navigable_id, url, history_handling, user_involvement, move(navigation_id));
+}
+
+void ConnectionFromClient::navigate_to_a_javascript_url(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id, URL::URL url, Web::HTML::HistoryHandlingBehavior history_handling, URL::Origin initiator_origin, Web::HTML::NavigationSourceSnapshot source_snapshot_params, Web::HTML::UserNavigationInvolvement user_involvement, Web::ContentSecurityPolicy::Directives::Directive::NavigationType csp_navigation_type, Utf16String navigation_id)
+{
+    if (auto page = this->page(page_id); page.has_value()) {
+        page->navigate_to_a_javascript_url(navigable_id, url, history_handling, initiator_origin, source_snapshot_params, user_involvement, csp_navigation_type, move(navigation_id));
+        return;
+    }
+    async_did_fail_navigation_population(page_id, navigable_id, move(navigation_id));
+}
+
+void ConnectionFromClient::run_navigation_unload_check(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id, Utf16String navigation_id, Web::HTML::UnloadPromptShown unload_prompt_shown)
+{
+    if (auto page = this->page(page_id); page.has_value()) {
+        page->run_navigation_unload_check(navigable_id, navigation_id, unload_prompt_shown);
+        return;
+    }
+    async_did_fail_navigation_population(page_id, navigable_id, move(navigation_id));
+}
+
+void ConnectionFromClient::create_navigation_params(Web::PageId page_id, Web::HTML::NavigationPopulationRequest request)
+{
+    if (auto page = this->page(page_id); page.has_value()) {
+        page->create_navigation_params(move(request));
+        return;
+    }
+    async_did_finish_navigation_params_creation(page_id, request.navigable_id, move(request.navigation_id), {});
+}
+
+void ConnectionFromClient::cancel_navigation_params_creation(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id, Utf16String navigation_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->cancel_navigation_params_creation(navigable_id, navigation_id);
+}
+
+void ConnectionFromClient::deliver_posted_message(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id, Web::HTML::MessageDescriptor message)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->deliver_posted_message(navigable_id, move(message));
+}
+
+void ConnectionFromClient::report_violation_of_environment(Web::PageId page_id, Web::HTML::EnvironmentId environment_id, u64 policy_index, Web::ContentSecurityPolicy::RemoteViolationDirective directive, URL::URL resource)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->report_violation_of_environment(environment_id, policy_index, directive, move(resource));
+}
+
+void ConnectionFromClient::close_traversable_from_script(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+    if (auto* traversable = as_if<Web::HTML::LocalTraversableNavigable>(page->page().navigable_with_id(navigable_id).ptr()))
+        traversable->close_top_level_traversable_from_script();
+}
+
+void ConnectionFromClient::run_focusing_steps_for_navigable(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id, Web::HTML::FocusTrigger focus_trigger)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+    if (auto* navigable = as_if<Web::HTML::LocalNavigable>(page->page().navigable_with_id(navigable_id).ptr()))
+        Web::HTML::run_focusing_steps(navigable->active_document(), nullptr, focus_trigger);
+}
+
+void ConnectionFromClient::focus_window_of_navigable(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+    auto* navigable = as_if<Web::HTML::LocalNavigable>(page->page().navigable_with_id(navigable_id).ptr());
+    if (!navigable)
+        return;
+    if (auto window = navigable->active_window())
+        window->focus();
+}
+
+void ConnectionFromClient::set_opener_of_navigable(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id, Web::HTML::CrossProcessId opener_navigable_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+    auto* navigable = as_if<Web::HTML::LocalNavigable>(page->page().navigable_with_id(navigable_id).ptr());
+    auto opener = Web::HTML::navigable_with_id_in_any_page(page->page(), opener_navigable_id);
+    if (!navigable || !navigable->active_browsing_context() || !opener)
+        return;
+    navigable->active_browsing_context()->set_opener_browsing_context(*opener);
+    navigable->report_opener_browsing_context();
+}
+
+Optional<PageClient&> ConnectionFromClient::page(Web::PageId index, SourceLocation location)
+{
+    if (auto page = m_page_host->page(index); page.has_value())
+        return *page;
+
+    dbgln("ConnectionFromClient::{}: Did not find a page with ID {}", location.function_name(), index);
+    return {};
+}
+
+Optional<PageClient const&> ConnectionFromClient::page(Web::PageId index, SourceLocation location) const
+{
+    if (auto page = m_page_host->page(index); page.has_value())
+        return *page;
+
+    dbgln("ConnectionFromClient::{}: Did not find a page with ID {}", location.function_name(), index);
+    return {};
+}
+
+void ConnectionFromClient::close_server()
+{
+    shutdown();
+}
+
+void ConnectionFromClient::start_worker_thread(IPC::TransportHandle worker_transport, Web::HTML::AgentType agent_type)
+{
+    // NB: The UI process notices a transport that nobody takes up, and tells the owners that their worker is gone.
+    if (auto result = WebWorker::start_worker_thread(move(worker_transport), agent_type); result.is_error())
+        dbgln("Unable to start a thread for a worker: {}", result.error());
+}
+
+Messages::WebContentServer::GetWindowHandleResponse ConnectionFromClient::get_window_handle(Web::PageId page_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        return as<Web::HTML::LocalTraversableNavigable>(*page->page().top_level_traversable()).window_handle().to_utf8();
+    return String {};
+}
+
+void ConnectionFromClient::set_window_handle(Web::PageId page_id, String handle)
+{
+    if (auto page = this->page(page_id); page.has_value()) {
+        page->set_window_handle(Utf16String::from_utf8(handle));
+        page->send_current_needs_beforeunload_check();
+    }
+}
+
+// A WebDriver command sees what the commands before it did, such as the viewport they set. The sizes that the windows
+// took while a rendering update was in flight become their sizes before the command runs.
+static void take_viewport_sizes_held_for_webdriver_command(PageHost& page_host)
+{
+    page_host.for_each_page([](PageClient& page_client) {
+        if (page_client.page().has_local_traversable())
+            page_client.page().local_traversable()->take_viewport_size_held_for_rendering_update_in_flight();
+    });
+}
+
+void ConnectionFromClient::run_webdriver_command(Web::PageId page_id, u64 command_id, Optional<Web::HTML::CrossProcessId> navigable_id, String name, JsonValue payload, Vector<String> arguments)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value()) {
+        // NB: A command the driver is waiting on must be answered even when its page is gone here.
+        async_webdriver_command_complete(page_id, command_id, Web::WebDriver::Error::from_code(Web::WebDriver::ErrorCode::NoSuchWindow, "Window not found"sv));
+        return;
+    }
+
+    take_viewport_sizes_held_for_webdriver_command(*m_page_host);
+    page->run_webdriver_command(command_id, navigable_id, name, move(payload), move(arguments));
+}
+
+void ConnectionFromClient::run_webdriver_bidi_command(Web::PageId page_id, u64 command_id, Web::HTML::CrossProcessId navigable_id, String method, JsonValue params)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value()) {
+        // NB: A command the driver is waiting on must be answered even when its page is gone here.
+        async_webdriver_command_complete(page_id, command_id, Web::WebDriver::Error::from_code(Web::WebDriver::ErrorCode::NoSuchFrame, "Browsing context not found"sv));
+        return;
+    }
+
+    take_viewport_sizes_held_for_webdriver_command(*m_page_host);
+    WebContent::run_webdriver_bidi_command(*page, command_id, navigable_id, method, move(params));
+}
+
+void ConnectionFromClient::set_webdriver_bidi_session_state(Web::WebDriver::BiDiSessionState state)
+{
+    WebContent::set_webdriver_bidi_session_state(move(state));
+}
+
+void ConnectionFromClient::set_webdriver_session_config(Web::PageId page_id, Web::WebDriver::UserPromptHandler user_prompt_handler, Web::WebDriver::PageLoadStrategy page_load_strategy, bool strict_file_interactability, JsonValue timeouts)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->set_webdriver_session_config(move(user_prompt_handler), page_load_strategy, strict_file_interactability, timeouts);
+}
+
+void ConnectionFromClient::did_handle_webdriver_mouse_event(Web::PageId page_id, u64 request_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->did_handle_webdriver_mouse_event(request_id);
+}
+
+void ConnectionFromClient::run_webdriver_user_prompt_handling(Web::PageId page_id, u64 request_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->run_webdriver_user_prompt_handling(request_id);
+}
+
+void ConnectionFromClient::connect_to_web_ui(Web::PageId page_id, IPC::TransportHandle handle)
+{
+    if (auto page = this->page(page_id); page.has_value()) {
+        // FIXME: Propagate this error back to the browser.
+        if (auto result = page->connect_to_web_ui(move(handle)); result.is_error())
+            dbgln("Unable to connect to the WebUI host: {}", result.error());
+    }
+}
+
+void ConnectionFromClient::disconnect_from_image_decoder()
+{
+    auto disconnect = [] {
+        static_cast<Web::Platform::RemoteImageCodecPlugin&>(Web::Platform::ImageCodecPlugin::the()).disconnect_client();
+    };
+    disconnect();
+    WebWorker::post_to_worker_threads(disconnect);
+}
+
+void ConnectionFromClient::connect_to_compositor_process(IPC::TransportHandle handle, IPC::TransportHandle render_clock_handle)
+{
+    auto transport = MUST(handle.create_transport());
+    m_compositor_connection = adopt_ref(*new Web::Compositor::CompositorConnection(move(transport)));
+    m_compositor_connection->on_mouse_event = [this](Web::PageId page_id, Web::MouseEvent event) {
+        mouse_event(page_id, move(event));
+    };
+    m_compositor_connection->on_key_event = [this](Web::PageId page_id, Web::KeyEvent event) {
+        key_event(page_id, move(event));
+    };
+    m_compositor_connection->on_pinch_event = [this](Web::PageId page_id, Web::PinchEvent event) {
+        pinch_event(page_id, event);
+    };
+    m_compositor_connection->on_compositor_lost = [this] {
+        m_page_host->compositor_process_lost();
+    };
+    m_compositor_connection->on_request_video_presentation_channel = [this] {
+        async_request_video_presentation_channel();
+    };
+
+    m_compositor_connection->attach_render_clock(move(render_clock_handle));
+    m_compositor_connection->hand_poster_to_paint_thread();
+}
+
+void ConnectionFromClient::compositor_process_reconnected()
+{
+    m_page_host->compositor_process_reconnected();
+}
+
+void ConnectionFromClient::connect_to_request_server(IPC::TransportHandle handle, int client_id, Optional<Utf16String> top_level_site)
+{
+    if (on_request_server_connection)
+        on_request_server_connection(handle, client_id, top_level_site);
+}
+
+ErrorOr<NonnullOwnPtr<IPC::Transport>> ConnectionFromClient::request_media_server_transport()
+{
+    auto response = send_sync_but_allow_failure<Messages::WebContentClient::RequestMediaServerConnection>();
+    if (!response || !response->handle().has_value())
+        return Error::from_string_literal("The Browser did not connect a media server");
+    return response->take_handle()->create_transport();
+}
+
+ErrorOr<NonnullOwnPtr<IPC::Transport>> ConnectionFromClient::request_audio_server_transport()
+{
+    auto response = send_sync_but_allow_failure<Messages::WebContentClient::RequestAudioServerConnection>();
+    if (!response || !response->handle().has_value())
+        return Error::from_string_literal("The Browser did not connect an audio server");
+    return response->take_handle()->create_transport();
+}
+
+ErrorOr<NonnullOwnPtr<IPC::Transport>> ConnectionFromClient::request_webrtc_client_transport()
+{
+    auto response = send_sync_but_allow_failure<Messages::WebContentClient::RequestWebrtcClientConnection>();
+    if (!response || !response->handle().has_value())
+        return Error::from_string_literal("The Browser did not launch a WebRTCClient");
+    return response->take_handle()->create_transport();
+}
+
+ErrorOr<NonnullOwnPtr<IPC::Transport>> ConnectionFromClient::request_image_decoder_transport()
+{
+    auto response = send_sync_but_allow_failure<Messages::WebContentClient::RequestImageDecoderConnection>();
+    if (!response || !response->handle().has_value())
+        return Error::from_string_literal("The Browser did not connect an image decoder");
+    return response->take_handle()->create_transport();
+}
+
+TestConnection* ConnectionFromClient::test_connection()
+{
+    if (m_test_connection)
+        m_test_connection->prepare_to_send();
+    return m_test_connection;
+}
+
+void ConnectionFromClient::connect_to_test_endpoint(IPC::TransportHandle handle)
+{
+    auto transport = MUST(handle.create_transport());
+    m_test_connection = TestConnection::construct(move(transport), *this);
+}
+
+void ConnectionFromClient::update_system_theme(Web::PageId page_id, Core::AnonymousBuffer theme_buffer)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    auto impl = Gfx::PaletteImpl::create_with_anonymous_buffer(theme_buffer);
+    page->set_palette_impl(*impl);
+}
+
+void ConnectionFromClient::set_site_compatibility_data(JsonValue data)
+{
+    auto parsed_data = Web::SiteCompatibilityData::from_json(data);
+    if (parsed_data.is_error()) {
+        warnln("Ignoring invalid site compatibility data: {}", parsed_data.error());
+        return;
+    }
+    Web::set_site_compatibility_data(parsed_data.release_value());
+}
+
+void ConnectionFromClient::set_permission_snapshot(Web::Permissions::PermissionSnapshot snapshot)
+{
+    Web::PermissionsAPI::PermissionStore::the().apply_snapshot(move(snapshot));
+}
+
+void ConnectionFromClient::update_screen_rects(Web::PageId page_id, Vector<Web::DevicePixelRect> rects, Vector<Web::DevicePixelRect> available_rects, u32 main_screen)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->set_screen_rects(rects, available_rects, main_screen);
+}
+
+void ConnectionFromClient::populate_navigation(Web::PageId page_id, Web::HTML::NavigationPopulationRequest request, Web::HTML::NavigationPopulationResult result)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value()) {
+        async_did_fail_navigation_population(page_id, request.navigable_id, move(request.navigation_id));
+        return;
+    }
+
+    page->populate_navigation(move(request), move(result));
+}
+
+void ConnectionFromClient::stop_loading(Web::PageId page_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().local_traversable()->stop_loading();
+}
+
+void ConnectionFromClient::cancel_download(Web::PageId page_id, u64 download_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->cancel_download(download_id);
+}
+
+void ConnectionFromClient::run_beforeunload_check(Web::PageId page_id, Web::HTML::CrossProcessId check_id, Vector<Web::HTML::CrossProcessId> navigable_ids, Optional<Web::HTML::SessionHistoryEntryDescriptor> target_entry, Optional<Web::HTML::UserNavigationInvolvement> user_involvement_for_navigate_event, Web::HTML::UnloadPromptShown unload_prompt_shown)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value()) {
+        async_beforeunload_check_result(page_id, check_id, Web::HTML::CheckIfUnloadingIsCanceledResult::Continue, unload_prompt_shown);
+        return;
+    }
+
+    page->page().history_executor().run_ui_beforeunload_check(move(navigable_ids), move(target_entry), user_involvement_for_navigate_event, unload_prompt_shown, GC::create_function(Web::HTML::main_thread_event_loop().heap(), GC::captures(make_weak_ptr<ConnectionFromClient>(), page_id, check_id), [](auto& connection, auto& page_id, auto& check_id, Web::HTML::CheckIfUnloadingIsCanceledResult result, Web::HTML::UnloadPromptShown unload_prompt_shown) {
+        if (!connection)
+            return;
+        connection->async_beforeunload_check_result(page_id, check_id, result, unload_prompt_shown);
+    }));
+}
+
+void ConnectionFromClient::unload_check_result(Web::PageId page_id, Web::HTML::CrossProcessId check_id, Web::HTML::CheckIfUnloadingIsCanceledResult result)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->did_receive_unload_check_result(check_id, result);
+}
+
+void ConnectionFromClient::discard_embedded_page(Web::PageId page_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    // Input events are only taken by a page hosting a document, so drop the ones still queued for this page. The view
+    // waits for every event it sent to finish, so they are reported as dropped.
+    Queue<Web::QueuedInputEvent> events_for_other_pages;
+    while (!m_input_event_queue.is_empty()) {
+        auto event = m_input_event_queue.dequeue();
+        if (event.page_id != page_id) {
+            events_for_other_pages.enqueue(move(event));
+            continue;
+        }
+        for (auto coalesced_event_id : event.coalesced_event_ids)
+            async_did_finish_handling_input_event(page_id, coalesced_event_id, Web::EventResult::Dropped);
+        async_did_finish_handling_input_event(page_id, Web::input_event_id(event.event), Web::EventResult::Dropped);
+    }
+    while (!events_for_other_pages.is_empty())
+        m_input_event_queue.enqueue(events_for_other_pages.dequeue());
+
+    page->page().discard();
+}
+
+void ConnectionFromClient::queue_navigation_api_state_clear_task(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id)
+{
+    auto page = this->page(page_id);
+    auto* navigable = page.has_value() ? as_if<Web::HTML::LocalNavigable>(page->page().navigable_with_id(navigable_id).ptr()) : nullptr;
+    if (!navigable)
+        return;
+
+    navigable->queue_navigation_api_state_clear_task();
+}
+
+void ConnectionFromClient::continue_history_navigation_population(Web::PageId page_id, Web::HTML::CrossProcessId operation_id, Web::HTML::HistoryNavigationPopulation population)
+{
+    auto navigable_id = population.request.navigable_id;
+    if (auto page = this->page(page_id); page.has_value() && page->page().history_executor().resume_history_navigation_population(operation_id, move(population)))
+        return;
+    async_changing_navigable_history_job_ready(page_id, operation_id, navigable_id, Web::HTML::ChangingNavigableHistoryStepJobDisposition::Skipped, false);
+}
+
+void ConnectionFromClient::populate_history_entry_document(Web::PageId page_id, Web::HTML::CrossProcessId operation_id, Web::HTML::SessionHistoryEntryDescriptor target_entry, Optional<Web::Bindings::NavigationType> navigation_type, bool ongoing_navigation_is_traversal, Web::HTML::HistoryNavigationPopulation population)
+{
+    auto navigable_id = population.request.navigable_id;
+    auto page = this->page(page_id);
+    if (!page.has_value()) {
+        async_changing_navigable_history_job_ready(page_id, operation_id, navigable_id, Web::HTML::ChangingNavigableHistoryStepJobDisposition::Skipped, false);
+        return;
+    }
+    page->page().history_executor().populate_ui_history_entry_document(operation_id, move(target_entry), navigation_type, ongoing_navigation_is_traversal, move(population),
+        GC::create_function(Web::HTML::main_thread_event_loop().heap(), GC::captures(make_weak_ptr<ConnectionFromClient>(), page_id, operation_id, navigable_id), [](auto& connection, auto& page_id, auto& operation_id, auto& navigable_id, Web::HTML::ChangingNavigableHistoryStepJobDisposition disposition, bool update_only) {
+            if (!connection)
+                return;
+            connection->async_changing_navigable_history_job_ready(page_id, operation_id, navigable_id, disposition, update_only);
+        }));
+}
+
+void ConnectionFromClient::run_changing_navigable_history_job(Web::PageId page_id, Web::HTML::CrossProcessId operation_id, Web::HTML::CrossProcessId navigable_id, Web::HTML::SessionHistoryEntryDescriptor target_entry, Web::HTML::UserNavigationInvolvement user_involvement, Optional<Web::Bindings::NavigationType> navigation_type, Optional<Utf16String> finalized_navigation_id, bool ongoing_navigation_is_traversal, bool needs_population)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value()) {
+        async_changing_navigable_history_job_ready(page_id, operation_id, navigable_id, Web::HTML::ChangingNavigableHistoryStepJobDisposition::Skipped, false);
+        return;
+    }
+
+    page->page().history_executor().run_ui_changing_navigable_history_job(operation_id, navigable_id, move(target_entry), user_involvement, navigation_type, move(finalized_navigation_id), ongoing_navigation_is_traversal, needs_population, GC::create_function(Web::HTML::main_thread_event_loop().heap(), GC::captures(make_weak_ptr<ConnectionFromClient>(), page_id, operation_id, navigable_id), [](auto& connection, auto& page_id, auto& operation_id, auto& navigable_id, Web::HTML::ChangingNavigableHistoryStepJobDisposition disposition, bool update_only) {
+        if (!connection)
+            return;
+        connection->async_changing_navigable_history_job_ready(page_id, operation_id, navigable_id, disposition, update_only);
+    }));
+}
+
+void ConnectionFromClient::create_history_navigation_params(Web::PageId page_id, Web::HTML::CrossProcessId operation_id, Web::HTML::NavigationPopulationRequest request, bool allow_POST)
+{
+    auto navigable_id = request.navigable_id;
+    if (auto page = this->page(page_id); page.has_value() && page->page().history_executor().create_ui_history_navigation_params(operation_id, move(request), allow_POST))
+        return;
+    async_changing_navigable_history_job_ready(page_id, operation_id, navigable_id, Web::HTML::ChangingNavigableHistoryStepJobDisposition::Skipped, false);
+}
+
+void ConnectionFromClient::clear_ongoing_history_traversal(Web::PageId page_id, Web::HTML::CrossProcessId operation_id, Web::HTML::CrossProcessId navigable_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().history_executor().clear_ui_changing_navigable_ongoing_traversal(operation_id, navigable_id);
+}
+
+void ConnectionFromClient::apply_changing_navigable_continuation(Web::PageId page_id, Web::HTML::CrossProcessId operation_id, Web::HTML::CrossProcessId navigable_id, Web::HTML::SessionHistoryEntryIdentity target_entry, u64 script_history_length, u64 script_history_index, Vector<Web::HTML::SessionHistoryEntryDescriptor> entries_for_navigation_api, bool clear_classic_history_api_state, bool clear_navigable_target_name)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value()) {
+        async_changing_navigable_continuation_applied(page_id, operation_id, navigable_id, {}, {});
+        return;
+    }
+
+    page->page().history_executor().apply_ui_changing_navigable_continuation(operation_id, navigable_id, target_entry, { script_history_length, script_history_index }, move(entries_for_navigation_api), clear_classic_history_api_state, clear_navigable_target_name, GC::create_function(Web::HTML::main_thread_event_loop().heap(), GC::captures(make_weak_ptr<ConnectionFromClient>(), page_id, operation_id, navigable_id), [](auto& connection, auto& page_id, auto& operation_id, auto& navigable_id, Optional<Web::HTML::HostedNavigableState> activated_navigable_state, Optional<Web::HTML::SessionHistoryEntryPersistedState> previous_entry_persisted_state) {
+        if (!connection)
+            return;
+        connection->async_changing_navigable_continuation_applied(page_id, operation_id, navigable_id, move(activated_navigable_state), move(previous_entry_persisted_state));
+    }));
+}
+
+void ConnectionFromClient::unload_displayed_document_and_apply_changing_navigable_continuation(Web::PageId page_id, Web::HTML::CrossProcessId operation_id, Web::HTML::CrossProcessId navigable_id, Web::HTML::SessionHistoryEntryIdentity target_entry, u64 script_history_length, u64 script_history_index, Vector<Web::HTML::SessionHistoryEntryDescriptor> entries_for_navigation_api, bool clear_classic_history_api_state, bool clear_navigable_target_name)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value()) {
+        async_changing_navigable_continuation_applied(page_id, operation_id, navigable_id, {}, {});
+        return;
+    }
+
+    page->page().history_executor().unload_displayed_document_and_apply_ui_changing_navigable_continuation(operation_id, navigable_id, target_entry, { script_history_length, script_history_index }, move(entries_for_navigation_api), clear_classic_history_api_state, clear_navigable_target_name, GC::create_function(Web::HTML::main_thread_event_loop().heap(), GC::captures(make_weak_ptr<ConnectionFromClient>(), page_id, operation_id, navigable_id), [](auto& connection, auto& page_id, auto& operation_id, auto& navigable_id, Optional<Web::HTML::HostedNavigableState> activated_navigable_state, Optional<Web::HTML::SessionHistoryEntryPersistedState> previous_entry_persisted_state) {
+        if (!connection)
+            return;
+        connection->async_changing_navigable_continuation_applied(page_id, operation_id, navigable_id, move(activated_navigable_state), move(previous_entry_persisted_state));
+    }));
+}
+
+void ConnectionFromClient::run_descendant_unload_task(Web::PageId page_id, Web::HTML::CrossProcessId unload_id, Web::HTML::CrossProcessId navigable_id, Web::HTML::ChildNavigableDestruction child_navigable_destruction, Web::HTML::StopHostingAfterUnload stop_hosting_after_unload)
+{
+    auto page = this->page(page_id);
+    auto navigable = Web::HTML::local_navigable_with_id(navigable_id);
+    if (!page.has_value() || !navigable) {
+        async_descendant_unload_task_complete(page_id, unload_id, navigable_id);
+        return;
+    }
+    VERIFY(&navigable->page() == &page->page());
+
+    navigable->run_ui_descendant_unload_task(child_navigable_destruction, stop_hosting_after_unload, GC::create_function(navigable->heap(), GC::captures(make_weak_ptr<ConnectionFromClient>(), page_id, unload_id, navigable_id), [](auto& connection, auto& page_id, auto& unload_id, auto& navigable_id) {
+        if (!connection)
+            return;
+        connection->async_descendant_unload_task_complete(page_id, unload_id, navigable_id);
+    }));
+}
+
+void ConnectionFromClient::continue_child_navigable_destruction(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    // The child has already been marked as destroyed, so a lookup through the page no longer finds it.
+    GC::Ptr<Web::HTML::Navigable> navigable = Web::HTML::local_navigable_with_id(navigable_id);
+    if (!navigable || &navigable->page() != &page->page())
+        navigable = Web::HTML::remote_navigable_with_id(page->page(), navigable_id);
+    if (!navigable)
+        return;
+    Web::HTML::NavigableContainer::continue_destroying_the_child_navigable(*navigable);
+}
+
+// https://html.spec.whatwg.org/multipage/document-lifecycle.html#abort-a-document-and-its-descendants
+void ConnectionFromClient::abort_navigable_document(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+    auto* navigable = as_if<Web::HTML::LocalNavigable>(page->page().navigable_with_id(navigable_id).ptr());
+    if (!navigable || !navigable->active_window())
+        return;
+
+    // 3. For each descendantNavigable of descendantNavigables, queue a global task on the navigation and traversal task source given descendantNavigable's active window to perform the following steps:
+    Web::HTML::queue_global_task(Web::HTML::Task::Source::NavigationAndTraversal, Web::HTML::relevant_global_object(*navigable->active_window()), GC::create_function(GC::Heap::the(), GC::captures(GC::Ref { *navigable }), [](auto& navigable) {
+        auto document = navigable->active_document();
+        if (!document)
+            return;
+        // NOTE: This is not in the spec but we need to abort ongoing navigations in all descendant navigables.
+        //       See https://github.com/whatwg/html/issues/9711
+        navigable->set_ongoing_navigation({});
+
+        // 1. Abort descendantNavigable's active document.
+        // NB: With its own descendants, hosted here or elsewhere, which the requesting process could not reach.
+        document->abort_a_document_and_its_descendants();
+    }));
+}
+
+// https://fullscreen.spec.whatwg.org/#exit-fullscreen
+void ConnectionFromClient::unfullscreen_navigable_document(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+    auto* navigable = as_if<Web::HTML::LocalNavigable>(page->page().navigable_with_id(navigable_id).ptr());
+    if (!navigable)
+        return;
+
+    // 15. For each descendantDoc in descendantDocs:
+    // NB: doc is hosted by another process, which asks this process to run these steps for navigable's document and
+    //     the documents of navigable's descendants.
+    Vector<GC::Root<Web::HTML::Navigable>> inclusive_descendants;
+    inclusive_descendants.append(*navigable);
+    if (auto document = navigable->active_document())
+        inclusive_descendants.extend(document->descendant_navigables());
+    page->page().unfullscreen_descendant_documents(inclusive_descendants);
+}
+
+// https://fullscreen.spec.whatwg.org/#dom-element-requestfullscreen
+void ConnectionFromClient::fullscreen_navigable_container(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id, Web::HTML::CrossProcessId requesting_navigable_id, Web::Fullscreen::RequestType request_type)
+{
+    auto page = this->page(page_id);
+    GC::Ptr<Web::HTML::NavigableContainer> container;
+    if (page.has_value()) {
+        if (auto navigable = page->page().navigable_with_id(navigable_id))
+            container = navigable->container();
+    }
+    if (container) {
+        // 11 to 13, for the part of the chain of containers this process holds.
+        if (auto hosted_root = page->page().fullscreen_element_and_its_containers(*container, request_type, Web::Page::ElementIsRequestedElement::No)) {
+            page->page().client().page_did_request_container_fullscreen(hosted_root->id(), requesting_navigable_id, request_type);
+            return;
+        }
+    }
+
+    // The request waits in the process holding the requesting document until the whole chain is fullscreen.
+    async_navigable_container_fullscreen_complete(page_id, requesting_navigable_id);
+}
+
+void ConnectionFromClient::container_fullscreen_complete(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().container_fullscreen_complete(navigable_id);
+}
+
+// https://fullscreen.spec.whatwg.org/#exit-fullscreen
+void ConnectionFromClient::unfullscreen_navigable_container(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id)
+{
+    auto page = this->page(page_id);
+    GC::Ptr<Web::HTML::NavigableContainer> container;
+    if (page.has_value()) {
+        if (auto navigable = page->page().navigable_with_id(navigable_id))
+            container = navigable->container();
+    }
+
+    // 12.6. If container's iframe fullscreen flag is set, break.
+    auto* iframe = container ? as_if<Web::HTML::HTMLIFrameElement>(*container) : nullptr;
+    if (!container || (iframe && iframe->iframe_fullscreen_flag()) || !container->document().is_fully_active() || !container->document().fullscreen_element()) {
+        // The collection ends here, and the requesting process finishes its exit with the documents it holds.
+        async_navigable_container_unfullscreen_complete(page_id, navigable_id);
+        return;
+    }
+
+    // The collection carries on from the container's document, in the process that holds it: with it the documents
+    // above, and the resize the process holding the top-level traversable decides on. The requesting process waits
+    // for that exit to complete.
+    Web::HTML::TemporaryExecutionContext context { container->document().relevant_settings_object(), Web::HTML::TemporaryExecutionContext::CallbacksEnabled::Yes };
+    container->document().exit_fullscreen(nullptr, navigable_id);
+}
+
+void ConnectionFromClient::container_unfullscreen_complete(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().container_unfullscreen_complete(navigable_id);
+}
+
+void ConnectionFromClient::run_traversable_close_unload_task(Web::PageId page_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        as<Web::HTML::LocalTraversableNavigable>(*page->page().local_traversable()).run_ui_traversable_close_unload_task();
+}
+
+void ConnectionFromClient::update_nonchanging_navigable_history_state(Web::PageId page_id, Web::HTML::CrossProcessId operation_id, Web::HTML::CrossProcessId navigable_id, u64 script_history_length, u64 script_history_index)
+{
+    auto page = this->page(page_id);
+    auto* navigable = page.has_value() ? as_if<Web::HTML::LocalNavigable>(page->page().navigable_with_id(navigable_id).ptr()) : nullptr;
+    if (!navigable) {
+        async_nonchanging_navigable_history_state_updated(page_id, operation_id, navigable_id);
+        return;
+    }
+
+    navigable->update_nonchanging_navigable_history_step_state({ script_history_length, script_history_index }, GC::create_function(navigable->heap(), GC::captures(make_weak_ptr<ConnectionFromClient>(), page_id, operation_id, navigable_id), [](auto& connection, auto& page_id, auto& operation_id, auto& navigable_id) {
+        if (!connection)
+            return;
+        connection->async_nonchanging_navigable_history_state_updated(page_id, operation_id, navigable_id);
+    }));
+}
+
+void ConnectionFromClient::history_step_applied(Web::PageId page_id, Web::HTML::CrossProcessId operation_id, Web::HTML::HistoryStepResult result)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().history_executor().did_apply_ui_history_step(operation_id, result);
+}
+
+void ConnectionFromClient::reject_navigation_api_traversal(Web::PageId page_id, Web::HTML::CrossProcessId operation_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().history_executor().reject_ui_navigation_api_traversal(operation_id);
+}
+
+void ConnectionFromClient::complete_history_operation(Web::PageId page_id, Web::HTML::CrossProcessId operation_id, Optional<i32> target_entry_step, u64 session_history_entry_count)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    if (auto* traversable = as_if<Web::HTML::LocalTraversableNavigable>(*page->page().top_level_traversable()))
+        traversable->set_session_history_entry_count(session_history_entry_count);
+    page->page().history_executor().complete_ui_history_operation(operation_id, target_entry_step);
+}
+
+void ConnectionFromClient::set_viewport(Web::PageId page_id, Web::DevicePixelSize size, double device_pixel_ratio, Web::ViewportIsFullscreen is_fullscreen)
+{
+    if (auto page = this->page(page_id); page.has_value()) {
+        page->set_viewport(size, device_pixel_ratio);
+        page->page().set_viewport_is_fullscreen(is_fullscreen);
+    }
+}
+
+void ConnectionFromClient::key_event(Web::PageId page_id, Web::KeyEvent event)
+{
+    enqueue_input_event({ page_id, move(event), {}, {} });
+}
+
+void ConnectionFromClient::mouse_event(Web::PageId page_id, Web::MouseEvent event)
+{
+    enqueue_mouse_event(page_id, {}, move(event));
+}
+
+void ConnectionFromClient::mouse_event_in_hosted_root(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id, Web::MouseEvent event)
+{
+    enqueue_mouse_event(page_id, navigable_id, move(event));
+}
+
+// The compositor numbers every wheel step, so only the gesture of the steps decides whether they may become one.
+static bool wheel_steps_are_of_one_gesture(Optional<Web::WheelGestureMark> const& first, Optional<Web::WheelGestureMark> const& second)
+{
+    if (!first.has_value() || !second.has_value())
+        return first.has_value() == second.has_value();
+    return first->gesture_id == second->gesture_id && first->lasts_until_fingers_lift == second->lasts_until_fingers_lift;
+}
+
+void ConnectionFromClient::enqueue_mouse_event(Web::PageId page_id, Optional<Web::HTML::CrossProcessId> navigable_id, Web::MouseEvent event)
+{
+    auto page = m_page_host->page(page_id);
+    if (!page.has_value()) {
+        async_did_finish_handling_input_event(page_id, event.id, Web::EventResult::Dropped);
+        return;
+    }
+
+    // OPTIMIZATION: Coalesce consecutive unprocessed mouse move and wheel events.
+    auto event_to_coalesce = [&]() -> Web::MouseEvent const* {
+        if (m_input_event_queue.is_empty())
+            return nullptr;
+        if (m_input_event_queue.tail().page_id != page_id || m_input_event_queue.tail().navigable_id != navigable_id)
+            return nullptr;
+
+        if (event.type != Web::MouseEvent::Type::MouseMove && event.type != Web::MouseEvent::Type::MouseWheel)
+            return nullptr;
+
+        if (auto const* mouse_event = m_input_event_queue.tail().event.get_pointer<Web::MouseEvent>()) {
+            if (mouse_event->type != event.type)
+                return nullptr;
+            auto* previous_pointer = mouse_event->pointer_data.ptr();
+            auto* pointer = event.pointer_data.ptr();
+            if (!!previous_pointer != !!pointer)
+                return nullptr;
+            if (pointer && (previous_pointer->pointer_id != pointer->pointer_id || previous_pointer->pointer_type != pointer->pointer_type))
+                return nullptr;
+            if (event.type == Web::MouseEvent::Type::MouseWheel
+                && (mouse_event->async_scroll_performed_default_action != event.async_scroll_performed_default_action
+                    || mouse_event->wheel_delta_precision != event.wheel_delta_precision
+                    || mouse_event->scroll_gesture_phase != event.scroll_gesture_phase
+                    || !wheel_steps_are_of_one_gesture(mouse_event->wheel_gesture_mark, event.wheel_gesture_mark)))
+                return nullptr;
+            return mouse_event;
+        }
+
+        return nullptr;
+    };
+
+    if (auto const* last_mouse_event = event_to_coalesce()) {
+        event.wheel_delta_x += last_mouse_event->wheel_delta_x;
+        event.wheel_delta_y += last_mouse_event->wheel_delta_y;
+        event.wheel_tick_120ths_x += last_mouse_event->wheel_tick_120ths_x;
+        event.wheel_tick_120ths_y += last_mouse_event->wheel_tick_120ths_y;
+
+        auto coalesced_event_id = last_mouse_event->id;
+        m_input_event_queue.tail().event = move(event);
+        m_input_event_queue.tail().coalesced_event_ids.append(coalesced_event_id);
+
+        page->page().client().request_frame();
+        return;
+    }
+
+    enqueue_input_event({ page_id, move(event), {}, navigable_id });
+}
+
+void ConnectionFromClient::drag_event(Web::PageId page_id, Web::DragEvent event)
+{
+    enqueue_input_event({ page_id, move(event), {}, {} });
+}
+
+void ConnectionFromClient::pinch_event(Web::PageId page_id, Web::PinchEvent event)
+{
+    enqueue_pinch_event(page_id, {}, move(event));
+}
+
+void ConnectionFromClient::pinch_event_in_hosted_root(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id, Web::PinchEvent event)
+{
+    enqueue_pinch_event(page_id, navigable_id, move(event));
+}
+
+void ConnectionFromClient::enqueue_pinch_event(Web::PageId page_id, Optional<Web::HTML::CrossProcessId> navigable_id, Web::PinchEvent event)
+{
+    auto page = m_page_host->page(page_id);
+    if (!page.has_value()) {
+        async_did_finish_handling_input_event(page_id, event.id, Web::EventResult::Dropped);
+        return;
+    }
+
+    // OPTIMIZATION: Coalesce consecutive unprocessed pinch events. Pinch scale
+    //               deltas are multiplicative, so preserve the combined scale change.
+    //               Only coalesce events with the same focal point, as applying
+    //               one combined zoom around a different point is not equivalent
+    //               to applying each zoom in sequence. A frame another process hosts
+    //               hands each pinch it lets through back for its own zoom, so the
+    //               events to such a frame stay apart.
+    if (!navigable_id.has_value() && !m_input_event_queue.is_empty() && m_input_event_queue.tail().page_id == page_id && !m_input_event_queue.tail().navigable_id.has_value()) {
+        if (auto const* pinch_event = m_input_event_queue.tail().event.get_pointer<Web::PinchEvent>()) {
+            if (pinch_event->position != event.position || pinch_event->modifiers != event.modifiers
+                || pinch_event->async_zoom_performed_default_action != event.async_zoom_performed_default_action
+                || pinch_event->wheel_event_was_dispatched != event.wheel_event_was_dispatched)
+                return enqueue_input_event({ page_id, move(event), {}, navigable_id });
+
+            event.scale_delta = (1.0 + pinch_event->scale_delta) * (1.0 + event.scale_delta) - 1.0;
+            auto coalesced_event_id = pinch_event->id;
+            m_input_event_queue.tail().event = move(event);
+            m_input_event_queue.tail().coalesced_event_ids.append(coalesced_event_id);
+
+            page->page().client().request_frame();
+            return;
+        }
+    }
+
+    enqueue_input_event({ page_id, move(event), {}, navigable_id });
+}
+
+static bool is_discrete_input_event(Web::InputEvent const& event)
+{
+    if (event.has<Web::KeyEvent>())
+        return true;
+    if (auto const* mouse_event = event.get_pointer<Web::MouseEvent>())
+        return first_is_one_of(mouse_event->type, Web::MouseEvent::Type::MouseDown, Web::MouseEvent::Type::MouseUp);
+    return false;
+}
+
+void ConnectionFromClient::enqueue_input_event(Web::QueuedInputEvent event)
+{
+    auto page_id = event.page_id;
+    auto page = m_page_host->page(page_id);
+    if (!page.has_value()) {
+        async_did_finish_handling_input_event(page_id, Web::input_event_id(event.event), Web::EventResult::Dropped);
+        return;
+    }
+
+    auto is_discrete = is_discrete_input_event(event.event);
+    m_input_event_queue.enqueue(move(event));
+    page->page().client().request_frame();
+    if (is_discrete)
+        Web::HTML::main_thread_event_loop().queue_task_to_process_input_events();
+}
+
+// Whether the destroyed document at the end of the path is reachable only because script holds objects of its realm, as
+// of a removed iframe whose built-ins the page kept. That is when the first cell of the document's realm on the path is
+// held for script: by a JS object, or by a callback that the platform keeps for script, such as an event listener,
+// maybe through other cells of the JS runtime, such as the environment of a closure. Any other cell holding it keeps the
+// document alive by itself.
+// NB: Only the shortest path is looked at, so a document that a leak keeps alive too can be put down to script. Cells
+//     of the Wasm runtime count as cells of the engine, as their heap blocks do not tell them apart.
+static bool is_held_by_script(GC::Heap::RetainingPath const& path)
+{
+    auto& document = static_cast<Web::DOM::Document&>(*path.steps.last().cell);
+    // NB: A window that another document reuses is that document's, as is its realm.
+    auto window = document.window();
+    if (window && &window->associated_document() != &document)
+        window = nullptr;
+    JS::Realm const* realm = window ? &window->principal_realm() : nullptr;
+
+    auto as_object = [](GC::Cell const& cell) -> JS::Object const* {
+        if (cell.cell_kind() != GC::CellKind::Object)
+            return nullptr;
+        return GC::static_cell_cast<JS::Object const>(&cell);
+    };
+
+    auto is_of_document_realm = [&](GC::Cell const& cell) {
+        if (&cell == &document)
+            return true;
+        if (!window)
+            return false;
+        if (&cell == window.ptr() || &cell == GC::as_cell(realm))
+            return true;
+        auto const* object = as_object(cell);
+        return object && &Web::HTML::relevant_realm(*object) == realm;
+    };
+
+    auto entry = path.steps.find_first_index_if([&](auto const& step) { return is_of_document_realm(*step.cell); });
+    VERIFY(entry.has_value());
+    for (size_t i = *entry; i > 0; --i) {
+        auto const& holder = *path.steps[i - 1].cell;
+        // NB: As for documents, the class the heap block records tells a callback apart without a cast.
+        if (as_object(holder) || GC::class_name_of(holder) == "CallbackType"sv)
+            return true;
+        // NB: The heap block of a cell that is not a C++ object records the type its foreign implementation gave it.
+        if (!GC::HeapBlockBase::from_cell(&holder)->foreign_type())
+            return false;
+        // NB: The wrapper of a platform object that is implemented in Rust holds the object as its host data.
+        if (i >= 2) {
+            auto const* wrapper = as_object(*path.steps[i - 2].cell);
+            if (wrapper && JS::host_data_of(*wrapper).ptr() == &holder)
+                return false;
+        }
+    }
+    return false;
+}
+
+namespace {
+
+// Paths to destroyed documents, grouped by the root and the classes along them.
+struct LeakedDocumentPaths {
+    void add(GC::Heap::RetainingPath const& path)
+    {
+        StringBuilder builder;
+        builder.append(GC::Heap::describe_root(path.root));
+        for (size_t i = 0; i < path.steps.size(); ++i) {
+            builder.append(i == 0 ? ": "sv : " -> "sv);
+            builder.append(path.steps[i].class_name);
+        }
+        auto signature = builder.to_string_without_validation();
+        auto& count = counts.ensure(signature, [&] -> size_t {
+            order.append(signature);
+            return 0;
+        });
+        ++count;
+        ++documents;
+    }
+
+    JsonArray print_and_serialize()
+    {
+        quick_sort(order, [&](auto const& a, auto const& b) { return counts.get(a).value() > counts.get(b).value(); });
+        JsonArray groups;
+        for (auto const& signature : order) {
+            auto count = counts.get(signature).value();
+            dbgln("  {}x {}", count, signature);
+            JsonObject group;
+            group.set("count"sv, count);
+            group.set("path"sv, signature);
+            groups.must_append(move(group));
+        }
+        return groups;
+    }
+
+    size_t documents { 0 };
+    HashMap<String, size_t> counts;
+    Vector<String> order;
+};
+
+}
+
+// Prints the shortest path from a root to each destroyed document that is still reachable, grouped by the classes along
+// it. Whatever keeps such a document alive leaks it, unless script holds objects of its realm. Those are listed apart.
+static void report_leaked_documents()
+{
+    static constexpr size_t max_documents = 1000;
+    auto paths = Web::Bindings::main_thread_vm().heap().find_retaining_paths([](GC::Cell& cell) {
+        // NB: Most cells are not C++ objects, so check the class their heap block records before casting.
+        if (!GC::class_name_of(cell).is_one_of("Document"sv, "HTMLDocument"sv, "XMLDocument"sv))
+            return false;
+        return static_cast<Web::DOM::Document&>(cell).has_been_destroyed();
+    },
+        max_documents);
+
+    LeakedDocumentPaths leaked;
+    LeakedDocumentPaths held_by_script;
+    for (auto const& path : paths) {
+        if (is_held_by_script(path))
+            held_by_script.add(path);
+        else
+            leaked.add(path);
+    }
+
+    auto or_more = paths.size() >= max_documents ? " (or more)"sv : ""sv;
+    dbgln("Leaked documents: {} destroyed documents are reachable{}", leaked.documents, or_more);
+    auto leaked_groups = leaked.print_and_serialize();
+    if (held_by_script.documents > 0)
+        dbgln("Held by script: {} destroyed documents are reachable through objects of their realms that script holds{}", held_by_script.documents, or_more);
+    auto held_by_script_groups = held_by_script.print_and_serialize();
+
+    if (auto* log = Core::StatsLog::the()) {
+        JsonObject data;
+        data.set("documents"sv, leaked.documents);
+        // NB: The search stops at max_documents destroyed documents, held by script or not.
+        data.set("truncated"sv, paths.size() >= max_documents);
+        data.set("paths"sv, move(leaked_groups));
+        data.set("documents_held_by_script"sv, held_by_script.documents);
+        data.set("paths_held_by_script"sv, move(held_by_script_groups));
+        log->event("leaked_documents"sv, move(data));
+    }
+}
+
+void ConnectionFromClient::debug_request(Web::PageId page_id, ByteString request, ByteString argument)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    if (request == "dump-session-history") {
+        Web::dump_tree(*page->page().local_traversable());
+        return;
+    }
+
+    if (request == "dump-display-list") {
+        if (auto doc = page->page().local_traversable()->active_document()) {
+            auto display_list_dump = doc->dump_display_list({ .owners = true, .text = true, .fonts = true, .record_ids = true, .chunks = true, .jsonl = argument == "jsonl" });
+            dbgln("{}", display_list_dump.to_utf8());
+        }
+        return;
+    }
+
+    if (request == "dump-dom-tree") {
+        if (auto doc = page->page().local_traversable()->active_document())
+            Web::dump_tree(*doc);
+        return;
+    }
+
+    if (request == "dump-layout-tree") {
+        if (auto doc = page->page().local_traversable()->active_document()) {
+            page->page().local_traversable()->update_layout_of_hosted_inclusive_descendant_documents(Web::DOM::UpdateLayoutReason::Debugging);
+            Web::Layout::ForcedReadScope read { *doc };
+            if (auto* viewport = doc->layout_node(read))
+                Web::dump_tree(*viewport);
+        }
+        return;
+    }
+
+    if (request == "dump-stacking-context-tree") {
+        if (auto doc = page->page().local_traversable()->active_document()) {
+            Web::Layout::ForcedReadScope read { *doc };
+            if (doc->layout_node(read)) {
+                VERIFY(doc->has_committed_viewport_box());
+                StringBuilder builder;
+                Web::Painting::dump_stacking_context_tree(read, builder, *doc);
+                dbgln("{}", builder.string_view());
+            }
+        }
+        return;
+    }
+
+    if (request == "dump-style-sheets") {
+        if (auto doc = page->page().local_traversable()->active_document()) {
+            dbgln("=== In document: ===");
+            for (auto& sheet : doc->style_scope().style_sheets()) {
+                Web::dump_sheet(sheet);
+            }
+
+            doc->for_each_shadow_root([&](auto& shadow_root) {
+                dbgln("=== In shadow root {}: ===", shadow_root.host()->debug_description());
+                shadow_root.for_each_css_style_sheet([&](auto& sheet) {
+                    Web::dump_sheet(sheet);
+                });
+            });
+        }
+        return;
+    }
+
+    if (request == "dump-all-resolved-styles") {
+        auto dump_style = [](String const& title, Web::CSS::ComputedValues const& style, RefPtr<Web::CSS::CustomPropertyData const> custom_property_data) {
+            dbgln("+ {}", title);
+            for (size_t i = to_underlying(Web::CSS::first_longhand_property_id); i <= to_underlying(Web::CSS::last_longhand_property_id); ++i) {
+                auto property_id = static_cast<Web::CSS::PropertyID>(i);
+                dbgln("|  {} = {}", Web::CSS::string_from_property_id(property_id), style.computed_style_value(property_id)->to_string(Web::CSS::SerializationMode::Normal));
+            }
+            if (custom_property_data) {
+                custom_property_data->for_each_property([](Utf16FlyString const& name, Web::CSS::StyleProperty const& property) {
+                    dbgln("|  {} = {}", name, property.value->to_string(Web::CSS::SerializationMode::Normal));
+                });
+            }
+            dbgln("---");
+        };
+
+        if (auto doc = page->page().local_traversable()->active_document()) {
+            GC::RootVector<Web::DOM::Node*> nodes_to_visit;
+            nodes_to_visit.append(doc->document_element());
+            for (size_t i = 0; i < nodes_to_visit.size(); ++i) {
+                auto node = nodes_to_visit[i];
+                for (auto& child : node->children_as_vector())
+                    nodes_to_visit.append(child.ptr());
+                if (auto* element = as_if<Web::DOM::Element>(node)) {
+                    doc->update_style_for_element(Web::DOM::AbstractElement { *element });
+                    if (auto styles = element->computed_style())
+                        dump_style(MUST(String::formatted("Element {}", node->debug_description())), *styles, element->custom_property_data({}));
+
+                    element->for_each_synthetic_pseudo_element([&](Web::CSS::PseudoElement pseudo_element_type, Web::DOM::PseudoElement const&) {
+                        auto computed_values = element->computed_style(pseudo_element_type);
+                        if (!computed_values)
+                            return;
+
+                        dump_style(MUST(String::formatted("PseudoElement {}::{}", node->debug_description(), Web::CSS::pseudo_element_name(pseudo_element_type))), *computed_values, element->custom_property_data(pseudo_element_type));
+                    });
+                }
+            }
+        }
+        return;
+    }
+
+    if (request == "dump-all-css-errors") {
+        Web::CSS::Parser::ErrorReporter::the().dump();
+        return;
+    }
+
+    if (request == "report-leaked-documents") {
+        // NOTE: We use deferred_invoke here so that as little as possible on the stack becomes a root.
+        Core::deferred_invoke([] {
+            report_leaked_documents();
+        });
+        return;
+    }
+
+    if (request == "collect-garbage") {
+        // NOTE: We use deferred_invoke here to ensure that GC runs with as little on the stack as possible.
+        Core::deferred_invoke([] {
+            Web::Bindings::main_thread_vm().heap().collect_garbage(GC::Heap::CollectionType::CollectGarbage, true);
+        });
+        return;
+    }
+
+    if (request == "crash-current-page") {
+        Core::deferred_invoke([] {
+            VERIFY_NOT_REACHED();
+        });
+        return;
+    }
+
+    if (request == "set-force-dark") {
+        // Force dark is the traversable's, which only the page displaying the tab has.
+        if (!page->page().has_local_traversable())
+            return;
+        bool state = argument == "on";
+        auto traversable = page->page().local_traversable();
+        traversable->set_force_dark_enabled(state);
+        // This request means the whole default force-dark state, thresholds included: only tests move them (through
+        // internals), and one test's thresholds must not leak into the next test sharing the view.
+        traversable->set_force_dark_thresholds(Web::HTML::default_force_dark_foreground_threshold, Web::HTML::default_force_dark_background_threshold);
+        return;
+    }
+
+    // The debug overlays are drawn by the traversable, which only the page displaying the tab has; a page hosting a
+    // child frame of the tab gets the same requests and has nothing to draw them on.
+    if (request == "set-line-box-borders") {
+        if (page->page().has_local_traversable())
+            page->page().local_traversable()->set_should_show_line_box_borders(argument == "on");
+        return;
+    }
+
+    if (request == "set-caret-hit-test-debug-overlay") {
+        if (page->page().has_local_traversable())
+            page->page().local_traversable()->set_should_show_caret_hit_test_debug_overlay(argument == "on");
+        return;
+    }
+
+    if (request == "clear-cache") {
+        Web::Fetch::Fetching::clear_http_memory_cache();
+        WebWorker::post_to_worker_threads(Web::Fetch::Fetching::clear_http_memory_cache);
+        Web::CSS::StyleScope::release_kept_data();
+        return;
+    }
+
+    if (request == "clear-user-style") {
+        page->page().set_user_style({});
+        return;
+    }
+
+    if (request == "spoof-user-agent") {
+        Web::update_loader_config([&](auto& config) { config.user_agent = MUST(String::from_byte_string(argument)); });
+        return;
+    }
+
+    if (request == "scripting") {
+        page->page().set_is_scripting_enabled(argument == "on");
+        return;
+    }
+
+    if (request == "block-pop-ups") {
+        page->page().set_should_block_pop_ups(argument == "on");
+        return;
+    }
+
+    if (request == "dump-local-storage") {
+        if (auto document = page->page().local_traversable()->active_document()) {
+            auto storage_or_error = document->window()->local_storage();
+            if (storage_or_error.is_error())
+                dbgln("Failed to retrieve local storage: {}", storage_or_error.release_error());
+            else
+                storage_or_error.release_value()->dump();
+        }
+        return;
+    }
+
+    if (request == "dump-session-storage") {
+        if (auto document = page->page().local_traversable()->active_document()) {
+            auto storage_or_error = document->window()->session_storage();
+            if (storage_or_error.is_error())
+                dbgln("Failed to retrieve session storage: {}", storage_or_error.release_error());
+            else
+                storage_or_error.release_value()->dump();
+        }
+        return;
+    }
+
+    if (request == "navigator-compatibility-mode") {
+        Web::NavigatorCompatibilityMode compatibility_mode;
+        if (argument == "chrome") {
+            compatibility_mode = Web::NavigatorCompatibilityMode::Chrome;
+        } else if (argument == "gecko") {
+            compatibility_mode = Web::NavigatorCompatibilityMode::Gecko;
+        } else if (argument == "webkit") {
+            compatibility_mode = Web::NavigatorCompatibilityMode::WebKit;
+        } else {
+            dbgln("Unknown navigator compatibility mode '{}', defaulting to Chrome", argument);
+            compatibility_mode = Web::NavigatorCompatibilityMode::Chrome;
+        }
+
+        Web::ResourceLoader::the().set_navigator_compatibility_mode(compatibility_mode);
+        return;
+    }
+}
+
+void ConnectionFromClient::get_source(Web::PageId page_id)
+{
+    if (auto page = this->page(page_id); page.has_value()) {
+        if (auto doc = page->page().local_traversable()->active_document()) {
+            auto html = Web::highlight_source(doc->url(), doc->base_url(), doc->source().to_utf8(), Syntax::Language::HTML);
+            async_did_get_highlighted_source(page_id, move(html));
+        }
+    }
+}
+
+void ConnectionFromClient::inspect_dom_tree(Web::PageId page_id)
+{
+    if (auto page = this->page(page_id); page.has_value()) {
+        if (auto doc = page->page().local_traversable()->active_document())
+            async_did_inspect_dom_tree(page_id, doc->dump_dom_tree_as_json().to_utf8());
+    }
+}
+
+void ConnectionFromClient::inspect_storage(Web::PageId page_id, Web::StorageAPI::StorageEndpointType storage_endpoint, u64 request_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value()) {
+        async_did_inspect_storage(page_id, request_id, "[]"_string);
+        return;
+    }
+
+    auto document = page->page().local_traversable()->active_document();
+    if (!document || !document->window()) {
+        async_did_inspect_storage(page_id, request_id, "[]"_string);
+        return;
+    }
+
+    Web::WebIDL::ExceptionOr<GC::Ref<Web::HTML::Storage>> storage_or_error = [&]() -> Web::WebIDL::ExceptionOr<GC::Ref<Web::HTML::Storage>> {
+        if (storage_endpoint == Web::StorageAPI::StorageEndpointType::LocalStorage)
+            return document->window()->local_storage();
+        VERIFY(storage_endpoint == Web::StorageAPI::StorageEndpointType::SessionStorage);
+        return document->window()->session_storage();
+    }();
+
+    if (storage_or_error.is_error()) {
+        async_did_inspect_storage(page_id, request_id, "[]"_string);
+        return;
+    }
+
+    JsonArray storage_items;
+    storage_or_error.value()->for_each_item([&](auto const& name, auto const& value) {
+        JsonObject item;
+        item.set("name"sv, name.to_utf8());
+        item.set("value"sv, value.to_utf8());
+        storage_items.must_append(move(item));
+    });
+
+    async_did_inspect_storage(page_id, request_id, storage_items.serialized());
+}
+
+Web::StorageAPI::StorageAreaConnection ConnectionFromClient::connect_to_storage_area(Web::PageId page_id, Web::StorageAPI::StorageEndpointType storage_endpoint, Web::HTML::EnvironmentId const& environment_id)
+{
+    auto response = send_sync_but_allow_failure<Messages::WebContentClient::ConnectToStorageArea>(page_id, storage_endpoint, environment_id);
+    if (!response) {
+        dbgln("WebContent client disconnected during ConnectToStorageArea. Exiting peacefully.");
+        Core::Process::terminate_immediately(0);
+    }
+    return { response->area_id(), response->take_keys(), response->take_values(), response->usage() };
+}
+
+void ConnectionFromClient::disconnect_from_storage_area(Web::StorageAPI::StorageAreaId area_id)
+{
+    async_disconnect_from_storage_area(area_id);
+}
+
+void ConnectionFromClient::set_storage_item(Web::StorageAPI::StorageAreaId area_id, Utf16String const& key, Utf16String const& value, String const& document_url)
+{
+    async_set_storage_item(area_id, key, value, document_url);
+}
+
+void ConnectionFromClient::remove_storage_item(Web::StorageAPI::StorageAreaId area_id, Utf16String const& key, String const& document_url)
+{
+    async_remove_storage_item(area_id, key, document_url);
+}
+
+void ConnectionFromClient::clear_storage_area(Web::StorageAPI::StorageAreaId area_id, String const& document_url)
+{
+    async_clear_storage_area(area_id, document_url);
+}
+
+void ConnectionFromClient::storage_area_changed(Web::StorageAPI::StorageAreaId area_id, Optional<Utf16String> key, Optional<Utf16String> old_value, Optional<Utf16String> new_value, String url)
+{
+    Web::StorageAPI::storage_area_did_change(area_id, key, old_value, new_value, url);
+}
+
+void ConnectionFromClient::storage_area_write_acknowledged(Web::StorageAPI::StorageAreaId area_id)
+{
+    Web::StorageAPI::storage_area_did_acknowledge_write(area_id);
+}
+
+void ConnectionFromClient::storage_area_write_refused(Web::StorageAPI::StorageAreaId area_id, Vector<Utf16String> keys, Vector<Utf16String> values)
+{
+    Web::StorageAPI::storage_area_did_refuse_write(area_id, move(keys), move(values));
+}
+
+void ConnectionFromClient::storage_area_reset(Web::StorageAPI::StorageAreaId area_id, Vector<Utf16String> keys, Vector<Utf16String> values)
+{
+    Web::StorageAPI::storage_area_did_reset(area_id, move(keys), move(values));
+}
+
+void ConnectionFromClient::inspect_dom_node(Web::PageId page_id, WebView::DOMNodeProperties::Type property_type, Web::UniqueNodeID node_id, Optional<Web::CSS::PseudoElement> pseudo_element, JsonValue options_value)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    clear_inspected_dom_node(page_id);
+
+    auto* node = Web::DOM::Node::from_unique_id(node_id);
+    if (!node || !node->is_element()) {
+        async_did_inspect_dom_node(page_id, { property_type, {} });
+        return;
+    }
+
+    auto& element = as<Web::DOM::Element>(*node);
+    node->document().set_inspected_node(node);
+
+    Web::DOM::AbstractElement abstract_element { element, pseudo_element };
+    node->document().update_style_for_element(abstract_element);
+
+    auto computed_values = element.computed_style(pseudo_element);
+
+    if (!computed_values) {
+        async_did_inspect_dom_node(page_id, { property_type, {} });
+        return;
+    }
+
+    Web::Layout::ForcedReadScope read { node->document() };
+    node->document().update_layout(Web::DOM::UpdateLayoutReason::Debugging);
+
+    // Nodes without layout (aka non-visible nodes) do not have box metrics, but DevTools can still ask for their style
+    // rules and computed properties.
+    if (property_type == WebView::DOMNodeProperties::Type::Layout && !node->layout_node(read)) {
+        async_did_inspect_dom_node(page_id, { property_type, {} });
+        return;
+    }
+
+    auto serialize_computed_style = [&]() {
+        JsonObject serialized;
+
+        for (auto i = to_underlying(Web::CSS::first_longhand_property_id); i <= to_underlying(Web::CSS::last_longhand_property_id); ++i) {
+            auto property_id = static_cast<Web::CSS::PropertyID>(i);
+            auto value = computed_values->computed_style_value(property_id);
+            serialized.set(
+                Web::CSS::string_from_property_id(property_id).to_utf16_string().to_utf8_but_should_be_ported_to_utf16(),
+                value->to_string(Web::CSS::SerializationMode::Normal));
+        }
+
+        // FIXME: Custom properties are not included in ComputedValues, so add them manually.
+        if (auto custom_property_data = element.custom_property_data(pseudo_element)) {
+            custom_property_data->for_each_property([&](Utf16FlyString const& name, Web::CSS::StyleProperty const& value) {
+                serialized.set(name.to_utf16_string().to_utf8_but_should_be_ported_to_utf16(), value.value->to_string(Web::CSS::SerializationMode::Normal));
+            });
+        }
+
+        return serialized;
+    };
+
+    auto serialize_layout = [&](Web::Layout::Node const* layout_node) {
+        if (!layout_node || !layout_node->is_box() || !Web::Painting::has_committed_box(*layout_node)) {
+            return JsonObject {};
+        }
+
+        auto const box_model = Web::Painting::box_model(*layout_node);
+
+        JsonObject serialized;
+
+        serialized.set("width"sv, Web::Painting::content_width(*layout_node).to_double());
+        serialized.set("height"sv, Web::Painting::content_height(*layout_node).to_double());
+
+        serialized.set("padding-top"sv, box_model.padding.top.to_double());
+        serialized.set("padding-right"sv, box_model.padding.right.to_double());
+        serialized.set("padding-bottom"sv, box_model.padding.bottom.to_double());
+        serialized.set("padding-left"sv, box_model.padding.left.to_double());
+
+        serialized.set("margin-top"sv, box_model.margin.top.to_double());
+        serialized.set("margin-right"sv, box_model.margin.right.to_double());
+        serialized.set("margin-bottom"sv, box_model.margin.bottom.to_double());
+        serialized.set("margin-left"sv, box_model.margin.left.to_double());
+
+        serialized.set("border-top-width"sv, box_model.border.top.to_double());
+        serialized.set("border-right-width"sv, box_model.border.right.to_double());
+        serialized.set("border-bottom-width"sv, box_model.border.bottom.to_double());
+        serialized.set("border-left-width"sv, box_model.border.left.to_double());
+
+        auto serialize_property = [&](Web::CSS::PropertyID property_id) {
+            return computed_values->computed_style_value(property_id)->to_string(Web::CSS::SerializationMode::Normal);
+        };
+        serialized.set("box-sizing"sv, serialize_property(Web::CSS::PropertyID::BoxSizing));
+        serialized.set("display"sv, serialize_property(Web::CSS::PropertyID::Display));
+        serialized.set("float"sv, serialize_property(Web::CSS::PropertyID::Float));
+        serialized.set("line-height"sv, serialize_property(Web::CSS::PropertyID::LineHeight));
+        serialized.set("position"sv, serialize_property(Web::CSS::PropertyID::Position));
+        serialized.set("z-index"sv, serialize_property(Web::CSS::PropertyID::ZIndex));
+
+        return serialized;
+    };
+
+    auto serialize_used_fonts = [&]() {
+        JsonArray serialized;
+
+        computed_values->font_list().for_each_font_entry([&](Gfx::FontCascadeList::Entry const& entry) {
+            auto const& font = *entry.font;
+
+            JsonObject font_object;
+            font_object.set("name"sv, font.family().to_string());
+            font_object.set("size"sv, font.point_size());
+            font_object.set("weight"sv, font.weight());
+            serialized.must_append(move(font_object));
+        });
+
+        return serialized;
+    };
+
+    auto serialize_applied_style_rules = [&]() {
+        JsonObject const empty_options;
+        auto const& options = options_value.is_object() ? options_value.as_object() : empty_options;
+        auto include_inherited = options.get_bool("inherited"sv).value_or(false);
+        auto include_user_agent_styles = options.get_string("filter"sv).map([](auto const& filter) { return filter == "ua"sv; }).value_or(false);
+        return node->document().style_computer().collect_devtools_applied_style_rules(read, abstract_element, include_inherited, include_user_agent_styles);
+    };
+
+    JsonValue serialized;
+
+    switch (property_type) {
+    case WebView::DOMNodeProperties::Type::AppliedStyleRules:
+        serialized = serialize_applied_style_rules();
+        break;
+    case WebView::DOMNodeProperties::Type::ComputedStyle:
+        serialized = serialize_computed_style();
+        break;
+    case WebView::DOMNodeProperties::Type::Layout:
+        serialized = serialize_layout(element.layout_node(read));
+        break;
+    case WebView::DOMNodeProperties::Type::UsedFonts:
+        serialized = serialize_used_fonts();
+        break;
+    }
+
+    async_did_inspect_dom_node(page_id, { property_type, move(serialized) });
+}
+
+static Optional<JsonObject> flex_layout_for_node(Web::DOM::Node const& node)
+{
+    Web::Layout::ForcedReadScope read { node.document() };
+    auto const* layout_node = node.layout_node(read);
+    if (!layout_node || !Web::Painting::has_committed_box(*layout_node))
+        return {};
+
+    auto serialized_layout = Web::Painting::flex_layout_json(*layout_node, node.unique_id());
+    if (!serialized_layout.has_value())
+        return {};
+
+    auto layout = MUST(JsonValue::from_string(*serialized_layout));
+    VERIFY(layout.is_object());
+    return move(layout.as_object());
+}
+
+static Optional<JsonObject> grid_layout_for_node(Web::DOM::Node const& node)
+{
+    Web::Layout::ForcedReadScope read { node.document() };
+    auto const* layout_node = node.layout_node(read);
+    if (!layout_node || !Web::Painting::has_committed_box(*layout_node))
+        return {};
+
+    auto serialized_layout = Web::Painting::grid_layout_json(*layout_node, node.unique_id());
+    if (!serialized_layout.has_value())
+        return {};
+
+    auto layout = MUST(JsonValue::from_string(*serialized_layout));
+    VERIFY(layout.is_object());
+    return move(layout.as_object());
+}
+
+static void append_grid_layouts_for_node_and_frame_descendants(Web::DOM::Node& root_node, JsonArray& grid_layouts)
+{
+    root_node.for_each_in_inclusive_subtree([&](Web::DOM::Node& node) {
+        if (auto grid_layout = grid_layout_for_node(node); grid_layout.has_value())
+            grid_layouts.must_append(grid_layout.release_value());
+
+        auto* navigable_container = as_if<Web::HTML::NavigableContainer>(node);
+        if (!navigable_container)
+            return Web::TraversalDecision::Continue;
+
+        auto content_navigable = navigable_container->content_navigable();
+        if (!content_navigable)
+            return Web::TraversalDecision::Continue;
+
+        // A cross-site frame's document lives in another process, so its grids can't be inspected from here.
+        auto* local_content_navigable = as_if<Web::HTML::LocalNavigable>(*content_navigable);
+        if (!local_content_navigable)
+            return Web::TraversalDecision::Continue;
+
+        auto content_document = local_content_navigable->active_document();
+        if (!content_document)
+            return Web::TraversalDecision::Continue;
+
+        if (!content_document->origin().is_same_origin_domain(navigable_container->document().origin()))
+            return Web::TraversalDecision::Continue;
+
+        content_document->update_layout(Web::DOM::UpdateLayoutReason::Debugging);
+        append_grid_layouts_for_node_and_frame_descendants(*content_document, grid_layouts);
+        return Web::TraversalDecision::Continue;
+    });
+}
+
+void ConnectionFromClient::inspect_grid_layouts(Web::PageId page_id, Web::UniqueNodeID root_node_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    auto* root_node = Web::DOM::Node::from_unique_id(root_node_id);
+    if (!root_node) {
+        async_did_inspect_grid_layouts(page_id, "[]"_string);
+        return;
+    }
+
+    root_node->document().update_layout(Web::DOM::UpdateLayoutReason::Debugging);
+
+    JsonArray grid_layouts;
+    append_grid_layouts_for_node_and_frame_descendants(*root_node, grid_layouts);
+
+    async_did_inspect_grid_layouts(page_id, grid_layouts.serialized());
+}
+
+void ConnectionFromClient::inspect_current_grid(Web::PageId page_id, Web::UniqueNodeID node_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    auto* node = Web::DOM::Node::from_unique_id(node_id);
+    if (!node) {
+        async_did_inspect_current_grid(page_id, "null"_string);
+        return;
+    }
+
+    node->document().update_layout(Web::DOM::UpdateLayoutReason::Debugging);
+
+    for (auto const* current = node; current; current = current->parent_or_shadow_host_node()) {
+        if (auto grid_layout = grid_layout_for_node(*current); grid_layout.has_value()) {
+            async_did_inspect_current_grid(page_id, grid_layout->serialized());
+            return;
+        }
+    }
+
+    async_did_inspect_current_grid(page_id, "null"_string);
+}
+
+void ConnectionFromClient::inspect_current_flexbox(Web::PageId page_id, Web::UniqueNodeID node_id, bool only_look_at_parents)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    auto* node = Web::DOM::Node::from_unique_id(node_id);
+    if (!node) {
+        async_did_inspect_current_flexbox(page_id, "null"_string);
+        return;
+    }
+
+    node->document().update_layout(Web::DOM::UpdateLayoutReason::Debugging);
+
+    for (auto const* current = only_look_at_parents ? node->parent_or_shadow_host_node() : node; current; current = current->parent_or_shadow_host_node()) {
+        if (auto flex_layout = flex_layout_for_node(*current); flex_layout.has_value()) {
+            async_did_inspect_current_flexbox(page_id, flex_layout->serialized());
+            return;
+        }
+    }
+
+    async_did_inspect_current_flexbox(page_id, "null"_string);
+}
+
+void ConnectionFromClient::inspect_indexed_database_storage(Web::PageId page_id, u64 request_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    auto document = page->page().local_traversable()->active_document();
+    if (!document) {
+        async_did_inspect_indexed_database(page_id, request_id, "{}"_string);
+        return;
+    }
+
+    async_did_inspect_indexed_database(page_id, request_id, DevToolsIndexedDB::serialize_storage(*document).serialized());
+}
+
+void ConnectionFromClient::inspect_indexed_database_objects(Web::PageId page_id, u64 request_id, String host, JsonValue names, JsonValue options)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    auto document = page->page().local_traversable()->active_document();
+    if (!document) {
+        async_did_inspect_indexed_database(page_id, request_id, "{}"_string);
+        return;
+    }
+
+    async_did_inspect_indexed_database(page_id, request_id, DevToolsIndexedDB::serialize_objects(*document, host, names, options).serialized());
+}
+
+static void send_indexed_database_operation_result(ConnectionFromClient& connection, Web::PageId page_id, u64 request_id, ErrorOr<JsonObject> result)
+{
+    if (result.is_error()) {
+        JsonObject error;
+        error.set("error"sv, result.error().string_literal());
+        connection.async_did_inspect_indexed_database(page_id, request_id, error.serialized());
+        return;
+    }
+
+    connection.async_did_inspect_indexed_database(page_id, request_id, result.release_value().serialized());
+}
+
+void ConnectionFromClient::delete_indexed_database(Web::PageId page_id, u64 request_id, String host, String name)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    auto document = page->page().local_traversable()->active_document();
+    if (!document) {
+        async_did_inspect_indexed_database(page_id, request_id, "{}"_string);
+        return;
+    }
+
+    send_indexed_database_operation_result(*this, page_id, request_id, DevToolsIndexedDB::delete_database(*document, host, name));
+}
+
+void ConnectionFromClient::clear_indexed_database_object_store(Web::PageId page_id, u64 request_id, String host, String name)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    auto document = page->page().local_traversable()->active_document();
+    if (!document) {
+        async_did_inspect_indexed_database(page_id, request_id, "{}"_string);
+        return;
+    }
+
+    send_indexed_database_operation_result(*this, page_id, request_id, DevToolsIndexedDB::clear_object_store(*document, host, name));
+}
+
+void ConnectionFromClient::delete_indexed_database_record(Web::PageId page_id, u64 request_id, String host, String name)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    auto document = page->page().local_traversable()->active_document();
+    if (!document) {
+        async_did_inspect_indexed_database(page_id, request_id, "{}"_string);
+        return;
+    }
+
+    send_indexed_database_operation_result(*this, page_id, request_id, DevToolsIndexedDB::delete_record(*document, host, name));
+}
+
+void ConnectionFromClient::clear_inspected_dom_node(Web::PageId page_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    for (auto& navigable : Web::HTML::all_local_navigables()) {
+        if (navigable.active_document() != nullptr) {
+            navigable.active_document()->set_inspected_node(nullptr);
+        }
+    }
+}
+
+void ConnectionFromClient::highlight_dom_node(Web::PageId page_id, Web::UniqueNodeID node_id, Optional<Web::CSS::PseudoElement> pseudo_element)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    for (auto& navigable : Web::HTML::all_local_navigables()) {
+        if (navigable.active_document() != nullptr) {
+            navigable.active_document()->set_highlighted_node(nullptr, {});
+        }
+    }
+
+    auto* node = Web::DOM::Node::from_unique_id(node_id);
+    if (!node || !node->is_connected())
+        return;
+
+    auto& document = node->document();
+    auto navigable = document.navigable();
+    if (!navigable || navigable->active_document() != GC::Ref { document })
+        return;
+
+    Web::Layout::ForcedReadScope read { document };
+    document.update_layout(Web::DOM::UpdateLayoutReason::Debugging);
+    if (!node->layout_node(read))
+        return;
+
+    document.set_highlighted_node(node, pseudo_element);
+}
+
+static Web::Painting::FlexboxInspectorOverlayOptions flexbox_inspector_overlay_options_from_json(JsonValue const& options)
+{
+    Web::Painting::FlexboxInspectorOverlayOptions result;
+
+    if (options.is_object()) {
+        auto const& object = options.as_object();
+        if (auto color = object.get_string("color"sv); color.has_value()) {
+            if (auto parsed_color = Gfx::Color::from_string(*color); parsed_color.has_value())
+                result.color = *parsed_color;
+        }
+    }
+
+    return result;
+}
+
+static Web::Painting::GridInspectorOverlayOptions grid_inspector_overlay_options_from_json(JsonValue const& options)
+{
+    Web::Painting::GridInspectorOverlayOptions result;
+
+    if (options.is_object()) {
+        auto const& object = options.as_object();
+        if (auto color = object.get_string("color"sv); color.has_value()) {
+            if (auto parsed_color = Gfx::Color::from_string(*color); parsed_color.has_value())
+                result.color = *parsed_color;
+        }
+
+        result.show_area_names = object.get_bool("showGridAreasOverlay"sv).value_or(result.show_area_names);
+        result.show_line_numbers = object.get_bool("showGridLineNumbers"sv).value_or(result.show_line_numbers);
+        result.show_infinite_lines = object.get_bool("showInfiniteLines"sv).value_or(result.show_infinite_lines);
+        result.show_track_sizes = object.get_bool("showGridTrackSizes"sv)
+                                      .value_or(object.get_bool("showGridTrackSizeLabels"sv)
+                                              .value_or(object.get_bool("showTrackSizes"sv)
+                                                      .value_or(result.show_track_sizes)));
+    }
+
+    return result;
+}
+
+void ConnectionFromClient::highlight_flexbox(Web::PageId page_id, Web::UniqueNodeID node_id, JsonValue options)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    auto* node = Web::DOM::Node::from_unique_id(node_id);
+    if (!node)
+        return;
+
+    auto& document = node->document();
+    Web::Layout::ForcedReadScope read { document };
+    document.update_layout(Web::DOM::UpdateLayoutReason::Debugging);
+    if (!node->layout_node(read))
+        return;
+
+    document.set_flexbox_highlighted_node(node, flexbox_inspector_overlay_options_from_json(options));
+}
+
+void ConnectionFromClient::clear_flexbox_highlight(Web::PageId page_id, Web::UniqueNodeID node_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    if (node_id != 0) {
+        auto* node = Web::DOM::Node::from_unique_id(node_id);
+        if (node)
+            node->document().clear_flexbox_highlighted_node(node);
+        return;
+    }
+
+    for (auto& navigable : Web::HTML::all_local_navigables()) {
+        if (navigable.active_document())
+            navigable.active_document()->clear_flexbox_highlighted_node(nullptr);
+    }
+}
+
+void ConnectionFromClient::highlight_grid(Web::PageId page_id, Web::UniqueNodeID node_id, JsonValue options)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    auto* node = Web::DOM::Node::from_unique_id(node_id);
+    if (!node)
+        return;
+
+    auto& document = node->document();
+    Web::Layout::ForcedReadScope read { document };
+    document.update_layout(Web::DOM::UpdateLayoutReason::Debugging);
+    if (!node->layout_node(read))
+        return;
+
+    document.set_grid_highlighted_node(node, grid_inspector_overlay_options_from_json(options));
+}
+
+void ConnectionFromClient::clear_grid_highlight(Web::PageId page_id, Web::UniqueNodeID node_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    if (node_id != 0) {
+        auto* node = Web::DOM::Node::from_unique_id(node_id);
+        if (node)
+            node->document().clear_grid_highlighted_node(node);
+        return;
+    }
+
+    for (auto& navigable : Web::HTML::all_local_navigables()) {
+        if (navigable.active_document())
+            navigable.active_document()->clear_grid_highlighted_node(nullptr);
+    }
+}
+
+void ConnectionFromClient::inspect_accessibility_tree(Web::PageId page_id)
+{
+    if (auto page = this->page(page_id); page.has_value() && page->page().has_local_traversable()) {
+        if (auto doc = page->page().local_traversable()->active_document())
+            async_did_inspect_accessibility_tree(page_id, doc->dump_accessibility_tree_as_json().to_utf8());
+    }
+}
+
+void ConnectionFromClient::request_accessibility_tree(Web::PageId page_id)
+{
+    // Only an assistive technology asks for the tree (the UIs ask on its behalf once one uses the platform
+    // accessibility API), so from here on, focus changes and DOM changes reach it as well: see Document::
+    // set_active_element() and Node::queue_mutation_record(). Users without an assistive technology never reach this
+    // path, so they pay for neither.
+    if (auto page = this->page(page_id); page.has_value()) {
+        page->page().set_accessibility_interested(true);
+        page->publish_accessibility_tree(true);
+    }
+}
+
+void ConnectionFromClient::perform_accessibility_action(Web::PageId page_id, i64 node_id, String action)
+{
+    if (auto page = this->page(page_id); page.has_value()) {
+        auto* node = Web::DOM::Node::from_unique_id(Web::UniqueNodeID(node_id));
+        if (!node)
+            return;
+
+        // We need an (ancestor) element — not a text node or any other kind of non-element node.
+        bool walked_up_from_text = false;
+        if (!node->is_element()) {
+            node = node->parent_element().ptr();
+            if (!node)
+                return;
+            walked_up_from_text = true;
+        }
+
+        auto& element = static_cast<Web::DOM::Element&>(*node);
+
+        // Browse-mode navigation shows a focus ring on an element without moving DOM focus. Scroll it into view, and
+        // mark it as the page's AT focus target — which is painted as a browser overlay (see outline_data_for_paint).
+        // Keyboard activation and form state stay wherever the user last explicitly focused.
+        auto show_accessibility_focus_ring = [&element]() {
+            Web::Bindings::ScrollIntoViewOptions scroll_options;
+            scroll_options.block = Web::Bindings::ScrollLogicalPosition::Nearest;
+            scroll_options.inline_ = Web::Bindings::ScrollLogicalPosition::Nearest;
+            element.scroll_into_view(scroll_options, nullptr);
+            element.document().set_accessibility_focus_target(&element);
+        };
+
+        if (action == "press"sv || action == "click"sv) {
+            if (auto* html_element = as_if<Web::HTML::HTMLElement>(element))
+                html_element->click();
+        } else if (action == "focus"sv) {
+            // This early return on walked_up_from_text prevents VoiceOver from incorrectly identifying elements with
+            // focused text nodes as "selectable groups", and then unexpectedly interrupting its reading to announce
+            // them as such, and then stopping while it waits for user action.
+            if (walked_up_from_text)
+                return;
+            if (element.is_focusable()) {
+                // A focusable element takes real DOM focus (FocusTrigger::Key so :focus-visible matches and the ring
+                // is drawn, same as tabbing). Drop any browse-mode accessibility focus ring so it does not linger.
+                element.document().set_accessibility_focus_target(nullptr);
+                Web::HTML::run_focusing_steps(&element, nullptr, Web::HTML::FocusTrigger::Key);
+            } else {
+                // A non-focusable element (heading, paragraph, etc.) cannot take DOM focus. Show the accessibility
+                // focus ring instead of forcing focusability by writing a tabindex attribute, which was a permanent,
+                // web-observable mutation of the page.
+                show_accessibility_focus_ring();
+            }
+        } else if (action == "scroll_into_view"sv) {
+            show_accessibility_focus_ring();
+        }
+
+        // Push a fresh tree after the action — what it moved (the focus, a scroll position) isn't a DOM mutation, so no
+        // other path would push it.
+        page->schedule_accessibility_tree_update();
+    }
+}
+
+void ConnectionFromClient::perform_accessibility_text_action(Web::PageId page_id, i64 node_id, String action,
+    i32 offset_start, i32 offset_end, String text)
+{
+    (void)text;
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    auto* node = Web::DOM::Node::from_unique_id(Web::UniqueNodeID(node_id));
+    if (!node)
+        return;
+
+    if (action == "set_caret_offset"sv || action == "set_selection"sv) {
+        // Both of these actions work via DOM Selection. offset_start/offset_end are Unicode-character offsets into the
+        // node's text — or else into the node's first text child, if the node's an element.
+        auto selection = node->document().get_selection();
+        if (!selection)
+            return;
+        Web::DOM::Node* text_target = node;
+        if (!text_target->is_text()) {
+            for (auto* child = text_target->first_child(); child; child = child->next_sibling()) {
+                if (child->is_text()) {
+                    text_target = child;
+                    break;
+                }
+            }
+        }
+        // For DOM Selection, convert character offsets to UTF-16 code-unit offsets. The offsets come from the AT
+        // client, so clamp them: code_unit_offset_of() VERIFY-aborts on a code-point offset past the end, and a
+        // negative i32 becomes a huge size_t.
+        auto convert_to_code_units = [text_target](i32 character_offset) -> u32 {
+            if (!text_target->is_text())
+                return static_cast<u32>(max(0, character_offset));
+            auto view = static_cast<Web::DOM::Text const&>(*text_target).data().utf16_view();
+            auto clamped = clamp(character_offset, 0, static_cast<i32>(view.length_in_code_points()));
+            return static_cast<u32>(view.code_unit_offset_of(static_cast<size_t>(clamped)));
+        };
+        auto start_code_unit = convert_to_code_units(offset_start);
+        auto end_code_unit = convert_to_code_units(action == "set_caret_offset"sv ? offset_start : offset_end);
+        (void)selection->set_base_and_extent(*text_target, start_code_unit, *text_target, end_code_unit);
+    } else if (action == "scroll_substring_to"sv) {
+        // Range-aware scrolling isn't exposed on DOM::Element — so as a fallback, scroll the node into view.
+        if (auto* element = as_if<Web::DOM::Element>(*node))
+            element->scroll_into_view(Web::Bindings::ScrollIntoViewOptions {}, nullptr);
+    } else if (action == "set_selected"sv) {
+        // offset_start carries the desired selection state (1 = select, 0 = deselect). Only the native <option>
+        // element has selection state the browser owns and may change here. For an ARIA widget (role=option, tab,
+        // menuitem, etc.) selection lives in author-controlled aria-selected; forcing it from here would overwrite the
+        // author's markup and desync it from the author's own model, so those are left to the page.
+        if (auto* option = as_if<Web::HTML::HTMLOptionElement>(*node))
+            option->set_selected(offset_start != 0);
+    } else if (action == "insert_text"sv || action == "delete_text"sv) {
+        // Text editing on form fields. offset_start/end are character offsets into the element's current value. The
+        // edit runs through the handlers keyboard input uses — handle_insert() and handle_delete() — so it honors a
+        // readonly or disabled field (is_mutable()), lands on the undo history, and fires the input event a page
+        // listens for. Gecko applies an AT's edit the same way: HyperTextAccessible::InsertText() and DeleteText()
+        // set the selection, then hand the edit to the editor.
+        Web::HTML::FormAssociatedTextControlElement* text_control = nullptr;
+        if (auto* input = as_if<Web::HTML::HTMLInputElement>(*node))
+            text_control = input;
+        else if (auto* textarea = as_if<Web::HTML::HTMLTextAreaElement>(*node))
+            text_control = textarea;
+        if (text_control) {
+            auto value = text_control->relevant_value();
+            auto view = value.utf16_view();
+            // Clamp and order the AT-supplied offsets: an out-of-range code-point offset VERIFY-aborts in
+            // code_unit_offset_of(), and the selection wants its start first.
+            auto code_points = static_cast<i32>(view.length_in_code_points());
+            auto start = clamp(offset_start, 0, code_points);
+            auto end = clamp(offset_end >= 0 ? offset_end : offset_start, 0, code_points);
+            if (end < start)
+                swap(start, end);
+            auto start_code_unit = static_cast<Web::WebIDL::UnsignedLong>(view.code_unit_offset_of(static_cast<size_t>(start)));
+            auto end_code_unit = static_cast<Web::WebIDL::UnsignedLong>(view.code_unit_offset_of(static_cast<size_t>(end)));
+            if (action == "insert_text"sv) {
+                auto insertion = Utf16String::from_utf8(text);
+                text_control->set_the_selection_range(start_code_unit, end_code_unit);
+                text_control->handle_insert(Web::UIEvents::InputTypes::insertText, insertion.utf16_view());
+            } else if (end > start) {
+                // handle_delete() widens a collapsed selection by one grapheme, like the Delete key does; an empty
+                // range from the AT deletes nothing.
+                text_control->set_the_selection_range(start_code_unit, end_code_unit);
+                text_control->handle_delete(Web::UIEvents::InputTypes::deleteContentForward);
+            }
+        }
+    }
+
+    page->schedule_accessibility_tree_update();
+}
+
+void ConnectionFromClient::get_hovered_node_id(Web::PageId page_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    Web::UniqueNodeID node_id = 0;
+
+    if (auto document = page->page().local_traversable()->active_document()) {
+        if (auto* hovered_node = document->hovered_node())
+            node_id = hovered_node->unique_id();
+    }
+
+    async_did_get_hovered_node_id(page_id, node_id);
+}
+
+void ConnectionFromClient::get_node_id_at_position(Web::PageId page_id, u64 request_id, Web::DevicePixelPoint position)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value()) {
+        async_did_get_node_id_at_position(page_id, request_id, 0);
+        return;
+    }
+
+    async_did_get_node_id_at_position(page_id, request_id, page->page().node_id_at_position(position));
+}
+
+void ConnectionFromClient::list_style_sheets(Web::PageId page_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    async_did_list_style_sheets(page_id, page->list_style_sheets());
+}
+
+void ConnectionFromClient::request_style_sheet_source(Web::PageId page_id, Web::CSS::StyleSheetIdentifier identifier)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    if (auto document = page->page().local_traversable()->active_document()) {
+        if (auto stylesheet = document->get_style_sheet_source(identifier); stylesheet.has_value())
+            async_did_get_style_sheet_source(page_id, identifier, document->base_url(), stylesheet.value());
+    }
+}
+
+void ConnectionFromClient::list_devtools_sources(Web::PageId page_id, u64 request_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    async_did_list_devtools_sources(page_id, request_id, page->list_devtools_sources());
+}
+
+void ConnectionFromClient::request_devtools_source(Web::PageId page_id, Web::HTML::ScriptRegistry::Identifier source_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    async_did_get_devtools_source(page_id, source_id, page->devtools_source_content(source_id));
+}
+
+void ConnectionFromClient::attach_debugger(Web::PageId page_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    if (!m_devtools_debugger)
+        m_devtools_debugger = make<DevToolsDebugger>(*this);
+    m_devtools_debugger->attach(*page);
+}
+
+void ConnectionFromClient::configure_debugger(Web::PageId page_id, WebView::DebuggerConfiguration configuration)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    if (!m_devtools_debugger)
+        m_devtools_debugger = make<DevToolsDebugger>(*this);
+    m_devtools_debugger->configure(*page, configuration);
+}
+
+void ConnectionFromClient::detach_debugger(Web::PageId page_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value() || !m_devtools_debugger)
+        return;
+    m_devtools_debugger->detach(*page);
+}
+
+void ConnectionFromClient::interrupt_debugger(Web::PageId page_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value() || !m_devtools_debugger)
+        return;
+    m_devtools_debugger->interrupt(*page);
+}
+
+void ConnectionFromClient::resume_debugger(Web::PageId page_id, WebView::DebuggerResumeMode mode)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value() || !m_devtools_debugger)
+        return;
+    m_devtools_debugger->resume(*page, mode);
+}
+
+void ConnectionFromClient::update_debugger_blackboxing(Web::PageId page_id, Utf16String url, Vector<WebView::DebuggerBlackboxRange> ranges, WebView::DebuggerBlackboxingOperation operation)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    if (!m_devtools_debugger)
+        m_devtools_debugger = make<DevToolsDebugger>(*this);
+    m_devtools_debugger->update_blackboxing(*page, move(url), move(ranges), operation);
+}
+
+static Optional<String> debugger_breakpoint_operation_error(ErrorOr<void> result)
+{
+    if (!result.is_error())
+        return {};
+    return String::from_utf8_without_validation(result.error().string_literal().bytes());
+}
+
+void ConnectionFromClient::set_debugger_breakpoint(Web::PageId page_id, u64 request_id, WebView::DebuggerBreakpointLocation location, WebView::DebuggerBreakpointOptions options)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value()) {
+        async_did_complete_debugger_breakpoint_operation(page_id, request_id, "Unable to locate page"_string);
+        return;
+    }
+
+    if (!m_devtools_debugger)
+        m_devtools_debugger = make<DevToolsDebugger>(*this);
+    async_did_complete_debugger_breakpoint_operation(page_id, request_id, debugger_breakpoint_operation_error(m_devtools_debugger->set_breakpoint(*page, move(location), move(options))));
+}
+
+void ConnectionFromClient::remove_debugger_breakpoint(Web::PageId page_id, u64 request_id, WebView::DebuggerBreakpointLocation location)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value() || !m_devtools_debugger) {
+        async_did_complete_debugger_breakpoint_operation(page_id, request_id, {});
+        return;
+    }
+
+    async_did_complete_debugger_breakpoint_operation(page_id, request_id, debugger_breakpoint_operation_error(m_devtools_debugger->remove_breakpoint(*page, location)));
+}
+
+void ConnectionFromClient::get_debugger_source_positions(Web::PageId page_id, u64 request_id, Web::HTML::ScriptRegistry::Identifier source_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value()) {
+        async_did_get_debugger_source_positions(page_id, request_id, {});
+        return;
+    }
+    async_did_get_debugger_source_positions(page_id, request_id, page->devtools_source_breakpoint_positions(source_id));
+}
+
+void ConnectionFromClient::get_debugger_environments(Web::PageId page_id, u64 request_id, u64 frame_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value()) {
+        async_did_get_debugger_environments(page_id, request_id, "Unable to locate page"_string, {});
+        return;
+    }
+    if (!m_devtools_debugger) {
+        async_did_get_debugger_environments(page_id, request_id, "No debugger client is attached"_string, {});
+        return;
+    }
+    async_did_get_debugger_environments(page_id, request_id, {}, m_devtools_debugger->environments_for_frame(*page, frame_id));
+}
+
+void ConnectionFromClient::evaluate_javascript_in_debugger_frame(Web::PageId page_id, u64 request_id, u64 frame_id, Utf16String source_text)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value()) {
+        async_did_evaluate_javascript_in_debugger_frame(page_id, request_id, "Unable to locate page"_string, {});
+        return;
+    }
+    if (!m_devtools_debugger) {
+        async_did_evaluate_javascript_in_debugger_frame(page_id, request_id, "No debugger client is attached"_string, {});
+        return;
+    }
+
+    auto result = m_devtools_debugger->evaluate_in_frame(*page, frame_id, source_text);
+    if (result.is_error()) {
+        async_did_evaluate_javascript_in_debugger_frame(page_id, request_id, MUST(String::from_utf8(result.release_error().string_literal())), {});
+        return;
+    }
+    async_did_evaluate_javascript_in_debugger_frame(page_id, request_id, {}, result.release_value());
+}
+
+void ConnectionFromClient::get_debugger_object_properties(Web::PageId page_id, u64 request_id, u64 object_id, WebView::DebuggerObjectScope scope)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value()) {
+        async_did_get_debugger_object_properties(page_id, request_id, "Unable to locate page"_string, {});
+        return;
+    }
+    if (scope == WebView::DebuggerObjectScope::Pause && !m_devtools_debugger) {
+        async_did_get_debugger_object_properties(page_id, request_id, "No debugger client is attached"_string, {});
+        return;
+    }
+
+    auto properties = scope == WebView::DebuggerObjectScope::Console
+        ? page->console_object_properties(object_id)
+        : m_devtools_debugger->properties_for_object(*page, object_id);
+    if (properties.is_error()) {
+        async_did_get_debugger_object_properties(page_id, request_id, MUST(String::from_utf8(properties.release_error().string_literal())), {});
+        return;
+    }
+    async_did_get_debugger_object_properties(page_id, request_id, {}, properties.release_value());
+}
+
+void ConnectionFromClient::resolve_dom_node_url(Web::PageId page_id, u64 request_id, Optional<Web::UniqueNodeID> node_id, String url)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value()) {
+        async_did_resolve_dom_node_url(page_id, request_id, move(url));
+        return;
+    }
+
+    auto* document = [&]() -> Web::DOM::Document* {
+        if (node_id.has_value()) {
+            if (auto* node = Web::DOM::Node::from_unique_id(*node_id))
+                return &node->document();
+            return nullptr;
+        }
+
+        return page->page().local_traversable()->active_document().ptr();
+    }();
+
+    auto resolved_url = document
+        ? document->encoding_parse_url(Utf16String::from_utf8(url))
+              .map([](auto const& parsed_url) {
+                  return parsed_url.serialize();
+              })
+              .value_or(url)
+        : url;
+
+    async_did_resolve_dom_node_url(page_id, request_id, move(resolved_url));
+}
+
+void ConnectionFromClient::set_listen_for_dom_mutations(Web::PageId page_id, bool listen_for_dom_mutations)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    page->page().set_listen_for_dom_mutations(listen_for_dom_mutations);
+    if (!listen_for_dom_mutations)
+        page->clear_pending_dom_mutations();
+}
+
+void ConnectionFromClient::set_has_devtools_client(Web::PageId page_id, bool has_devtools_client)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->set_has_devtools_client(has_devtools_client);
+}
+
+// The Hub holds the session history, but only learns where the user is in a document once they leave it. Each navigable
+// of the page saves what it would save then, and the Hub hears when all of them have.
+void ConnectionFromClient::save_session_history_entry_states(Web::PageId page_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+    for (auto const& navigable : page->page().hosted_navigables()) {
+        navigable->save_persisted_state_to_active_session_history_entry();
+        auto entry = navigable->active_session_history_entry();
+        if (!entry)
+            continue;
+        if (auto persisted_state = Web::HTML::create_session_history_entry_persisted_state(*entry); persisted_state.has_value())
+            async_did_save_session_history_entry_state(page_id, navigable->id(), persisted_state.release_value());
+    }
+    async_did_save_session_history_entry_states(page_id);
+}
+
+void ConnectionFromClient::start_sending_console_output(Web::PageId page_id, bool messages, bool errors)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->start_sending_console_output(messages, errors);
+}
+
+void ConnectionFromClient::get_dom_node_inner_html(Web::PageId page_id, Web::UniqueNodeID node_id)
+{
+    auto* dom_node = Web::DOM::Node::from_unique_id(node_id);
+    if (!dom_node)
+        return;
+
+    Utf16String html;
+
+    if (dom_node->is_element()) {
+        auto const& element = static_cast<Web::DOM::Element const&>(*dom_node);
+        html = element.inner_html().release_value_but_fixme_should_propagate_errors();
+    } else if (dom_node->is_text() || dom_node->is_comment()) {
+        auto const& character_data = static_cast<Web::DOM::CharacterData const&>(*dom_node);
+        html = character_data.data();
+    } else {
+        return;
+    }
+
+    async_did_get_dom_node_html(page_id, html.to_utf8_but_should_be_ported_to_utf16());
+}
+
+void ConnectionFromClient::get_dom_node_outer_html(Web::PageId page_id, Web::UniqueNodeID node_id)
+{
+    auto* dom_node = Web::DOM::Node::from_unique_id(node_id);
+    if (!dom_node)
+        return;
+
+    Utf16String html;
+
+    if (dom_node->is_element()) {
+        auto const& element = static_cast<Web::DOM::Element const&>(*dom_node);
+        html = element.outer_html().release_value_but_fixme_should_propagate_errors();
+    } else if (dom_node->is_text() || dom_node->is_comment()) {
+        auto const& character_data = static_cast<Web::DOM::CharacterData const&>(*dom_node);
+        html = character_data.data();
+    } else {
+        return;
+    }
+
+    async_did_get_dom_node_html(page_id, html.to_utf8_but_should_be_ported_to_utf16());
+}
+
+void ConnectionFromClient::set_dom_node_outer_html(Web::PageId page_id, Web::UniqueNodeID node_id, String html)
+{
+    auto* dom_node = Web::DOM::Node::from_unique_id(node_id);
+    if (!dom_node) {
+        async_did_finish_editing_dom_node(page_id, {});
+        return;
+    }
+
+    if (dom_node->is_element()) {
+        auto& element = static_cast<Web::DOM::Element&>(*dom_node);
+        element.set_outer_html(html).release_value_but_fixme_should_propagate_errors();
+    } else if (dom_node->is_text() || dom_node->is_comment()) {
+        auto& character_data = static_cast<Web::DOM::CharacterData&>(*dom_node);
+        character_data.set_data(Utf16String::from_utf8(html));
+    } else {
+        async_did_finish_editing_dom_node(page_id, {});
+        return;
+    }
+
+    async_did_finish_editing_dom_node(page_id, node_id);
+}
+
+void ConnectionFromClient::set_dom_node_text(Web::PageId page_id, Web::UniqueNodeID node_id, String text)
+{
+    auto* dom_node = Web::DOM::Node::from_unique_id(node_id);
+    if (!dom_node || (!dom_node->is_text() && !dom_node->is_comment())) {
+        async_did_finish_editing_dom_node(page_id, {});
+        return;
+    }
+
+    auto& character_data = static_cast<Web::DOM::CharacterData&>(*dom_node);
+    character_data.set_data(Utf16String::from_utf8(text));
+
+    async_did_finish_editing_dom_node(page_id, character_data.unique_id());
+}
+
+void ConnectionFromClient::set_dom_node_tag(Web::PageId page_id, Web::UniqueNodeID node_id, Utf16FlyString name)
+{
+    auto* dom_node = Web::DOM::Node::from_unique_id(node_id);
+    if (!dom_node || !dom_node->is_element() || !dom_node->parent()) {
+        async_did_finish_editing_dom_node(page_id, {});
+        return;
+    }
+
+    auto& element = static_cast<Web::DOM::Element&>(*dom_node);
+    auto new_element = Web::DOM::create_element(element.document(), move(name), element.namespace_uri(), element.prefix(), element.is_value()).release_value_but_fixme_should_propagate_errors();
+
+    element.for_each_attribute([&](Web::DOM::Attr const& attribute) {
+        new_element->set_attribute_value(attribute.local_name(), attribute.value(), attribute.prefix(), attribute.namespace_uri());
+    });
+
+    while (auto* child_node = element.first_child()) {
+        MUST(element.remove_child(*child_node));
+        MUST(new_element->append_child(*child_node));
+    }
+
+    element.parent()->replace_child(*new_element, element).release_value_but_fixme_should_propagate_errors();
+    async_did_finish_editing_dom_node(page_id, new_element->unique_id());
+}
+
+void ConnectionFromClient::add_dom_node_attributes(Web::PageId page_id, Web::UniqueNodeID node_id, Vector<WebView::Attribute> attributes)
+{
+    auto* dom_node = Web::DOM::Node::from_unique_id(node_id);
+    if (!dom_node || !dom_node->is_element()) {
+        async_did_finish_editing_dom_node(page_id, {});
+        return;
+    }
+
+    auto& element = static_cast<Web::DOM::Element&>(*dom_node);
+
+    for (auto const& attribute : attributes) {
+        // NOTE: We ignore invalid attributes for now, but we may want to send feedback to the user that this failed.
+        element.set_attribute_value(attribute.name, attribute.value);
+    }
+
+    async_did_finish_editing_dom_node(page_id, element.unique_id());
+}
+
+void ConnectionFromClient::replace_dom_node_attribute(Web::PageId page_id, Web::UniqueNodeID node_id, Utf16FlyString name, Vector<WebView::Attribute> replacement_attributes)
+{
+    auto* dom_node = Web::DOM::Node::from_unique_id(node_id);
+    if (!dom_node || !dom_node->is_element()) {
+        async_did_finish_editing_dom_node(page_id, {});
+        return;
+    }
+
+    auto& element = static_cast<Web::DOM::Element&>(*dom_node);
+    bool should_remove_attribute = true;
+
+    for (auto const& attribute : replacement_attributes) {
+        if (should_remove_attribute && name.equals_ignoring_ascii_case(attribute.name))
+            should_remove_attribute = false;
+
+        // NOTE: We ignore invalid attributes for now, but we may want to send feedback to the user that this failed.
+        element.set_attribute_value(attribute.name, attribute.value);
+    }
+
+    if (should_remove_attribute)
+        element.remove_attribute(name);
+
+    async_did_finish_editing_dom_node(page_id, element.unique_id());
+}
+
+void ConnectionFromClient::create_child_element(Web::PageId page_id, Web::UniqueNodeID node_id)
+{
+    auto* dom_node = Web::DOM::Node::from_unique_id(node_id);
+    if (!dom_node) {
+        async_did_finish_editing_dom_node(page_id, {});
+        return;
+    }
+
+    auto element = Web::DOM::create_element(dom_node->document(), Web::HTML::TagNames::div, Web::Namespace::HTML).release_value_but_fixme_should_propagate_errors();
+    dom_node->append_child(element).release_value_but_fixme_should_propagate_errors();
+
+    async_did_finish_editing_dom_node(page_id, element->unique_id());
+}
+
+void ConnectionFromClient::create_child_text_node(Web::PageId page_id, Web::UniqueNodeID node_id)
+{
+    auto* dom_node = Web::DOM::Node::from_unique_id(node_id);
+    if (!dom_node) {
+        async_did_finish_editing_dom_node(page_id, {});
+        return;
+    }
+
+    auto text_node = Web::DOM::Text::create(dom_node->document(), "text"_utf16);
+    dom_node->append_child(text_node).release_value_but_fixme_should_propagate_errors();
+
+    async_did_finish_editing_dom_node(page_id, text_node->unique_id());
+}
+
+void ConnectionFromClient::insert_dom_node_before(Web::PageId page_id, Web::UniqueNodeID node_id, Web::UniqueNodeID parent_node_id, Optional<Web::UniqueNodeID> sibling_node_id)
+{
+    auto* dom_node = Web::DOM::Node::from_unique_id(node_id);
+    auto* parent_dom_node = Web::DOM::Node::from_unique_id(parent_node_id);
+
+    if (!dom_node || !parent_dom_node) {
+        async_did_finish_editing_dom_node(page_id, {});
+        return;
+    }
+
+    GC::Ptr<Web::DOM::Node> sibling_dom_node;
+    if (sibling_node_id.has_value()) {
+        sibling_dom_node = Web::DOM::Node::from_unique_id(*sibling_node_id);
+
+        if (!sibling_dom_node) {
+            async_did_finish_editing_dom_node(page_id, {});
+            return;
+        }
+    }
+
+    parent_dom_node->insert_before(*dom_node, sibling_dom_node);
+    async_did_finish_editing_dom_node(page_id, dom_node->unique_id());
+}
+
+void ConnectionFromClient::clone_dom_node(Web::PageId page_id, Web::UniqueNodeID node_id)
+{
+    auto* dom_node = Web::DOM::Node::from_unique_id(node_id);
+    if (!dom_node || !dom_node->parent_node()) {
+        async_did_finish_editing_dom_node(page_id, {});
+        return;
+    }
+
+    auto dom_node_clone = MUST(dom_node->clone_node(nullptr, true));
+    dom_node->parent_node()->insert_before(dom_node_clone, dom_node->next_sibling());
+
+    async_did_finish_editing_dom_node(page_id, dom_node_clone->unique_id());
+}
+
+void ConnectionFromClient::remove_dom_node(Web::PageId page_id, Web::UniqueNodeID node_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    auto active_document = page->page().local_traversable()->active_document();
+    if (!active_document) {
+        async_did_finish_editing_dom_node(page_id, {});
+        return;
+    }
+
+    auto* dom_node = Web::DOM::Node::from_unique_id(node_id);
+    if (!dom_node) {
+        async_did_finish_editing_dom_node(page_id, {});
+        return;
+    }
+
+    auto* previous_dom_node = dom_node->previous_sibling();
+    if (!previous_dom_node)
+        previous_dom_node = dom_node->parent();
+
+    dom_node->remove();
+
+    async_did_finish_editing_dom_node(page_id, previous_dom_node->unique_id());
+}
+
+void ConnectionFromClient::take_document_screenshot(Web::PageId page_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    page->queue_screenshot_task({});
+}
+
+void ConnectionFromClient::take_dom_node_screenshot(Web::PageId page_id, Web::UniqueNodeID node_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    page->queue_screenshot_task(node_id);
+}
+
+static void append_page_text(Web::Page& page, StringBuilder& builder)
+{
+    auto document = page.local_traversable()->active_document();
+    if (!document) {
+        builder.append("(no DOM tree)"sv);
+        return;
+    }
+
+    auto* body = document->body();
+    if (!body) {
+        builder.append("(no body)"sv);
+        return;
+    }
+
+    builder.append(body->inner_text());
+}
+
+static void append_layout_tree(Web::Page& page, StringBuilder& builder)
+{
+    auto document = page.local_traversable()->active_document();
+    if (!document) {
+        builder.append("(no DOM tree)"sv);
+        return;
+    }
+
+    page.local_traversable()->update_layout_of_hosted_inclusive_descendant_documents(Web::DOM::UpdateLayoutReason::Debugging);
+
+    Web::Layout::ForcedReadScope read { *document };
+    auto* layout_root = document->layout_node(read);
+    if (!layout_root) {
+        builder.append("(no layout tree)"sv);
+        return;
+    }
+
+    Web::dump_tree(builder, *layout_root);
+}
+
+static void append_stacking_context_tree(Web::Page& page, StringBuilder& builder)
+{
+    auto document = page.local_traversable()->active_document();
+    if (!document) {
+        builder.append("(no DOM tree)"sv);
+        return;
+    }
+
+    Web::Layout::ForcedReadScope read { *document };
+    document->update_layout(Web::DOM::UpdateLayoutReason::Debugging);
+
+    auto* layout_root = document->layout_node(read);
+    if (!layout_root) {
+        builder.append("(no layout tree)"sv);
+        return;
+    }
+    if (!document->has_committed_viewport_box()) {
+        builder.append("(no paint tree)"sv);
+        return;
+    }
+
+    Web::Painting::dump_stacking_context_tree(read, builder, *document);
+}
+
+static void append_display_list(Web::Page& page, StringBuilder& builder)
+{
+    auto document = page.local_traversable()->active_document();
+    if (!document) {
+        builder.append("(no DOM tree)"sv);
+        return;
+    }
+
+    builder.append(document->dump_display_list({}).to_utf8());
+}
+
+static void append_gc_graph(StringBuilder& builder)
+{
+    auto gc_graph = Web::Bindings::main_thread_vm().heap().dump_graph();
+    gc_graph.serialize(builder);
+}
+
+void ConnectionFromClient::describe_owners_of_visual_context_nodes(Web::PageId page_id, Vector<u32> spatial_node_indices, Vector<u32> effect_node_indices)
+{
+    Web::Painting::OwnersOfVisualContextNodes owners;
+    auto page = this->page(page_id);
+    if (auto document = page.has_value() && page->page().has_local_traversable() ? page->page().local_traversable()->active_document() : nullptr)
+        owners = Web::Painting::describe_owners_of_visual_context_nodes(*document, spatial_node_indices, effect_node_indices);
+    else
+        owners.owners.resize(spatial_node_indices.size() + effect_node_indices.size());
+    async_did_describe_owners_of_visual_context_nodes(page_id, owners.structural_epoch, move(spatial_node_indices), move(effect_node_indices), move(owners.owners));
+}
+
+void ConnectionFromClient::request_internal_page_info(Web::PageId page_id, WebView::PageInfoType type)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value()) {
+        async_did_get_internal_page_info(page_id, type, {});
+        return;
+    }
+
+    StringBuilder builder;
+
+    if (has_flag(type, WebView::PageInfoType::Text)) {
+        append_page_text(page->page(), builder);
+    }
+
+    if (has_flag(type, WebView::PageInfoType::LayoutTree)) {
+        if (!builder.is_empty())
+            builder.append("\n"sv);
+        append_layout_tree(page->page(), builder);
+    }
+
+    if (has_flag(type, WebView::PageInfoType::StackingContextTree)) {
+        if (!builder.is_empty())
+            builder.append("\n"sv);
+        append_stacking_context_tree(page->page(), builder);
+    }
+
+    if (has_flag(type, WebView::PageInfoType::DisplayList)) {
+        if (!builder.is_empty())
+            builder.append("\n"sv);
+        append_display_list(page->page(), builder);
+    }
+
+    if (has_flag(type, WebView::PageInfoType::AccessibilityTree)) {
+        if (!builder.is_empty())
+            builder.append("\n"sv);
+        auto doc = page->page().local_traversable()->active_document();
+        if (doc) {
+            doc->update_layout(Web::DOM::UpdateLayoutReason::InspectAccessibilityTree);
+            auto nodes = doc->build_accessibility_node_data();
+
+            HashMap<i64, WebView::AccessibilityNodeData const*> node_map;
+            i64 root_id = -1;
+            for (auto const& node : nodes) {
+                node_map.set(node.id, &node);
+                if (node.parent_id == -1)
+                    root_id = node.id;
+            }
+
+            // Anchor links like <a href="#section"> resolve to the document's own URL plus a fragment — e.g.,
+            // file:///path/to/test.html#section. Dumping that absolute URL would make the test's expectations depend on
+            // the absolute path of the test source on disk — which differs from machine to machine. So, when a node's
+            // URL starts with the document's own URL (modulo fragment), strip that prefix and dump only the suffix —
+            // that is, just the fragment — so that the result is path-independent output.
+            auto document_url_no_fragment = doc->url().serialize(URL::ExcludeFragment::Yes);
+
+            Function<void(i64, int)> dump_node = [&](i64 id, int depth) {
+                auto const* node = node_map.get(id).value_or(nullptr);
+                if (!node)
+                    return;
+
+                for (int i = 0; i < depth; ++i)
+                    builder.append("  "sv);
+
+                builder.append(node->role.bytes_as_string_view());
+
+                if (!node->name.is_empty()) {
+                    builder.append(" name=\""sv);
+                    builder.append(node->name.bytes_as_string_view());
+                    builder.append("\""sv);
+                }
+
+                if (!node->description.is_empty()) {
+                    builder.append(" description=\""sv);
+                    builder.append(node->description.bytes_as_string_view());
+                    builder.append("\""sv);
+                }
+
+                if (!node->value.is_empty()) {
+                    builder.append(" value=\""sv);
+                    builder.append(node->value.bytes_as_string_view());
+                    builder.append("\""sv);
+                }
+
+                if (!node->url.is_empty()) {
+                    builder.append(" url=\""sv);
+                    auto url_view = node->url.bytes_as_string_view();
+                    if (url_view.starts_with(document_url_no_fragment))
+                        builder.append(url_view.substring_view(document_url_no_fragment.bytes_as_string_view().length()));
+                    else
+                        builder.append(url_view);
+                    builder.append("\""sv);
+                }
+
+                if (!node->language.is_empty()) {
+                    builder.append(" lang=\""sv);
+                    builder.append(node->language.bytes_as_string_view());
+                    builder.append("\""sv);
+                }
+
+                if (!node->keybinding.is_empty()) {
+                    builder.append(" accesskey=\""sv);
+                    builder.append(node->keybinding.bytes_as_string_view());
+                    builder.append("\""sv);
+                }
+
+                if (node->heading_level > 0)
+                    builder.appendff(" level={}", node->heading_level);
+                else if (node->hierarchical_level > 0)
+                    builder.appendff(" level={}", node->hierarchical_level);
+
+                if (!node->live.is_empty()) {
+                    builder.append(" live=\""sv);
+                    builder.append(node->live.bytes_as_string_view());
+                    builder.append("\""sv);
+                }
+
+                if (node->value_numeric.has_value()) {
+                    builder.appendff(" value={}", *node->value_numeric);
+                    if (node->value_minimum.has_value())
+                        builder.appendff(" min={}", *node->value_minimum);
+                    if (node->value_maximum.has_value())
+                        builder.appendff(" max={}", *node->value_maximum);
+                }
+
+                if (node->column_span != 1)
+                    builder.appendff(" colspan={}", node->column_span);
+                if (node->row_span != 1)
+                    builder.appendff(" rowspan={}", node->row_span);
+                if (node->cell_column_index >= 0)
+                    builder.appendff(" cell_col={}", node->cell_column_index);
+                if (node->table_row_count >= 0)
+                    builder.appendff(" rows={}", node->table_row_count);
+                if (node->table_column_count >= 0)
+                    builder.appendff(" cols={}", node->table_column_count);
+
+                using CheckedState = WebView::AccessibilityNodeData::CheckedState;
+                switch (node->checked_state) {
+                case CheckedState::Checked:
+                    builder.append(" checked"sv);
+                    break;
+                case CheckedState::Unchecked:
+                    builder.append(" unchecked"sv);
+                    break;
+                case CheckedState::Mixed:
+                    builder.append(" mixed"sv);
+                    break;
+                case CheckedState::NotApplicable:
+                    break;
+                }
+
+                using ExpandedState = WebView::AccessibilityNodeData::ExpandedState;
+                switch (node->expanded_state) {
+                case ExpandedState::Expanded:
+                    builder.append(" expanded"sv);
+                    break;
+                case ExpandedState::Collapsed:
+                    builder.append(" collapsed"sv);
+                    break;
+                case ExpandedState::NotApplicable:
+                    break;
+                }
+
+                if (node->is_focused)
+                    builder.append(" focused"sv);
+                if (node->is_disabled)
+                    builder.append(" disabled"sv);
+                if (node->is_selected)
+                    builder.append(" selected"sv);
+                if (node->is_editable)
+                    builder.append(" editable"sv);
+                if (node->is_password)
+                    builder.append(" password"sv);
+                if (node->is_multi_line)
+                    builder.append(" multiline"sv);
+                if (node->is_read_only)
+                    builder.append(" readonly"sv);
+                if (node->is_required)
+                    builder.append(" required"sv);
+                if (node->is_invalid)
+                    builder.append(" invalid"sv);
+                if (node->is_multi_selectable)
+                    builder.append(" multiselectable"sv);
+                using PressedState = WebView::AccessibilityNodeData::PressedState;
+                switch (node->pressed_state) {
+                case PressedState::Pressed:
+                    builder.append(" pressed"sv);
+                    break;
+                case PressedState::NotPressed:
+                    builder.append(" unpressed"sv);
+                    break;
+                case PressedState::Mixed:
+                    builder.append(" mixed"sv);
+                    break;
+                case PressedState::NotApplicable:
+                    break;
+                }
+                if (node->is_visited)
+                    builder.append(" visited"sv);
+
+                builder.append("\n"sv);
+
+                for (auto child_id : node->child_ids)
+                    dump_node(child_id, depth + 1);
+            };
+
+            if (root_id != -1)
+                dump_node(root_id, 0);
+        }
+    }
+
+    if (has_flag(type, WebView::PageInfoType::GCGraph)) {
+        if (!builder.is_empty())
+            builder.append("\n"sv);
+        append_gc_graph(builder);
+    }
+
+    auto buffer = MUST(Core::AnonymousBuffer::create_with_size(builder.length()));
+    if (builder.length() > 0)
+        memcpy(buffer.data<void>(), builder.string_view().characters_without_null_termination(), builder.length());
+    async_did_get_internal_page_info(page_id, type, buffer);
+}
+
+void ConnectionFromClient::get_selected_text(Web::PageId page_id, u64 request_id)
+{
+    ByteString selection;
+    if (auto page = this->page(page_id); page.has_value()) {
+        if (auto navigable = page->page().hosted_focused_navigable())
+            selection = navigable->selected_text().to_utf8().to_byte_string();
+    }
+    async_did_get_selected_text(page_id, request_id, selection);
+}
+
+void ConnectionFromClient::generate_text_fragment_url(Web::PageId page_id, u64 request_id, u64 generation_id)
+{
+    Optional<URL::URL> generated_url;
+    if (auto page = this->page(page_id); page.has_value())
+        generated_url = page->generate_text_fragment_url(generation_id);
+    async_did_generate_text_fragment_url(page_id, request_id, move(generated_url));
+}
+
+static WebView::DictionaryLookupTextStyle dictionary_lookup_text_style_from_layout_node(Web::Layout::Node const& layout_node, double scale)
+{
+    auto const& font = layout_node.first_available_font();
+    return {
+        .font_family = font.family().to_string(),
+        .ui_point_size = font.pixel_size() * static_cast<float>(scale),
+        .optical_size = font.variation_settings().axes.get(Gfx::FourCC("opsz")),
+        .weight = font.weight(),
+        .slope = font.slope(),
+    };
+}
+
+static Web::Layout::Node const* layout_node_for_dictionary_lookup(Web::DOM::Node const& node)
+{
+    Web::Layout::ForcedReadScope read { node.document() };
+    for (auto const* current = &node; current; current = current->parent_or_shadow_host_node()) {
+        auto const* layout_node = current->layout_node(read);
+        if (layout_node && layout_node->has_style_or_parent_with_style())
+            return layout_node;
+    }
+
+    return nullptr;
+}
+
+static Optional<Gfx::IntPoint> dictionary_lookup_baseline_origin_for_range(Web::DOM::Range& range, Web::Page& page, Web::Layout::Node const& layout_node)
+{
+    auto& document = range.start_container()->document();
+    auto navigable = document.navigable();
+    if (!navigable)
+        return {};
+
+    auto rect = range.bounding_client_rect();
+    if (rect.width() <= 0 || rect.height() <= 0)
+        return {};
+
+    auto const& font = layout_node.first_available_font();
+    Web::CSSPixelPoint baseline_origin {
+        Web::CSSPixels::nearest_value_for(rect.x()),
+        Web::CSSPixels::nearest_value_for(rect.y() + font.pixel_metrics().ascent),
+    };
+    return page.css_to_device_point(navigable->to_page_position(baseline_origin)).to_type<int>();
+}
+
+void ConnectionFromClient::get_selected_text_for_lookup(Web::PageId page_id, u64 request_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value()) {
+        async_did_get_selected_text_for_lookup(page_id, request_id, {});
+        return;
+    }
+
+    auto navigable = page->page().hosted_focused_navigable();
+    auto text = navigable ? navigable->selected_text() : Utf16String {};
+    if (text.is_empty()) {
+        async_did_get_selected_text_for_lookup(page_id, request_id, {});
+        return;
+    }
+
+    auto document = navigable->active_document();
+    auto range = document ? document->get_selection()->range() : nullptr;
+    auto const* layout_node = range ? layout_node_for_dictionary_lookup(range->start_container()) : nullptr;
+    if (!layout_node && document) {
+        if (auto active_element = document->active_element())
+            layout_node = layout_node_for_dictionary_lookup(*active_element);
+    }
+
+    Optional<WebView::DictionaryLookupTextStyle> style;
+    Optional<Gfx::IntPoint> baseline_origin;
+    if (layout_node) {
+        // The word is drawn over the page as the user sees it, which the local root's visual viewport may magnify.
+        auto scale = navigable->page().client().zoom_level();
+        if (auto local_root_document = navigable->local_root()->active_document())
+            scale *= local_root_document->visual_viewport()->scale();
+        style = dictionary_lookup_text_style_from_layout_node(*layout_node, scale);
+        if (range)
+            baseline_origin = dictionary_lookup_baseline_origin_for_range(*range, page->page(), *layout_node);
+    }
+
+    async_did_get_selected_text_for_lookup(page_id, request_id, WebView::DictionaryLookup {
+                                                                    .text = text.to_utf8(),
+                                                                    .style = move(style),
+                                                                    .baseline_origin = baseline_origin,
+                                                                });
+}
+
+void ConnectionFromClient::select_word_for_dictionary_lookup(Web::PageId page_id, u64 request_id, Web::DevicePixelPoint position)
+{
+    bool selected = false;
+#if defined(AK_OS_MACOS)
+    if (auto page = this->page(page_id); page.has_value())
+        selected = page->page().select_word_for_dictionary_lookup(position);
+#else
+    (void)position;
+#endif
+    async_did_select_word_for_dictionary_lookup(page_id, request_id, selected);
+}
+
+void ConnectionFromClient::cut_selected_text(Web::PageId page_id, u64 request_id)
+{
+    ByteString selection;
+    if (auto page = this->page(page_id); page.has_value()) {
+        if (auto navigable = page->page().hosted_focused_navigable())
+            selection = navigable->cut_selected_text().to_utf8().to_byte_string();
+    }
+    async_did_cut_selected_text(page_id, request_id, selection);
+}
+
+void ConnectionFromClient::select_all(Web::PageId page_id)
+{
+    if (auto page = this->page(page_id); page.has_value()) {
+        if (auto navigable = page->page().hosted_focused_navigable())
+            navigable->select_all();
+    }
+}
+
+void ConnectionFromClient::undo(Web::PageId page_id)
+{
+    if (auto page = this->page(page_id); page.has_value()) {
+        if (auto navigable = page->page().hosted_focused_navigable())
+            navigable->undo();
+    }
+    update_input_method_state(page_id);
+}
+
+void ConnectionFromClient::redo(Web::PageId page_id)
+{
+    if (auto page = this->page(page_id); page.has_value()) {
+        if (auto navigable = page->page().hosted_focused_navigable())
+            navigable->redo();
+    }
+    update_input_method_state(page_id);
+}
+
+void ConnectionFromClient::find_in_page(Web::PageId page_id, Utf16String query, CaseSensitivity case_sensitivity, bool highlight_all_matches)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    auto result = page->page().find_in_page({ .string = query, .case_sensitivity = case_sensitivity, .highlight_all_matches = highlight_all_matches });
+    async_did_find_in_page(page_id, result.current_match_index, result.total_match_count);
+}
+
+void ConnectionFromClient::find_in_page_next_match(Web::PageId page_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    auto result = page->page().find_in_page_next_match();
+    async_did_find_in_page(page_id, result.current_match_index, result.total_match_count);
+}
+
+void ConnectionFromClient::find_in_page_previous_match(Web::PageId page_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    auto result = page->page().find_in_page_previous_match();
+    async_did_find_in_page(page_id, result.current_match_index, result.total_match_count);
+}
+
+void ConnectionFromClient::find_in_page_end(Web::PageId page_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    page->page().find_in_page_end();
+}
+
+void ConnectionFromClient::paste(Web::PageId page_id, Utf16String text)
+{
+    if (auto page = this->page(page_id); page.has_value()) {
+        if (auto navigable = page->page().hosted_focused_navigable())
+            navigable->paste(text);
+    }
+}
+
+void ConnectionFromClient::paste_from_clipboard(Web::PageId page_id, Vector<Web::Clipboard::SystemClipboardItem> system_clipboard_data)
+{
+    if (auto page = this->page(page_id); page.has_value()) {
+        if (auto navigable = page->page().hosted_focused_navigable())
+            navigable->paste_from_clipboard(system_clipboard_data);
+    }
+}
+
+void ConnectionFromClient::set_marked_text_from_input_method(Web::PageId page_id, Utf16String text)
+{
+    if (auto page = this->page(page_id); page.has_value()) {
+        if (auto navigable = page->page().hosted_focused_navigable())
+            navigable->set_marked_text_from_input_method(text);
+    }
+    update_input_method_state(page_id);
+}
+
+void ConnectionFromClient::commit_text_from_input_method(Web::PageId page_id, Utf16String text, i32 replacement_start, i32 replacement_length)
+{
+    if (auto page = this->page(page_id); page.has_value()) {
+        if (auto navigable = page->page().hosted_focused_navigable())
+            navigable->commit_text_from_input_method(text, replacement_start, replacement_length);
+    }
+    update_input_method_state(page_id);
+}
+
+void ConnectionFromClient::unmark_text_from_input_method(Web::PageId page_id)
+{
+    if (auto page = this->page(page_id); page.has_value()) {
+        if (auto navigable = page->page().hosted_focused_navigable())
+            navigable->unmark_text_from_input_method();
+    }
+    update_input_method_state(page_id);
+}
+
+static constexpr size_t maximum_input_method_surrounding_text_length = 1024;
+
+void ConnectionFromClient::update_input_method_state(Web::PageId page_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    // Push the updated input state to the UI, so platform input methods can place their overlays. We deliberately
+    // push this asynchronously instead of answering a synchronous request from inside a UI-side text-input callback.
+    // Blocking there re-enters the run loop and can deadlock input-method server <-> UI <-> WebContent message flow.
+    Optional<Web::DevicePixelRect> caret_rect;
+    bool is_enabled = false;
+    i32 cursor_position = 0;
+    i32 anchor_position = 0;
+    Utf16String text_before_cursor;
+    Utf16String text_after_cursor;
+
+    auto navigable = page->page().hosted_focused_navigable();
+    if (auto document = navigable ? navigable->active_document() : nullptr) {
+        if (auto rect = document->current_caret_rect(); rect.has_value())
+            caret_rect = page->page().enclosing_device_rect(*rect);
+
+        if (auto const* text_control = as_if<Web::HTML::FormAssociatedTextControlElement>(document->focused_area().ptr())) {
+            if (text_control->selection_start_binding().has_value()) {
+                auto value = text_control->relevant_value();
+                auto selection_start = text_control->selection_start();
+                auto selection_end = text_control->selection_end();
+                auto cursor = text_control->selection_direction_state() == Web::HTML::SelectionDirection::Backward ? selection_start : selection_end;
+                auto anchor = cursor == selection_start ? selection_end : selection_start;
+                auto value_length = value.length_in_code_units();
+                auto text_before_start = cursor > maximum_input_method_surrounding_text_length ? cursor - maximum_input_method_surrounding_text_length : 0;
+                auto text_after_length = min(value_length - cursor, maximum_input_method_surrounding_text_length);
+
+                auto const& html_element = text_control->text_control_to_html_element();
+                if (auto const* input_element = as_if<Web::HTML::HTMLInputElement>(html_element))
+                    is_enabled = input_element->is_mutable();
+                else if (auto const* text_area_element = as_if<Web::HTML::HTMLTextAreaElement>(html_element))
+                    is_enabled = text_area_element->is_mutable();
+
+                cursor_position = AK::clamp_to<i32>(cursor);
+                anchor_position = AK::clamp_to<i32>(anchor);
+                text_before_cursor = Utf16String::from_utf16(value.substring_view(text_before_start, cursor - text_before_start));
+                text_after_cursor = Utf16String::from_utf16(value.substring_view(cursor, text_after_length));
+            }
+        } else if (auto focused_area = document->focused_area(); focused_area && focused_area->is_editable_or_editing_host()) {
+            // The focused area is contenteditable, or a document with designMode enabled. Qt answers Qt::ImEnabled from
+            // this. While it's false, no composition begins: A dead key would be dropped before the engine ever saw it.
+            is_enabled = true;
+
+            // Approximate the surrounding text as the contents of the Text node containing the selection focus. This
+            // reports exactly the text a replacement request can reach. With the caret between elements, an empty
+            // context is reported: Composition still works — but the input method just gets no surrounding text.
+            if (auto selection = document->get_selection()) {
+                if (auto const* text_node = as_if<Web::DOM::Text>(selection->focus_node().ptr())) {
+                    auto const& data = text_node->data();
+                    auto data_length = data.length_in_code_units();
+                    auto cursor = min(static_cast<size_t>(selection->focus_offset()), data_length);
+                    auto anchor = selection->anchor_node() == selection->focus_node()
+                        ? min(static_cast<size_t>(selection->anchor_offset()), data_length)
+                        : cursor;
+                    auto text_before_start = cursor > maximum_input_method_surrounding_text_length ? cursor - maximum_input_method_surrounding_text_length : 0;
+                    auto text_after_length = min(data_length - cursor, maximum_input_method_surrounding_text_length);
+
+                    cursor_position = AK::clamp_to<i32>(cursor);
+                    anchor_position = AK::clamp_to<i32>(anchor);
+                    text_before_cursor = Utf16String::from_utf16(data.substring_view(text_before_start, cursor - text_before_start));
+                    text_after_cursor = Utf16String::from_utf16(data.substring_view(cursor, text_after_length));
+                }
+            }
+        }
+    }
+
+    async_did_update_input_method_state(page_id, caret_rect, is_enabled, cursor_position, anchor_position, move(text_before_cursor), move(text_after_cursor));
+}
+
+void ConnectionFromClient::set_content_blocking_policy(Web::PageId page_id, bool enabled, Vector<String> disabled_sites)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().set_content_blocking_policy(enabled, disabled_sites);
+}
+
+void ConnectionFromClient::set_content_blockers(Core::AnonymousBuffer patterns_buffer)
+{
+    auto& blocker = Web::ContentBlocker::the();
+    auto had_cosmetic_rules = blocker.has_cosmetic_rules();
+    auto result = blocker.set_rules_from_bytes(patterns_buffer.bytes());
+    if (result.is_error()) {
+        dbgln("Failed to set content blockers: {}", result.error());
+        return;
+    }
+
+    if (had_cosmetic_rules || blocker.has_cosmetic_rules())
+        m_page_host->invalidate_user_style();
+}
+
+void ConnectionFromClient::set_force_dark_settings(Web::PageId page_id, bool enabled, HashMap<String, bool> per_host)
+{
+    if (auto page = this->page(page_id); page.has_value() && page->page().has_local_traversable())
+        page->page().local_traversable()->set_force_dark_settings(enabled, move(per_host));
+}
+
+void ConnectionFromClient::set_force_dark_for_local_roots(Web::PageId page_id, bool enabled)
+{
+    if (auto page = this->page(page_id); page.has_value() && !page->page().has_local_traversable())
+        page->page().set_force_dark_for_local_roots(enabled);
+}
+
+void ConnectionFromClient::set_autoplay_settings(Web::PageId, Web::HTML::AutoplayPolicy policy, OrderedHashMap<String, Web::HTML::AutoplayPolicy> site_policies)
+{
+    Web::HTML::AutoplaySettings::the().set_policy(policy, site_policies);
+}
+
+void ConnectionFromClient::set_preferred_color_scheme(Web::PageId page_id, Web::CSS::PreferredColorScheme color_scheme)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->set_preferred_color_scheme(color_scheme);
+}
+
+void ConnectionFromClient::set_preferred_contrast(Web::PageId page_id, Web::CSS::PreferredContrast contrast)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->set_preferred_contrast(contrast);
+}
+
+void ConnectionFromClient::set_preferred_motion(Web::PageId page_id, Web::CSS::PreferredMotion motion)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->set_preferred_motion(motion);
+}
+
+void ConnectionFromClient::set_preferred_languages(Web::PageId, Vector<String> preferred_languages)
+{
+    // FIXME: Whenever the user agent needs to make the navigator.languages attribute of a Window or WorkerGlobalScope
+    // object global return a new set of language tags, the user agent must queue a global task on the DOM manipulation
+    // task source given global to fire an event named languagechange at global, and wait until that task begins to be
+    // executed before actually returning a new value.
+    Web::update_loader_config([&](auto& config) { config.preferred_languages = move(preferred_languages); });
+}
+
+void ConnectionFromClient::set_browsing_behavior(Web::PageId page_id, WebView::BrowsingBehavior browsing_behavior)
+{
+    if (auto page = this->page(page_id); page.has_value()) {
+        page->page().set_enable_autoscroll(browsing_behavior.enable_autoscroll);
+        page->page().set_enable_primary_paste(browsing_behavior.enable_primary_paste);
+    }
+}
+
+void ConnectionFromClient::consume_user_activation(Web::PageId page_id, Web::HTML::UserActivationConsumption consumption)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        Web::HTML::Window::consume_user_activation_of_windows_hosted_by(page->page(), consumption);
+}
+
+void ConnectionFromClient::notify_about_user_activation(Web::PageId page_id, Web::HTML::CrossProcessId document_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().notify_document_about_user_activation(document_id);
+}
+
+void ConnectionFromClient::set_enable_global_privacy_control(Web::PageId, bool enable)
+{
+    Web::update_loader_config([&](auto& config) { config.enable_global_privacy_control = enable; });
+}
+
+void ConnectionFromClient::set_geolocation_emulated_position(Web::PageId page_id, WebView::GeolocationPositionData position, Optional<u16> error_code)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->set_geolocation_emulated_position(position, error_code);
+}
+
+void ConnectionFromClient::geolocation_position_response(Web::PageId page_id, u64 request_id, WebView::GeolocationPositionData position, Optional<u16> error_code)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->geolocation_position_response(request_id, position, error_code);
+}
+
+void ConnectionFromClient::permission_request_completed(Web::PageId page_id, u64 request_id, Web::Permissions::EffectiveState state)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->permission_request_completed(request_id, state);
+}
+
+void ConnectionFromClient::notification_shown(Web::PageId page_id, u64 notification_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().notification_shown(notification_id);
+}
+
+void ConnectionFromClient::notification_show_failed(Web::PageId page_id, u64 notification_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().notification_show_failed(notification_id);
+}
+
+void ConnectionFromClient::notification_clicked(Web::PageId page_id, u64 notification_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().notification_clicked(notification_id);
+}
+
+void ConnectionFromClient::notification_closed(Web::PageId page_id, u64 notification_id, bool by_user)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().notification_closed(notification_id, by_user);
+}
+
+void ConnectionFromClient::set_has_focus(Web::PageId page_id, bool has_focus)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->set_has_focus(has_focus);
+}
+
+void ConnectionFromClient::set_focused_navigable(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().focused_navigable_changed_in_another_page(navigable_id);
+}
+
+void ConnectionFromClient::set_is_scripting_enabled(Web::PageId page_id, bool is_scripting_enabled)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->set_is_scripting_enabled(is_scripting_enabled);
+}
+
+void ConnectionFromClient::set_zoom_level(Web::PageId page_id, double zoom_level)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->set_zoom_level(zoom_level);
+}
+
+void ConnectionFromClient::set_maximum_frames_per_second(Web::PageId page_id, double maximum_frames_per_second)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->set_maximum_frames_per_second(maximum_frames_per_second);
+}
+
+void ConnectionFromClient::set_screen_shows_high_dynamic_range(Web::PageId page_id, bool screen_shows_high_dynamic_range)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->set_screen_shows_high_dynamic_range(screen_shows_high_dynamic_range);
+}
+
+void ConnectionFromClient::set_frame_rate_capped(Web::PageId page_id, bool capped)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->set_frame_rate_capped(capped);
+}
+
+void ConnectionFromClient::set_window_position(Web::PageId page_id, Web::DevicePixelPoint position)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->set_window_position(position);
+}
+
+void ConnectionFromClient::set_window_size(Web::PageId page_id, Web::DevicePixelSize size)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->set_window_size(size);
+}
+
+void ConnectionFromClient::did_complete_window_rect_request(Web::PageId page_id, u64 completion_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().did_complete_window_rect_request(completion_id);
+}
+
+void ConnectionFromClient::handle_file_return(Web::PageId, i32 error, Optional<IPC::File> file, i32 request_id)
+{
+    auto file_request = m_requested_files.take(request_id);
+
+    VERIFY(file_request.has_value());
+    VERIFY(file_request.value().on_file_request_finish);
+
+    file_request.value().on_file_request_finish(error != 0 ? Error::from_errno(error) : ErrorOr<i32> { file->take_fd() });
+}
+
+void ConnectionFromClient::request_file(Web::PageId page_id, Web::FileRequest file_request)
+{
+    i32 const id = last_id++;
+
+    auto path = file_request.path();
+    m_requested_files.set(id, move(file_request));
+
+    async_did_request_file(page_id, path, id);
+}
+
+void ConnectionFromClient::request_file_for_webdriver(Web::PageId page_id, u64 command_id, Web::FileRequest file_request)
+{
+    i32 const id = last_id++;
+
+    auto path = file_request.path();
+    m_requested_files.set(id, move(file_request));
+
+    async_did_request_file_for_webdriver(page_id, command_id, path, id);
+}
+
+void ConnectionFromClient::blob_url_entry_removed(Utf16String url)
+{
+    if (auto url_record = Web::DOMURL::parse(url.utf16_view()); url_record.has_value())
+        Web::FileAPI::remove_entry_from_blob_url_store(*url_record);
+}
+
+void ConnectionFromClient::set_system_visibility_state(Web::PageId page_id, Web::HTML::VisibilityState system_visibility_state)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().set_system_visibility_state(system_visibility_state);
+}
+
+void ConnectionFromClient::set_browsing_context_group(Web::PageId page_id, u64 browsing_context_group_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().set_browsing_context_group(browsing_context_group_id);
+}
+
+void ConnectionFromClient::update_visibility_state(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id, Web::HTML::VisibilityState visibility_state)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    auto* navigable = as_if<Web::HTML::LocalNavigable>(page->page().navigable_with_id(navigable_id).ptr());
+    if (!navigable)
+        return;
+
+    // 1. Let document be navigable's active document.
+    auto document = navigable->active_document();
+    if (!document)
+        return;
+
+    // 2. Queue a global task on the user interaction task source given document's relevant global object
+    //    to update the visibility state of document with newState.
+    Web::HTML::queue_global_task(Web::HTML::Task::Source::UserInteraction, Web::HTML::relevant_global_object(*document), GC::create_function(GC::Heap::the(), GC::captures(visibility_state, document), [](auto& visibility_state, auto& document) {
+        document->update_the_visibility_state(visibility_state);
+    }));
+}
+
+void ConnectionFromClient::reset_zoom(Web::PageId page_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().local_traversable()->reset_zoom();
+}
+
+void ConnectionFromClient::js_console_input(Web::PageId page_id, String js_source)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value())
+        return;
+
+    page->js_console_input(js_source);
+}
+
+void ConnectionFromClient::complete_js_console_input(Web::PageId page_id, u64 request_id, String input)
+{
+    auto page = this->page(page_id);
+    auto completion = page.has_value() ? page->complete_js_console_input(input) : OptionalNone {};
+    if (!completion.has_value()) {
+        async_did_complete_js_console_input(page_id, request_id, OptionalNone {}, String {});
+        return;
+    }
+
+    async_did_complete_js_console_input(page_id, request_id, move(completion->matches), move(completion->match_prop));
+}
+
+void ConnectionFromClient::run_javascript(Web::PageId page_id, String js_source)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->run_javascript(js_source);
+}
+
+void ConnectionFromClient::did_open_dialog_in_another_process(Web::PageId page_id, Web::Page::PendingDialog dialog, Utf16String message)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().did_open_dialog_in_another_process(dialog, message);
+}
+
+void ConnectionFromClient::alert_closed(Web::PageId page_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().alert_closed();
+}
+
+void ConnectionFromClient::before_unload_closed(Web::PageId page_id, bool accepted)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().before_unload_closed(accepted);
+}
+
+void ConnectionFromClient::confirm_closed(Web::PageId page_id, bool accepted)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().confirm_closed(accepted);
+}
+
+void ConnectionFromClient::prompt_closed(Web::PageId page_id, Optional<Utf16String> response)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().prompt_closed(move(response));
+}
+
+void ConnectionFromClient::color_picker_update(Web::PageId page_id, Optional<Color> picked_color, Web::HTML::ColorPickerUpdateState state)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().color_picker_update(picked_color, state);
+}
+
+void ConnectionFromClient::date_picker_closed(Web::PageId page_id, Optional<Utf16String> picked_value)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().date_picker_closed(move(picked_value));
+}
+
+void ConnectionFromClient::file_picker_closed(Web::PageId page_id, Vector<Web::HTML::SelectedFile> selected_files)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().file_picker_closed(selected_files);
+}
+
+void ConnectionFromClient::select_dropdown_closed(Web::PageId page_id, Optional<u32> selected_item_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().select_dropdown_closed(selected_item_id);
+}
+
+void ConnectionFromClient::retrieved_clipboard_entries(Web::PageId page_id, u64 request_id, Vector<Web::Clipboard::SystemClipboardItem> items)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().retrieved_clipboard_entries(request_id, move(items));
+}
+
+void ConnectionFromClient::set_spell_checking_available(Web::PageId page_id, bool available)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().set_spell_checking_available(available);
+}
+
+void ConnectionFromClient::did_check_spelling(Web::PageId page_id, u64 request_id, Vector<Web::SpellingError> errors)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().did_check_spelling(request_id, move(errors));
+}
+
+void ConnectionFromClient::set_writing_suggestions_available(Web::PageId page_id, bool available)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().set_writing_suggestions_available(available);
+}
+
+void ConnectionFromClient::did_get_writing_suggestion(Web::PageId page_id, u64 request_id, Optional<Web::WritingSuggestion> suggestion)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().did_get_writing_suggestion(request_id, move(suggestion));
+}
+
+void ConnectionFromClient::request_translation_language_sample(Web::PageId page_id, u64 request_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        async_did_get_translation_language_sample(page_id, request_id, page->page().translation_language_sample());
+}
+
+void ConnectionFromClient::start_translation(Web::PageId page_id, String source_language, String target_language)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().start_translation(move(source_language), move(target_language));
+}
+
+void ConnectionFromClient::stop_translation(Web::PageId page_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().stop_translation();
+}
+
+void ConnectionFromClient::did_translate(Web::PageId page_id, Web::TranslatedUnit unit)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().did_translate(move(unit));
+}
+
+void ConnectionFromClient::replace_context_menu_misspelling(Web::PageId page_id, Utf16String replacement)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().replace_context_menu_misspelling(replacement);
+}
+
+void ConnectionFromClient::accept_spelling_word(Web::PageId page_id, Utf16String word)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().accept_spelling_word(word);
+}
+
+void ConnectionFromClient::forget_accepted_spelling_words(Web::PageId page_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().forget_accepted_spelling_words();
+}
+
+void ConnectionFromClient::did_complete_spelling_menu_action_for_testing(Web::PageId page_id, String menu)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().did_complete_spelling_menu_action_for_testing(move(menu));
+}
+
+void ConnectionFromClient::did_delete_all_cookies(Web::PageId page_id, u64 request_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->did_delete_all_cookies(request_id);
+}
+
+void ConnectionFromClient::toggle_media_play_state(Web::PageId page_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().toggle_media_play_state();
+}
+
+void ConnectionFromClient::toggle_media_mute_state(Web::PageId page_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().toggle_media_mute_state();
+}
+
+void ConnectionFromClient::toggle_media_loop_state(Web::PageId page_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().toggle_media_loop_state();
+}
+
+void ConnectionFromClient::toggle_media_fullscreen_state(Web::PageId page_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().toggle_media_fullscreen_state();
+}
+
+void ConnectionFromClient::toggle_media_picture_in_picture_state(Web::PageId page_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().toggle_media_picture_in_picture_state();
+}
+
+void ConnectionFromClient::toggle_media_controls_state(Web::PageId page_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().toggle_media_controls_state();
+}
+
+void ConnectionFromClient::system_time_zone_changed()
+{
+    JS::clear_system_time_zone_cache();
+    Unicode::clear_system_time_zone_cache();
+}
+
+void ConnectionFromClient::set_system_font_family(String family)
+{
+    Web::Platform::FontPlugin::the().set_system_font_family(FlyString { family });
+}
+
+void ConnectionFromClient::set_gamepad_state_buffer(Web::Gamepad::GamepadStateBuffer gamepad_state_buffer)
+{
+    Web::Gamepad::GamepadRegistry::the().set_shared_state_buffer(move(gamepad_state_buffer));
+}
+
+void ConnectionFromClient::gamepad_connected(Web::Gamepad::GamepadDescription description)
+{
+    dispatch_gamepad_change_event(Web::Gamepad::GamepadConnectedEvent { move(description) });
+    dispatch_changed_gamepad_states();
+}
+
+void ConnectionFromClient::gamepad_disconnected(Web::Gamepad::GamepadHandle handle)
+{
+    dispatch_gamepad_change_event(Web::Gamepad::GamepadDisconnectedEvent { handle });
+}
+
+void ConnectionFromClient::gamepad_states_changed()
+{
+    dispatch_changed_gamepad_states();
+}
+
+void ConnectionFromClient::dispatch_gamepad_change_event(Web::Gamepad::GamepadChangeEvent const& event)
+{
+    auto& registry = Web::Gamepad::GamepadRegistry::the();
+    event.visit(
+        [&](Web::Gamepad::GamepadConnectedEvent const& connected_event) {
+            registry.gamepad_connected(connected_event.description);
+            m_page_host->for_each_page([&](PageClient& page) {
+                page.page().handle_gamepad_connected(connected_event.description);
+            });
+        },
+        [&](Web::Gamepad::GamepadDisconnectedEvent const& disconnected_event) {
+            registry.gamepad_disconnected(disconnected_event.handle);
+            m_page_host->for_each_page([&](PageClient& page) {
+                page.page().handle_gamepad_disconnected(disconnected_event.handle);
+            });
+        });
+}
+
+void ConnectionFromClient::dispatch_changed_gamepad_states()
+{
+    for (auto const& state : Web::Gamepad::GamepadRegistry::the().take_changed_shared_states()) {
+        m_page_host->for_each_page([&](PageClient& page) {
+            page.page().handle_gamepad_updated(state);
+        });
+    }
+}
+
+void ConnectionFromClient::pump_and_dispatch_gamepad_events()
+{
+    auto* test_connection = this->test_connection();
+    if (!test_connection)
+        return;
+
+    auto response = test_connection->send_sync_but_allow_failure<Messages::WebContentTestClient::PumpGamepadEvents>();
+    if (!response)
+        return;
+    for (auto const& event : response->take_events())
+        dispatch_gamepad_change_event(event);
+    dispatch_changed_gamepad_states();
+}
+
+void ConnectionFromClient::set_document_cookie_version_buffer(Web::PageId page_id, Core::AnonymousBuffer document_cookie_version_buffer)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().client().page_did_receive_document_cookie_version_buffer(move(document_cookie_version_buffer));
+}
+
+void ConnectionFromClient::set_document_cookie_version_index(Web::PageId page_id, i64 document_id, Core::SharedVersionIndex document_index)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().client().page_did_receive_document_cookie_version_index(document_id, document_index);
+}
+
+void ConnectionFromClient::cookies_changed(Web::PageId page_id, Vector<HTTP::Cookie::Cookie> cookies)
+{
+    if (auto page = this->page(page_id); page.has_value()) {
+        // Cookie notifications can arrive after a process switch has made this page's traversable remote.
+        if (!page->page().has_local_traversable())
+            return;
+
+        auto window = page->page().local_traversable()->active_window();
+        if (!window)
+            return;
+
+        window->cookie_store()->process_cookie_changes(cookies);
+    }
+}
+
+void ConnectionFromClient::broadcast_channel_message(Web::HTML::BroadcastChannelMessage message)
+{
+    Web::HTML::deliver_broadcast_channel_message_locally(move(message));
+}
+
+void ConnectionFromClient::did_worker_agent_fail_loading_script(Web::HTML::WorkerAgentOwnerToken owner_token)
+{
+    Web::HTML::WorkerAgentParent::did_fail_loading_worker_script(owner_token);
+}
+
+void ConnectionFromClient::did_worker_agent_report_content_security_policy_violation(Web::HTML::WorkerAgentOwnerToken owner_token, u64 policy_index, String effective_directive, URL::URL resource)
+{
+    Web::HTML::WorkerAgentParent::did_report_content_security_policy_violation(owner_token, policy_index, move(effective_directive), move(resource));
+}
+
+void ConnectionFromClient::did_worker_agent_close(Web::HTML::WorkerAgentOwnerToken owner_token)
+{
+    Web::HTML::WorkerAgentParent::did_close_worker(owner_token);
+}
+
+void ConnectionFromClient::did_worker_agent_die(Web::HTML::WorkerAgentOwnerToken owner_token)
+{
+    Web::HTML::WorkerAgentParent::did_worker_agent_die(owner_token);
+}
+
+// https://html.spec.whatwg.org/multipage/speculative-loading.html#nav-traversal-ui:close-a-top-level-traversable
+void ConnectionFromClient::request_close(Web::PageId page_id)
+{
+    // Browser user agents should offer users the ability to arbitrarily close any top-level traversable in their top-level traversable set.
+    // For example, by clicking a "close tab" button.
+    if (auto page = this->page(page_id); page.has_value()) {
+        // NB: A close queued before a process switch can arrive after this page has stopped hosting the traversable.
+        if (auto* traversable = as_if<Web::HTML::LocalTraversableNavigable>(page->page().top_level_traversable().ptr()))
+            traversable->close_top_level_traversable();
+        else
+            discard_embedded_page(page_id);
+    }
+}
+
+void ConnectionFromClient::request_close_preflight(Web::PageId page_id, u64 request_id)
+{
+    auto page = this->page(page_id);
+    if (!page.has_value()) {
+        async_did_complete_close_preflight(page_id, request_id, false);
+        return;
+    }
+
+    auto* traversable = as_if<Web::HTML::LocalTraversableNavigable>(page->page().top_level_traversable().ptr());
+    if (!traversable) {
+        async_did_complete_close_preflight(page_id, request_id, true);
+        return;
+    }
+
+    traversable->request_close_preflight(GC::create_function(Web::Bindings::main_thread_vm().heap(), GC::captures(make_weak_ptr<ConnectionFromClient>(), page_id, request_id), [](auto& connection, auto& page_id, auto& request_id, bool approved) {
+        if (!connection)
+            return;
+        connection->async_did_complete_close_preflight(page_id, request_id, approved);
+    }));
+}
+
+void ConnectionFromClient::request_close_without_prompting(Web::PageId page_id)
+{
+    if (auto page = this->page(page_id); page.has_value()) {
+        if (auto* traversable = as_if<Web::HTML::LocalTraversableNavigable>(page->page().top_level_traversable().ptr()))
+            traversable->close_top_level_traversable(Web::HTML::LocalTraversableNavigable::PromptToUnload::No);
+    }
+}
+
+void ConnectionFromClient::force_close(Web::PageId page_id)
+{
+    if (auto page = this->page(page_id); page.has_value()) {
+        // NB: A close queued before a process switch can arrive after this page has stopped hosting the traversable.
+        if (auto* traversable = as_if<Web::HTML::LocalTraversableNavigable>(page->page().top_level_traversable().ptr()))
+            traversable->close_top_level_traversable(Web::HTML::LocalTraversableNavigable::PromptToUnload::No);
+        else
+            discard_embedded_page(page_id);
+    }
+}
+
+void ConnectionFromClient::exit_fullscreen(Web::PageId page_id)
+{
+    if (auto page = this->page(page_id); page.has_value()) {
+        Web::HTML::TemporaryExecutionContext context(page->page().local_traversable()->active_document()->relevant_settings_object(), Web::HTML::TemporaryExecutionContext::CallbacksEnabled::Yes);
+        page->page().local_traversable()->active_document()->fully_exit_fullscreen();
+    }
+}
+
+void ConnectionFromClient::set_has_picture_in_picture_support(Web::PageId page_id, bool has_support)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().picture_in_picture_controller().set_has_picture_in_picture_support(has_support);
+}
+
+void ConnectionFromClient::set_offers_to_trust_certificates(Web::PageId page_id, bool self_signed, bool invalid)
+{
+    if (auto page = this->page(page_id); page.has_value()) {
+        page->page().set_offers_to_trust_self_signed_certificates(self_signed);
+        page->page().set_offers_to_trust_invalid_certificates(invalid);
+    }
+}
+
+void ConnectionFromClient::did_open_picture_in_picture_window(Web::PageId page_id, Gfx::IntSize window_size)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().picture_in_picture_controller().did_open_window(window_size);
+}
+
+void ConnectionFromClient::picture_in_picture_window_did_resize(Web::PageId page_id, Gfx::IntSize window_size)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().picture_in_picture_controller().window_did_resize(window_size);
+}
+
+void ConnectionFromClient::picture_in_picture_window_did_close(Web::PageId page_id, bool pause_video)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().picture_in_picture_controller().window_did_close(pause_video);
+}
+
+void ConnectionFromClient::set_picture_in_picture_window_controls_in_use(Web::PageId page_id, bool in_use)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().set_picture_in_picture_window_controls_in_use(in_use);
+}
+
+}

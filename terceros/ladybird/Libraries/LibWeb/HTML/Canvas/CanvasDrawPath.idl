@@ -1,0 +1,18 @@
+// https://html.spec.whatwg.org/multipage/canvas.html#canvasfillrule
+enum CanvasFillRule { "nonzero", "evenodd" };
+
+// https://html.spec.whatwg.org/multipage/canvas.html#canvasdrawpath
+interface mixin CanvasDrawPath {
+    // path API (see also CanvasPath)
+    undefined beginPath();
+    [ImplementedAs=fill] undefined fill(optional CanvasFillRule fillRule = "nonzero");
+    [ImplementedAs=fill_path2d] undefined fill(Path2D path, optional CanvasFillRule fillRule = "nonzero");
+    [ImplementedAs=stroke] undefined stroke();
+    [ImplementedAs=stroke_path2d] undefined stroke(Path2D path);
+    [ImplementedAs=clip] undefined clip(optional CanvasFillRule fillRule = "nonzero");
+    [ImplementedAs=clip_path2d] undefined clip(Path2D path, optional CanvasFillRule fillRule = "nonzero");
+    [ImplementedAs=is_point_in_path] boolean isPointInPath(unrestricted double x, unrestricted double y, optional CanvasFillRule fillRule = "nonzero");
+    [ImplementedAs=is_point_in_path2d] boolean isPointInPath(Path2D path, unrestricted double x, unrestricted double y, optional CanvasFillRule fillRule = "nonzero");
+    [ImplementedAs=is_point_in_stroke] boolean isPointInStroke(unrestricted double x, unrestricted double y);
+    [ImplementedAs=is_point_in_stroke_path2d] boolean isPointInStroke(Path2D path, unrestricted double x, unrestricted double y);
+};

@@ -1,0 +1,33 @@
+// https://dom.spec.whatwg.org/#shadowroot
+[Exposed=Window]
+interface ShadowRoot : DocumentFragment {
+    readonly attribute ShadowRootMode mode;
+    readonly attribute boolean delegatesFocus;
+    readonly attribute boolean serializable;
+    readonly attribute SlotAssignmentMode slotAssignment;
+    readonly attribute boolean clonable;
+    readonly attribute Element host;
+
+    attribute EventHandler onslotchange;
+};
+
+enum ShadowRootMode { "open", "closed" };
+
+[MissingValueDefault=named, InvalidValueDefault=named]
+enum SlotAssignmentMode { "manual", "named" };
+
+// https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#dom-parsing-and-serialization
+partial interface ShadowRoot {
+    [CEReactions] undefined setHTML(DOMString html, optional SetHTMLOptions options = {});
+    [CEReactions] undefined appendHTML(DOMString html, optional SetHTMLOptions options = {});
+    [CEReactions] undefined prependHTML(DOMString html, optional SetHTMLOptions options = {});
+    [CEReactions, ImplementedInBindings] undefined setHTMLUnsafe((TrustedHTML or DOMString) html, optional (SetHTMLUnsafeOptions or TrustedHTMLParserOptions) options = {});
+    [CEReactions, ImplementedInBindings] undefined appendHTMLUnsafe((TrustedHTML or DOMString) html, optional (SetHTMLUnsafeOptions or TrustedHTMLParserOptions) options = {});
+    [CEReactions, ImplementedInBindings] undefined prependHTMLUnsafe((TrustedHTML or DOMString) html, optional (SetHTMLUnsafeOptions or TrustedHTMLParserOptions) options = {});
+    DOMString getHTML(optional GetHTMLOptions options = {});
+
+    // FIXME: Only the DOMString variant should have the LegacyNullToEmptyString attribute.
+    [CEReactions, ImplementedInBindings, LegacyNullToEmptyString] attribute (TrustedHTML or DOMString) innerHTML;
+};
+
+ShadowRoot includes DocumentOrShadowRoot;

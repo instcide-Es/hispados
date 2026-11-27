@@ -1,0 +1,175 @@
+<!doctype html>
+<!--
+Copyright (c) 2026-present, the Ladybird developers.
+SPDX-License-Identifier: BSD-2-Clause
+-->
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Welcome</title>
+        <link rel="icon" type="image/png" href="resource://icons/48x48/app-browser.png" />
+        <link rel="stylesheet" href="resource://ladybird/ladybird.css" />
+        <link rel="stylesheet" href="resource://ladybird/about-pages/webui.css" />
+        <link rel="stylesheet" href="resource://ladybird/about-pages/welcome.css" />
+        <script type="module" src="resource://ladybird/about-pages/welcome.js"></script>
+    </head>
+    <body>
+        <form id="welcome-form">
+            <header>
+                <svg
+                    class="logomark"
+                    viewBox="-11 -9.2 22 18.4"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="0.85"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                >
+                    <path
+                        d="M0 0 L1.39 1.68 L2.76 3.29 L4.07 4.76 L5.30 6.02 L6.43 7.02 L7.43 7.70 L8.29 8.06 L8.99 8.06 L9.51 7.70 L9.85 7.02 L9.99 6.02 L9.95 4.76 L9.70 3.29 L9.27 1.68 L8.66 0 L7.88 -1.68 L6.95 -3.29 L5.88 -4.76 L4.69 -6.02 L3.42 -7.02 L2.08 -7.70 L0.70 -8.06 L-0.70 -8.06 L-2.08 -7.70 L-3.42 -7.02 L-4.69 -6.02 L-5.88 -4.76 L-6.95 -3.29 L-7.88 -1.68 L-8.66 0 L-9.27 1.68 L-9.70 3.29 L-9.95 4.76 L-9.99 6.02 L-9.85 7.02 L-9.51 7.70 L-8.99 8.06 L-8.29 8.06 L-7.43 7.70 L-6.43 7.02 L-5.30 6.02 L-4.07 4.76 L-2.76 3.29 L-1.39 1.68 L0 0 L1.39 -1.68 L2.76 -3.29 L4.07 -4.76 L5.30 -6.02 L6.43 -7.02 L7.43 -7.70 L8.29 -8.06 L8.99 -8.06 L9.51 -7.70 L9.85 -7.02 L9.99 -6.02 L9.95 -4.76 L9.70 -3.29 L9.27 -1.68 L8.66 0 L7.88 1.68 L6.95 3.29 L5.88 4.76 L4.69 6.02 L3.42 7.02 L2.08 7.70 L0.70 8.06 L-0.70 8.06 L-2.08 7.70 L-3.42 7.02 L-4.69 6.02 L-5.88 4.76 L-6.95 3.29 L-7.88 1.68 L-8.66 0 L-9.27 -1.68 L-9.70 -3.29 L-9.95 -4.76 L-9.99 -6.02 L-9.85 -7.02 L-9.51 -7.70 L-8.99 -8.06 L-8.29 -8.06 L-7.43 -7.70 L-6.43 -7.02 L-5.30 -6.02 L-4.07 -4.76 L-2.76 -3.29 L-1.39 -1.68 Z"
+                    />
+                </svg>
+                <h1>Welcome to Ladybird</h1>
+                <p class="muted">You can change any of this later in Settings.</p>
+            </header>
+            <fieldset id="setup-options" disabled>
+                <section aria-labelledby="search-engine-title">
+                    <div class="section-heading">
+                        <h2 id="search-engine-title">Search engine</h2>
+                        <p class="muted small">Optional</p>
+                    </div>
+                    <div
+                        id="search-engines"
+                        class="search-engines"
+                        role="radiogroup"
+                        aria-labelledby="search-engine-title"
+                    ></div>
+                    <div id="search-suggestions" class="switch-card control-row hidden">
+                        <label for="search-suggestions-enabled">
+                            <span id="search-suggestions-title">Show search suggestions</span>
+                            <p id="search-suggestions-description" class="muted small description"></p>
+                        </label>
+                        <input
+                            id="search-suggestions-enabled"
+                            type="checkbox"
+                            switch
+                            aria-labelledby="search-suggestions-title"
+                            aria-describedby="search-suggestions-description"
+                        />
+                    </div>
+                </section>
+                <section id="tab-layout-section" aria-labelledby="tab-layout-title">
+                    <h2 id="tab-layout-title">Layout</h2>
+                    <div class="tab-options" role="radiogroup" aria-labelledby="tab-layout-title">
+                        <label class="tab-option choice-card">
+                            <input type="radio" name="tab-layout" value="horizontal" checked />
+                            <span class="tab-preview horizontal-preview" aria-hidden="true">
+                                <span class="preview-strip"><i class="active"></i><i></i><i></i></span>
+                                <span class="preview-toolbar"><i></i></span>
+                            </span>
+                            <span class="tab-option-label">Tabs on top</span>
+                        </label>
+                        <label class="tab-option choice-card">
+                            <input type="radio" name="tab-layout" value="vertical" />
+                            <span class="tab-preview vertical-preview" aria-hidden="true">
+                                <span class="preview-sidebar"><i></i><i class="active"></i><i></i></span>
+                                <span class="preview-main"
+                                    ><span class="preview-toolbar"><i></i></span
+                                ></span>
+                            </span>
+                            <span class="tab-option-label">Tabs on the side</span>
+                        </label>
+                        <label class="tab-option choice-card">
+                            <input type="radio" name="tab-layout" value="sidebar" />
+                            <span class="tab-preview vertical-preview" aria-hidden="true">
+                                <span class="preview-sidebar"><b></b><i></i><i class="active"></i><i></i></span>
+                                <span class="preview-main"></span>
+                            </span>
+                            <span class="tab-option-label">Everything in the sidebar</span>
+                        </label>
+                    </div>
+                </section>
+                <section aria-labelledby="color-theme-title">
+                    <h2 id="color-theme-title">Color</h2>
+                    <div id="color-theme" class="color-swatches" role="radiogroup" aria-labelledby="color-theme-title">
+                        <label class="color-swatch system-swatch" title="System" style="--swatch: #8e8e93">
+                            <input type="radio" name="color-theme" value="neutral" aria-label="System" />
+                        </label>
+                        <label class="color-swatch" title="Harbor" style="--swatch: #2f6fd6">
+                            <input type="radio" name="color-theme" value="harbor" aria-label="Harbor" />
+                        </label>
+                        <label class="color-swatch" title="Glacier" style="--swatch: #1798b8">
+                            <input type="radio" name="color-theme" value="glacier" aria-label="Glacier" />
+                        </label>
+                        <label class="color-swatch" title="Lagoon" style="--swatch: #12957f">
+                            <input type="radio" name="color-theme" value="lagoon" aria-label="Lagoon" />
+                        </label>
+                        <label class="color-swatch" title="Moss" style="--swatch: #3b8f3e">
+                            <input type="radio" name="color-theme" value="moss" aria-label="Moss" />
+                        </label>
+                        <label class="color-swatch" title="Saffron" style="--swatch: #c99500">
+                            <input type="radio" name="color-theme" value="saffron" aria-label="Saffron" />
+                        </label>
+                        <label class="color-swatch" title="Copper" style="--swatch: #d0631c">
+                            <input type="radio" name="color-theme" value="copper" aria-label="Copper" />
+                        </label>
+                        <label class="color-swatch" title="Cherry" style="--swatch: #d1344b">
+                            <input type="radio" name="color-theme" value="cherry" aria-label="Cherry" />
+                        </label>
+                        <label class="color-swatch" title="Blossom" style="--swatch: #d2459a">
+                            <input type="radio" name="color-theme" value="blossom" aria-label="Blossom" />
+                        </label>
+                        <label class="color-swatch" title="Lavender" style="--swatch: #7563d4">
+                            <input type="radio" name="color-theme" value="lavender" aria-label="Lavender" />
+                        </label>
+                    </div>
+                </section>
+                <section class="switch-list">
+                    <div class="switch-row control-row">
+                        <label for="enable-content-blocking">
+                            <h2 id="ad-blocking-title">Block ads, trackers and more</h2>
+                            <p class="muted small description">
+                                Pages load faster. If a site breaks, turn it off for that site from the address bar.
+                            </p>
+                        </label>
+                        <input
+                            id="enable-content-blocking"
+                            type="checkbox"
+                            switch
+                            aria-labelledby="ad-blocking-title"
+                        />
+                    </div>
+                    <div class="switch-row control-row">
+                        <label for="enable-update-checks">
+                            <h2 id="update-checks-title">Check for updates</h2>
+                            <p class="muted small description">
+                                Ladybird tells you when a newer version is available. Shares your version and system
+                                type, without an identifier.
+                            </p>
+                        </label>
+                        <input id="enable-update-checks" type="checkbox" switch aria-labelledby="update-checks-title" />
+                    </div>
+                    <div id="default-browser" class="switch-row hidden">
+                        <label id="default-browser-label">
+                            <h2>Default browser</h2>
+                            <p id="default-browser-description" class="muted small description" role="status"></p>
+                        </label>
+                        <button
+                            id="make-default-browser"
+                            class="secondary-button"
+                            type="button"
+                            aria-describedby="default-browser-description"
+                        >
+                            Make default
+                        </button>
+                    </div>
+                </section>
+            </fieldset>
+            <footer>
+                <p id="save-status" class="muted small" role="status"></p>
+                <button id="start-browsing" class="primary-button" type="submit" disabled>Start browsing</button>
+            </footer>
+        </form>
+    </body>
+</html>

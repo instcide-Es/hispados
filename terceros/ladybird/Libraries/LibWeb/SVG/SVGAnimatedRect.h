@@ -1,0 +1,37 @@
+/*
+ * Copyright (c) 2024, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <LibWeb/Bindings/Wrappable.h>
+#include <LibWeb/Geometry/DOMRect.h>
+
+namespace Web::SVG {
+
+class SVGAnimatedRect final : public Bindings::GCAllocatedWrappable {
+    WEB_WRAPPABLE(SVGAnimatedRect, Bindings::GCAllocatedWrappable);
+    GC_DECLARE_ALLOCATOR(SVGAnimatedRect);
+
+public:
+    [[nodiscard]] static GC::Ref<SVGAnimatedRect> create();
+    virtual ~SVGAnimatedRect();
+
+    GC::Ref<Geometry::DOMRect> base_val() const { return m_base_val; }
+    GC::Ref<Geometry::DOMRect> anim_val() const { return m_anim_val; }
+
+    void set_base_val(Gfx::DoubleRect const&);
+    void set_anim_val(Gfx::DoubleRect const&);
+
+private:
+    virtual void visit_edges(Visitor&) override;
+
+    SVGAnimatedRect();
+
+    GC::Ref<Geometry::DOMRect> m_base_val;
+    GC::Ref<Geometry::DOMRect> m_anim_val;
+};
+
+}

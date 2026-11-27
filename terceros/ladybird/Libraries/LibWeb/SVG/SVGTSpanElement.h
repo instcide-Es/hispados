@@ -1,0 +1,26 @@
+/*
+ * Copyright (c) 2023, MacDue <macdue@dueutil.tech>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <LibWeb/SVG/SVGTextPositioningElement.h>
+#include <LibWeb/WebIDL/ExceptionOr.h>
+
+namespace Web::SVG {
+
+// https://svgwg.org/svg2-draft/text.html#InterfaceSVGTSpanElement
+class SVGTSpanElement : public SVGTextPositioningElement {
+    WEB_WRAPPABLE(SVGTSpanElement, SVGTextPositioningElement);
+    GC_DECLARE_ALLOCATOR(SVGTSpanElement);
+
+public:
+    virtual CSS::ElementBoxKind box_kind() const override;
+
+protected:
+    SVGTSpanElement(DOM::Document&, DOM::QualifiedName);
+};
+
+}

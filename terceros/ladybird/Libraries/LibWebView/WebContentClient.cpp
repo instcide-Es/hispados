@@ -1,0 +1,1489 @@
+/*
+ * Copyright (c) 2020-2021, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/Debug.h>
+#include <AK/JsonArray.h>
+#include <AK/JsonObject.h>
+#include <AK/NeverDestroyed.h>
+#include <AK/WeakPtr.h>
+#include <LibCore/ElapsedTimer.h>
+#include <LibCore/EventLoop.h>
+#include <LibCore/Process.h>
+#include <LibCore/Timer.h>
+#include <LibDevTools/StorageHelpers.h>
+#include <LibHTTP/Cookie/ParsedCookie.h>
+#include <LibIPC/Transport.h>
+#include <LibIPC/TransportHandle.h>
+#include <LibRequests/Request.h>
+#include <LibURL/Site.h>
+#include <LibWebCommon/HTML/BrowsingContext.h>
+#include <LibWebCommon/Page/InputEvent.h>
+#include <LibWebCommon/WebDriver/Error.h>
+#include <LibWebView/Application.h>
+#include <LibWebView/AudioServerControlClient.h>
+#include <LibWebView/BlobURLStore.h>
+#include <LibWebView/CanonicalBrowsingContext.h>
+#include <LibWebView/CanonicalBrowsingContextGroup.h>
+#include <LibWebView/CanonicalDocument.h>
+#include <LibWebView/CanonicalEnvironmentSettingsObject.h>
+#include <LibWebView/CanonicalTraversable.h>
+#include <LibWebView/CanonicalWindow.h>
+#include <LibWebView/CookieJar.h>
+#include <LibWebView/GamepadManager.h>
+#include <LibWebView/HSTSStore.h>
+#include <LibWebView/HelperProcess.h>
+#include <LibWebView/ImageDecoderManager.h>
+#include <LibWebView/NavigationLoader.h>
+#include <LibWebView/NotificationManager.h>
+#include <LibWebView/PermissionManager.h>
+#include <LibWebView/PictureInPictureManager.h>
+#include <LibWebView/RecordingNotificationBackend.h>
+#include <LibWebView/RequestServerManager.h>
+#include <LibWebView/ViewImplementation.h>
+#include <LibWebView/WebContentClient.h>
+#include <LibWebView/WebContentTestClient.h>
+#include <LibWebView/WebDriverBiDi.h>
+#include <LibWebView/WebUI.h>
+#include <LibWebView/WorkerAgentManager.h>
+
+namespace WebView {
+
+Messages::WebContentClient::DidAddBlobUrlEntryResponse WebContentClient::did_add_blob_url_entry(Web::PageId page_id, Web::HTML::EnvironmentId environment_id, Utf16String url, Web::FileAPI::SerializedBlobURLEntry entry)
+{
+    if (auto* page = this->page(page_id))
+        return page->did_add_blob_url_entry(move(environment_id), move(url), move(entry));
+
+    return URL::BlobURLEntry::Token { 0 };
+}
+
+void WebContentClient::did_remove_blob_url_entries(Web::PageId page_id, Web::HTML::EnvironmentId environment_id, Vector<Utf16String> urls)
+{
+    if (auto* page = this->page(page_id)) {
+        page->did_remove_blob_url_entries(move(environment_id), move(urls));
+        return;
+    }
+
+    // NB: A closed page's environments went with it, so its process can only revoke the entries it added itself.
+    if (may_act_for_page(page_id))
+        m_session->blob_url_store->remove_entries_added_by(urls, WeakPtr<WebContentClient> { *this });
+}
+
+void WebContentClient::close_worker_agent(Web::PageId page_id, Web::HTML::WorkerAgentId agent_id, Web::HTML::WorkerAgentOwnerToken owner_token)
+{
+    // NB: A page's workers are closed as its documents are destroyed, which happens after the tab's page has closed.
+    if (may_act_for_page(page_id))
+        WorkerAgentManager::the().close_worker_agent(*this, agent_id, owner_token);
+}
+
+void WebContentClient::note_hosted_document(CanonicalDocument const& document)
+{
+    // NB: An about:blank document starts out empty, and its origin is that of a document the process already hosts or
+    //     an opaque one that nothing else can script.
+    if (m_has_hosted_more_than_tabs_of_one_origin || Web::HTML::url_matches_about_blank(document.creation_url()))
+        return;
+
+    auto const& origin = document.origin();
+    if (document.may_share_a_process_with_tabs_of_its_origin()) {
+        if (!m_origin_of_hosted_tabs.has_value()) {
+            m_origin_of_hosted_tabs = origin;
+            m_hosted_tabs_are_origin_keyed = document.relevant_global_object().agent().agent_cluster_is_origin_keyed();
+        }
+        if (has_hosted_only_tabs_of_the_site_of(document)) {
+            if (origin != *m_origin_of_hosted_tabs)
+                m_has_hosted_tabs_of_more_than_one_origin_of_a_site = true;
+            return;
+        }
+    } else if (!document.is_top_level() && m_origin_of_hosted_tabs.has_value()) {
+        // NB: A data: URL iframe is hosted in the process of the document that made it, and holds only what that
+        //     document already had.
+        if (origin.is_opaque()) {
+            if (document.creation_url().scheme() == "data"sv)
+                return;
+        } else if (m_hosted_tabs_are_origin_keyed ? origin.is_same_origin(*m_origin_of_hosted_tabs) : origin.is_same_site(*m_origin_of_hosted_tabs)) {
+            return;
+        }
+    }
+
+    m_has_hosted_more_than_tabs_of_one_origin = true;
+    m_origin_of_hosted_tabs.clear();
+}
+
+static bool tabs_of_a_site_share_processes()
+{
+    return Application::the().tab_processes() == TabProcesses::PerSite;
+}
+
+bool WebContentClient::has_hosted_only_tabs_like(CanonicalDocument const& document) const
+{
+    if (tabs_of_a_site_share_processes())
+        return has_hosted_only_tabs_of_the_site_of(document);
+    return !m_has_hosted_tabs_of_more_than_one_origin_of_a_site && m_origin_of_hosted_tabs == document.origin()
+        && m_hosted_tabs_are_origin_keyed == document.relevant_global_object().agent().agent_cluster_is_origin_keyed();
+}
+
+bool WebContentClient::has_hosted_only_tabs_unlike(CanonicalDocument const& document) const
+{
+    // NB: The user may want no tabs to share a process, which makes every other tab unlike the tabs of a process.
+    if (Application::the().tab_processes() == TabProcesses::PerTab)
+        return m_origin_of_hosted_tabs.has_value();
+    if (tabs_of_a_site_share_processes())
+        return m_origin_of_hosted_tabs.has_value() && !has_hosted_only_tabs_of_the_site_of(document);
+    return m_origin_of_hosted_tabs.has_value() && !has_hosted_only_tabs_like(document);
+}
+
+// NB: An origin-keyed tab keeps apart from the other origins of its site, so its site is just its origin.
+bool WebContentClient::has_hosted_only_tabs_of_the_site_of(CanonicalDocument const& document) const
+{
+    if (!m_origin_of_hosted_tabs.has_value() || m_hosted_tabs_are_origin_keyed != document.relevant_global_object().agent().agent_cluster_is_origin_keyed())
+        return false;
+    if (m_hosted_tabs_are_origin_keyed)
+        return *m_origin_of_hosted_tabs == document.origin();
+    return m_origin_of_hosted_tabs->is_same_site(document.origin());
+}
+
+bool WebContentClient::hosts_an_environment_with_storage_key(Web::StorageAPI::StorageKey const& storage_key)
+{
+    bool hosts_one = false;
+    for_each_page([&](WebContentPage& page) {
+        hosts_one = page.hosts_an_environment_with_storage_key(storage_key);
+        return hosts_one ? IterationDecision::Break : IterationDecision::Continue;
+    });
+    return hosts_one;
+}
+
+Optional<CanonicalEnvironmentSettingsObject const&> WebContentClient::hosted_environment(Web::HTML::EnvironmentId const& environment_id)
+{
+    Optional<CanonicalEnvironmentSettingsObject const&> environment;
+    for_each_page([&](WebContentPage& page) {
+        environment = page.hosted_environment(environment_id);
+        return environment.has_value() ? IterationDecision::Break : IterationDecision::Continue;
+    });
+    return environment;
+}
+
+bool WebContentClient::hosts_a_document_of_origin(URL::Origin const& origin)
+{
+    bool hosts_one = false;
+    for_each_page([&](WebContentPage& page) {
+        page.for_each_hosted_document([&](CanonicalDocument& document) {
+            hosts_one = document.origin().is_same_origin(origin);
+            return hosts_one ? IterationDecision::Break : IterationDecision::Continue;
+        });
+        return hosts_one ? IterationDecision::Break : IterationDecision::Continue;
+    });
+    return hosts_one;
+}
+
+void WebContentClient::did_retain_blob_url_token(Web::HTML::CrossProcessId navigable_id, URL::BlobURLEntry::Token token)
+{
+    if (auto navigable = hosted_navigable(navigable_id); navigable.has_value())
+        navigable->retain_blob_url_token(token);
+}
+
+Messages::WebContentClient::DidRequestBlobUrlEntryResponse WebContentClient::did_request_blob_url_entry(Utf16String url, Optional<URL::BlobURLEntry::Token> token)
+{
+    return m_session->blob_url_store->resolve(url, token);
+}
+
+void WebContentClient::connect_test_endpoint(NonnullOwnPtr<IPC::Transport> transport)
+{
+    m_test_connection = make_ref_counted<WebContentTestClient>(move(transport), *this);
+    GamepadManager::the().client_did_connect_test_endpoint(*this);
+}
+
+void WebContentClient::remove_blob_url_entries()
+{
+    m_session->blob_url_store->remove_entries_added_by(WeakPtr<WebContentClient> { *this });
+}
+
+HashTable<WebContentClient*>& WebContentClient::clients()
+{
+    static NeverDestroyed<HashTable<WebContentClient*>> clients;
+    return *clients;
+}
+
+static constexpr auto detached_page_close_timeout_ms = 1000;
+static constexpr auto close_server_exit_timeout_ms = 5000;
+static constexpr auto detached_page_forced_exit_timeout_ms = detached_page_close_timeout_ms + close_server_exit_timeout_ms;
+
+WebContentClient::WebContentClient(NonnullOwnPtr<IPC::Transport> transport, BrowsingSession& session, Web::PageId initial_page_id, Web::HTML::CrossProcessId root_navigable_id)
+    : IPC::ConnectionToServer<WebContentClientEndpoint, WebContentServerEndpoint, WebContentClientPageRoutingStub>(*this, move(transport))
+    , m_is_private(session.is_private())
+    , m_session(session)
+    , m_request_server_site_bindings([this](RequestServerClientConnection& connection, Optional<Utf16String> const& top_level_site) {
+        async_connect_to_request_server(move(connection.handle), connection.client_id, top_level_site);
+    })
+    , m_unassigned_initial_page_id(initial_page_id)
+    , m_root_navigable_id(root_navigable_id)
+    , m_audio_tab_id(allocate_audio_tab_id())
+{
+    VERIFY(initial_page_id > 0);
+    clients().set(this);
+}
+
+WebContentClient::~WebContentClient()
+{
+    // The tree can still hold a page of a process that is gone; it reads as closed from now on.
+    for (auto& page : m_pages)
+        page.value->close();
+    cancel_navigation_transactions();
+    remove_blob_url_entries();
+    StorageAreaRegistry::the().remove_listener(*this);
+    WorkerAgentManager::the().remove_web_content_owner(*this);
+    GamepadManager::the().client_disconnected(*this);
+    clients().remove(this);
+}
+
+Optional<WebContentClient&> WebContentClient::client_for_compositor_context_id(Web::CompositorContextId context_id)
+{
+    Optional<WebContentClient&> client;
+    for_each_client([&](auto& candidate) {
+        if (!candidate.page_id_for_compositor_context_id(context_id).has_value())
+            return IterationDecision::Continue;
+        client = candidate;
+        return IterationDecision::Break;
+    });
+    return client;
+}
+
+void WebContentClient::gamepad_play_effect(Web::Gamepad::GamepadHandle handle, Web::Gamepad::GamepadEffect effect)
+{
+    GamepadManager::the().play_effect(*this, handle, effect);
+}
+
+void WebContentClient::gamepad_stop_effects(Web::Gamepad::GamepadHandle handle)
+{
+    GamepadManager::the().stop_effects(*this, handle);
+}
+
+void WebContentClient::die()
+{
+    did_lose_process();
+}
+
+// A tab the user left is likely to stay in the background for long, and its process keeps much that only makes it
+// faster: compiled code, decoded images, caches. Once every tab of a process was hidden for this long, the process is
+// asked to let go of all that. The wait keeps a user who switches back and forth between tabs from paying for it.
+static constexpr auto time_hidden_before_releasing_memory = AK::Duration::from_seconds(10);
+
+bool WebContentClient::all_tabs_are_hidden() const
+{
+    // NB: A process without pages has no tabs to speak of, and little to release.
+    bool has_open_page = false;
+    for (auto const& [page_id, page] : m_pages) {
+        if (!page->is_open() || !page->has_traversable())
+            continue;
+        if (page->traversable().system_visibility_state() != Web::HTML::VisibilityState::Hidden)
+            return false;
+        has_open_page = true;
+    }
+    return has_open_page;
+}
+
+void WebContentClient::did_change_visibility_of_a_tab()
+{
+    if (!all_tabs_are_hidden()) {
+        if (m_release_memory_of_hidden_tabs_timer)
+            m_release_memory_of_hidden_tabs_timer->stop();
+        return;
+    }
+    if (!m_release_memory_of_hidden_tabs_timer) {
+        m_release_memory_of_hidden_tabs_timer = Core::Timer::create_single_shot(time_hidden_before_releasing_memory, [this] {
+            release_memory_of_hidden_tabs();
+        });
+    }
+    // NB: A timer that already runs keeps its time, so that more of these calls while the tabs stay hidden do not
+    //     put the release off.
+    if (!m_release_memory_of_hidden_tabs_timer->is_active())
+        m_release_memory_of_hidden_tabs_timer->start();
+}
+
+void WebContentClient::release_memory_of_hidden_tabs()
+{
+    if (!is_open() || !all_tabs_are_hidden())
+        return;
+    // NB: What the process lets go of, it has to make again when it needs it, which a tab that plays or records sound
+    //     in the background could not do without the user hearing it. A page that only hosts a frame of a tab counts
+    //     too, as the sound of the tab may come from that frame. The process is asked once the sound has stopped.
+    for (auto const& [page_id, page] : m_pages) {
+        if (!page->is_open() || !page->has_traversable())
+            continue;
+        auto view = page->traversable().view();
+        if (!view.has_value())
+            continue;
+        auto plays_or_records_sound = view->is_playing_audio() || view->is_capturing_audio();
+        // NB: A view that another view owns has no tab of its own, and its capture shows on its owner.
+        if (auto owner_view_id = view->owner_view_id(); owner_view_id.has_value()) {
+            if (auto owner = ViewImplementation::find_view_by_id(*owner_view_id); owner.has_value())
+                plays_or_records_sound |= owner->is_playing_audio() || owner->is_capturing_audio();
+        }
+        if (plays_or_records_sound) {
+            m_release_memory_of_hidden_tabs_timer->restart();
+            return;
+        }
+    }
+    async_release_memory();
+}
+
+void WebContentClient::did_misbehave(StringView message_name, StringView reason)
+{
+    m_rejected_ipc = true;
+    dbgln("WebContentClient: terminating helper process {}: {} rejected: {}", pid(), message_name, reason);
+    (void)Application::process_manager().terminate_child(child_id(), Core::Process::TerminationMode::Forceful);
+    shutdown();
+}
+
+// Only an open page registers its context: the UI process forgets a closed page's context while the process still
+// holds it, and a request the process sent before the close can arrive after it.
+Web::CompositorContextId WebContentClient::compositor_context_id_for_page(WebContentPage const& page)
+{
+    VERIFY(page.is_open());
+    auto page_id = page.id();
+    auto context_id = Web::compositor_context_id_for_page(page_id);
+    if (auto registered_page_id = m_compositor_contexts.get(context_id); registered_page_id.has_value()) {
+        if (!registered_page_id->has_value() || **registered_page_id != page_id) {
+            did_misbehave("allocate_compositor_context_id"sv, "page ID collides with an existing compositor context"sv);
+            return context_id;
+        }
+        return context_id;
+    }
+
+    remember_compositor_context(context_id, page_id);
+    Application::the().register_compositor_context(*this, context_id, page_id);
+    return context_id;
+}
+
+Optional<Web::PageId> WebContentClient::page_id_for_compositor_context_id(Web::CompositorContextId context_id) const
+{
+    auto page_id = m_compositor_contexts.get(context_id);
+    if (!page_id.has_value())
+        return {};
+    return *page_id;
+}
+
+Messages::WebContentClient::AllocateCompositorContextIdResponse WebContentClient::allocate_compositor_context_id(Web::PageId page_id, Web::PagePresentationRegistration page_presentation_registration)
+{
+    return allocate_compositor_context(page_id, page_presentation_registration);
+}
+
+Web::CompositorContextId WebContentClient::allocate_compositor_context(Web::PageId page_id, Web::PagePresentationRegistration page_presentation_registration)
+{
+    if (page_presentation_registration == Web::PagePresentationRegistration::Yes) {
+        if (auto* page = this->page(page_id))
+            return compositor_context_id_for_page(*page);
+        return Web::compositor_context_id_for_page(page_id);
+    }
+
+    auto context_id = Application::the().allocate_compositor_context_id();
+    remember_compositor_context(context_id, {});
+    Application::the().register_compositor_context(*this, context_id, {});
+    return context_id;
+}
+
+void WebContentClient::did_destroy_compositor_context(Web::CompositorContextId context_id)
+{
+    forget_compositor_context(context_id);
+}
+
+bool WebContentClient::forget_compositor_context(Web::CompositorContextId context_id)
+{
+    if (!m_compositor_contexts.remove(context_id))
+        return false;
+    return true;
+}
+
+void WebContentClient::remember_compositor_context(Web::CompositorContextId context_id, Optional<Web::PageId> page_id)
+{
+    m_compositor_contexts.set(context_id, page_id);
+}
+
+WebContentPage& WebContentClient::open_initial_page_for_new_top_level_traversable()
+{
+    auto initial_page_id = m_unassigned_initial_page_id.release_value();
+
+    // A tab's first process creates its traversable, in the page that displays the tab.
+    VERIFY(m_initial_top_level_history_entry.has_value());
+    auto& traversable = CanonicalTraversable::create_a_new_top_level_traversable(m_root_navigable_id, {}, m_initial_top_level_history_entry.release_value(), m_initial_top_level_document_id);
+    auto& page = open_page_for_new_top_level_traversable(initial_page_id, traversable);
+    page.async_set_browsing_context_group(traversable.active_browsing_context().group()->id());
+    return page;
+}
+
+void WebContentClient::set_compositor_connection_id(Badge<Application>, i32 compositor_connection_id)
+{
+    m_compositor_connection_id = compositor_connection_id;
+}
+
+WebContentPage& WebContentClient::open_page_for_new_top_level_traversable(Web::PageId page_id, CanonicalTraversable& traversable)
+{
+    if (m_detached_page_close_timer)
+        m_detached_page_close_timer->stop();
+    Application::process_manager().cancel_forced_exit(child_id());
+
+    auto& page = open_page(page_id, traversable);
+    traversable.active_document().set_host(page);
+    if (auto* bidi = WebDriverBiDi::the())
+        bidi->push_session_state_for_client(*this);
+    return page;
+}
+
+// The process never learns of a page no view displays, so it can make no claim for it.
+void WebContentClient::discard_page_of_undisplayed_top_level_traversable(Web::PageId page_id)
+{
+    if (auto page = m_pages.take(page_id); page.has_value())
+        page.value()->close();
+    release_unneeded_representing_pages();
+}
+
+void WebContentClient::close_page_of_closed_tab(Web::PageId page_id)
+{
+    if (auto* page = this->page(page_id))
+        page->traversable().remove_page(*page);
+
+    if (auto* page = find_page(page_id)) {
+        // A page that still needs a beforeunload check is not a detached
+        // background close. It is being closed without waiting for WebContent,
+        // e.g. because the user requested a forced close.
+        if (page->needs_beforeunload_check())
+            page->set_detached_close_pending(false);
+        // NB: The process can stay alive for other pages or for a shared worker, and the document must not go on in it.
+        //     Its close steps run through the traversable that is going away, so it cannot close by itself.
+        if (!page->detached_close_pending() || WorkerAgentManager::the().hosts_shared_worker(*this))
+            page->async_discard_embedded_page();
+        PictureInPictureManager::the().close_window_and_its_page(*page);
+        // NB: Other tabs can keep the process alive, so its page has to go as well.
+        page->async_discard_embedded_page();
+        page->close();
+    }
+    // Forgotten once the page is closed, so nothing registers it again.
+    forget_compositor_context(Web::compositor_context_id_for_page(page_id));
+    release_unneeded_representing_pages();
+    close_server_if_unused();
+}
+
+void WebContentClient::fail_renderer_owned_downloads()
+{
+    for (auto& page : m_pages)
+        page.value->fail_renderer_owned_downloads();
+}
+
+void WebContentClient::register_embedded_page(Web::PageId page_id, CanonicalTraversable& traversable)
+{
+    auto& page = open_page(page_id, traversable);
+    if (m_unassigned_initial_page_id == page_id)
+        m_unassigned_initial_page_id.clear();
+    Application::process_manager().cancel_forced_exit(child_id());
+
+    page.view().send_preferences_to_page(page);
+    page.view().send_force_dark_to_embedded_page(page);
+    if (Application::browser_options().webdriver_browser_endpoint.has_value())
+        Application::the().push_webdriver_session_config(page);
+    page.async_set_has_focus(traversable.has_system_focus());
+    page.async_set_viewport_is_fullscreen(page.view().is_fullscreen());
+    if (auto focused_navigable_id = traversable.focused_navigable_id(); focused_navigable_id.has_value())
+        page.async_set_focused_navigable(*focused_navigable_id);
+}
+
+Optional<Web::PageId> WebContentClient::page_id_for_traversable(CanonicalTraversable const& traversable) const
+{
+    for (auto const& [page_id, page] : m_pages) {
+        if (page->is_open() && &page->traversable() == &traversable)
+            return page_id;
+    }
+    return {};
+}
+
+void WebContentClient::unregister_embedded_page(Web::PageId page_id)
+{
+    if (auto* page = find_page(page_id); page && !(page->is_open() && page->displays_tab()))
+        page->close();
+    release_unneeded_representing_pages();
+    close_server_if_unused();
+}
+
+// Whether a page of this process holds part of a tab in the browsing context group of the traversable's tab.
+bool WebContentClient::holds_part_of_a_tab_in_the_group_of(CanonicalTraversable const& traversable)
+{
+    auto group = traversable.active_browsing_context().group();
+    if (!group)
+        return false;
+    for (auto const& [page_id, page] : m_pages) {
+        if (!page->is_open())
+            continue;
+        auto const& held = page->traversable();
+        if (!page->displays_tab() && !held.page_hosts_any(*page))
+            continue;
+        if (held.active_browsing_context().group() == group)
+            return true;
+    }
+    return false;
+}
+
+void WebContentClient::release_unneeded_representing_pages()
+{
+    Vector<NonnullRefPtr<WebContentPage>> representing_pages;
+    for_each_page([&](WebContentPage& page) {
+        if (!page.displays_tab() && page.traversable().is_representing_page(page))
+            representing_pages.append(page);
+        return IterationDecision::Continue;
+    });
+    for (auto const& page : representing_pages) {
+        if (page->is_open())
+            page->traversable().release_page_if_unused(page);
+    }
+}
+
+WebContentPage& WebContentClient::open_page(Web::PageId page_id, CanonicalTraversable& traversable)
+{
+    auto page = adopt_ref(*new WebContentPage(*this, page_id, traversable));
+    m_pages.set(page_id, page);
+    // NB: A tab that starts hidden, or that moves to this process while hidden, never tells of a change.
+    did_change_visibility_of_a_tab();
+    return page;
+}
+
+WebContentPage* WebContentClient::find_page(Web::PageId page_id) const
+{
+    auto page = m_pages.find(page_id);
+    if (page == m_pages.end())
+        return nullptr;
+    return page->value.ptr();
+}
+
+WebContentPage* WebContentClient::page(Web::PageId page_id) const
+{
+    auto* page = find_page(page_id);
+    if (!page || !page->is_open())
+        return nullptr;
+    return page;
+}
+
+bool WebContentClient::may_act_for_page(Web::PageId page_id) const
+{
+    // A page ID the connection was given is not a false claim once the page is gone: the connection can
+    // have sent the message while it still had the page, and the handler drops it.
+    return m_pages.contains(page_id) || m_unassigned_initial_page_id == page_id;
+}
+
+bool WebContentClient::may_act_for_storage_area(Web::StorageAPI::StorageAreaId area_id) const
+{
+    return StorageAreaRegistry::the().was_issued_to(*this, area_id);
+}
+
+Optional<CanonicalNavigable&> WebContentClient::hosted_navigable(Web::HTML::CrossProcessId navigable_id)
+{
+    Optional<CanonicalNavigable&> result;
+    for_each_page([&](WebContentPage& page) {
+        result = page.hosted_navigable(navigable_id);
+        return result.has_value() ? IterationDecision::Break : IterationDecision::Continue;
+    });
+    return result;
+}
+
+void WebContentClient::close_server_if_unused()
+{
+    if (m_requested_close)
+        return;
+
+    bool any_detached_close_pending = false;
+    for (auto const& page : m_pages) {
+        if (page.value->is_open())
+            return;
+        any_detached_close_pending |= page.value->detached_close_pending();
+    }
+
+    if (WorkerAgentManager::the().hosts_shared_worker(*this))
+        return;
+
+    if (!any_detached_close_pending) {
+        if (m_detached_page_close_timer)
+            m_detached_page_close_timer->stop();
+        m_requested_close = true;
+        async_close_server();
+        Application::process_manager().force_exit_after_timeout(child_id(), close_server_exit_timeout_ms);
+        return;
+    }
+
+    Application::process_manager().force_exit_after_timeout(child_id(), detached_page_forced_exit_timeout_ms);
+
+    if (!m_detached_page_close_timer) {
+        m_detached_page_close_timer = Core::Timer::create_single_shot(AK::Duration::from_milliseconds(detached_page_close_timeout_ms), [this] {
+            dbgln("Timed out waiting for detached WebContent page close acknowledgement");
+            for (auto& page : m_pages)
+                page.value->set_detached_close_pending(false);
+            close_server_if_unused();
+        });
+    }
+
+    if (!m_detached_page_close_timer->is_active())
+        m_detached_page_close_timer->start();
+}
+
+void WebContentClient::destroy_all_compositor_contexts()
+{
+    m_compositor_contexts.clear();
+}
+
+ErrorOr<void> WebContentClient::reconnect_to_compositor_process(Badge<Application>)
+{
+    if (!is_open())
+        return {};
+
+    m_compositor_connection_id.clear();
+    TRY(Application::the().connect_web_content_to_compositor(*this));
+    return {};
+}
+
+ErrorOr<void> WebContentClient::recreate_compositor_contexts(Badge<Application>)
+{
+    if (!is_open())
+        return {};
+
+    for (auto const& [context_id, page_id] : m_compositor_contexts)
+        TRY(Application::the().try_register_compositor_context(*this, context_id, page_id));
+
+    return {};
+}
+
+void WebContentClient::replay_compositor_view_state_after_reconnect(Badge<Application>)
+{
+    if (!is_open())
+        return;
+
+    for (auto& [page_id, page] : m_pages) {
+        if (!page->is_open() || !page->displays_tab())
+            continue;
+        auto context_id = Web::compositor_context_id_for_page(page_id);
+        if (!m_compositor_contexts.contains(context_id))
+            continue;
+        auto& view = page->view();
+        Application::the().update_compositor_context_scales_frames_to_fit(context_id, view.scales_frames_to_fit());
+        view.recreate_remote_layer_after_compositor_reconnect({});
+        Application::the().update_compositor_viewport(context_id, view.viewport_size().to_type<int>(), view.device_pixel_ratio());
+        Application::the().update_compositor_display_metadata(context_id, view.display_id(), view.maximum_frames_per_second());
+        Application::the().update_compositor_context_visibility(context_id, view.traversable().system_visibility_state());
+        Application::the().update_compositor_context_presents_from_cpu_memory(context_id, view.presents_from_cpu_memory());
+        view.update_ui_overlays();
+    }
+}
+
+void WebContentClient::notify_compositor_process_reconnected(Badge<Application>)
+{
+    if (!is_open())
+        return;
+
+    async_compositor_process_reconnected();
+}
+
+void WebContentClient::did_lose_process()
+{
+    // Removing pages can release the last reference to this client.
+    RefPtr self = this;
+    // A close request the client made before the loss; one its lost pages' release makes now is not one.
+    auto requested_close = m_requested_close;
+
+    struct LostPage {
+        NonnullRefPtr<WebContentPage> page;
+        Optional<u64> view_id;
+        // An owned view has no tab of its own to recover, so its owner decides what becomes of it, and the owner's
+        // crash screen is the one that offers the crash report.
+        bool shows_crash_screen { false };
+    };
+    Vector<LostPage> lost_pages;
+    for_each_page([&](WebContentPage& page) {
+        LostPage lost { page, {} };
+        if (page.displays_tab()) {
+            auto const& view = page.view();
+            lost.view_id = view.view_id();
+            lost.shows_crash_screen = !view.owner_view_id().has_value();
+        }
+        lost_pages.append(move(lost));
+        return IterationDecision::Continue;
+    });
+
+    // Closing a page settles the replies it owed once this task is over.
+    for (auto const& lost : lost_pages)
+        lost.page->close();
+
+    destroy_all_compositor_contexts();
+
+    for (auto const& lost : lost_pages)
+        lost.page->traversable().did_lose_page(*lost.page, WebContentProcessLost::Yes);
+    for (auto const& lost : lost_pages)
+        lost.page->traversable().remove_page(*lost.page);
+
+    cancel_navigation_transactions();
+    fail_renderer_owned_downloads();
+    remove_blob_url_entries();
+    StorageAreaRegistry::the().remove_listener(*this);
+
+    if (requested_close)
+        return;
+
+    // The views are told deferred, and looked up by ID, in case they are destroyed before then.
+    auto crash_reason = ViewImplementation::WebContentCrashReason::ProcessCrash;
+    if (m_rejected_ipc)
+        crash_reason = ViewImplementation::WebContentCrashReason::RejectedIPC;
+    else if (m_exceeded_memory_limit)
+        crash_reason = ViewImplementation::WebContentCrashReason::ExceededMemoryLimit;
+    for (auto const& lost : lost_pages) {
+        if (!lost.view_id.has_value())
+            continue;
+        if (lost.shows_crash_screen)
+            m_crashed_view_ids.append(*lost.view_id);
+        Core::deferred_invoke([view_id = *lost.view_id, shows_crash_screen = lost.shows_crash_screen, crash_reason] {
+            auto view = ViewImplementation::find_view_by_id(view_id);
+            if (!view.has_value())
+                return;
+            if (shows_crash_screen)
+                view->handle_web_content_process_crash(crash_reason);
+            if (view->on_web_content_crashed)
+                view->on_web_content_crashed(crash_reason);
+        });
+    }
+}
+
+// Deferred like the loss itself, so the view reads this after it has taken on its crash state. A crash makes one report,
+// so one of the views it took down is offered it. Offering it to several would let each send it, uploading it more than
+// once and removing it from under the others.
+void WebContentClient::did_save_crash_report(ByteString const& report_name)
+{
+    Core::deferred_invoke([view_ids = m_crashed_view_ids, report_name] {
+        for (auto view_id : view_ids) {
+            if (auto view = ViewImplementation::find_view_by_id(view_id); view.has_value()) {
+                view->did_save_crash_report(report_name);
+                return;
+            }
+        }
+    });
+}
+
+void WebContentClient::cancel_navigation_transactions()
+{
+    ViewImplementation::for_each_view([this](ViewImplementation& view) {
+        // NB: A helper spawn can deliver an older child's exit before a new view has its traversable.
+        if (!view.has_traversable())
+            return IterationDecision::Continue;
+        view.traversable().for_each_in_inclusive_subtree([this](CanonicalNavigable& navigable) {
+            navigable.cancel_navigation_for_client(*this);
+            return IterationDecision::Continue;
+        });
+        return IterationDecision::Continue;
+    });
+}
+
+// Seeing HttpOnly cookies, storing cookies the way an HTTP response does, and changing a cookie by its identity are for
+// WebDriver and the test harness. RequestServer handles the cookies of HTTP responses and requests itself, so a renderer
+// serving an ordinary browsing session never needs any of it.
+// NB: Under WebDriver, the renderer may do so only while it runs a cookie command, and only for the document the
+//     command is for. Otherwise any renderer of an automated browser could take the cookies of every site.
+static Optional<URL::URL> url_of_webdriver_cookie_command_running_in(WebContentClient const& client)
+{
+    if (!Application::browser_options().webdriver_browser_endpoint.has_value())
+        return {};
+
+    Optional<URL::URL> url;
+    ViewImplementation::for_each_view([&](ViewImplementation& view) {
+        url = view.url_of_webdriver_cookie_command_running_in(client);
+        return url.has_value() ? IterationDecision::Break : IterationDecision::Continue;
+    });
+    return url;
+}
+
+WebContentClient::HTTPCookieAccess WebContentClient::http_cookie_access_for(URL::URL const& url) const
+{
+    if (Application::web_content_options().is_test_mode == IsTestMode::Yes)
+        return HTTPCookieAccess::Allowed;
+
+    auto command_url = url_of_webdriver_cookie_command_running_in(*this);
+    if (!command_url.has_value())
+        return HTTPCookieAccess::Refused;
+    return command_url->equals(url, URL::ExcludeFragment::Yes) ? HTTPCookieAccess::Allowed : HTTPCookieAccess::RefusedForURL;
+}
+
+bool WebContentClient::renderers_may_synthesize_input_for_testing()
+{
+    // The internals object dispatches input as though the user produced it.
+    return Application::web_content_options().is_test_mode == IsTestMode::Yes
+        || Application::web_content_options().expose_internals_object == ExposeInternalsObject::Yes;
+}
+
+bool WebContentClient::may_read_local_files() const
+{
+    return m_has_hosted_local_file_content;
+}
+
+Messages::WebContentClient::DidRequestAllCookiesWebdriverResponse WebContentClient::did_request_all_cookies_webdriver(URL::URL url, Optional<HTTP::Cookie::PartitionContext> partition_context)
+{
+    if (auto access = http_cookie_access_for(url); access != HTTPCookieAccess::Allowed) {
+        if (access == HTTPCookieAccess::Refused)
+            did_misbehave("did_request_all_cookies_webdriver"sv, "not running a WebDriver cookie command"sv);
+        return Vector<HTTP::Cookie::Cookie> {};
+    }
+    // NB: Only the internals object of a test asks for the cookies of a partition. WebDriver asks for the unpartitioned
+    //     cookies of the document its command is for.
+    if (partition_context.has_value() && Application::web_content_options().is_test_mode != IsTestMode::Yes) {
+        did_misbehave("did_request_all_cookies_webdriver"sv, "partition context outside of a test"sv);
+        return Vector<HTTP::Cookie::Cookie> {};
+    }
+    return m_session->cookie_jar->get_all_cookies_webdriver(url, partition_context);
+}
+
+Messages::WebContentClient::DidRequestAllCookiesCookiestoreResponse WebContentClient::did_request_all_cookies_cookiestore(Web::PageId page_id, Web::HTML::EnvironmentId environment_id, URL::URL url)
+{
+    if (auto* page = this->page(page_id))
+        return page->did_request_all_cookies_cookiestore(environment_id, move(url));
+
+    return Vector<HTTP::Cookie::Cookie> {};
+}
+
+Messages::WebContentClient::DidRequestNotificationsStateForTestingResponse WebContentClient::did_request_notifications_state_for_testing(Web::PageId page_id)
+{
+    if (auto* recording_backend = NotificationManager::the().backend().as_recording_backend())
+        return recording_backend->state_json(page_id, NotificationManager::the().ids_without_a_page_for_testing(page_id));
+    return "{}"_string;
+}
+
+Messages::WebContentClient::DidRequestNamedCookieResponse WebContentClient::did_request_named_cookie(URL::URL url, String name)
+{
+    if (auto access = http_cookie_access_for(url); access != HTTPCookieAccess::Allowed) {
+        if (access == HTTPCookieAccess::Refused)
+            did_misbehave("did_request_named_cookie"sv, "not running a WebDriver cookie command"sv);
+        return Optional<HTTP::Cookie::Cookie> {};
+    }
+
+    return m_session->cookie_jar->get_named_cookie(url, name);
+}
+
+Messages::WebContentClient::DidRequestCookieResponse WebContentClient::did_request_cookie(Web::PageId page_id, Optional<Web::HTML::EnvironmentId> environment_id, URL::URL url, HTTP::Cookie::Source source)
+{
+    if (auto access = source == HTTP::Cookie::Source::Http ? http_cookie_access_for(url) : HTTPCookieAccess::Allowed; access != HTTPCookieAccess::Allowed) {
+        if (access == HTTPCookieAccess::Refused)
+            did_misbehave("did_request_cookie"sv, "HTTP cookie source"sv);
+        return HTTP::Cookie::VersionedCookie {};
+    }
+
+    if (auto* page = this->page(page_id))
+        return page->did_request_cookie(environment_id, move(url), source);
+
+    // A spare process can request cookies for its initial page before a view adopts it. No document of that page is
+    // known here, so only a request with the HTTP source is answered.
+    if (m_unassigned_initial_page_id != page_id || source != HTTP::Cookie::Source::Http)
+        return HTTP::Cookie::VersionedCookie {};
+
+    HTTP::Cookie::VersionedCookie cookie;
+    cookie.cookie = m_session->cookie_jar->get_cookie(url, source, {}, HTTP::Cookie::SameSiteContext::same_site());
+    return cookie;
+}
+
+Messages::WebContentClient::DidRequestStorageUsageResponse WebContentClient::did_request_storage_usage(Web::PageId page_id, Web::HTML::EnvironmentId environment_id)
+{
+    if (auto* page = this->page(page_id))
+        return page->did_request_storage_usage(move(environment_id));
+
+    return 0u;
+}
+
+Messages::WebContentClient::ConnectToStorageAreaResponse WebContentClient::connect_to_storage_area(Web::PageId page_id, Web::StorageAPI::StorageEndpointType storage_endpoint, Web::HTML::EnvironmentId environment_id)
+{
+    if (auto* page = this->page(page_id))
+        return page->connect_to_storage_area(storage_endpoint, move(environment_id));
+
+    // A closed page has no storage to connect to; the mirror stays detached.
+    return { {}, {}, {}, 0 };
+}
+
+void WebContentClient::disconnect_from_storage_area(Web::StorageAPI::StorageAreaId area_id)
+{
+    StorageAreaRegistry::the().disconnect(*this, area_id);
+}
+
+void WebContentClient::set_storage_item(Web::StorageAPI::StorageAreaId area_id, Utf16String key, Utf16String value, String url)
+{
+    StorageAreaRegistry::the().set_item(*this, area_id, key, value, url);
+}
+
+void WebContentClient::remove_storage_item(Web::StorageAPI::StorageAreaId area_id, Utf16String key, String url)
+{
+    StorageAreaRegistry::the().remove_item(*this, area_id, key, url);
+}
+
+void WebContentClient::clear_storage_area(Web::StorageAPI::StorageAreaId area_id, String url)
+{
+    StorageAreaRegistry::the().clear(*this, area_id, url);
+}
+
+static void split_items(Vector<StorageItem> const& items, Vector<Utf16String>& keys, Vector<Utf16String>& values)
+{
+    keys.ensure_capacity(items.size());
+    values.ensure_capacity(items.size());
+    for (auto const& item : items) {
+        keys.unchecked_append(item.key);
+        values.unchecked_append(item.value);
+    }
+}
+
+void WebContentClient::storage_area_changed(Web::StorageAPI::StorageAreaId area_id, Optional<Utf16String> const& key, Optional<Utf16String> const& old_value, Optional<Utf16String> const& new_value, String const& url)
+{
+    async_storage_area_changed(area_id, key, old_value, new_value, url);
+}
+
+void WebContentClient::storage_area_write_acknowledged(Web::StorageAPI::StorageAreaId area_id)
+{
+    async_storage_area_write_acknowledged(area_id);
+}
+
+void WebContentClient::storage_area_write_refused(Web::StorageAPI::StorageAreaId area_id, Vector<StorageItem> items)
+{
+    Vector<Utf16String> keys;
+    Vector<Utf16String> values;
+    split_items(items, keys, values);
+    async_storage_area_write_refused(area_id, move(keys), move(values));
+}
+
+void WebContentClient::storage_area_reset(Web::StorageAPI::StorageAreaId area_id, Vector<StorageItem> items)
+{
+    Vector<Utf16String> keys;
+    Vector<Utf16String> values;
+    split_items(items, keys, values);
+    async_storage_area_reset(area_id, move(keys), move(values));
+}
+
+Messages::WebContentClient::DidStartDownloadWithoutRequestResponse WebContentClient::did_start_download_without_request(Web::PageId page_id, URL::URL url, ByteString suggested_filename, Optional<u64> total_size)
+{
+    if (auto* page = this->page(page_id))
+        return page->did_start_download_without_request(move(url), move(suggested_filename), total_size);
+
+    return Optional<u64> {};
+}
+
+Messages::WebContentClient::DidStartDownloadResponse WebContentClient::did_start_download(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id, Optional<Utf16String> navigation_id, URL::URL url, ByteString suggested_filename, Optional<u64> total_size, HTTP::Cookie::SameSiteContext same_site_context, int request_server_client_id, u64 request_server_request_id, ByteBuffer initial_data, JsonValue network_response)
+{
+    if (auto* page = this->page(page_id))
+        return page->did_start_download(navigable_id, move(navigation_id), move(url), move(suggested_filename), total_size, same_site_context, request_server_client_id, request_server_request_id, move(initial_data), move(network_response));
+
+    return Optional<u64> {};
+}
+
+Messages::WebContentClient::DidRequestNewWebViewResponse WebContentClient::did_request_new_web_view(Web::PageId page_id, Web::HTML::ActivateTab activate_tab, Web::HTML::WebViewHints hints, Web::HTML::CrossProcessId current_navigable_id, Utf16String name, bool no_opener, Optional<URL::URL> current_document_base_url)
+{
+    if (auto* page = this->page(page_id))
+        return page->did_request_new_web_view(activate_tab, hints, current_navigable_id, move(name), no_opener, move(current_document_base_url));
+
+    return { Optional<Web::PageId> {}, Optional<Web::HTML::CrossProcessId> {}, Optional<Web::HTML::SessionHistoryEntryDescriptor> {}, Optional<Web::HTML::EnvironmentId> {}, Optional<Web::HTML::CrossProcessId> {}, Optional<u64> {}, Web::HTML::WindowType::ExistingOrNone, Web::HTML::VisibilityState::Hidden, String {} };
+}
+
+Messages::WebContentClient::StartWorkerAgentResponse WebContentClient::start_worker_agent(Web::PageId page_id, Web::HTML::WorkerAgentStartRequest request)
+{
+    if (auto* page = this->page(page_id))
+        return page->start_worker_agent(move(request));
+
+    return { Web::HTML::WorkerAgentId {}, Optional<IPC::TransportHandle> {}, false };
+}
+
+void WebContentClient::register_dedicated_worker(Web::PageId page_id, Web::HTML::WorkerAgentStartRequest request, IPC::TransportHandle worker_transport)
+{
+    if (auto* page = this->page(page_id))
+        page->register_dedicated_worker(move(request), move(worker_transport));
+}
+
+void WebContentClient::did_close_browsing_context(Web::PageId page_id)
+{
+    if (auto* page = this->page(page_id)) {
+        page->did_close_browsing_context();
+        return;
+    }
+
+    auto* page = find_page(page_id);
+    if (!page)
+        return;
+    page->set_detached_close_pending(false);
+    release_unneeded_representing_pages();
+    close_server_if_unused();
+}
+
+void WebContentClient::did_update_cookie(HTTP::Cookie::Cookie cookie)
+{
+    if (Application::web_content_options().is_test_mode == IsTestMode::Yes) {
+        m_session->cookie_jar->update_cookie(move(cookie));
+        return;
+    }
+
+    // NB: WebDriver's Delete Cookie expires the cookies of the document its cookie command is for, which it got from
+    //     the cookie jar. So the browser expires its own copy of the cookie, and the renderer changes nothing else.
+    auto command_url = url_of_webdriver_cookie_command_running_in(*this);
+    if (!command_url.has_value()) {
+        did_misbehave("did_update_cookie"sv, "not running a WebDriver cookie command"sv);
+        return;
+    }
+
+    // NB: A cookie of the document can expire, and leave the cookie jar, before the renderer asks to expire it.
+    for (auto existing : m_session->cookie_jar->get_all_cookies_webdriver(*command_url)) {
+        if (existing.name != cookie.name || existing.domain != cookie.domain || existing.path != cookie.path
+            || existing.host_only != cookie.host_only || existing.partition_key != cookie.partition_key)
+            continue;
+        existing.expiry_time = UnixDateTime::earliest();
+        m_session->cookie_jar->update_cookie(move(existing));
+        return;
+    }
+}
+
+Messages::WebContentClient::DidIsKnownHstsHostResponse WebContentClient::did_is_known_hsts_host(String domain)
+{
+    return m_session->hsts_store->is_known_hsts_host(domain);
+}
+
+Messages::WebContentClient::DidLoseRequestServerConnectionResponse WebContentClient::did_lose_request_server_connection(Optional<Utf16String> top_level_site)
+{
+    bool navigation_authorized = false;
+    if (top_level_site.has_value() && !m_request_server_site_bindings.client_id_for(top_level_site).has_value()) {
+        ViewImplementation::for_each_view([&](ViewImplementation& view) {
+            if (!view.has_traversable())
+                return IterationDecision::Continue;
+            auto& traversable = view.traversable();
+            auto navigation = traversable.uncommitted_navigation();
+            if (navigation && navigation->state.has<CanonicalNavigation::CreatingNavigationParams>()
+                && navigation->worker() && &navigation->worker()->client() == this
+                && URL::Site::serialize_for_partitioning(navigation->url.origin()) == *top_level_site)
+                navigation_authorized = true;
+            if (traversable.client_populates_a_history_entry_for_site(*this, *top_level_site))
+                navigation_authorized = true;
+            return navigation_authorized ? IterationDecision::Break : IterationDecision::Continue;
+        });
+    }
+    if (!m_request_server_site_bindings.client_id_for(top_level_site).has_value() && !navigation_authorized) {
+        did_misbehave("did_lose_request_server_connection"sv, "site has neither an existing client nor an authorized navigation"sv);
+        return OptionalNone {};
+    }
+
+    auto connection = m_request_server_site_bindings.replace_client(top_level_site, navigation_authorized);
+    if (connection.is_error()) {
+        warnln("Unable to connect a replacement RequestServer client: {}", connection.error());
+        return OptionalNone {};
+    }
+    return move(connection.value().handle);
+}
+
+Messages::WebContentClient::RequestMediaServerConnectionResponse WebContentClient::request_media_server_connection()
+{
+    auto connection = connect_new_media_server_client(m_media_server_client, child_id(), is_private(), [weak_self = make_weak_ptr<WebContentClient>()]() -> ErrorOr<IPC::TransportHandle> {
+        auto self = weak_self.strong_ref();
+        if (!self)
+            return Error::from_string_literal("The WebContent process is gone");
+        return self->connect_audio_server_client();
+    });
+    if (connection.is_error()) {
+        warnln("Unable to connect a MediaServer client: {}", connection.error());
+        return OptionalNone {};
+    }
+    m_media_server_client_id = connection.value().client_id;
+    return move(connection.value().handle);
+}
+
+void WebContentClient::request_video_presentation_channel()
+{
+    if (!m_media_server_client || !m_media_server_client->is_open() || !m_media_server_client_id.has_value()) {
+        dbgln("WebContentClient: Process {} asked for a video presentation channel before connecting a media server", pid());
+        return;
+    }
+
+    auto channel = IPC::TransportHandle::create_pair();
+    if (channel.is_error()) {
+        warnln("Unable to create a video presentation channel: {}", channel.error());
+        return;
+    }
+    if (!Application::the().connect_video_presentation_to_compositor(*this, move(channel.value().first)))
+        return;
+    m_media_server_client->async_connect_video_presentation_channel(*m_media_server_client_id, move(channel.value().second));
+}
+
+ErrorOr<IPC::TransportHandle> WebContentClient::connect_audio_server_client()
+{
+    // The server must know of the permission and the authorizations before any client gets its connection. A failed
+    // request can reveal that the existing server has died, so the connection is tried once more, letting a closed
+    // controller be replaced and initialized first.
+    auto connect = [this]() -> ErrorOr<IPC::TransportHandle> {
+        TRY(ensure_audio_server_controller());
+        return connect_new_audio_server_client(*m_audio_server_client, m_audio_tab_id);
+    };
+    auto handle = connect();
+    if (handle.is_error())
+        handle = connect();
+    return handle;
+}
+
+ErrorOr<void> WebContentClient::ensure_audio_server_controller()
+{
+    auto* previous_controller = m_audio_server_client.ptr();
+    TRY(ensure_audio_server_is_running(m_audio_server_client, child_id(), is_private()));
+    if (m_audio_server_client.ptr() == previous_controller)
+        return {};
+    // A server that isn't told everything gets no clients; the next attempt starts over with another.
+    if (auto result = initialize_audio_server_controller(); result.is_error()) {
+        m_audio_server_client->shutdown();
+        return result.release_error();
+    }
+    return {};
+}
+
+ErrorOr<void> WebContentClient::initialize_audio_server_controller()
+{
+    m_audio_server_client->on_capture_requested = [weak_self = make_weak_ptr<WebContentClient>()](u64 tab_id, u64 request_id, ByteString const&, Audio::PlaybackGroupId group) {
+        auto self = weak_self.strong_ref();
+        if (self && tab_id == self->m_audio_tab_id)
+            self->decide_audio_capture_request(request_id, group);
+    };
+    m_audio_server_activity.watch(
+        *m_audio_server_client,
+        [weak_self = make_weak_ptr<WebContentClient>()](u64 tab_id, Audio::PlaybackGroupId group, Audio::Audibility audibility) {
+            auto self = weak_self.strong_ref();
+            if (!self || tab_id != self->m_audio_tab_id)
+                return false;
+            // A report of sound can trail the revocation of the page's authorization.
+            return audibility == Audio::Audibility::Inaudible || self->m_authorized_audio_playback_groups.contains(group);
+        },
+        [weak_self = make_weak_ptr<WebContentClient>()](u64 tab_id) {
+            auto self = weak_self.strong_ref();
+            return self && tab_id == self->m_audio_tab_id;
+        });
+    if (m_audio_capture_permitted)
+        TRY(tell_audio_server_of_capture_permission());
+    // A muted group is never heard: the mutes land before the authorizations.
+    for (auto group : m_muted_audio_playback_groups)
+        m_audio_server_client->async_mute_playback_group(m_audio_tab_id, group);
+    for (auto group : m_authorized_audio_playback_groups)
+        TRY(tell_audio_server_of_playback_authorization(group));
+    return {};
+}
+
+String WebContentClient::audio_capture_permission_key(URL::URL const& url)
+{
+    // A file:// page has a new opaque origin at every look, so the permission is keyed on the file itself.
+    if (auto origin = url.origin(); !origin.is_opaque())
+        return origin.serialize();
+    return url.serialize(URL::ExcludeFragment::Yes);
+}
+
+ErrorOr<void> WebContentClient::grant_audio_capture_to_file(URL::URL const& url)
+{
+    m_audio_capture_grants.set(audio_capture_permission_key(url));
+    m_audio_capture_permitted = audio_capture_permitted();
+    if (!m_audio_capture_permitted)
+        return {};
+    TRY(ensure_audio_server_controller());
+    return tell_audio_server_of_capture_permission();
+}
+
+void WebContentClient::update_audio_capture_permission()
+{
+    // A page that comes to permit capture, or stops, can take over a stream labelled for no permitting page.
+    update_audio_capture_indicators();
+
+    auto permitted = audio_capture_permitted();
+    if (permitted == m_audio_capture_permitted)
+        return;
+    m_audio_capture_permitted = permitted;
+    if (!m_audio_server_client || !m_audio_server_client->is_open())
+        return;
+    if (auto result = tell_audio_server_of_capture_permission(); result.is_error())
+        warnln("Unable to update the AudioServer's capture permission: {}", result.error());
+}
+
+void WebContentClient::add_permission_origin(URL::Origin const& origin)
+{
+    if (!origin.is_opaque() && !m_permission_origins.contains_slow(origin))
+        m_permission_origins.append(origin);
+}
+
+// A process may learn the permissions only of a site it shows; asking about any other is refused, and gets just the
+// defaults.
+Messages::WebContentClient::DidRequestPermissionSnapshotResponse WebContentClient::did_request_permission_snapshot(Web::PageId, URL::Origin top_level_origin)
+{
+    auto& manager = *session().permission_manager;
+    auto shows_site = false;
+    for (auto const& it : m_pages) {
+        if (it.value->is_open() && it.value->hosts_a_document_with_top_level_origin(top_level_origin)) {
+            shows_site = true;
+            break;
+        }
+    }
+    if (shows_site)
+        add_permission_origin(top_level_origin);
+    return manager.snapshot_for(m_permission_origins);
+}
+
+bool WebContentClient::page_may_capture_audio(WebContentPage const& page) const
+{
+    // A new page has no view until the chrome makes one, and replacing a window can get here before that.
+    auto view = page.traversable().view();
+    if (!view.has_value())
+        return false;
+
+    // A window that is part of a tab has the tab's grant, whichever document its process has it show.
+    auto tab_view = view->tab_view();
+    if (!tab_view.has_value())
+        return false;
+
+    // The top-level document's origin, which a popup on about:blank has from its opener; only a file page is left with
+    // an opaque one, and reads its own grant by URL.
+    auto origin = tab_view->permission_origin();
+    if (origin.is_opaque()) {
+        // NB: The global default binds a file: page too; its own grant only matters while sites may ask.
+        if (session().permission_manager->global_default(Web::Permissions::PermissionName::Microphone) == Web::Permissions::EffectiveState::Denied)
+            return false;
+        return m_audio_capture_grants.contains(audio_capture_permission_key(tab_view->url()));
+    }
+    return session().permission_manager->effective_state(Web::Permissions::PermissionName::Microphone, origin) == Web::Permissions::EffectiveState::Granted;
+}
+
+// A tab's grant reaches only the documents whose permissions policy allows them the microphone. A window that is part of
+// the tab is held to the document it acts for too, or an iframe could get past its policy by opening a window.
+bool WebContentClient::page_permits_audio_capture(WebContentPage const& page) const
+{
+    if (!page.is_open() || !page_may_capture_audio(page))
+        return false;
+
+    auto microphone = Web::PermissionsPolicy::PolicyControlledFeature::Microphone;
+    if (auto const* owner_document = page.view().owner_document(); owner_document && !owner_document->is_allowed_to_use(microphone))
+        return false;
+    return page.hosts_a_document_allowed_to_use(microphone);
+}
+
+// The process may capture if it hosts a page that permits it, as it can act for any document it hosts.
+WebContentPage* WebContentClient::page_permitting_audio_capture() const
+{
+    for (auto const& it : m_pages) {
+        if (page_permits_audio_capture(*it.value))
+            return it.value.ptr();
+    }
+    return nullptr;
+}
+
+// WebContent derives the group of a page's sound from the page's ID too.
+static Audio::PlaybackGroupId audio_playback_group(Web::PageId page_id)
+{
+    return Audio::PlaybackGroupId { page_id.value() };
+}
+
+static Web::PageId page_id_of_audio_playback_group(Audio::PlaybackGroupId group)
+{
+    return Web::PageId { group.value() };
+}
+
+void WebContentClient::decide_audio_capture_request(u64 request_id, Audio::PlaybackGroupId group)
+{
+    auto* page = page_permitting_audio_capture();
+    if (!page) {
+        send_audio_capture_decision(request_id, false);
+        return;
+    }
+
+    // The renderer names the page it captures for, so the name only says where the user hears of a refusal, and only
+    // for a page that permits capture.
+    if (auto* named_page = this->page(page_id_of_audio_playback_group(group)); named_page && page_permits_audio_capture(*named_page))
+        page = named_page;
+
+    // A page that permits capture is part of a tab, which is where the user hears of the answer.
+    auto tab_view = page->view().tab_view();
+
+    // Only a site the user allowed gets the system to ask the user, if it never has.
+    tab_view->ensure_microphone_authorization([weak_self = make_weak_ptr<WebContentClient>(), request_id](bool authorized) {
+        auto self = weak_self.strong_ref();
+        if (!self || !self->m_audio_server_client || !self->m_audio_server_client->is_open())
+            return;
+        // The user may have taken the permission away while the system asked.
+        self->send_audio_capture_decision(request_id, authorized && self->audio_capture_permitted());
+    });
+}
+
+void WebContentClient::send_audio_capture_decision(u64 request_id, bool allowed)
+{
+    ++m_audio_capture_decision_count;
+    if (!allowed)
+        ++m_audio_capture_refusal_count;
+    m_audio_server_client->async_capture_decided(request_id, allowed);
+}
+
+// The AudioServer counts every capture stream of the process, but the renderer labels them, so a label counts only for a
+// page that permits capture. A stream with any other label is shown on every such page, as the process could be
+// capturing for any of them.
+void WebContentClient::update_audio_capture_indicators()
+{
+    HashTable<Web::PageId> labelled_pages;
+    auto shown_on_every_permitting_page = false;
+    for (auto group : m_audio_server_activity.capturing_groups()) {
+        if (auto* page = this->page(page_id_of_audio_playback_group(group)); page && page_permits_audio_capture(*page))
+            labelled_pages.set(page->id());
+        else
+            shown_on_every_permitting_page = true;
+    }
+
+    for (auto const& [page_id, page] : m_pages) {
+        auto capturing = labelled_pages.contains(page_id) || (shown_on_every_permitting_page && page_permits_audio_capture(*page));
+        page->set_capturing_audio(capturing);
+    }
+}
+
+void WebContentClient::report_audio_capture_for_testing(Web::PageId labelled_page_id, bool capturing)
+{
+    m_audio_server_activity.set_capturing_for_testing(audio_playback_group(labelled_page_id), capturing);
+}
+
+ErrorOr<void> WebContentClient::tell_audio_server_of_capture_permission()
+{
+    auto response = send_sync_to_helper<Messages::AudioServerControl::SetCapturePermission>(*m_audio_server_client, m_audio_tab_id, m_audio_capture_permitted);
+    if (!response)
+        return Error::from_string_literal("Failed to tell the AudioServer of the capture permission");
+    return {};
+}
+
+void WebContentClient::did_change_audio_playback_audibility(Audio::PlaybackGroupId group, Audio::Audibility audibility)
+{
+    if (auto page = m_pages.get(page_id_of_audio_playback_group(group)); page.has_value())
+        page.value()->set_audibility(audibility);
+}
+
+void WebContentClient::authorize_audio_playback(Web::PageId page_id)
+{
+    auto group = audio_playback_group(page_id);
+    if (m_authorized_audio_playback_groups.set(group) != HashSetResult::InsertedNewEntry)
+        return;
+    // An AudioServer launched later hears of the group before it connects a client.
+    if (!m_audio_server_client || !m_audio_server_client->is_open())
+        return;
+    if (auto result = tell_audio_server_of_playback_authorization(group); result.is_error())
+        warnln("Unable to authorize audio playback: {}", result.error());
+}
+
+void WebContentClient::revoke_audio_playback(Web::PageId page_id)
+{
+    auto group = audio_playback_group(page_id);
+    if (!m_authorized_audio_playback_groups.remove(group))
+        return;
+    if (m_audio_server_client && m_audio_server_client->is_open())
+        m_audio_server_client->async_revoke_playback_group(m_audio_tab_id, group);
+    m_audio_server_activity.forget_audibility(group);
+}
+
+void WebContentClient::set_audio_playback_mute_state(Web::PageId page_id, Web::HTML::MuteState mute_state)
+{
+    auto group = audio_playback_group(page_id);
+    switch (mute_state) {
+    case Web::HTML::MuteState::Muted:
+        if (m_muted_audio_playback_groups.set(group) != HashSetResult::InsertedNewEntry)
+            return;
+        if (m_audio_server_client && m_audio_server_client->is_open())
+            m_audio_server_client->async_mute_playback_group(m_audio_tab_id, group);
+        break;
+    case Web::HTML::MuteState::Unmuted:
+        if (!m_muted_audio_playback_groups.remove(group))
+            return;
+        if (m_audio_server_client && m_audio_server_client->is_open())
+            m_audio_server_client->async_unmute_playback_group(m_audio_tab_id, group);
+        break;
+    }
+}
+
+void WebContentClient::forget_audio_playback(Web::PageId page_id)
+{
+    revoke_audio_playback(page_id);
+    set_audio_playback_mute_state(page_id, Web::HTML::MuteState::Unmuted);
+}
+
+ErrorOr<void> WebContentClient::tell_audio_server_of_playback_authorization(Audio::PlaybackGroupId group)
+{
+    auto response = send_sync_to_helper<Messages::AudioServerControl::AuthorizePlaybackGroup>(*m_audio_server_client, m_audio_tab_id, group);
+    if (!response)
+        return Error::from_string_literal("Failed to tell the AudioServer of a playback authorization");
+    return {};
+}
+
+Messages::WebContentClient::RequestAudioServerConnectionResponse WebContentClient::request_audio_server_connection()
+{
+    auto handle = connect_audio_server_client();
+    if (handle.is_error()) {
+        warnln("Unable to connect an AudioServer client: {}", handle.error());
+        return OptionalNone {};
+    }
+    return handle.release_value();
+}
+
+Messages::WebContentClient::RequestWebrtcClientConnectionResponse WebContentClient::request_webrtc_client_connection()
+{
+    // A renderer asks again whenever its helper dies, so a helper that keeps crashing, or a renderer that keeps asking,
+    // would otherwise have us spawn processes in a loop.
+    static constexpr size_t MAX_WEBRTC_CLIENT_LAUNCHES_PER_MINUTE = 5;
+    auto now = MonotonicTime::now_coarse();
+    m_webrtc_client_launch_times.remove_all_matching([&](auto launch_time) { return now - launch_time >= AK::Duration::from_seconds(60); });
+    if (m_webrtc_client_launch_times.size() >= MAX_WEBRTC_CLIENT_LAUNCHES_PER_MINUTE) {
+        warnln("Not launching another WebRTCClient for WebContent {}: it had {} in the last minute", child_id(), m_webrtc_client_launch_times.size());
+        return OptionalNone {};
+    }
+    m_webrtc_client_launch_times.append(now);
+
+    auto handle = launch_webrtc_client_process(*this);
+    if (handle.is_error()) {
+        warnln("Unable to launch a WebRTCClient: {}", handle.error());
+        return OptionalNone {};
+    }
+    return handle.release_value();
+}
+
+void WebContentClient::did_host_document_of_site(Utf16String site)
+{
+    if (m_has_hosted_documents_of_several_sites)
+        return;
+    if (m_site_of_hosted_documents.has_value() && *m_site_of_hosted_documents != site) {
+        m_has_hosted_documents_of_several_sites = true;
+        m_site_of_hosted_documents.clear();
+        // Only the processes of one site may share a decoder, so this one asks for its own when it next needs one.
+        if (ImageDecoderManager::the().remove_client_from_decoder_of_site(child_id()))
+            async_disconnect_from_image_decoder();
+        return;
+    }
+    m_site_of_hosted_documents = move(site);
+}
+
+Optional<IPC::TransportHandle> WebContentClient::connect_new_image_decoder_client(Optional<u64>& client_generation)
+{
+    return ImageDecoderManager::the().connect_requesting_process(child_id(), m_session, m_site_of_hosted_documents, client_generation);
+}
+
+Messages::WebContentClient::RequestImageDecoderConnectionResponse WebContentClient::request_image_decoder_connection()
+{
+    return connect_new_image_decoder_client(m_image_decoder_client_generation);
+}
+
+void WebContentClient::did_release_image_decoder()
+{
+    if (auto generation = exchange(m_image_decoder_client_generation, {}); generation.has_value())
+        ImageDecoderManager::the().process_did_release_decoder(child_id(), *generation);
+}
+
+Vector<u64> WebContentClient::performance_owners() const
+{
+    Vector<u64> owners;
+    for (auto const& it : m_pages) {
+        auto const& page = it.value;
+        if (!page->is_open())
+            continue;
+        auto const& view = page->view();
+        auto owner = view.owner_view_id().value_or(view.view_id());
+        if (!owners.contains_slow(owner))
+            owners.append(owner);
+    }
+    return owners;
+}
+
+Optional<u64> WebContentClient::exclusive_performance_owner() const
+{
+    auto owners = performance_owners();
+    if (owners.size() != 1)
+        return {};
+    return owners.first();
+}
+
+}

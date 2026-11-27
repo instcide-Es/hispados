@@ -1,0 +1,285 @@
+/*
+ * Copyright (c) 2022-2023, Linus Groh <linusg@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibGC/Heap.h>
+#include <LibJS/Runtime/VM.h>
+#include <LibWeb/DOMURL/DOMURL.h>
+#include <LibWeb/Fetch/BodyInit.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/Bodies.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/MIME.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/Responses.h>
+#include <LibWeb/Fetch/Response.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/Infra/JSON.h>
+#include <LibWebCommon/Fetch/Infrastructure/HTTP/Statuses.h>
+
+namespace Web::Fetch {
+
+GC_DEFINE_ALLOCATOR(Response);
+
+static Bindings::ResponseType response_type_to_bindings(Infrastructure::Response::Type type)
+{
+    return static_cast<Bindings::ResponseType>(type);
+}
+
+Response::Response(GC::Ref<Infrastructure::ResponseView> response)
+    : m_response(response)
+{
+}
+
+Response::~Response() = default;
+
+void Response::visit_edges(GC::Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_response);
+    visitor.visit(m_headers);
+}
+
+// https://fetch.spec.whatwg.org/#concept-body-mime-type
+// https://fetch.spec.whatwg.org/#ref-for-concept-header-extract-mime-type%E2%91%A7
+Optional<MimeSniff::MimeType> Response::mime_type_impl() const
+{
+    // Objects including the Body interface mixin need to define an associated MIME type algorithm which takes no arguments and returns failure or a MIME type.
+    // A Response object’s MIME type is to return the result of extracting a MIME type from its response’s header list.
+    return Infrastructure::extract_mime_type(m_response->header_list());
+}
+
+// https://fetch.spec.whatwg.org/#concept-body-body
+// https://fetch.spec.whatwg.org/#ref-for-concept-body-body%E2%91%A8
+GC::Ptr<Infrastructure::Body const> Response::body_impl() const
+{
+    // Objects including the Body interface mixin have an associated body (null or a body).
+    // A Response object’s body is its response’s body.
+    return m_response->body() ? m_response->body() : nullptr;
+}
+
+// https://fetch.spec.whatwg.org/#concept-body-body
+// https://fetch.spec.whatwg.org/#ref-for-concept-body-body%E2%91%A8
+GC::Ptr<Infrastructure::Body> Response::body_impl()
+{
+    // Objects including the Body interface mixin have an associated body (null or a body).
+    // A Response object’s body is its response’s body.
+    return m_response->body() ? m_response->body() : nullptr;
+}
+
+// https://fetch.spec.whatwg.org/#response-create
+GC::Ref<Response> Response::create(GC::Ref<Infrastructure::ResponseView> response)
+{
+    return GC::Heap::the().allocate<Response>(response);
+}
+
+GC::Ref<Response> Response::create(GC::Ref<Infrastructure::ResponseView> response, Headers::Guard guard)
+{
+    // 1. Let responseObject be a new Response object with realm.
+    // 2. Set responseObject’s response to response.
+    auto response_object = create(response);
+
+    // 3. Set responseObject’s headers to a new Headers object with realm, whose headers list is response’s headers list and guard is guard.
+    response_object->m_headers = Headers::create(response->header_list());
+    response_object->m_headers->set_guard(guard);
+
+    // 4. Return responseObject.
+    return response_object;
+}
+
+// https://httpwg.org/specs/rfc9112.html#status.line
+static bool is_valid_status_text(String const& status_text)
+{
+    // A status text is valid if it is either the empty string or matches the reason-phrase token production.
+    // reason-phrase  = 1*( HTAB / SP / VCHAR / obs-text )
+    // VCHAR          = %x21-7E
+    // obs-text       = %x80-FF
+    return all_of(status_text.code_points(), [](auto c) {
+        return c == '\t' || c == ' ' || (c >= 0x21 && c <= 0x7E) || (c >= 0x80 && c <= 0xFF);
+    });
+}
+
+// https://fetch.spec.whatwg.org/#initialize-a-response
+// NB: This initializes a new response before the Response object holding it is created, so the object's response is
+//     complete from the start. Nothing can observe the order.
+WebIDL::ExceptionOr<GC::Ref<Response>> Response::create_with_body(ResponseInit const& init, Optional<Infrastructure::BodyWithType> const& body)
+{
+    auto response = Infrastructure::Response::create();
+    auto headers = Headers::create(response->header_list());
+    headers->set_guard(Headers::Guard::Response);
+
+    // 1. If init["status"] is not in the range 200 to 599, inclusive, then throw a RangeError.
+    if (init.status < 200 || init.status > 599)
+        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::RangeError, "Status must be in range 200-599"_utf16 };
+
+    // 2. If init["statusText"] is not the empty string and does not match the reason-phrase token production, then throw a TypeError.
+    if (!is_valid_status_text(init.status_text))
+        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Invalid statusText: does not match the reason-phrase token production"_utf16 };
+
+    // 3. Set response’s response’s status to init["status"].
+    response->set_status(init.status);
+
+    // 4. Set response’s response’s status message to init["statusText"].
+    response->set_status_message(init.status_text.to_byte_string());
+
+    // 5. If init["headers"] exists, then fill response’s headers with init["headers"].
+    if (init.headers.has_value())
+        TRY(headers->fill(*init.headers));
+
+    // 6. If body was given, then:
+    if (body.has_value()) {
+        // 1. If response’s status is a null body status, then throw a TypeError.
+        if (Infrastructure::is_null_body_status(response->status()))
+            return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Response with null body status cannot have a body"_utf16 };
+
+        // 2. Set response’s body to body’s body.
+        response->set_body(Infrastructure::ResponseBody::from_fetch_body(body->body->fetch_body()));
+
+        // 3. If body’s type is non-null and response’s header list does not contain `Content-Type`, then append (`Content-Type`, body’s type) to response’s header list.
+        if (body->type.has_value() && !response->header_list()->contains("Content-Type"sv))
+            response->header_list()->append(HTTP::Header::isomorphic_encode("Content-Type"sv, *body->type));
+    }
+
+    auto body_view = body.has_value() ? GC::Ptr<Infrastructure::Body> { body->body } : nullptr;
+    auto response_object = create(Infrastructure::ResponseView::create(response, body_view));
+    response_object->m_headers = headers;
+    return response_object;
+}
+
+// https://fetch.spec.whatwg.org/#dom-response-error
+GC::Ref<Response> Response::error()
+{
+    // The static error() method steps are to return the result of creating a Response object, given a new network error, "immutable", and this’s relevant Realm.
+    // FIXME: How can we reliably get 'this', i.e. the object the function was called on, in IDL-defined functions?
+    return Response::create(Infrastructure::ResponseView::network_error("Response created via `Response.error()`"_string), Headers::Guard::Immutable);
+}
+
+// https://fetch.spec.whatwg.org/#dom-response-redirect
+WebIDL::ExceptionOr<GC::Ref<Response>> Response::redirect(Utf16String const& url, u16 status)
+{
+    // 1. Let parsedURL be the result of parsing url with current settings object’s API base URL.
+    auto api_base_url = HTML::current_settings_object().api_base_url();
+    auto parsed_url = DOMURL::parse(url.utf16_view(), api_base_url);
+
+    // 2. If parsedURL is failure, then throw a TypeError.
+    if (!parsed_url.has_value())
+        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Redirect URL is not valid"_utf16 };
+
+    // 3. If status is not a redirect status, then throw a RangeError.
+    if (!Infrastructure::is_redirect_status(status))
+        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::RangeError, "Status must be one of 301, 302, 303, 307, or 308"_utf16 };
+
+    // NB: Step 4 runs after steps 5 to 7, so the Response object's response is complete when it is created. Nothing
+    //     can observe the order.
+    auto response = Infrastructure::Response::create();
+
+    // 5. Set responseObject’s response’s status to status.
+    response->set_status(status);
+
+    // 6. Let value be parsedURL, serialized and isomorphic encoded.
+    auto value = parsed_url->serialize();
+
+    // 7. Append (`Location`, value) to responseObject’s response’s header list.
+    auto header = HTTP::Header::isomorphic_encode("Location"sv, value);
+    response->header_list()->append(move(header));
+
+    // 4. Let responseObject be the result of creating a Response object, given a new response, "immutable", and the current realm.
+    auto response_object = Response::create(Infrastructure::ResponseView::create(response, nullptr), Headers::Guard::Immutable);
+
+    // 8. Return responseObject.
+    return response_object;
+}
+
+WebIDL::ExceptionOr<GC::Ref<Response>> Response::create_for_constructor(JS::Object& relevant_global_object, NullableBodyInit const& body, ResponseInit const& init)
+{
+    auto& realm = HTML::relevant_realm(relevant_global_object);
+
+    Optional<Infrastructure::BodyWithType> body_with_type;
+    if (!body.has<Empty>())
+        body_with_type = TRY(extract_body(realm, body.downcast<BodyInit>()));
+
+    return create_with_body(init, body_with_type);
+}
+
+// https://fetch.spec.whatwg.org/#dom-response-json
+WebIDL::ExceptionOr<GC::Ref<Response>> Response::json(JS::Realm& realm, JS::Value data, ResponseInit const& init)
+{
+    // 1. Let bytes the result of running serialize a JavaScript value to JSON bytes on data.
+    auto bytes = TRY(Infra::serialize_javascript_value_to_json_bytes(realm, data));
+
+    // 2. Let body be the result of extracting bytes.
+    auto [body, _] = TRY(extract_body(realm, { bytes.bytes() }));
+
+    // 3. Let responseObject be the result of creating a Response object, given a new response, "response", and this’s relevant Realm.
+    // FIXME: How can we reliably get 'this', i.e. the object the function was called on, in IDL-defined functions?
+    // 4. Perform initialize a response given responseObject, init, and (body, "application/json").
+    // 5. Return responseObject.
+    return create_with_body(init, Infrastructure::BodyWithType { body, "application/json"_utf16 });
+}
+
+// https://fetch.spec.whatwg.org/#dom-response-url
+Utf16String Response::url() const
+{
+    // The url getter steps are to return the empty string if this’s response’s URL is null; otherwise this’s response’s URL, serialized with exclude fragment set to true.
+    if (!m_response->url().has_value())
+        return {};
+
+    auto serialized_url = m_response->url()->serialize(URL::ExcludeFragment::Yes);
+    return Utf16String::from_ascii_without_validation(serialized_url.bytes());
+}
+
+Bindings::ResponseType Response::type() const
+{
+    // The type getter steps are to return this’s response’s type.
+    return response_type_to_bindings(m_response->type());
+}
+
+// https://fetch.spec.whatwg.org/#dom-response-redirected
+bool Response::redirected() const
+{
+    // The redirected getter steps are to return true if this’s response’s URL list has more than one item; otherwise false.
+    return m_response->url_list().size() > 1;
+}
+
+// https://fetch.spec.whatwg.org/#dom-response-status
+u16 Response::status() const
+{
+    // The status getter steps are to return this’s response’s status.
+    return m_response->status();
+}
+
+// https://fetch.spec.whatwg.org/#dom-response-ok
+bool Response::ok() const
+{
+    // The ok getter steps are to return true if this’s response’s status is an ok status; otherwise false.
+    return Infrastructure::is_ok_status(m_response->status());
+}
+
+// https://fetch.spec.whatwg.org/#dom-response-statustext
+String Response::status_text() const
+{
+    // The statusText getter steps are to return this’s response’s status message.
+    return MUST(String::from_byte_string(m_response->status_message()));
+}
+
+// https://fetch.spec.whatwg.org/#dom-response-headers
+GC::Ref<Headers> Response::headers() const
+{
+    // The headers getter steps are to return this’s headers.
+    return *m_headers;
+}
+
+// https://fetch.spec.whatwg.org/#dom-response-clone
+WebIDL::ExceptionOr<GC::Ref<Response>> Response::clone(JS::Realm& realm) const
+{
+    // 1. If this is unusable, then throw a TypeError.
+    if (is_unusable())
+        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Response is unusable"_utf16 };
+
+    // 2. Let clonedResponse be the result of cloning this’s response.
+    auto cloned_response = m_response->clone(realm);
+
+    // 3. Return the result of creating a Response object, given clonedResponse, this’s headers’s guard, and this’s relevant Realm.
+    return Response::create(cloned_response, m_headers->guard());
+}
+
+}

@@ -1,0 +1,144 @@
+/*
+ * Copyright (c) 2024, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibWeb/ContentSecurityPolicy/Directives/Names.h>
+#include <LibWeb/ContentSecurityPolicy/PolicyList.h>
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/Fetch/Engine/NetworkTransportHandle.h>
+#include <LibWeb/Fetch/Infrastructure/FetchController.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/ResponseView.h>
+#include <LibWeb/HTML/BrowsingContext.h>
+#include <LibWeb/HTML/LocalNavigable.h>
+#include <LibWeb/HTML/NavigationParams.h>
+#include <LibWeb/HTML/Scripting/Agent.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+
+namespace Web::HTML {
+
+GC_DEFINE_ALLOCATOR(NavigationParams);
+GC_DEFINE_ALLOCATOR(NonFetchSchemeNavigationParams);
+
+void NavigationParams::visit_edges(Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(navigable);
+    visitor.visit(response);
+    visitor.visit(fetch_controller);
+    visitor.visit(commit_early_hints);
+    visitor.visit(reserved_environment);
+    visitor.visit(browsing_context);
+}
+
+NavigationParams::BodyDelivery NavigationParams::body_delivery() const
+{
+    if (fetch_controller)
+        return GC::Ref { *fetch_controller };
+    if (auto const& network_transport = response->network_transport(); network_transport.has_value())
+        return network_transport->handle;
+    return Empty {};
+}
+
+bool stop_body_delivery(NavigationParams::BodyDelivery const& body_delivery)
+{
+    return body_delivery.visit(
+        [](Empty) { return false; },
+        [](GC::Ref<Fetch::Infrastructure::FetchController> const& fetch_controller) {
+            if (fetch_controller->state() != Fetch::Infrastructure::FetchController::State::Ongoing)
+                return false;
+            fetch_controller->stop_fetch();
+            return true;
+        },
+        [](NonnullRefPtr<Fetch::Engine::NetworkTransportHandle> const& network_transport) {
+            network_transport->post_stop(*surrounding_agent().fetch_executor);
+            return true;
+        });
+}
+
+void NonFetchSchemeNavigationParams::visit_edges(Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(navigable);
+}
+
+// https://html.spec.whatwg.org/multipage/document-lifecycle.html#check-a-navigation-response's-adherence-to-x-frame-options
+bool check_a_navigation_responses_adherence_to_x_frame_options(GC::Ptr<Fetch::Infrastructure::ResponseView> response, LocalNavigable* navigable, ContentSecurityPolicy::PolicyList const& csp_list, URL::Origin destination_origin)
+{
+    // 1. If navigable is not a child navigable, then return true.
+    if (!navigable->parent()) {
+        return true;
+    }
+
+    // 2. For each policy of cspList:
+    for (auto const& policy : csp_list.policies()) {
+        // 1. If policy's disposition is not "enforce", then continue.
+        if (policy->disposition() != ContentSecurityPolicy::Policy::Disposition::Enforce)
+            continue;
+
+        // 2. If policy's directive set contains a frame-ancestors directive, then return true.
+        auto maybe_frame_ancestors = policy->directives().find_if([](auto const& directive) {
+            return directive.kind() == ContentSecurityPolicy::Directives::Directive::Kind::FrameAncestors;
+        });
+
+        if (!maybe_frame_ancestors.is_end())
+            return true;
+    }
+
+    // 3. Let rawXFrameOptions be the result of getting, decoding, and splitting `X-Frame-Options` from response's header list.
+    auto raw_x_frame_options = response->header_list()->get_decode_and_split("X-Frame-Options"sv.bytes());
+
+    // 4. Let xFrameOptions be a new set.
+    Vector<StringView> x_frame_options;
+
+    // 5. For each value of rawXFrameOptions, append value, converted to ASCII lowercase, to xFrameOptions.
+    if (raw_x_frame_options.has_value()) {
+        for (auto const& value : raw_x_frame_options.value()) {
+            auto value_view = value.bytes_as_string_view();
+            if (!x_frame_options.contains([&](auto const& option) { return option.equals_ignoring_ascii_case(value_view); }))
+                x_frame_options.append(value_view);
+        }
+    }
+
+    auto is_recognized_x_frame_option = [](StringView option) {
+        return option.equals_ignoring_ascii_case("deny"sv)
+            || option.equals_ignoring_ascii_case("allowall"sv)
+            || option.equals_ignoring_ascii_case("sameorigin"sv);
+    };
+
+    // 6. If xFrameOptions's size is greater than 1, and xFrameOptions contains any of "deny", "allowall", or "sameorigin", then return false.
+    if (x_frame_options.size() > 1 && x_frame_options.contains(is_recognized_x_frame_option)) {
+        return false;
+    }
+
+    // 7. If xFrameOptions's size is greater than 1, then return true.
+    if (x_frame_options.size() > 1) {
+        return true;
+    }
+
+    // 8. If xFrameOptions[0] is "deny", then return false.
+    auto first_x_frame_option = x_frame_options.begin();
+    if (!x_frame_options.is_empty() && first_x_frame_option->equals_ignoring_ascii_case("deny"sv)) {
+        return false;
+    }
+
+    // 9. If xFrameOptions[0] is "sameorigin", then:
+    if (!x_frame_options.is_empty() && first_x_frame_option->equals_ignoring_ascii_case("sameorigin"sv)) {
+        // 1. Let containerDocument be navigable's container document.
+        // 2. While containerDocument is not null:
+        //     1. If containerDocument's origin is not same origin with destinationOrigin, then return false.
+        //     2. Set containerDocument to containerDocument's container document.
+        // NB: Each container document is the next parent navigable's active document, and a parent navigable
+        //     answers for a document hosted in another process.
+        for (auto ancestor = navigable->parent(); ancestor; ancestor = ancestor->parent()) {
+            if (!ancestor->active_document_origin()->is_same_origin(destination_origin))
+                return false;
+        }
+    }
+
+    // 10. Return true.
+    return true;
+}
+
+}

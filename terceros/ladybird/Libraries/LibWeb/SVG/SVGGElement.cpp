@@ -1,0 +1,27 @@
+/*
+ * Copyright (c) 2021, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/StringBuilder.h>
+#include <LibGC/Heap.h>
+#include <LibWeb/CSS/ElementBoxKind.h>
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/SVG/SVGGElement.h>
+
+namespace Web::SVG {
+
+GC_DEFINE_ALLOCATOR(SVGGElement);
+
+SVGGElement::SVGGElement(DOM::Document& document, DOM::QualifiedName qualified_name)
+    : SVGGraphicsElement(document, move(qualified_name))
+{
+}
+
+CSS::ElementBoxKind SVGGElement::box_kind() const
+{
+    return CSS::ElementBoxKind::SvgGraphics;
+}
+
+}

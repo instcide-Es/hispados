@@ -1,0 +1,110 @@
+/*
+ * Copyright (c) 2020, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/ByteBuffer.h>
+#include <AK/Time.h>
+#include <LibCore/ElapsedTimer.h>
+#include <LibHTTP/Cache/CacheMode.h>
+#include <LibHTTP/Cookie/Cookie.h>
+#include <LibHTTP/Cookie/IncludeCredentials.h>
+#include <LibHTTP/HeaderList.h>
+#include <LibHTTP/NetworkIsolationKey.h>
+#include <LibURL/URL.h>
+#include <LibWeb/Export.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/Requests.h>
+#include <LibWeb/Forward.h>
+#include <LibWeb/Page/Page.h>
+#include <LibWebCommon/ReferrerPolicy/ReferrerPolicy.h>
+
+namespace Web {
+
+// NB: A load request keeps its page in a GC::Root, and holds no other cell.
+class WEB_API LoadRequest {
+public:
+    GC_HOLDS_NO_CELL_EDGES;
+
+    explicit LoadRequest(NonnullRefPtr<HTTP::HeaderList> headers)
+        : m_headers(move(headers))
+    {
+    }
+
+    Optional<URL::URL> const& url() const { return m_url; }
+    void set_url(Optional<URL::URL> url) { m_url = move(url); }
+
+    ByteString const& method() const { return m_method; }
+    void set_method(ByteString const& method) { m_method = method; }
+
+    ByteBuffer const& body() const { return m_body; }
+    void set_body(ByteBuffer body) { m_body = move(body); }
+
+    HTTP::CacheMode cache_mode() const { return m_cache_mode; }
+    void set_cache_mode(HTTP::CacheMode cache_mode) { m_cache_mode = cache_mode; }
+
+    HTTP::Cookie::IncludeCredentials include_credentials() const { return m_include_credentials; }
+    void set_include_credentials(HTTP::Cookie::IncludeCredentials include_credentials) { m_include_credentials = include_credentials; }
+
+    Optional<Fetch::Infrastructure::Request::InitiatorType> const& initiator_type() const { return m_initiator_type; }
+    void set_initiator_type(Optional<Fetch::Infrastructure::Request::InitiatorType> initiator_type) { m_initiator_type = move(initiator_type); }
+
+    Optional<Fetch::Infrastructure::Request::Destination> const& destination() const { return m_destination; }
+    void set_destination(Optional<Fetch::Infrastructure::Request::Destination> destination) { m_destination = move(destination); }
+
+    Fetch::Infrastructure::Request::Mode request_mode() const { return m_request_mode; }
+    void set_request_mode(Fetch::Infrastructure::Request::Mode request_mode) { m_request_mode = request_mode; }
+
+    ReferrerPolicy::ReferrerPolicy referrer_policy() const { return m_referrer_policy; }
+    void set_referrer_policy(ReferrerPolicy::ReferrerPolicy referrer_policy) { m_referrer_policy = referrer_policy; }
+
+    bool is_navigation_request() const { return m_is_navigation_request; }
+    void set_is_navigation_request(bool is_navigation_request) { m_is_navigation_request = is_navigation_request; }
+
+    Fetch::Infrastructure::Request::Priority priority() const { return m_priority; }
+    void set_priority(Fetch::Infrastructure::Request::Priority priority) { m_priority = priority; }
+
+    HTTP::Cookie::SameSiteContext same_site_context() const { return m_same_site_context; }
+    void set_same_site_context(HTTP::Cookie::SameSiteContext context) { m_same_site_context = context; }
+
+    Optional<HTTP::NetworkIsolationKey> const& network_isolation_key() const { return m_network_isolation_key; }
+    void set_network_isolation_key(Optional<HTTP::NetworkIsolationKey> network_isolation_key) { m_network_isolation_key = move(network_isolation_key); }
+
+    Optional<URL::URL> const& source_url() const { return m_source_url; }
+    void set_source_url(URL::URL source_url) { m_source_url = move(source_url); }
+
+    Optional<URL::URL> const& top_level_creation_url() const { return m_top_level_creation_url; }
+    void set_top_level_creation_url(Optional<URL::URL> url) { m_top_level_creation_url = move(url); }
+
+    void start_timer() { m_load_timer.start(); }
+    AK::Duration load_time() const { return m_load_timer.elapsed_time(); }
+
+    GC::Ptr<Page> page() const { return m_page.ptr(); }
+    void set_page(Page& page) { m_page = page; }
+
+    HTTP::HeaderList const& headers() const { return m_headers; }
+
+private:
+    Optional<URL::URL> m_url;
+    ByteString m_method { "GET" };
+    NonnullRefPtr<HTTP::HeaderList> m_headers;
+    ByteBuffer m_body;
+    Core::ElapsedTimer m_load_timer;
+    GC::Root<Page> m_page;
+    HTTP::CacheMode m_cache_mode { HTTP::CacheMode::Default };
+    HTTP::Cookie::IncludeCredentials m_include_credentials { HTTP::Cookie::IncludeCredentials::Yes };
+    Optional<Fetch::Infrastructure::Request::InitiatorType> m_initiator_type;
+    Optional<Fetch::Infrastructure::Request::Destination> m_destination;
+    Fetch::Infrastructure::Request::Mode m_request_mode { Fetch::Infrastructure::Request::Mode::NoCORS };
+    ReferrerPolicy::ReferrerPolicy m_referrer_policy { ReferrerPolicy::DEFAULT_REFERRER_POLICY };
+    bool m_is_navigation_request { false };
+    Fetch::Infrastructure::Request::Priority m_priority { Fetch::Infrastructure::Request::Priority::Auto };
+    Optional<URL::URL> m_source_url;
+    Optional<URL::URL> m_top_level_creation_url;
+    HTTP::Cookie::SameSiteContext m_same_site_context;
+    Optional<HTTP::NetworkIsolationKey> m_network_isolation_key;
+};
+
+}

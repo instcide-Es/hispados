@@ -1,0 +1,6 @@
+// https://drafts.csswg.org/cssom/#the-stylesheetlist-interface
+[Exposed=Window, ImplementedIn=Rust]
+interface StyleSheetList {
+    getter CSSStyleSheet? item(unsigned long index);
+    readonly attribute unsigned long length;
+};

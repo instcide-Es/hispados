@@ -1,0 +1,664 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+//! What the host writes of a document's paint state, as typed changes its render state applies to the arena: what the
+//! user scrolled, what is selected, and the state of the chrome the host draws.
+
+use super::ffi::{FfiImageMapArea, ScrollDirection};
+use super::host::{
+    FfiCanvasPaintFacts, FfiFormControlPaintFacts, FfiLayerImagePaintFactsEntry, FfiNavigableContainerPaintFacts,
+    FfiReplacedImagePaintFacts, FfiVideoPaintFacts,
+};
+use super::image_map_areas::{AreaCoverage, AreaShape, PublishedImageMapArea};
+use super::layer_image_paint_facts::{LayerImagePaintFacts, LayerImagePaintFactsEntry};
+use super::paint_read::GeometryRead;
+use super::paintable_data::{
+    FfiCustomHighlightReplacedEntry, FfiCustomHighlightTextEntry, FfiSearchTextRange, FfiSelectionEntry,
+    FfiSpellingError, PaintableFlag,
+};
+use super::record::change_ticks::RowPaintChange;
+use super::replaced_paint_facts::{ImagePaintFacts, ReplacedPaintFacts, VideoPaintFacts};
+use super::selection::HighlightStyleRecords;
+use super::visual_context::dirty::VisualContextBoxDirtyKind;
+use crate::css::css_pixels::{CssPixelPoint, FfiCssPixelPoint};
+use crate::css::style::index::StyleAtomID;
+use crate::css::style::tree::StyleNodeID;
+use crate::layout::LayoutNodeArena;
+use crate::layout::node_data::NodeSlotId;
+use crate::layout::tree_update_marks::MarkedBox;
+use crate::render_state::{ArenaChange, DocumentHost};
+use std::sync::Arc;
+
+/// One write of the host to a document's paint state.
+pub(crate) enum PaintChange {
+    /// What the navigable has scrolled the viewport to.
+    SetViewportScrollOffset(CssPixelPoint),
+    /// The selection covers `entries`, between the offsets in its start and end text.
+    ApplySelection {
+        viewport: NodeSlotId,
+        entries: Box<[FfiSelectionEntry]>,
+        start_offset: usize,
+        end_offset: usize,
+    },
+    /// Nothing is selected.
+    ClearSelection { viewport: NodeSlotId },
+    /// The find-in-page matches are `ranges`, each covering its span of `entries`, between the offsets in its start
+    /// and end text.
+    ApplySearchText {
+        viewport: NodeSlotId,
+        ranges: Box<[FfiSearchTextRange]>,
+        entries: Box<[FfiSelectionEntry]>,
+    },
+    /// No find-in-page match is highlighted.
+    ClearSearchText,
+    /// The runs the spellchecker flagged, each inside one DOM text.
+    ApplySpellingErrors {
+        viewport: NodeSlotId,
+        errors: Box<[FfiSpellingError]>,
+    },
+    /// No text is flagged as misspelled.
+    ClearSpellingErrors,
+    /// The registered custom highlights and what of the document they cover.
+    ApplyCustomHighlights {
+        viewport: NodeSlotId,
+        layers: Box<[StyleAtomID]>,
+        text_entries: Box<[FfiCustomHighlightTextEntry]>,
+        replaced_entries: Box<[FfiCustomHighlightReplacedEntry]>,
+    },
+    /// No custom highlight covers anything.
+    ClearCustomHighlights,
+    /// Whether a registered custom highlight holds a range.
+    SetHasRegisteredCustomHighlightRanges(bool),
+    /// The element's style changed: the rows that paint text under it take what `style_records`, the `::selection`,
+    /// `::search-text` and `::spelling-error` records the host holds for it (zero for none), say highlighted text
+    /// paints with.
+    SyncHighlightPseudoStyles {
+        element: StyleNodeID,
+        style_records: HighlightStyleRecords,
+    },
+    /// The element's style changed. The rows that paint text under it take its `::highlight()` records by name.
+    SyncCustomHighlightPseudoStyles {
+        element: StyleNodeID,
+        style_records: Box<[(StyleAtomID, u64)]>,
+    },
+    /// Whether the overlay scrollbar of the row in `direction` has faded out, so that it takes no pointer input.
+    SetScrollbarHidden {
+        node: NodeSlotId,
+        direction: ScrollDirection,
+        hidden: bool,
+    },
+    /// The images the row's background, mask and border image layers paint.
+    SetLayerImagePaintFacts {
+        node: NodeSlotId,
+        entries: Vec<LayerImagePaintFactsEntry>,
+    },
+    /// What the replaced content of the box `target` names, and of the rows sharing its DOM node, paints. A row whose
+    /// facts changed paints again.
+    SetReplacedPaintFacts {
+        target: MarkedBox,
+        facts: ReplacedPaintFacts,
+    },
+    /// Replaced content facts that later facts replace.
+    SupersededReplacedPaintFacts,
+    /// The `<area>` elements of the image map the image `node` is associated with, in tree order.
+    PublishImageMapAreas {
+        node: NodeSlotId,
+        areas: Box<[PublishedImageMapArea]>,
+    },
+    /// What the row's visual context is derived from changed.
+    NoteVisualContextBoxDirty {
+        node: NodeSlotId,
+        kind: VisualContextBoxDirtyKind,
+    },
+    /// The visual context tree is built again whole before it is published next.
+    RequestFullVisualContextRebuild(super::visual_context::dirty::VisualContextUpdateScope),
+    /// The SVG paint resources the rows enrolled may have changed: they are synced again before they are painted next.
+    SvgPaintResourcesChanged,
+    /// Whether the document's recordings are traced.
+    SetRecordingTraceEnabled(bool),
+    /// The updates of the document's visual context tree are traced from now on.
+    BeginVisualContextTrace,
+    /// The host published the recording `output` and takes it in as the document's last.
+    TakeInRecording {
+        output: Arc<super::record::RecordingOutput>,
+        publishes_recording: bool,
+    },
+}
+
+impl PaintChange {
+    /// How far the change may write the rows. Noting what the visual context tree is to be updated for writes nothing
+    /// the rows answer before the tree is updated.
+    pub(crate) fn row_write(&self) -> crate::render_state::RowWrite {
+        match self {
+            Self::NoteVisualContextBoxDirty { .. } | Self::RequestFullVisualContextRebuild(_) => {
+                crate::render_state::RowWrite::None
+            }
+            _ => crate::render_state::RowWrite::Rows,
+        }
+    }
+
+    /// Applies the change to `arena`, the arena of the document it was queued for.
+    pub(crate) fn apply(self, arena: &mut LayoutNodeArena) {
+        match self {
+            Self::SetViewportScrollOffset(offset) => arena.set_viewport_scroll_offset(offset),
+            Self::ApplySelection {
+                viewport,
+                entries,
+                start_offset,
+                end_offset,
+            } => {
+                if !arena.paintable_row_is_populated(viewport) {
+                    return;
+                }
+                let selection =
+                    super::selection::apply(&mut arena.paintable_rows_mut(), &entries, start_offset, end_offset);
+                arena.paint_state_mut().selection = Some(Arc::new(selection));
+            }
+            Self::ClearSelection { viewport } => {
+                if arena.paintable_row_is_populated(viewport) {
+                    super::selection::clear(&mut arena.paintable_rows_mut());
+                }
+            }
+            Self::ApplySearchText {
+                viewport,
+                ranges,
+                entries,
+            } => {
+                if arena.paintable_row_is_populated(viewport) {
+                    super::selection::apply_search_text(&mut arena.paintable_rows_mut(), &ranges, &entries);
+                }
+            }
+            Self::ClearSearchText => super::selection::clear_search_text(&mut arena.paintable_rows_mut()),
+            Self::ApplySpellingErrors { viewport, errors } => {
+                if arena.paintable_row_is_populated(viewport) {
+                    super::selection::apply_spelling_errors(&mut arena.paintable_rows_mut(), &errors);
+                }
+            }
+            Self::ClearSpellingErrors => super::selection::clear_spelling_errors(&mut arena.paintable_rows_mut()),
+            Self::ApplyCustomHighlights {
+                viewport,
+                layers,
+                text_entries,
+                replaced_entries,
+            } => {
+                if arena.paintable_row_is_populated(viewport) {
+                    super::selection::apply_custom_highlights(
+                        &mut arena.paintable_rows_mut(),
+                        &layers,
+                        &text_entries,
+                        &replaced_entries,
+                    );
+                }
+            }
+            Self::ClearCustomHighlights => super::selection::clear_custom_highlights(&mut arena.paintable_rows_mut()),
+            Self::SetHasRegisteredCustomHighlightRanges(has_ranges) => {
+                arena.paint_state_mut().has_registered_custom_highlight_ranges = has_ranges;
+            }
+            Self::SyncHighlightPseudoStyles { element, style_records } => {
+                super::selection::sync_highlight_pseudo_styles(arena, element, style_records);
+            }
+            Self::SyncCustomHighlightPseudoStyles { element, style_records } => {
+                super::selection::sync_custom_highlight_pseudo_styles(arena, element, &style_records);
+            }
+            Self::SetScrollbarHidden {
+                node,
+                direction,
+                hidden,
+            } => {
+                let mut rows = arena.paintable_rows_mut();
+                if !rows.paintable_row_is_populated(node) {
+                    return;
+                }
+                let flag = match direction {
+                    ScrollDirection::Horizontal => PaintableFlag::HorizontalScrollbarHidden,
+                    ScrollDirection::Vertical => PaintableFlag::VerticalScrollbarHidden,
+                };
+                if rows.paintable_data(node).has_flag(flag) == hidden {
+                    return;
+                }
+                rows.paintable_data_mut(node).set_flag(flag, hidden);
+                rows.note_paint_change(node, RowPaintChange::HIT_TESTING);
+            }
+            Self::SetLayerImagePaintFacts { node, entries } => {
+                arena.set_layer_image_paint_facts(node, entries);
+            }
+            Self::SetReplacedPaintFacts { target, facts } => arena.set_replaced_paint_facts(target, facts),
+            Self::SupersededReplacedPaintFacts => {}
+            Self::PublishImageMapAreas { node, areas } => arena.image_map_areas_mut().publish(node, areas),
+            Self::NoteVisualContextBoxDirty { node, kind } => {
+                if arena.paintable_row_is_populated(node) {
+                    arena.note_visual_context_box_dirty(node, kind);
+                }
+            }
+            Self::RequestFullVisualContextRebuild(scope) => arena.request_full_visual_context_rebuild(scope),
+            Self::SvgPaintResourcesChanged => {
+                arena.svg_paint_resources_mut().note_changed();
+            }
+            Self::SetRecordingTraceEnabled(enabled) => arena.paint_state_mut().trace_recordings = enabled,
+            Self::BeginVisualContextTrace => {
+                arena.paint_state_mut().visual_context.trace = Some(Default::default());
+            }
+            Self::TakeInRecording {
+                output,
+                publishes_recording,
+            } => {
+                super::record::publish::take_in_recording(arena, output, publishes_recording);
+            }
+        }
+    }
+}
+
+/// Queues `change` for the render state of `host`'s document.
+pub(crate) fn queue(host: &DocumentHost, change: PaintChange) {
+    host.queue_change(ArenaChange::Paint(change));
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn render_state_set_viewport_scroll_offset(host: &DocumentHost, offset: FfiCssPixelPoint) {
+    queue(host, PaintChange::SetViewportScrollOffset(offset.into()));
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn render_state_apply_selection(
+    host: &DocumentHost,
+    viewport: NodeSlotId,
+    entries: ak::Span<'_, FfiSelectionEntry>,
+    start_offset: usize,
+    end_offset: usize,
+) {
+    let change = PaintChange::ApplySelection {
+        viewport,
+        entries: entries.as_slice().into(),
+        start_offset,
+        end_offset,
+    };
+    queue(host, change);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn render_state_clear_selection(host: &DocumentHost, viewport: NodeSlotId) {
+    queue(host, PaintChange::ClearSelection { viewport });
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn render_state_apply_search_text(
+    host: &DocumentHost,
+    viewport: NodeSlotId,
+    ranges: ak::Span<'_, FfiSearchTextRange>,
+    entries: ak::Span<'_, FfiSelectionEntry>,
+) {
+    let ranges: Box<[FfiSearchTextRange]> = ranges.as_slice().into();
+    host.host_tables().shows_search_text.set(!ranges.is_empty());
+    let change = PaintChange::ApplySearchText {
+        viewport,
+        ranges,
+        entries: entries.as_slice().into(),
+    };
+    queue(host, change);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn render_state_clear_search_text(host: &DocumentHost) {
+    // Rows that show no search text have none to clear, which spares the write that would leave the rows the host
+    // holds stale.
+    if !host.host_tables().shows_search_text.replace(false) {
+        return;
+    }
+    queue(host, PaintChange::ClearSearchText);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn render_state_apply_spelling_errors(
+    host: &DocumentHost,
+    viewport: NodeSlotId,
+    errors: ak::Span<'_, FfiSpellingError>,
+) {
+    let errors: Box<[FfiSpellingError]> = errors.as_slice().into();
+    host.host_tables().shows_spelling_errors.set(!errors.is_empty());
+    queue(host, PaintChange::ApplySpellingErrors { viewport, errors });
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn render_state_clear_spelling_errors(host: &DocumentHost) {
+    // Rows that show no spelling errors have none to clear.
+    if !host.host_tables().shows_spelling_errors.replace(false) {
+        return;
+    }
+    queue(host, PaintChange::ClearSpellingErrors);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn render_state_apply_custom_highlights(
+    host: &DocumentHost,
+    viewport: NodeSlotId,
+    layers: ak::Span<'_, u32>,
+    text_entries: ak::Span<'_, FfiCustomHighlightTextEntry>,
+    replaced_entries: ak::Span<'_, FfiCustomHighlightReplacedEntry>,
+) {
+    let tables = host.host_tables();
+    tables
+        .shows_custom_highlights
+        .set(!text_entries.as_slice().is_empty() || !replaced_entries.as_slice().is_empty());
+    let change = PaintChange::ApplyCustomHighlights {
+        viewport,
+        layers: layers.as_slice().iter().copied().map(StyleAtomID).collect(),
+        text_entries: text_entries.as_slice().into(),
+        replaced_entries: replaced_entries.as_slice().into(),
+    };
+    queue(host, change);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn render_state_clear_custom_highlights(host: &DocumentHost) {
+    // Rows that show no custom highlights have none to clear.
+    if !host.host_tables().shows_custom_highlights.replace(false) {
+        return;
+    }
+    queue(host, PaintChange::ClearCustomHighlights);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn render_state_set_has_registered_custom_highlight_ranges(host: &DocumentHost, has_ranges: bool) {
+    queue(host, PaintChange::SetHasRegisteredCustomHighlightRanges(has_ranges));
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn render_state_custom_highlight_row_generation(
+    host: &DocumentHost,
+    read: &crate::render_state::BegunRead,
+) -> u64 {
+    super::ffi::read_arena(host, read, (), |arena, ()| {
+        arena.paint_state().custom_highlight_row_generation
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn render_state_sync_custom_highlight_pseudo_styles(
+    host: &DocumentHost,
+    element: u32,
+    names: ak::Span<'_, u32>,
+    style_records: ak::Span<'_, u64>,
+) {
+    let Some(element) = StyleNodeID::from_raw(element) else {
+        return;
+    };
+    let style_records = names
+        .as_slice()
+        .iter()
+        .zip(style_records.as_slice())
+        .map(|(&name, &record)| (StyleAtomID(name), record))
+        .collect();
+    queue(
+        host,
+        PaintChange::SyncCustomHighlightPseudoStyles { element, style_records },
+    );
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn render_state_sync_highlight_pseudo_styles(
+    host: &DocumentHost,
+    element: u32,
+    selection_style_record: u64,
+    search_text_style_record: u64,
+    search_text_current_style_record: u64,
+    spelling_error_style_record: u64,
+) {
+    let Some(element) = StyleNodeID::from_raw(element) else {
+        return;
+    };
+    let change = PaintChange::SyncHighlightPseudoStyles {
+        element,
+        style_records: [
+            selection_style_record,
+            search_text_style_record,
+            search_text_current_style_record,
+            spelling_error_style_record,
+        ],
+    };
+    queue(host, change);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn render_state_set_scrollbar_hidden(
+    host: &DocumentHost,
+    node: NodeSlotId,
+    direction: ScrollDirection,
+    hidden: bool,
+) {
+    let change = PaintChange::SetScrollbarHidden {
+        node,
+        direction,
+        hidden,
+    };
+    queue(host, change);
+}
+
+/// # Safety
+///
+/// `host` must be a live document host, on the document's thread, and `entries` must point at `count` readable
+/// entries whose images are live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn render_state_set_layer_image_paint_facts(
+    host: &DocumentHost,
+    node: NodeSlotId,
+    entries: *const FfiLayerImagePaintFactsEntry,
+    count: usize,
+) {
+    let entries = if count == 0 {
+        Vec::new()
+    } else {
+        // SAFETY: Guaranteed by the caller.
+        unsafe { ak::slice_from_raw_parts(entries, count) }
+            .iter()
+            .map(|entry| LayerImagePaintFactsEntry {
+                list: entry.list,
+                computed_index: entry.computed_index,
+                // SAFETY: Guaranteed by the caller.
+                facts: unsafe { LayerImagePaintFacts::from_ffi(&entry.facts) },
+            })
+            .collect()
+    };
+    // A row the host gave no facts has none to clear, which spares the write that would leave the rows the host holds
+    // stale.
+    let mut rows_with_facts = host.host_tables().rows_with_layer_image_paint_facts.borrow_mut();
+    if entries.is_empty() {
+        if !rows_with_facts.remove(&node) {
+            return;
+        }
+    } else {
+        rows_with_facts.insert(node);
+    }
+    drop(rows_with_facts);
+    queue(host, PaintChange::SetLayerImagePaintFacts { node, entries });
+}
+
+fn queue_replaced_paint_facts(host: &DocumentHost, target: MarkedBox, facts: ReplacedPaintFacts) {
+    queue(host, PaintChange::SetReplacedPaintFacts { target, facts });
+}
+
+/// Queues `facts`, read off the element with `element`, for the box bound to it, which the render state finds as it
+/// applies them: the element may change beside a frame in flight, which holds the boxes.
+fn queue_element_paint_facts(host: &DocumentHost, element: u32, facts: ReplacedPaintFacts) {
+    if let Some(element) = StyleNodeID::from_raw(element) {
+        queue_replaced_paint_facts(host, MarkedBox::Node(Some(element)), facts);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn render_state_set_form_control_paint_facts(
+    host: &DocumentHost,
+    element: u32,
+    facts: FfiFormControlPaintFacts,
+) {
+    queue_element_paint_facts(host, element, ReplacedPaintFacts::FormControl(facts));
+}
+
+/// The canvas paints its surface's content of this size and generation now: where that changed, so does what its box
+/// paints.
+#[unsafe(no_mangle)]
+pub extern "C" fn render_state_set_canvas_paint_facts(host: &DocumentHost, element: u32, facts: FfiCanvasPaintFacts) {
+    queue_element_paint_facts(host, element, ReplacedPaintFacts::Canvas(facts));
+}
+
+/// The navigable container paints the compositor context of its content, if it has one: where that changed, so does
+/// what its row paints.
+#[unsafe(no_mangle)]
+pub extern "C" fn render_state_set_navigable_container_paint_facts(
+    host: &DocumentHost,
+    node: NodeSlotId,
+    facts: FfiNavigableContainerPaintFacts,
+) {
+    let facts = ReplacedPaintFacts::NavigableContainer(facts);
+    queue_replaced_paint_facts(host, MarkedBox::Row(node), facts);
+}
+
+/// The image box `node` shows the image of the provider its box holds: its own, or its element's.
+///
+/// # Safety
+///
+/// `host` must be a live document host, on the document's thread, and the image `facts` names must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn render_state_set_replaced_image_paint_facts(
+    host: &DocumentHost,
+    node: NodeSlotId,
+    facts: FfiReplacedImagePaintFacts,
+) {
+    // SAFETY: Guaranteed by the caller.
+    let facts = unsafe { ImagePaintFacts::from_ffi(&facts) };
+    queue_replaced_paint_facts(host, MarkedBox::Row(node), ReplacedPaintFacts::Image(facts));
+}
+
+/// The image of the element with `element` is the one `facts` describes, which its box shows unless the box owns the
+/// provider of an image of its own.
+///
+/// # Safety
+///
+/// `host` must be a live document host, on the document's thread, and the image `facts` names must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn render_state_set_element_image_paint_facts(
+    host: &DocumentHost,
+    element: u32,
+    facts: FfiReplacedImagePaintFacts,
+) {
+    // SAFETY: Guaranteed by the caller.
+    let facts = unsafe { ImagePaintFacts::from_ffi(&facts) };
+    queue_element_paint_facts(host, element, ReplacedPaintFacts::Image(facts));
+}
+
+/// # Safety
+///
+/// `host` must be a live document host, on the document's thread, and the poster frame `facts` names, if any, must be
+/// live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn render_state_set_video_paint_facts(
+    host: &DocumentHost,
+    element: u32,
+    facts: FfiVideoPaintFacts,
+) {
+    // SAFETY: Guaranteed by the caller.
+    let facts = unsafe { VideoPaintFacts::from_ffi(&facts) };
+    queue_element_paint_facts(host, element, ReplacedPaintFacts::Video(facts));
+}
+
+/// Publishes the `<area>` elements of the image map the image `node` is associated with, in tree order. Publishing no
+/// area is how an image with no image map is named. The areas index `coords`.
+#[unsafe(no_mangle)]
+pub extern "C" fn render_state_publish_image_map_areas(
+    host: &DocumentHost,
+    node: NodeSlotId,
+    areas: ak::Span<'_, FfiImageMapArea>,
+    coords: ak::Span<'_, f64>,
+) {
+    let coords = coords.as_slice();
+    let areas = areas
+        .as_slice()
+        .iter()
+        .map(|area| {
+            let start = area.coords_offset as usize;
+            PublishedImageMapArea {
+                style_node: area.style_node,
+                coverage: AreaCoverage::new(
+                    AreaShape::from_raw(area.shape),
+                    &coords[start..start + area.coords_count as usize],
+                ),
+            }
+        })
+        .collect();
+    queue(host, PaintChange::PublishImageMapAreas { node, areas });
+}
+
+/// Notes a style change of `node` for its visual contexts: one that changes their structure, or only their values.
+#[unsafe(no_mangle)]
+pub extern "C" fn render_state_note_visual_context_style_change(
+    host: &DocumentHost,
+    node: NodeSlotId,
+    changes_structure: bool,
+) {
+    let kind = if changes_structure {
+        VisualContextBoxDirtyKind::StyleStructuralChange
+    } else {
+        VisualContextBoxDirtyKind::StyleValueChange
+    };
+    queue(host, PaintChange::NoteVisualContextBoxDirty { node, kind });
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn render_state_visual_context_request_full_rebuild(
+    host: &DocumentHost,
+    scope: crate::painting::visual_context::dirty::VisualContextUpdateScope,
+) {
+    queue(host, PaintChange::RequestFullVisualContextRebuild(scope));
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn render_state_set_recording_trace_enabled(host: &DocumentHost, enabled: bool) {
+    queue(host, PaintChange::SetRecordingTraceEnabled(enabled));
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn render_state_begin_visual_context_trace(host: &DocumentHost) {
+    queue(host, PaintChange::BeginVisualContextTrace);
+}
+
+/// Hands `append_line` each line of what the updates of the visual context tree of `host`'s document did since the
+/// trace began, and stops tracing: whether the line is indented, the element of the box it is about or zero, the name
+/// of a box without an element, and the rest of the line.
+///
+/// # Safety
+///
+/// `host` must be a live document host, on its document's thread, and `append_line` must copy the bytes synchronously.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn render_state_take_visual_context_trace(
+    host: &DocumentHost,
+    read: &crate::render_state::BegunRead,
+    context: *mut std::ffi::c_void,
+    append_line: unsafe extern "C" fn(*mut std::ffi::c_void, bool, u32, *const u8, usize, *const u8, usize),
+) {
+    let lines = crate::layout::shell_reads::read_arena(host, read, (), |arena, ()| {
+        arena
+            .paint_state_mut()
+            .visual_context
+            .trace
+            .take()
+            .map(|trace| trace.lines)
+            .unwrap_or_default()
+    });
+    for line in lines {
+        let name = line.name_without_element;
+        // SAFETY: Guaranteed by the caller.
+        unsafe {
+            append_line(
+                context,
+                line.indented,
+                line.element.map_or(0, |element| element.raw()),
+                name.as_ptr(),
+                name.len(),
+                line.text.as_ptr(),
+                line.text.len(),
+            );
+        };
+    }
+}

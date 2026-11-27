@@ -1,0 +1,47 @@
+/*
+ * Copyright (c) 2022, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibWeb/CSS/ElementBoxKind.h>
+#include <LibWeb/SVG/AttributeNames.h>
+#include <LibWeb/SVG/SVGClipPathElement.h>
+#include <LibWeb/SVG/SVGUnitTypes.h>
+
+namespace Web::SVG {
+
+GC_DEFINE_ALLOCATOR(SVGClipPathElement);
+
+SVGClipPathElement::SVGClipPathElement(DOM::Document& document, DOM::QualifiedName qualified_name)
+    : SVGGraphicsElement(document, move(qualified_name))
+{
+}
+
+SVGClipPathElement::~SVGClipPathElement()
+{
+}
+
+void SVGClipPathElement::attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_)
+{
+    Base::attribute_changed(name, old_value, value, namespace_);
+
+    if (name == AttributeNames::clipPathUnits) {
+        m_clip_path_units = parse_units(value.value_or({}));
+        mark_resource_box_referencing_elements_for_layout_update();
+    }
+}
+
+CSS::ElementBoxKind SVGClipPathElement::box_kind() const
+{
+    // Clip paths are handled as a special case in the TreeBuilder.
+    return CSS::ElementBoxKind::NoBox;
+}
+
+// https://drafts.fxtf.org/css-masking/#dom-svgclippathelement-clippathunits
+GC::Ref<SVGAnimatedEnumeration> SVGClipPathElement::clip_path_units_for_bindings()
+{
+    return svg_animated_enumeration_for_attribute(AttributeNames::clipPathUnits, svg_unit_type_keywords, to_underlying(SVGUnitType::UserSpaceOnUse));
+}
+
+}

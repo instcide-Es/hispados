@@ -1,0 +1,28 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+namespace Gfx {
+
+class PaintingSurface;
+class SkiaBackendContext;
+
+}
+
+namespace Compositor {
+
+class CanvasHost;
+class CanvasSurfaceRegistry;
+class ConnectionFromClient;
+class ConnectionFromPresentation;
+class ConnectionFromWebContent;
+class CompositorState;
+class DisplayListPlayerSkia;
+class DisplayListRasterCache;
+class OwnedCanvasSurfaces;
+
+}

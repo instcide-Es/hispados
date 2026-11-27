@@ -1,0 +1,812 @@
+<!doctype html>
+<html>
+    <head>
+        <title>Bookmarks</title>
+        <link rel="icon" type="image/png" href="resource://icons/48x48/app-browser.png" />
+        <link rel="stylesheet" type="text/css" href="resource://ladybird/ladybird.css" />
+        <link rel="stylesheet" type="text/css" href="resource://ladybird/about-pages/webui.css" />
+        <style>
+            body {
+                display: flex;
+                max-width: none;
+                min-height: 100vh;
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
+            .folders {
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+                flex-shrink: 0;
+                width: 240px;
+                padding: 26px 12px;
+                box-sizing: border-box;
+                box-shadow: inset -1px 0 0 var(--separator-soft);
+            }
+
+            .folders h1 {
+                margin: 0;
+                padding: 0 10px 12px;
+                font-size: 22px;
+                font-weight: 600;
+            }
+
+            .folder-link {
+                display: flex;
+                align-items: center;
+                gap: 9px;
+                height: 30px;
+                padding: 0 10px;
+                border-radius: 6px;
+                color: var(--text);
+                text-decoration: none;
+                cursor: pointer;
+            }
+
+            /* The current folder's fill is deeper than the faint hover fill, so a hovered folder never looks current. */
+            .folder-link:hover {
+                background-color: var(--hover-faint);
+            }
+
+            .folder-link[aria-current="page"] {
+                background-color: var(--control-pressed);
+            }
+
+            .folder-link.drop-inside {
+                background-color: var(--information, rgba(10, 122, 255, 0.18));
+            }
+
+            .folder-link .name {
+                flex: 1;
+                min-width: 0;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .count {
+                color: var(--muted);
+                font-size: 12px;
+                font-variant-numeric: tabular-nums;
+            }
+
+            .folder-icon {
+                flex-shrink: 0;
+                width: 15px;
+                height: 15px;
+                color: var(--body);
+            }
+
+            main {
+                flex: 1;
+                min-width: 0;
+                padding: 30px 40px;
+                box-sizing: border-box;
+            }
+
+            header {
+                gap: 10px;
+                margin-bottom: 14px;
+            }
+
+            header h2 {
+                flex: 1;
+                margin: 0;
+                font-size: 15px;
+                font-weight: 600;
+            }
+
+            .header-menu {
+                position: relative;
+            }
+
+            .rows {
+                display: flex;
+                flex-direction: column;
+            }
+
+            .row {
+                position: relative;
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                height: 34px;
+                padding: 0 6px 0 10px;
+                border-radius: 6px;
+            }
+
+            .row:hover {
+                background-color: var(--control);
+            }
+
+            .row.dragging {
+                opacity: 0.35;
+            }
+
+            .row.drop-inside {
+                background-color: var(--information, rgba(10, 122, 255, 0.18));
+            }
+
+            .row.drop-above::before,
+            .row.drop-below::before {
+                content: "";
+                position: absolute;
+                left: 4px;
+                right: 4px;
+                height: 2px;
+                border-radius: 1px;
+                background-color: var(--accent);
+            }
+
+            .row.drop-above::after,
+            .row.drop-below::after {
+                content: "";
+                position: absolute;
+                left: 0;
+                width: 8px;
+                height: 8px;
+                box-sizing: border-box;
+                border: 2px solid var(--accent);
+                border-radius: 4px;
+                background-color: var(--page);
+            }
+
+            .row.drop-above::before {
+                top: -1px;
+            }
+
+            .row.drop-above::after {
+                top: -4px;
+            }
+
+            .row.drop-below::before {
+                bottom: -1px;
+            }
+
+            .row.drop-below::after {
+                bottom: -4px;
+            }
+
+            .favicon {
+                display: flex;
+                flex-shrink: 0;
+                width: 16px;
+                height: 16px;
+            }
+
+            .favicon img {
+                width: 16px;
+                height: 16px;
+                border-radius: 3px;
+            }
+
+            .favicon svg {
+                width: 16px;
+                height: 16px;
+                color: var(--muted);
+            }
+
+            .favicon .folder-icon {
+                width: 15px;
+                height: 15px;
+                margin: auto;
+                color: var(--body);
+            }
+
+            .title {
+                flex: 0 1 340px;
+                min-width: 0;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                color: var(--text);
+                text-decoration: none;
+            }
+
+            /* The title's link stretches over the whole row, as the whole row lights up under the pointer. */
+            .title::before {
+                content: "";
+                position: absolute;
+                inset: 0;
+                border-radius: 6px;
+            }
+
+            .detail {
+                flex: 1;
+                min-width: 0;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                color: var(--muted);
+                font-size: 12px;
+            }
+
+            .more-button {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                flex-shrink: 0;
+                width: 26px;
+                height: 24px;
+                padding: 0;
+                border: 0;
+                border-radius: 5px;
+                color: var(--body);
+                background-color: var(--control);
+                visibility: hidden;
+                position: relative;
+                z-index: 1;
+            }
+
+            /* The button takes clicks from a 32 px square around it. */
+            .more-button::after {
+                content: "";
+                position: absolute;
+                inset: -4px -3px;
+            }
+
+            .row:hover .more-button,
+            .row:focus-within .more-button {
+                visibility: visible;
+            }
+
+            .more-button svg {
+                width: 14px;
+                height: 14px;
+            }
+
+            .search-highlight {
+                color: inherit;
+                background-color: var(--information, rgba(10, 122, 255, 0.18));
+                border-radius: 2px;
+            }
+
+            .empty {
+                padding: 40px 20px;
+                color: var(--muted);
+                text-align: center;
+                font-size: 13px;
+            }
+        </style>
+    </head>
+    <body>
+        <nav class="folders" id="folders" aria-label="Bookmark folders">
+            <h1>Bookmarks</h1>
+        </nav>
+
+        <main>
+            <header>
+                <h2 id="folder-title">Bookmarks bar</h2>
+                <label class="search-container">
+                    <svg
+                        class="search-icon"
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                        stroke-linecap="round"
+                        aria-hidden="true"
+                    >
+                        <path d="M7 2.5a4.5 4.5 0 1 1 0 9a4.5 4.5 0 1 1 0-9zM10.5 10.5L14 14" />
+                    </svg>
+                    <input
+                        type="text"
+                        class="search-input"
+                        id="search-input"
+                        placeholder="Search bookmarks"
+                        aria-label="Search bookmarks"
+                    />
+                </label>
+                <button class="secondary-button" id="new-folder-button">New folder</button>
+                <div class="header-menu">
+                    <button class="menu-toggle" id="menu-toggle" aria-label="Bookmark options">
+                        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                            <circle cx="12" cy="5" r="2" />
+                            <circle cx="12" cy="12" r="2" />
+                            <circle cx="12" cy="19" r="2" />
+                        </svg>
+                    </button>
+                    <div class="menu-dropdown hidden" id="menu-dropdown">
+                        <button class="menu-item" id="import-button">Import from HTML…</button>
+                        <button class="menu-item" id="export-button">Export to HTML…</button>
+                    </div>
+                </div>
+                <input type="file" id="import-file" accept=".html,text/html" hidden />
+            </header>
+
+            <div class="rows" id="rows" role="list"></div>
+        </main>
+
+        <script type="module">
+            const FOLDER_SVG = `<svg class="folder-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M2 4.2c0-.6.4-1 1-1h3.3l1.4 1.5H13c.6 0 1 .4 1 1v6.6c0 .6-.4 1-1 1H3c-.6 0-1-.4-1-1z"/></svg>`;
+            const GLOBE_SVG = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M2.5 8h11M8 2.5c1.6 1.6 2.3 3.5 2.3 5.5S9.6 11.9 8 13.5M8 2.5C6.4 4.1 5.7 6 5.7 8s.7 3.9 2.3 5.5"/></svg>`;
+            const MORE_SVG = `<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3.5" cy="8" r="1.3"/><circle cx="8" cy="8" r="1.3"/><circle cx="12.5" cy="8" r="1.3"/></svg>`;
+
+            let BOOKMARKS = [];
+            // The folder shown on the right, or null for the bookmarks bar itself.
+            let CURRENT_FOLDER_ID = null;
+            let DRAGGED_ITEM_ID = null;
+            let SEARCH_QUERY = "";
+
+            const foldersNav = document.getElementById("folders");
+            const rowsContainer = document.getElementById("rows");
+            const folderTitle = document.getElementById("folder-title");
+
+            function createElement(tagName, properties = {}, children = []) {
+                const element = document.createElement(tagName);
+                Object.assign(element, properties);
+                element.append(...children);
+                return element;
+            }
+
+            function findFolder(items, id) {
+                for (const item of items) {
+                    if (item.type !== "folder") continue;
+                    if (item.id === id) return item;
+                    const found = findFolder(item.children || [], id);
+                    if (found) return found;
+                }
+                return null;
+            }
+
+            function currentItems() {
+                if (CURRENT_FOLDER_ID === null) return BOOKMARKS;
+                return findFolder(BOOKMARKS, CURRENT_FOLDER_ID)?.children || [];
+            }
+
+            function bookmarkCount(count) {
+                return count === 1 ? "1 bookmark" : `${count} bookmarks`;
+            }
+
+            function displayUrl(url) {
+                return (url || "").replace(/^https?:\/\//, "").replace(/\/$/, "");
+            }
+
+            function highlightText(text, query) {
+                if (!query) return [document.createTextNode(text)];
+
+                const lowerText = text.toLowerCase();
+                const lowerQuery = query.toLowerCase();
+                const fragments = [];
+                let lastIndex = 0;
+                for (
+                    let index = lowerText.indexOf(lowerQuery);
+                    index !== -1;
+                    index = lowerText.indexOf(lowerQuery, lastIndex)
+                ) {
+                    if (index > lastIndex) fragments.push(document.createTextNode(text.slice(lastIndex, index)));
+                    fragments.push(
+                        createElement("mark", {
+                            className: "search-highlight",
+                            textContent: text.slice(index, index + query.length),
+                        })
+                    );
+                    lastIndex = index + query.length;
+                }
+                if (lastIndex < text.length) fragments.push(document.createTextNode(text.slice(lastIndex)));
+                return fragments;
+            }
+
+            function matchingItems(items, query, parentId = null, result = []) {
+                const lowerQuery = query.toLowerCase();
+                for (const item of items) {
+                    const title = (item.title || "").toLowerCase();
+                    const url = (item.url || "").toLowerCase();
+                    if (title.includes(lowerQuery) || url.includes(lowerQuery)) result.push({ item, parentId });
+                    if (item.type === "folder") matchingItems(item.children || [], query, item.id, result);
+                }
+                return result;
+            }
+
+            function showContextMenu(event, item, parentId, anchor) {
+                event.preventDefault();
+                event.stopPropagation();
+
+                let clientX = event.clientX;
+                let clientY = event.clientY;
+                if (anchor) {
+                    const rect = anchor.getBoundingClientRect();
+                    clientX = Math.round(rect.left);
+                    clientY = Math.round(rect.bottom + 4);
+                }
+
+                ladybird.sendMessage("showContextMenu", {
+                    clientX,
+                    clientY,
+                    id: item.id,
+                    targetFolderId: item.type === "folder" ? item.id : parentId,
+                    parentFolderId: parentId,
+                });
+            }
+
+            function moveDraggedItem(targetFolderId, targetIndex) {
+                if (!DRAGGED_ITEM_ID || DRAGGED_ITEM_ID === targetFolderId) return;
+                ladybird.sendMessage("moveItem", { id: DRAGGED_ITEM_ID, index: targetIndex, targetFolderId });
+                DRAGGED_ITEM_ID = null;
+            }
+
+            function clearDropMarks() {
+                for (const element of document.querySelectorAll(".drop-above, .drop-below, .drop-inside"))
+                    element.classList.remove("drop-above", "drop-below", "drop-inside");
+            }
+
+            // A row takes a dragged item above or below itself, and a folder's row also takes it inside.
+            function dropPosition(event, row, item) {
+                const rect = row.getBoundingClientRect();
+                const ratio = (event.clientY - rect.top) / rect.height;
+                if (item.type === "folder" && ratio > 0.25 && ratio < 0.75) return "inside";
+                return ratio < 0.5 ? "above" : "below";
+            }
+
+            function setUpDragAndDrop(row, item, index) {
+                if (SEARCH_QUERY) return;
+                row.draggable = true;
+
+                row.addEventListener("dragstart", event => {
+                    DRAGGED_ITEM_ID = item.id;
+                    row.classList.add("dragging");
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData("text/plain", item.id);
+                });
+                row.addEventListener("dragend", () => {
+                    DRAGGED_ITEM_ID = null;
+                    row.classList.remove("dragging");
+                    clearDropMarks();
+                });
+                row.addEventListener("dragover", event => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    event.dataTransfer.dropEffect = "move";
+                    clearDropMarks();
+                    row.classList.add(`drop-${dropPosition(event, row, item)}`);
+                });
+                row.addEventListener("drop", event => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    clearDropMarks();
+                    const position = dropPosition(event, row, item);
+                    if (position === "inside") moveDraggedItem(item.id, item.children?.length || 0);
+                    else moveDraggedItem(CURRENT_FOLDER_ID, position === "above" ? index : index + 1);
+                });
+            }
+
+            function renderFolderLink(folder, depth) {
+                const id = folder ? folder.id : null;
+                const children = folder ? folder.children || [] : BOOKMARKS;
+                const link = createElement("a", { href: "#", className: "folder-link" });
+                link.style.paddingLeft = `${10 + depth * 20}px`;
+                link.innerHTML = FOLDER_SVG;
+                link.append(
+                    createElement("span", {
+                        className: "name",
+                        textContent: folder ? folder.title || "(no title)" : "Bookmarks bar",
+                    }),
+                    createElement("span", { className: "count", textContent: String(children.length) })
+                );
+                if (!SEARCH_QUERY && id === CURRENT_FOLDER_ID) link.setAttribute("aria-current", "page");
+
+                link.addEventListener("click", event => {
+                    event.preventDefault();
+                    CURRENT_FOLDER_ID = id;
+                    searchInput.value = "";
+                    SEARCH_QUERY = "";
+                    render();
+                });
+                link.addEventListener("dragover", event => {
+                    if (!DRAGGED_ITEM_ID) return;
+                    event.preventDefault();
+                    clearDropMarks();
+                    link.classList.add("drop-inside");
+                });
+                link.addEventListener("dragleave", () => link.classList.remove("drop-inside"));
+                link.addEventListener("drop", event => {
+                    event.preventDefault();
+                    clearDropMarks();
+                    moveDraggedItem(id, children.length);
+                });
+                if (folder) link.addEventListener("contextmenu", event => showContextMenu(event, folder, null));
+                foldersNav.append(link);
+
+                for (const child of children) {
+                    if (child.type === "folder") renderFolderLink(child, depth + 1);
+                }
+            }
+
+            function renderRow(item, parentId, index) {
+                const row = createElement("div", { className: "row" });
+                row.setAttribute("role", "listitem");
+
+                if (item.type === "folder") {
+                    row.append(createElement("span", { className: "favicon", innerHTML: FOLDER_SVG }));
+                    const title = createElement("a", { href: "#", className: "title", draggable: false });
+                    title.append(...highlightText(item.title || "(no title)", SEARCH_QUERY));
+                    title.addEventListener("click", event => {
+                        event.preventDefault();
+                        CURRENT_FOLDER_ID = item.id;
+                        searchInput.value = "";
+                        SEARCH_QUERY = "";
+                        render();
+                    });
+                    row.append(
+                        title,
+                        createElement("span", {
+                            className: "detail",
+                            textContent: bookmarkCount((item.children || []).length),
+                        })
+                    );
+                } else {
+                    const favicon = createElement("span", { className: "favicon" });
+                    if (item.favicon)
+                        favicon.append(createElement("img", { src: `data:image/png;base64,${item.favicon}`, alt: "" }));
+                    else favicon.innerHTML = GLOBE_SVG;
+                    const title = createElement("a", { href: item.url, className: "title", draggable: false });
+                    title.append(...highlightText(item.title || item.url, SEARCH_QUERY));
+                    const detail = createElement("span", { className: "detail" });
+                    detail.append(...highlightText(displayUrl(item.url), SEARCH_QUERY));
+                    row.append(favicon, title, detail);
+                }
+
+                const moreButton = createElement("button", { className: "more-button", innerHTML: MORE_SVG });
+                moreButton.setAttribute("aria-label", `More actions for ${item.title || item.url || "folder"}`);
+                moreButton.addEventListener("click", event => showContextMenu(event, item, parentId, moreButton));
+                row.append(moreButton);
+
+                row.addEventListener("contextmenu", event => showContextMenu(event, item, parentId));
+                setUpDragAndDrop(row, item, index);
+                rowsContainer.append(row);
+            }
+
+            function render() {
+                for (const link of foldersNav.querySelectorAll(".folder-link")) link.remove();
+                renderFolderLink(null, 0);
+
+                rowsContainer.replaceChildren();
+
+                if (SEARCH_QUERY) {
+                    folderTitle.textContent = "Search results";
+                    const matches = matchingItems(BOOKMARKS, SEARCH_QUERY);
+                    if (matches.length === 0) {
+                        rowsContainer.append(
+                            createElement("div", { className: "empty", textContent: "No bookmarks match your search." })
+                        );
+                        return;
+                    }
+                    matches.forEach(({ item, parentId }, index) => renderRow(item, parentId, index));
+                    return;
+                }
+
+                const folder = CURRENT_FOLDER_ID === null ? null : findFolder(BOOKMARKS, CURRENT_FOLDER_ID);
+                if (CURRENT_FOLDER_ID !== null && !folder) CURRENT_FOLDER_ID = null;
+                folderTitle.textContent = folder ? folder.title || "(no title)" : "Bookmarks bar";
+
+                const items = currentItems();
+                if (items.length === 0) {
+                    rowsContainer.append(
+                        createElement("div", { className: "empty", textContent: "No bookmarks here yet." })
+                    );
+                    return;
+                }
+                items.forEach((item, index) => renderRow(item, CURRENT_FOLDER_ID, index));
+            }
+            const renderTree = render;
+
+            rowsContainer.addEventListener("dragover", event => {
+                if (!DRAGGED_ITEM_ID) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+            });
+            rowsContainer.addEventListener("drop", event => {
+                event.preventDefault();
+                clearDropMarks();
+                moveDraggedItem(CURRENT_FOLDER_ID, currentItems().length);
+            });
+
+            document.querySelector("main").addEventListener("contextmenu", event => {
+                if (event.defaultPrevented) return;
+                event.preventDefault();
+                ladybird.sendMessage("showContextMenu", {
+                    clientX: event.clientX,
+                    clientY: event.clientY,
+                    targetFolderId: CURRENT_FOLDER_ID,
+                });
+            });
+
+            document.getElementById("new-folder-button").addEventListener("click", () => {
+                ladybird.sendMessage("newFolder", { targetFolderId: CURRENT_FOLDER_ID });
+            });
+
+            document.addEventListener("WebUILoaded", () => {
+                ladybird.sendMessage("loadBookmarks");
+            });
+
+            document.addEventListener("WebUIMessage", event => {
+                if (event.detail.name === "loadBookmarks") {
+                    BOOKMARKS = event.detail.data;
+                    render();
+                }
+            });
+
+            const menuToggle = document.getElementById("menu-toggle");
+            const menuDropdown = document.getElementById("menu-dropdown");
+            const importButton = document.getElementById("import-button");
+            const exportButton = document.getElementById("export-button");
+            const importFileInput = document.getElementById("import-file");
+
+            function closeMenu() {
+                menuDropdown.classList.add("hidden");
+            }
+
+            menuToggle.addEventListener("click", event => {
+                event.stopPropagation();
+                menuDropdown.classList.toggle("hidden");
+            });
+
+            document.addEventListener("click", event => {
+                if (!menuDropdown.contains(event.target) && event.target !== menuToggle) {
+                    closeMenu();
+                }
+            });
+
+            // Import: parse Netscape Bookmark HTML format using DOMParser
+            function parseNetscapeBookmarks(html) {
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, "text/html");
+
+                function parseItems(dl) {
+                    const items = [];
+                    if (!dl) {
+                        return items;
+                    }
+
+                    for (const dt of dl.children) {
+                        if (dt.tagName !== "DT") {
+                            continue;
+                        }
+
+                        const anchor = dt.querySelector(":scope > A");
+                        if (anchor) {
+                            const item = {
+                                id: crypto.randomUUID(),
+                                type: "bookmark",
+                                url: anchor.getAttribute("href") || "",
+                                title: anchor.textContent.trim() || null,
+                            };
+
+                            const icon = anchor.getAttribute("icon");
+                            if (icon) {
+                                const match = icon.match(/^data:image\/png;base64,(.+)$/i);
+                                if (match) {
+                                    item.favicon = match[1];
+                                }
+                            }
+
+                            const addDate = anchor.getAttribute("add_date");
+                            if (addDate && addDate !== "0") {
+                                item.dateAdded = Number(addDate) * 1000;
+                            }
+
+                            const lastModified = anchor.getAttribute("last_modified");
+                            if (lastModified && lastModified !== "0") {
+                                item.lastModified = Number(lastModified) * 1000;
+                            }
+
+                            if (item.url) {
+                                items.push(item);
+                            }
+                            continue;
+                        }
+
+                        const heading = dt.querySelector(":scope > H3");
+                        if (heading) {
+                            const childDl = dt.querySelector(":scope > DL");
+                            const folder = {
+                                id: crypto.randomUUID(),
+                                type: "folder",
+                                title: heading.textContent.trim() || null,
+                                children: parseItems(childDl),
+                            };
+
+                            const addDate = heading.getAttribute("add_date");
+                            if (addDate && addDate !== "0") {
+                                folder.dateAdded = Number(addDate) * 1000;
+                            }
+
+                            const lastModified = heading.getAttribute("last_modified");
+                            if (lastModified && lastModified !== "0") {
+                                folder.lastModified = Number(lastModified) * 1000;
+                            }
+
+                            items.push(folder);
+                            continue;
+                        }
+                    }
+
+                    return items;
+                }
+
+                // The top-level <DL> is the root bookmark list
+                const topDl = doc.querySelector("DL");
+                return parseItems(topDl);
+            }
+
+            importButton.addEventListener("click", () => {
+                closeMenu();
+                importFileInput.value = "";
+                importFileInput.click();
+            });
+
+            importFileInput.addEventListener("change", () => {
+                const file = importFileInput.files[0];
+                if (!file) {
+                    return;
+                }
+
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const items = parseNetscapeBookmarks(reader.result);
+                    if (items.length > 0) {
+                        ladybird.sendMessage("importBookmarks", items);
+                    }
+                };
+                reader.readAsText(file);
+            });
+
+            // Export: generate Netscape Bookmark HTML format from current bookmarks
+            function escapeHtml(text) {
+                return text.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)}`);
+            }
+
+            function generateBookmarkHtml(items, indent) {
+                const pad = "    ".repeat(indent);
+                let html = `${pad}<DL><p>\n`;
+
+                for (const item of items) {
+                    if (item.type === "bookmark") {
+                        const title = item.title ? escapeHtml(item.title) : escapeHtml(item.url);
+                        const addDate = item.dateAdded ? Math.floor(item.dateAdded / 1000) : 0;
+                        let attrs = `HREF="${escapeHtml(item.url)}" ADD_DATE="${addDate}"`;
+
+                        if (item.favicon) {
+                            attrs += ` ICON="data:image/png;base64,${item.favicon}"`;
+                        }
+
+                        html += `${pad}    <DT><A ${attrs}>${title}</A>\n`;
+                    } else if (item.type === "folder") {
+                        const title = item.title ? escapeHtml(item.title) : "Untitled Folder";
+                        const addDate = item.dateAdded ? Math.floor(item.dateAdded / 1000) : 0;
+                        const lastModified = item.lastModified ? Math.floor(item.lastModified / 1000) : 0;
+
+                        html += `${pad}    <DT><H3 ADD_DATE="${addDate}" LAST_MODIFIED="${lastModified}">${title}</H3>\n`;
+                        html += generateBookmarkHtml(item.children || [], indent + 1);
+                    }
+                }
+
+                html += `${pad}</DL><p>\n`;
+                return html;
+            }
+
+            const searchInput = document.getElementById("search-input");
+
+            searchInput.addEventListener("input", () => {
+                SEARCH_QUERY = searchInput.value.trim();
+                renderTree();
+            });
+
+            exportButton.addEventListener("click", () => {
+                closeMenu();
+
+                let html = "<!DOCTYPE NETSCAPE-Bookmark-file-1>\n";
+                html += '<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">\n';
+                html += "<TITLE>Bookmarks</TITLE>\n";
+                html += "<H1>Bookmarks</H1>\n";
+                html += generateBookmarkHtml(BOOKMARKS, 0);
+
+                // FIXME: Route bookmark export through a web platform save/download API
+                //        once one is implemented in Ladybird.
+                ladybird.sendMessage("exportBookmarks", html);
+            });
+        </script>
+    </body>
+</html>

@@ -1,0 +1,179 @@
+/*
+ * Copyright (c) 2021, Luke Wilde <lukew@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibGC/Heap.h>
+#include <LibWeb/Bindings/Intrinsics.h>
+#include <LibWeb/Bindings/PrincipalHostDefined.h>
+#include <LibWeb/Bindings/Wrappable.h>
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/HTML/BrowsingContext.h>
+#include <LibWeb/HTML/LocalNavigable.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HTML/Scripting/WindowEnvironmentSettingsObject.h>
+#include <LibWeb/HTML/Window.h>
+#include <LibWebCommon/HTML/CrossOrigin/OpenerPolicy.h>
+
+namespace Web::HTML {
+
+GC_DEFINE_ALLOCATOR(WindowEnvironmentSettingsObject);
+
+WindowEnvironmentSettingsObject::WindowEnvironmentSettingsObject(Window& window, NonnullOwnPtr<JS::ExecutionContext> execution_context)
+    : EnvironmentSettingsObject(move(execution_context))
+    , m_window(window)
+{
+    m_window->set_environment_settings_object({}, *this);
+}
+
+WindowEnvironmentSettingsObject::~WindowEnvironmentSettingsObject() = default;
+
+void WindowEnvironmentSettingsObject::visit_edges(JS::Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_window);
+}
+
+// https://html.spec.whatwg.org/multipage/window-object.html#set-up-a-window-environment-settings-object
+void WindowEnvironmentSettingsObject::setup(Page& page, URL::URL const& creation_url, NonnullOwnPtr<JS::ExecutionContext> execution_context, GC::Ptr<Environment> reserved_environment, URL::URL top_level_creation_url, URL::Origin top_level_origin, Optional<u64> agent_cluster_id, CrossOriginIsolationMode agent_cluster_cross_origin_isolation_mode, Optional<EnvironmentId> environment_id)
+{
+    // 1. Let realm be the value of execution context's Realm component.
+    auto realm = execution_context->realm();
+    VERIFY(realm);
+
+    // 2. Let window be realm's global object.
+    auto* window = window_from_global_object(realm->global_object());
+    VERIFY(window);
+
+    // 3. Let settings object be a new environment settings object whose algorithms are defined as follows:
+    // NOTE: See the functions defined for this class.
+    auto settings_object = realm->create<WindowEnvironmentSettingsObject>(*window, move(execution_context));
+    settings_object->m_agent_cluster_id = agent_cluster_id;
+    settings_object->m_agent_cluster_cross_origin_isolation_mode = agent_cluster_cross_origin_isolation_mode;
+
+    // 4. If reservedEnvironment is non-null, then:
+    if (reserved_environment) {
+        // FIXME:    1. Set settings object's id to reservedEnvironment's id,
+        //              target browsing context to reservedEnvironment's target browsing context,
+        //              and active service worker to reservedEnvironment's active service worker.
+        settings_object->id = reserved_environment->id;
+        settings_object->target_browsing_context = reserved_environment->target_browsing_context;
+
+        // 2. Set reservedEnvironment's id to the empty string.
+        reserved_environment->id = {};
+    }
+
+    // 5. Otherwise, set settings object's id to a new unique opaque string, settings object's target browsing context to
+    //    null, and settings object's active service worker to null.
+    else {
+        // AD-HOC: An id the UI process already learned stands in for the new unique opaque string.
+        settings_object->id = environment_id.has_value() ? environment_id.release_value() : EnvironmentId::generate();
+        settings_object->target_browsing_context = nullptr;
+        // FIXME: Set settings object's active service worker to null.
+    }
+
+    // 6. Set settings object's creation URL to creationURL,
+    //    settings object's top-level creation URL to topLevelCreationURL,
+    //    and settings object's top-level origin to topLevelOrigin.
+    settings_object->creation_url = creation_url;
+    settings_object->top_level_creation_url = move(top_level_creation_url);
+    settings_object->top_level_origin = move(top_level_origin);
+
+    // 7. Set realm's [[HostDefined]] field to settings object.
+    // Non-Standard: We store the ESO next to the web intrinsics in a custom HostDefined object
+    auto intrinsics = realm->create<Bindings::Intrinsics>(*realm);
+    realm->set_host_defined(Bindings::create_principal_host_defined(settings_object, intrinsics, page));
+    Bindings::cache_global_object_wrapper(*realm);
+
+    // Non-Standard: We cannot fully initialize window object until *after* the we set up
+    //    the realm's [[HostDefined]] internal slot as the internal slot contains the web platform intrinsics
+    MUST(Bindings::initialize_window_web_interfaces(*window));
+}
+
+// https://html.spec.whatwg.org/multipage/window-object.html#script-settings-for-window-objects:responsible-document
+GC::Ptr<DOM::Document> WindowEnvironmentSettingsObject::responsible_document()
+{
+    // Return window's associated Document.
+    return m_window->associated_document_if_any();
+}
+
+// https://html.spec.whatwg.org/multipage/window-object.html#script-settings-for-window-objects:api-base-url
+URL::URL WindowEnvironmentSettingsObject::api_base_url() const
+{
+    // Return the current base URL of window's associated Document.
+    return m_window->associated_document().base_url();
+}
+
+// https://html.spec.whatwg.org/multipage/window-object.html#script-settings-for-window-objects:concept-settings-object-origin
+URL::Origin WindowEnvironmentSettingsObject::origin() const
+{
+    // Return the origin of window's associated Document.
+    return m_window->associated_document().origin();
+}
+
+// https://html.spec.whatwg.org/multipage/nav-history-apis.html#script-settings-for-window-objects:concept-settings-object-has-cross-site-ancestor
+bool WindowEnvironmentSettingsObject::has_cross_site_ancestor() const
+{
+    auto navigable = m_window->navigable();
+
+    // AD-HOC: A document created for a navigation is not its navigable's active document yet when it processes the
+    //         preloads of its Link headers, so its window has no navigable. Answer for the navigable it is created in,
+    //         as its own fetches are answered once it is active.
+    if (!navigable)
+        navigable = m_window->associated_document().navigable_awaiting_activation();
+
+    // NB: A fetch can outlive its document's navigable, for example when following a redirect after an iframe is
+    //     removed. Without its ancestors, conservatively treat the environment as a third-party context.
+    if (!navigable)
+        return true;
+
+    // 1. If window's navigable's parent is null, then return false.
+    auto parent = navigable->parent();
+    if (!parent)
+        return false;
+
+    // 2. Let parentDocument be window's navigable's parent's active document.
+    // 3. If parentDocument's relevant settings object's has cross-site ancestor is true, then return true.
+    if (parent->active_document_has_cross_site_ancestor())
+        return true;
+
+    // 4. If parentDocument's origin is not same site with window's associated Document's origin, then return true.
+    if (!parent->active_document_origin()->is_same_site(m_window->associated_document().origin()))
+        return true;
+
+    // 5. Return false.
+    return false;
+}
+
+// https://html.spec.whatwg.org/multipage/window-object.html#script-settings-for-window-objects:concept-settings-object-policy-container
+NonnullRefPtr<PolicyContainer> WindowEnvironmentSettingsObject::policy_container() const
+{
+    // Return the policy container of window's associated Document.
+    return m_window->associated_document().policy_container();
+}
+
+// https://html.spec.whatwg.org/multipage/nav-history-apis.html#script-settings-for-window-objects:concept-settings-object-time-origin
+double WindowEnvironmentSettingsObject::time_origin() const
+{
+    // Return window's associated Document's load timing info's navigation start time.
+    return m_window->associated_document().load_timing_info().navigation_start_time;
+}
+
+// https://html.spec.whatwg.org/multipage/window-object.html#script-settings-for-window-objects:concept-settings-object-cross-origin-isolated-capability
+CanUseCrossOriginIsolatedAPIs WindowEnvironmentSettingsObject::cross_origin_isolated_capability() const
+{
+    // Return true if both of the following hold, and false otherwise:
+    // - realm's agent cluster's cross-origin-isolation mode is "concrete", and
+    // - window's associated Document is allowed to use the "cross-origin-isolated" feature.
+    // NB: This can be called before the window's document is associated (e.g., via time coarsening during setup) — so,
+    //     we guard against a null document here.
+    auto document = m_window ? m_window->associated_document_if_any() : nullptr;
+    if (m_agent_cluster_cross_origin_isolation_mode == CrossOriginIsolationMode::Concrete
+        && document && document->is_allowed_to_use_feature(DOM::PolicyControlledFeature::CrossOriginIsolated)) {
+        return CanUseCrossOriginIsolatedAPIs::Yes;
+    }
+    return CanUseCrossOriginIsolatedAPIs::No;
+}
+
+}

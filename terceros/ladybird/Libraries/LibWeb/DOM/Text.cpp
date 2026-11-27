@@ -1,0 +1,220 @@
+/*
+ * Copyright (c) 2018-2022, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2025, Jelle Raaijmakers <jelle@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibGC/Heap.h>
+#include <LibUnicode/CharacterTypes.h>
+#include <LibUnicode/Segmenter.h>
+#include <LibWeb/DOM/Range.h>
+#include <LibWeb/DOM/Text.h>
+#include <LibWeb/Editing/SpellingMarkers.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HTML/Window.h>
+#include <LibWeb/Layout/TextNode.h>
+
+namespace Web::DOM {
+
+#if ARCH(X86_64) && !defined(AK_OS_WINDOWS)
+static_assert(sizeof(Text) == 136);
+#endif
+
+struct Text::RareData final
+    : CharacterData::RareData
+    , SlottableMixin::RareData {
+    AK_ALLOC_WITH_KMALLOC;
+
+    virtual void visit_edges(Cell::Visitor& visitor) override
+    {
+        CharacterData::RareData::visit_edges(visitor);
+        SlottableMixin::RareData::visit_edges(visitor);
+    }
+};
+
+OwnPtr<Node::RareData> Text::create_rare_data() const
+{
+    return make<RareData>();
+}
+
+SlottableMixin::RareData* Text::slottable_rare_data()
+{
+    return static_cast<RareData*>(rare_data());
+}
+
+SlottableMixin::RareData const* Text::slottable_rare_data() const
+{
+    return static_cast<RareData const*>(rare_data());
+}
+
+SlottableMixin::RareData& Text::ensure_slottable_rare_data()
+{
+    return static_cast<RareData&>(ensure_rare_data());
+}
+
+GC_DEFINE_ALLOCATOR(Text);
+
+Text::Text(Document& document, Utf16String data)
+    : CharacterData(document, NodeType::TEXT_NODE, move(data))
+{
+}
+
+Text::Text(Document& document, NodeType type, Utf16String data)
+    : CharacterData(document, type, move(data))
+{
+}
+
+GC::Ref<Text> Text::create(Document& document, Utf16String data)
+{
+    return GC::Heap::the().allocate<Text>(document, move(data));
+}
+
+GC::Ref<Text> Text::create_for_constructor(JS::Object& relevant_global_object, Utf16String data)
+{
+    return create(HTML::relevant_window(relevant_global_object).associated_document(), move(data));
+}
+
+// Spelling markers belong to the document whose spellchecker flagged the text, so they stay behind when the text moves
+// to another document.
+void Text::adopted_from(Document& old_document)
+{
+    Base::adopted_from(old_document);
+    if (has_spelling_markers())
+        old_document.spelling_markers().remove_all(*this);
+}
+
+void Text::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+}
+
+// https://dom.spec.whatwg.org/#dom-text-splittext
+// https://dom.spec.whatwg.org/#concept-text-split
+WebIDL::ExceptionOr<GC::Ref<Text>> Text::split_text(size_t offset)
+{
+    // 1. Let length be node’s length.
+    auto length = this->length();
+
+    // 2. If offset is greater than length, then throw an "IndexSizeError" DOMException.
+    if (offset > length)
+        return WebIDL::IndexSizeError::create("Split offset is greater than length"_utf16);
+
+    // 3. Let count be length minus offset.
+    auto count = length - offset;
+
+    // 4. Let new data be the result of substringing data with node node, offset offset, and count count.
+    auto new_data = TRY(substring_data(offset, count));
+
+    // 5. Let new node be a new Text node, with the same node document as node. Set new node’s data to new data.
+    auto new_node = create(document(), new_data);
+
+    // 6. Let parent be node’s parent.
+    GC::Ptr<Node> parent = this->parent();
+
+    // 7. If parent is not null, then:
+    if (parent) {
+        // 1. Insert new node into parent before node’s next sibling.
+        parent->insert_before(*new_node, next_sibling());
+
+        // 2. For each live range whose start node is node and start offset is greater than offset, set its start node
+        //    to new node and decrease its start offset by offset.
+        // 3. For each live range whose end node is node and end offset is greater than offset, set its end node to new
+        //    node and decrease its end offset by offset.
+        // 4. For each live range whose start node is parent and start offset is equal to the index of node plus 1,
+        //    increase its start offset by 1.
+        // 5. For each live range whose end node is parent and end offset is equal to the index of node plus 1, increase
+        //    its end offset by 1.
+        // OPTIMIZATION: These steps are independent between ranges, so traverse the live ranges only once.
+        auto node_index = index();
+        for (auto& range : document().live_ranges()) {
+            if (range.start_container().ptr() == this && range.start_offset() > offset) {
+                range.set_start_node(*new_node);
+                range.decrease_start_offset(offset);
+            }
+            if (range.end_container().ptr() == this && range.end_offset() > offset) {
+                range.set_end_node(*new_node);
+                range.decrease_end_offset(offset);
+            }
+            if (range.start_container().ptr() == parent.ptr() && range.start_offset() == node_index + 1)
+                range.increase_start_offset(1);
+            if (range.end_container().ptr() == parent.ptr() && range.end_offset() == node_index + 1)
+                range.increase_end_offset(1);
+        }
+    }
+
+    // 8. Replace data with node node, offset offset, count count, and data the empty string.
+    TRY(replace_data(offset, count, {}));
+
+    // 9. Return new node.
+    return new_node;
+}
+
+// https://dom.spec.whatwg.org/#dom-text-wholetext
+Utf16String Text::whole_text()
+{
+    // https://dom.spec.whatwg.org/#contiguous-text-nodes
+    // The contiguous Text nodes of a node node are node, node’s previous sibling Text node, if any, and its contiguous
+    // Text nodes, and node’s next sibling Text node, if any, and its contiguous Text nodes, avoiding any duplicates.
+    GC::RootVector<Text*> nodes;
+
+    nodes.append(this);
+
+    auto* current_node = previous_sibling();
+    while (current_node && (current_node->is_text() || current_node->is_cdata_section())) {
+        nodes.append(static_cast<Text*>(current_node));
+        current_node = current_node->previous_sibling();
+    }
+
+    // Reverse nodes so they are in tree order
+    nodes.reverse();
+
+    current_node = next_sibling();
+    while (current_node && (current_node->is_text() || current_node->is_cdata_section())) {
+        nodes.append(static_cast<Text*>(current_node));
+        current_node = current_node->next_sibling();
+    }
+
+    Utf16StringBuilder builder;
+    for (auto const& text_node : nodes)
+        builder.append(text_node->data());
+
+    return builder.to_string();
+}
+
+void Text::set_style_node_id(CSS::StyleNodeID style_node_id)
+{
+    if (m_style_node_id == style_node_id)
+        return;
+    auto old_style_node_id = m_style_node_id;
+    m_style_node_id = style_node_id;
+    Layout::Node::dom_node_style_node_changed(*this, old_style_node_id);
+}
+
+// https://html.spec.whatwg.org/multipage/dom.html#text-node-directionality
+Optional<Element::Directionality> Text::directionality() const
+{
+    // 1. If text's data does not contain a code point whose bidirectional character type is L, AL, or R, then return null.
+    // 2. Let codePoint be the first code point in text's data whose bidirectional character type is L, AL, or R.
+    Optional<Unicode::BidiClass> found_character_bidi_class;
+    for (auto code_point : data()) {
+        auto bidi_class = Unicode::bidirectional_class(code_point);
+        if (first_is_one_of(bidi_class, Unicode::BidiClass::LeftToRight, Unicode::BidiClass::RightToLeftArabic, Unicode::BidiClass::RightToLeft)) {
+            found_character_bidi_class = bidi_class;
+            break;
+        }
+    }
+    if (!found_character_bidi_class.has_value())
+        return {};
+
+    // 3. If codePoint is of bidirectional character type AL or R, then return 'rtl'.
+    if (first_is_one_of(*found_character_bidi_class, Unicode::BidiClass::RightToLeftArabic, Unicode::BidiClass::RightToLeft))
+        return Element::Directionality::Rtl;
+
+    // 4. If codePoint is of bidirectional character type L, then return 'ltr'.
+    // NOTE: codePoint should always be of bidirectional character type L by this point, so we can just return 'ltr' here.
+    VERIFY(*found_character_bidi_class == Unicode::BidiClass::LeftToRight);
+    return Element::Directionality::Ltr;
+}
+
+}

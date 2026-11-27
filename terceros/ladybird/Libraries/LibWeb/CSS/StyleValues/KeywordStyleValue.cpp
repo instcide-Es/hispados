@@ -1,0 +1,74 @@
+/*
+ * Copyright (c) 2018-2020, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2021, Tobias Christiansen <tobyase@serenityos.org>
+ * Copyright (c) 2021-2026, Sam Atkins <sam@ladybird.org>
+ * Copyright (c) 2022-2023, MacDue <macdue@dueutil.tech>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include "KeywordStyleValue.h"
+#include <LibWeb/CSS/StyleValues/ColorStyleValue.h>
+
+namespace Web::CSS {
+
+bool KeywordStyleValue::is_color(Keyword keyword)
+{
+    switch (keyword) {
+    case Keyword::Accentcolor:
+    case Keyword::Accentcolortext:
+    case Keyword::Activeborder:
+    case Keyword::Activecaption:
+    case Keyword::Activetext:
+    case Keyword::Appworkspace:
+    case Keyword::Background:
+    case Keyword::Buttonborder:
+    case Keyword::Buttonface:
+    case Keyword::Buttonhighlight:
+    case Keyword::Buttonshadow:
+    case Keyword::Buttontext:
+    case Keyword::Canvas:
+    case Keyword::Canvastext:
+    case Keyword::Captiontext:
+    case Keyword::Currentcolor:
+    case Keyword::Field:
+    case Keyword::Fieldtext:
+    case Keyword::Graytext:
+    case Keyword::Highlight:
+    case Keyword::Highlighttext:
+    case Keyword::Inactiveborder:
+    case Keyword::Inactivecaption:
+    case Keyword::Inactivecaptiontext:
+    case Keyword::Infobackground:
+    case Keyword::Infotext:
+    case Keyword::LibwebButtonfacedisabled:
+    case Keyword::LibwebButtonfacehover:
+    case Keyword::Linktext:
+    case Keyword::Mark:
+    case Keyword::Marktext:
+    case Keyword::Menu:
+    case Keyword::Menutext:
+    case Keyword::Scrollbar:
+    case Keyword::Selecteditem:
+    case Keyword::Selecteditemtext:
+    case Keyword::Threeddarkshadow:
+    case Keyword::Threedface:
+    case Keyword::Threedhighlight:
+    case Keyword::Threedlightshadow:
+    case Keyword::Threedshadow:
+    case Keyword::Visitedtext:
+    case Keyword::Window:
+    case Keyword::Windowframe:
+    case Keyword::Windowtext:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool KeywordStyleValue::has_color() const
+{
+    return is_color(keyword());
+}
+
+}

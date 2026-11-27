@@ -1,0 +1,1020 @@
+/*
+ * Copyright (c) 2025-2026, Tim Flynn <trflynn89@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/AllOf.h>
+#include <AK/Array.h>
+#include <AK/CharacterTypes.h>
+#include <AK/GenericLexer.h>
+#include <AK/Hex.h>
+#include <AK/NumericLimits.h>
+#include <AK/QuickSort.h>
+#include <AK/StringBuilder.h>
+#include <AK/StringConversions.h>
+#include <AK/Utf16View.h>
+#include <LibCrypto/Hash/Hash.h>
+#include <LibHTTP/Cache/DiskCache.h>
+#include <LibHTTP/Cache/Utilities.h>
+#include <LibHTTP/HTTP.h>
+#include <LibURL/URL.h>
+
+namespace HTTP {
+
+static Optional<StringView> extract_cache_control_directive(StringView, StringView, bool allow_argument);
+
+// https://httpwg.org/specs/rfc9111.html#delta-seconds
+static Optional<AK::Duration> parse_delta_seconds(StringView value)
+{
+    // delta-seconds = 1*DIGIT
+    if (value.is_empty() || !all_of(value, is_ascii_digit))
+        return {};
+
+    // If a cache receives a delta-seconds value greater than the greatest integer it can represent, or if any of its
+    // subsequent calculations overflows, the cache MUST consider the value to be 2147483648 (2^31) or the greatest
+    // positive integer it can conveniently represent.
+    static constexpr u64 maximum_delta_seconds = 2'147'483'648;
+    auto seconds = min(value.to_number<u64>().value_or(maximum_delta_seconds), maximum_delta_seconds);
+    return AK::Duration::from_seconds(static_cast<i64>(seconds));
+}
+
+// https://httpwg.org/specs/rfc9110.html#field.date
+static Optional<UnixDateTime> parse_http_date(Optional<ByteString const&> date)
+{
+    // <day-name>, <day> <month> <year> <hour>:<minute>:<second> GMT
+    if (date.has_value())
+        return UnixDateTime::parse("%a, %d %b %Y %T GMT"sv, *date, true);
+    return {};
+}
+
+i64 compute_maximum_disk_cache_size(u64 free_bytes, u64 limit_maximum_disk_cache_size)
+{
+    auto cache_size = [&]() {
+        if (free_bytes <= 100 * MiB)
+            return free_bytes * 8 / 10; // Up to 80 MiB
+        if (free_bytes <= 800 * MiB)
+            return free_bytes * 6 / 10; // Up to 480 MiB
+        if (free_bytes <= 2 * GiB)
+            return free_bytes * 4 / 10; // Up to 820 MiB
+        if (free_bytes <= 10 * GiB)
+            return free_bytes * 2 / 10; // Up to 2 GiB
+        return limit_maximum_disk_cache_size;
+    }();
+
+    // The index accounts for sizes in SQLite's signed integer domain, so the limit lives there too.
+    static constexpr u64 MAXIMUM_REPRESENTABLE_DISK_CACHE_SIZE = NumericLimits<i64>::max();
+
+    cache_size = min(cache_size, limit_maximum_disk_cache_size);
+    cache_size = min(cache_size, MAXIMUM_REPRESENTABLE_DISK_CACHE_SIZE);
+    return static_cast<i64>(cache_size);
+}
+
+i64 compute_maximum_disk_cache_entry_size(i64 maximum_disk_cache_size)
+{
+    static constexpr i64 MAXIMUM_DISK_CACHE_ENTRY_SIZE = 256 * MiB;
+
+    return min(maximum_disk_cache_size / 8, MAXIMUM_DISK_CACHE_ENTRY_SIZE);
+}
+
+String serialize_url_for_cache_storage(URL::URL const& url)
+{
+    return url.serialize(URL::ExcludeFragment::Yes);
+}
+
+static CacheDigest serialize_hash(Crypto::Hash::Hasher& hasher)
+{
+    auto digest = hasher.finish();
+    return CacheDigest::from_bytes(digest.bytes()).release_value();
+}
+
+// Length prefixes prevent distinct fields from hashing the same byte sequence.
+static void update_with_length(Crypto::Hash::Hasher& hasher, StringView bytes)
+{
+    u64 length = bytes.length();
+    hasher.update(ReadonlyBytes { &length, sizeof(length) });
+    hasher.update(bytes);
+}
+
+CacheDigest create_cache_key(Utf16View const& partition, StringView url, StringView method)
+{
+    Crypto::Hash::Hasher hasher { Crypto::Hash::HashKind::SHA256 };
+
+    u64 partition_length = partition.length_in_code_units();
+    hasher.update(ReadonlyBytes { &partition_length, sizeof(partition_length) });
+
+    // NB: Hash the code units rather than the string's storage, so the same text always gives the same key.
+    Array<u8, 256> buffer;
+    size_t buffer_size = 0;
+    for (size_t i = 0; i < partition.length_in_code_units(); ++i) {
+        if (buffer_size == buffer.size()) {
+            hasher.update(buffer.span());
+            buffer_size = 0;
+        }
+        auto code_unit = partition.code_unit_at(i);
+        buffer[buffer_size++] = static_cast<u8>(code_unit & 0xff);
+        buffer[buffer_size++] = static_cast<u8>(code_unit >> 8);
+    }
+    hasher.update(buffer.span().trim(buffer_size));
+    update_with_length(hasher, url);
+    update_with_length(hasher, method);
+
+    return serialize_hash(hasher);
+}
+
+CacheKey create_cache_key(StringView url, StringView method)
+{
+    return { MUST(String::from_utf8(url)), MUST(String::from_utf8(method)) };
+}
+
+// https://httpwg.org/specs/rfc9111.html#caching.negotiated.responses
+Optional<Vector<ByteString>> vary_field_names(HeaderList const& response_headers)
+{
+    Vector<ByteString> field_names;
+    auto has_vary_wildcard = false;
+    auto has_too_many_fields = false;
+    auto has_unmatchable_field = false;
+
+    response_headers.for_each_vary_header([&](StringView header) {
+        // A stored response with a Vary header field value containing a member "*" always fails to match.
+        if (header == "*"sv) {
+            has_vary_wildcard = true;
+            return IterationDecision::Break;
+        }
+
+        if (header.is_empty())
+            return IterationDecision::Continue;
+
+        // AD-HOC: RequestServer adds cookies after cache lookup, so we cannot match Vary: Cookie.
+        if (header.equals_ignoring_ascii_case("Cookie"sv)) {
+            has_unmatchable_field = true;
+            return IterationDecision::Break;
+        }
+
+        auto field_name = ByteString { header }.to_lowercase();
+        if (field_names.contains_slow(field_name))
+            return IterationDecision::Continue;
+
+        if (field_names.size() == MAXIMUM_VARY_FIELD_COUNT) {
+            has_too_many_fields = true;
+            return IterationDecision::Break;
+        }
+
+        field_names.append(move(field_name));
+        return IterationDecision::Continue;
+    });
+
+    // AD-HOC: Bound the cost of matching variants against nominated fields.
+    if (has_vary_wildcard || has_too_many_fields || has_unmatchable_field)
+        return {};
+
+    quick_sort(field_names);
+    return field_names;
+}
+
+Optional<CacheDigest> create_vary_key(HeaderList const& request_headers, HeaderList const& response_headers)
+{
+    auto field_names = vary_field_names(response_headers);
+    if (!field_names.has_value())
+        return {};
+    if (field_names->is_empty())
+        return CacheDigest {};
+
+    Crypto::Hash::Hasher hasher { Crypto::Hash::HashKind::SHA256 };
+
+    for (auto const& field_name : *field_names) {
+        update_with_length(hasher, field_name);
+
+        // If (after any normalization that might take place) a header field is absent from a request, it can only
+        // match another request if it is also absent there.
+        //
+        // NB: Offset present-field counts to distinguish absent and empty fields.
+        auto values = normalize_request_vary_header_values(field_name, request_headers);
+        u64 value_count = values.has_value() ? values->size() + 1 : 0;
+        hasher.update(ReadonlyBytes { &value_count, sizeof(value_count) });
+
+        if (values.has_value()) {
+            for (auto const& value : *values)
+                update_with_length(hasher, value);
+        }
+    }
+
+    return serialize_hash(hasher);
+}
+
+LexicalPath path_for_cache_entry(LexicalPath const& cache_directory, CacheDigest const& cache_key, CacheDigest const& vary_key)
+{
+    Crypto::Hash::Hasher hasher { Crypto::Hash::HashKind::SHA256 };
+    hasher.update(cache_key.bytes.span());
+    hasher.update(vary_key.bytes.span());
+    auto digest = hasher.finish();
+
+    return cache_directory.append(encode_hex(digest.bytes().trim(16)));
+}
+
+// https://httpwg.org/specs/rfc9111.html#response.cacheability
+bool is_cacheable(StringView method, HTTP::HeaderList const& request_headers)
+{
+    // A cache MUST NOT store a response to a request unless:
+
+    // * the request method is understood by the cache;
+    if (!method.is_one_of("GET"sv, "HEAD"sv))
+        return false;
+
+    auto cache_control = request_headers.get("Cache-Control"sv);
+
+    // https://httpwg.org/specs/rfc9111.html#cache-request-directive.no-store
+    // The no-store request directive indicates that a cache MUST NOT store any part of either this request or any
+    // response to it.
+    if (cache_control.has_value() && cache_control->contains("no-store"sv, CaseSensitivity::CaseInsensitive))
+        return false;
+
+    // FIXME: Neither the disk cache nor the memory cache handle partial responses yet. So we don't cache them for now.
+    return !request_headers.contains("Range"sv);
+}
+
+// https://httpwg.org/specs/rfc9110.html#preconditions
+bool has_preconditions(HeaderList const& request_headers)
+{
+    return request_headers.contains("If-Match"sv)
+        || request_headers.contains("If-None-Match"sv)
+        || request_headers.contains("If-Modified-Since"sv)
+        || request_headers.contains("If-Unmodified-Since"sv)
+        || request_headers.contains("If-Range"sv);
+}
+
+// AD-HOC: The "force-cache" cache mode uses a stored response "not paying attention to staleness". But a request that
+//         carries a no-cache directive of its own asks for a response that the origin validated, so it does not get a
+//         stale one. This is checked when the cache is looked up, as only then does the request have its final headers.
+//         As RFC 7234 put it, "When the Cache-Control header field is also present and understood in a request, Pragma
+//         is ignored."
+bool request_permits_stale_responses(CacheMode cache_mode, HeaderList const& request_headers)
+{
+    if (!cache_mode_permits_stale_responses(cache_mode))
+        return false;
+    if (cache_mode != CacheMode::ForceCache)
+        return true;
+
+    if (auto cache_control = request_headers.get("Cache-Control"sv); cache_control.has_value())
+        return !contains_cache_control_directive(*cache_control, "no-cache"sv);
+    if (auto pragma = request_headers.get("Pragma"sv); pragma.has_value())
+        return !contains_cache_control_directive(*pragma, "no-cache"sv);
+
+    return true;
+}
+
+// https://datatracker.ietf.org/doc/html/rfc9110#name-overview-of-status-codes
+static bool is_heuristically_cacheable_status(u32 status_code)
+{
+    // Responses with status codes that are defined as heuristically cacheable
+    // (e.g., 200, 203, 204, 206, 300, 301, 308, 404, 405, 410, 414, and 501)
+    // can be reused by a cache with heuristic expiration [...]
+    switch (status_code) {
+    case 200:
+    case 203:
+    case 204:
+    case 206:
+    case 300:
+    case 301:
+    case 308:
+    case 404:
+    case 405:
+    case 410:
+    case 414:
+    case 501:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool has_unterminated_quoted_string(StringView value)
+{
+    bool in_quoted_string = false;
+
+    for (size_t i = 0; i < value.length(); ++i) {
+        if (in_quoted_string && value[i] == '\\')
+            ++i;
+        else if (value[i] == '"')
+            in_quoted_string = !in_quoted_string;
+    }
+
+    return in_quoted_string;
+}
+
+// https://httpwg.org/specs/rfc9111.html#response.cacheability
+bool is_cacheable(u32 status_code, HeaderList const& headers)
+{
+    // A cache MUST NOT store a response to a request unless:
+
+    // * the response status code is final (see Section 15 of [HTTP]);
+    if (status_code < 200)
+        return false;
+
+    // FIXME: Neither the disk cache nor the memory cache handle partial responses yet. So we don't cache them for now.
+    if (status_code == 206)
+        return false;
+
+    // FIXME: If the response contains `Vary: *`, we don't cache it for now, as it "signals that other aspects of the
+    //        request might have played a role in selecting the response representation, possibly including aspects
+    //        outside the message syntax". Rather than guessing which cached response might be a fit for a new request,
+    //        we will issue an unconditional request for now.
+    //        https://httpwg.org/specs/rfc9110.html#field.vary
+    //
+    // NB: This also rejects responses that nominate more request fields than we are willing to match on.
+    if (!vary_field_names(headers).has_value())
+        return false;
+
+    auto cache_control = headers.get("Cache-Control"sv);
+
+    // AD-HOC: An unterminated quoted-string may hide directives that forbid storage.
+    if (cache_control.has_value() && has_unterminated_quoted_string(*cache_control))
+        return false;
+
+    // * if the response status code is 206 or 304, or the must-understand cache directive (see Section 5.2.2.3) is
+    //   present: the cache understands the response status code;
+    //
+    // NB: This cache implements the semantics of 304 for revalidation. 206 is excluded above.
+    bool has_must_understand = cache_control.has_value() && extract_cache_control_directive(*cache_control, "must-understand"sv, false).has_value();
+
+    if (has_must_understand) {
+        if (!is_heuristically_cacheable_status(status_code) && status_code != 304)
+            return false;
+
+        // https://httpwg.org/specs/rfc9111.html#cache-response-directive.must-understand
+        // The must-understand response directive limits caching of the response to a cache that understands and conforms
+        // to the requirements for that response's status code.
+        //
+        // A response that contains the must-understand directive SHOULD also contain the no-store directive. When a cache
+        // that implements the must-understand directive receives a response that includes it, the cache SHOULD ignore the
+        // no-store directive if it understands and implements the status code's caching requirements.
+    } else {
+        // * the no-store cache directive is not present in the response (see Section 5.2.2.5);
+        if (cache_control.has_value() && contains_cache_control_directive(*cache_control, "no-store"sv))
+            return false;
+    }
+
+    // * if the cache is shared: the private response directive is either not present or allows a shared cache to store
+    //   a modified response; see Section 5.2.2.7);
+    //
+    // Not applicable: this is a private UA cache.
+
+    // * if the cache is shared: the Authorization header field is not present in the request (see Section 11.6.2 of
+    //   [HTTP]) or a response directive is present that explicitly allows shared caching (see Section 3.5); and
+    //
+    // Not applicable: this is a private UA cache.
+
+    // * the response contains at least one of the following:
+    //     - a public response directive (see Section 5.2.2.9);
+    //     - a private response directive, if the cache is not shared (see Section 5.2.2.7);
+    //     - an Expires header field (see Section 5.3);
+    //     - a max-age response directive (see Section 5.2.2.1);
+    //     - if the cache is shared: an s-maxage response directive (see Section 5.2.2.10);
+    //     - a cache extension that allows it to be cached (see Section 5.2.3); or
+    //     - a status code that is defined as heuristically cacheable (see Section 4.2.2).
+
+    bool has_expires = headers.contains("Expires"sv);
+    bool has_public = false;
+    bool has_private = false;
+    bool has_max_age = false;
+
+    if (cache_control.has_value()) {
+        has_public = contains_cache_control_directive(*cache_control, "public"sv);
+        has_private = contains_cache_control_directive(*cache_control, "private"sv);
+        has_max_age = extract_cache_control_duration_directive(*cache_control, "max-age"sv).has_value();
+
+        // FIXME: cache extensions that explicitly allow caching are not interpreted.
+    }
+
+    if (!has_public
+        && !has_private
+        && !has_expires
+        && !has_max_age
+        && !is_heuristically_cacheable_status(status_code)) {
+        return false;
+    }
+
+    // Note that, in normal operation, some caches will not store a response that has neither
+    // a cache validator nor an explicit expiration time, as such responses are not usually
+    // useful to store. However, caches are not prohibited from storing such responses.
+    //
+    // This function only answers whether storage is permitted by the protocol.
+    return true;
+}
+
+// https://httpwg.org/specs/rfc9111.html#storing.fields
+bool is_header_exempted_from_storage(StringView name)
+{
+    // Caches MUST include all received response header fields — including unrecognized ones — when storing a response;
+    // this assures that new HTTP header fields can be successfully deployed. However, the following exceptions are made:
+    return name.is_one_of_ignoring_ascii_case(
+        // * The Connection header field and fields whose names are listed in it are required by Section 7.6.1 of [HTTP]
+        //   to be removed before forwarding the message. This MAY be implemented by doing so before storage.
+        "Connection"sv,
+        "Keep-Alive"sv,
+        "Proxy-Connection"sv,
+        "TE"sv,
+        "Transfer-Encoding"sv,
+        "Upgrade"sv,
+
+        // * Likewise, some fields' semantics require them to be removed before forwarding the message, and this MAY be
+        //   implemented by doing so before storage; see Section 7.6.1 of [HTTP] for some examples.
+
+        // * The no-cache (Section 5.2.2.4) and private (Section 5.2.2.7) cache directives can have arguments that
+        //   prevent storage of header fields by all caches and shared caches, respectively.
+
+        // * Header fields that are specific to the proxy that a cache uses when forwarding a request MUST NOT be stored,
+        //   unless the cache incorporates the identity of the proxy into the cache key. Effectively, this is limited to
+        //   Proxy-Authenticate (Section 11.7.1 of [HTTP]), Proxy-Authentication-Info (Section 11.7.3 of [HTTP]), and
+        //   Proxy-Authorization (Section 11.7.2 of [HTTP]).
+
+        // AD-HOC: Exclude fields that change the user agent's state when a response is received. They are acted on only
+        //         for the response that carried them, so a cached copy could only replay stale cookies or HSTS policies.
+        "Set-Cookie"sv,
+        "Strict-Transport-Security"sv,
+
+        // AD-HOC: Exclude headers used only for testing.
+        TEST_CACHE_ENABLED_HEADER,
+        TEST_CACHE_STATUS_HEADER,
+        TEST_CACHE_REQUEST_TIME_OFFSET);
+}
+
+// https://httpwg.org/specs/rfc9111.html#storing.fields
+NonnullRefPtr<HeaderList> remove_connection_specific_fields(HeaderList const& headers)
+{
+    // * The Connection header field and fields whose names are listed in it are required by Section 7.6.1 of [HTTP]
+    //   to be removed before forwarding the message. This MAY be implemented by doing so before storage.
+    //
+    // NB: Strip these before deciding cacheability too.
+    Vector<StringView> connection_options;
+
+    headers.for_each_header_value("Connection"sv, [&](StringView value) {
+        value.for_each_split_view(',', SplitBehavior::Nothing, [&](StringView connection_option) {
+            if (connection_option = connection_option.trim(HTTP_WHITESPACE); !connection_option.is_empty())
+                connection_options.append(connection_option);
+        });
+        return IterationDecision::Continue;
+    });
+
+    auto result = HeaderList::create();
+
+    for (auto const& header : headers) {
+        auto is_connection_specific = any_of(connection_options, [&](auto connection_option) {
+            return header.name.equals_ignoring_ascii_case(connection_option);
+        });
+        if (!is_connection_specific)
+            result->append(header);
+    }
+
+    return result;
+}
+
+// https://httpwg.org/specs/rfc9111.html#heuristic.freshness
+static AK::Duration calculate_heuristic_freshness_lifetime(HeaderList const& headers, AK::Duration current_time_offset_for_testing)
+{
+    // Since origin servers do not always provide explicit expiration times, a cache MAY assign a heuristic expiration
+    // time when an explicit time is not specified, employing algorithms that use other field values (such as the
+    // Last-Modified time) to estimate a plausible expiration time. This specification does not provide specific
+    // algorithms, but it does impose worst-case constraints on their results.
+    //
+    // A cache MUST NOT use heuristics to determine freshness when an explicit expiration time is present in the stored
+    // response. Because of the requirements in Section 3, heuristics can only be used on responses without explicit
+    // freshness whose status codes are defined as heuristically cacheable and on responses without explicit freshness
+    // that have been marked as explicitly cacheable (e.g., with a public response directive).
+    //
+    // If the response has a Last-Modified header field, caches are encouraged to use a heuristic expiration value that
+    // is no more than some fraction of the interval since that time. A typical setting of this fraction might be 10%.
+
+    auto last_modified = parse_http_date(headers.get("Last-Modified"sv));
+    if (!last_modified.has_value())
+        return {};
+
+    auto now = UnixDateTime::now() + current_time_offset_for_testing;
+    auto since_last_modified = now - *last_modified;
+    auto seconds = since_last_modified.to_seconds();
+
+    if (seconds <= 0)
+        return {};
+
+    // 10% heuristic, clamped at >= 0.
+    auto heuristic_seconds = max<i64>(0, seconds / 10);
+    return AK::Duration::from_seconds(heuristic_seconds);
+}
+
+// https://httpwg.org/specs/rfc9111.html#calculating.freshness.lifetime
+AK::Duration calculate_freshness_lifetime(u32 status_code, HeaderList const& headers, AK::Duration current_time_offset_for_testing)
+{
+    // A cache can calculate the freshness lifetime (denoted as freshness_lifetime) of a response by evaluating the
+    // following rules and using the first match:
+
+    auto cache_control = headers.get("Cache-Control"sv);
+
+    // * If the cache is shared and the s-maxage response directive (Section 5.2.2.10) is present, use its value, or
+    //
+    // Not a shared cache; s-maxage is ignored here.
+
+    // * If the max-age response directive (Section 5.2.2.1) is present, use its value, or
+    if (cache_control.has_value()) {
+        if (auto max_age = extract_cache_control_duration_directive(*cache_control, "max-age"sv); max_age.has_value())
+            return *max_age;
+    }
+
+    // * If the Expires response header field (Section 5.3) is present, use its value minus the value of the Date response
+    //   header field (using the time the message was received if it is not present, as per Section 6.6.1 of [HTTP]), or
+    if (auto expires_header = headers.get("Expires"sv); expires_header.has_value()) {
+        // https://httpwg.org/specs/rfc9111.html#field.expires
+        // A cache recipient MUST interpret invalid date formats, especially the value "0", as representing a time in
+        // the past (i.e., "already expired").
+        auto expires = parse_http_date(*expires_header);
+        if (!expires.has_value())
+            return {};
+
+        auto date = parse_http_date(headers.get("Date"sv)).value_or_lazy_evaluated([&]() {
+            return UnixDateTime::now() + current_time_offset_for_testing;
+        });
+
+        return *expires - date;
+    }
+
+    // * Otherwise, no explicit expiration time is present in the response. A heuristic freshness lifetime might be
+    //   applicable; see Section 4.2.2.
+
+    bool heuristics_allowed = false;
+
+    // Because of the requirements in Section 3, heuristics can only be used on responses without explicit freshness
+    // whose status codes are defined as heuristically cacheable and on responses without explicit freshness that have
+    // been marked as explicitly cacheable (e.g., with a public response directive).
+    if (is_heuristically_cacheable_status(status_code)) {
+        heuristics_allowed = true;
+    } else if (cache_control.has_value() && contains_cache_control_directive(*cache_control, "public"sv)) {
+        heuristics_allowed = true;
+    }
+
+    if (heuristics_allowed) {
+        // INTEROP: Chromium treats 301 and 308 responses without explicit freshness as indefinitely fresh, while
+        //          WebKit assigns 301 responses a one-year lifetime. Use the more conservative one-year lifetime for
+        //          both permanent redirect status codes.
+        if (status_code == 301 || status_code == 308)
+            return AK::Duration::from_seconds(365 * 24 * 60 * 60);
+
+        return calculate_heuristic_freshness_lifetime(headers, current_time_offset_for_testing);
+    }
+
+    // No explicit expiration time, and heuristics not allowed or not applicable.
+    return {};
+}
+
+// https://httpwg.org/specs/rfc9111.html#age.calculations
+AK::Duration calculate_age(HeaderList const& headers, UnixDateTime request_time, UnixDateTime response_time, AK::Duration current_time_offset_for_testing)
+{
+    // The term "age_value" denotes the value of the Age header field (Section 5.1), in a form appropriate for arithmetic
+    // operation; or 0, if not available.
+    AK::Duration age_value;
+
+    if (auto age = headers.get("Age"sv); age.has_value()) {
+        if (auto seconds = parse_delta_seconds(*age); seconds.has_value())
+            age_value = *seconds;
+    }
+
+    // The term "now" means the current value of this implementation's clock (Section 5.6.7 of [HTTP]).
+    auto now = UnixDateTime::now() + current_time_offset_for_testing;
+
+    // The term "date_value" denotes the value of the Date header field, in a form appropriate for arithmetic operations.
+    // See Section 6.6.1 of [HTTP] for the definition of the Date header field and for requirements regarding responses
+    // without it.
+    auto date_value = parse_http_date(headers.get("Date"sv)).value_or(now);
+
+    auto apparent_age = max(AK::Duration::zero(), (response_time - date_value));
+
+    auto response_delay = response_time - request_time;
+    auto corrected_age_value = age_value + response_delay;
+
+    auto corrected_initial_age = max(apparent_age, corrected_age_value);
+
+    auto resident_time = now - response_time;
+    auto current_age = corrected_initial_age + resident_time;
+
+    return current_age;
+}
+
+// https://httpwg.org/specs/rfc5861.html#n-the-stale-while-revalidate-cache-control-extension
+AK::Duration calculate_stale_while_revalidate_lifetime(HeaderList const& headers, AK::Duration freshness_lifetime)
+{
+    auto cache_control = headers.get("Cache-Control"sv);
+    if (!cache_control.has_value())
+        return {};
+
+    if (auto swr = extract_cache_control_duration_directive(*cache_control, "stale-while-revalidate"sv); swr.has_value())
+        return freshness_lifetime + *swr;
+    return {};
+}
+
+CacheLifetimeStatus cache_lifetime_status(HeaderList const& request_headers, HeaderList const& response_headers, AK::Duration freshness_lifetime, AK::Duration current_age)
+{
+    auto revalidation_status = [&](auto revalidation_type) {
+        // In order to revalidate a cache entry, we must have one of these headers to attach to the revalidation request.
+        if (response_headers.contains("Last-Modified"sv) || response_headers.contains("ETag"sv))
+            return revalidation_type;
+        return CacheLifetimeStatus::Expired;
+    };
+
+    auto request_cache_control = request_headers.get("Cache-Control"sv);
+    auto response_cache_control = response_headers.get("Cache-Control"sv);
+
+    // https://httpwg.org/specs/rfc9111.html#cache-response-directive.no-cache
+    // The no-cache response directive, in its unqualified form (without an argument), indicates that the response MUST
+    // NOT be used to satisfy any other request without forwarding it for validation and receiving a successful response
+    //
+    // FIXME: Handle the qualified form of the no-cache directive, which may allow us to re-use the response.
+    if (response_cache_control.has_value() && contains_cache_control_directive(*response_cache_control, "no-cache"sv))
+        return revalidation_status(CacheLifetimeStatus::MustRevalidate);
+
+    // AD-HOC: RFC 9111 deprecates Pragma, but clients still send it. Keep the rule of RFC 7234:
+    //         https://www.rfc-editor.org/rfc/rfc7234#section-5.4
+    //         "When the Cache-Control header field is not present in a request, caches MUST consider the no-cache
+    //         request pragma-directive as having the same effect as if "Cache-Control: no-cache" were present"
+    if (!request_cache_control.has_value()) {
+        if (auto request_pragma = request_headers.get("Pragma"sv); request_pragma.has_value() && contains_cache_control_directive(*request_pragma, "no-cache"sv))
+            return revalidation_status(CacheLifetimeStatus::MustRevalidate);
+    }
+
+    if (request_cache_control.has_value()) {
+        // https://httpwg.org/specs/rfc9111.html#cache-request-directive.no-cache
+        // The no-cache request directive indicates that the client prefers a stored response not be used to satisfy the
+        // request without successful validation on the origin server.
+        if (request_cache_control->contains("no-cache"sv, CaseSensitivity::CaseInsensitive))
+            return revalidation_status(CacheLifetimeStatus::MustRevalidate);
+
+        // https://httpwg.org/specs/rfc9111.html#cache-request-directive.max-age
+        // The max-age request directive indicates that the client prefers a response whose age is less than or equal to
+        // the specified number of seconds. Unless the max-stale request directive is also present, the client doesn't
+        // wish to receive a stale response.
+        //
+        // NB: This doesn't preclude validating the stored response: per Section 4, a stored response may also be reused
+        //     if it's "successfully validated (see Section 4.3)". Clients send "Cache-Control: max-age=0" to request
+        //     exactly that. Notably, Fetch attaches it to requests whose cache mode is "no-cache" — which is how a
+        //     browser reload forces revalidation of the document.
+        if (auto max_age = extract_cache_control_duration_directive(*request_cache_control, "max-age"sv); max_age.has_value()) {
+            if (*max_age <= current_age)
+                return revalidation_status(CacheLifetimeStatus::MustRevalidate);
+        }
+
+        // https://httpwg.org/specs/rfc9111.html#cache-request-directive.min-fresh
+        // The min-fresh request directive indicates that the client prefers a response whose freshness lifetime is no
+        // less than its current age plus the specified time in seconds. That is, the client wants a response that will
+        // still be fresh for at least the specified number of seconds.
+        if (auto min_fresh = extract_cache_control_duration_directive(*request_cache_control, "min-fresh"sv); min_fresh.has_value()) {
+            if (freshness_lifetime < current_age + *min_fresh)
+                return CacheLifetimeStatus::Expired;
+        }
+    }
+
+    // https://httpwg.org/specs/rfc9111.html#expiration.model
+    if (freshness_lifetime > current_age)
+        return CacheLifetimeStatus::Fresh;
+
+    // https://httpwg.org/specs/rfc9111.html#cache-response-directive.must-revalidate
+    // The must-revalidate response directive indicates that once the response has become stale, a cache MUST NOT reuse
+    // that response to satisfy another request until it has been successfully validated by the origin
+    //
+    // NB: A max-stale request directive does not permit reuse of such a response either, so check this first.
+    bool has_must_revalidate = response_cache_control.has_value() && contains_cache_control_directive(*response_cache_control, "must-revalidate"sv);
+
+    if (request_cache_control.has_value() && !has_must_revalidate) {
+        // https://httpwg.org/specs/rfc9111.html#cache-request-directive.max-stale
+        // The max-stale request directive indicates that the client will accept a response that has exceeded its
+        // freshness lifetime. If a value is present, then the client is willing to accept a response that has exceeded
+        // its freshness lifetime by no more than the specified number of seconds. If no value is assigned to max-stale,
+        // then the client will accept a stale response of any age.
+        if (auto max_stale = extract_cache_control_duration_directive(*request_cache_control, "max-stale"sv, AK::Duration::max()); max_stale.has_value()) {
+            if (freshness_lifetime + *max_stale > current_age)
+                return CacheLifetimeStatus::Fresh;
+        }
+    }
+
+    // AD-HOC: If there isn't a Cache-Control response header, we have already at least determined the response is
+    //         heuristically cacheable by the time we reach here. Allow revalidating these responses. This is expected
+    //         by WPT.
+    if (!response_cache_control.has_value())
+        return revalidation_status(CacheLifetimeStatus::MustRevalidate);
+
+    // NB: must-revalidate takes precedence over stale-while-revalidate, as per
+    //     https://httpwg.org/specs/rfc9111.html#serving.stale.responses:
+    //     A cache MUST NOT generate a stale response if it is prohibited by an explicit in-protocol directive (e.g., by
+    //     a no-cache response directive, a must-revalidate response directive, or an applicable s-maxage or
+    //     proxy-revalidate response directive; see Section 5.2.2).
+    if (has_must_revalidate)
+        return revalidation_status(CacheLifetimeStatus::MustRevalidate);
+
+    // https://httpwg.org/specs/rfc5861.html#n-the-stale-while-revalidate-cache-control-extension
+    // When present in an HTTP response, the stale-while-revalidate Cache-Control extension indicates that caches MAY
+    // serve the response it appears in after it becomes stale, up to the indicated number of seconds.
+    if (calculate_stale_while_revalidate_lifetime(response_headers, freshness_lifetime) > current_age)
+        return revalidation_status(CacheLifetimeStatus::StaleWhileRevalidate);
+
+    return CacheLifetimeStatus::Expired;
+}
+
+// https://httpwg.org/specs/rfc9111.html#validation.sent
+RevalidationAttributes RevalidationAttributes::create(HeaderList const& headers)
+{
+    RevalidationAttributes attributes;
+    attributes.etag = headers.get("ETag"sv);
+    attributes.last_modified = headers.get("Last-Modified"sv);
+
+    return attributes;
+}
+
+// https://httpwg.org/specs/rfc9111.html#storing.fields
+void store_header_and_trailer_fields(HeaderList& stored_headers, HeaderList const& response_headers)
+{
+    for (auto const& header : response_headers) {
+        if (!is_header_exempted_from_storage(header.name))
+            stored_headers.append(header);
+    }
+}
+
+// https://httpwg.org/specs/rfc9110.html#field.etag
+static bool is_weak_entity_tag(StringView entity_tag)
+{
+    // entity-tag = [ weak ] opaque-tag
+    // weak       = %s"W/"
+    return entity_tag.starts_with("W/"sv);
+}
+
+// https://httpwg.org/specs/rfc9110.html#entity.tag.comparison
+static bool entity_tags_match_strongly(StringView first, StringView second)
+{
+    // "Strong comparison": two entity tags are equivalent if both are not weak and their opaque-tags match
+    // character-by-character.
+    return !is_weak_entity_tag(first) && !is_weak_entity_tag(second) && first == second;
+}
+
+static bool entity_tags_match_weakly(StringView first, StringView second)
+{
+    // "Weak comparison": two entity tags are equivalent if their opaque-tags match character-by-character, regardless
+    // of either or both being tagged as "weak".
+    auto opaque_tag = [](StringView entity_tag) {
+        return is_weak_entity_tag(entity_tag) ? entity_tag.substring_view(2) : entity_tag;
+    };
+    return opaque_tag(first) == opaque_tag(second);
+}
+
+// https://httpwg.org/specs/rfc9111.html#freshening.responses
+bool can_freshen_stored_response(HeaderList const& stored_headers, HeaderList const& not_modified_headers)
+{
+    // When a cache receives a 304 (Not Modified) response, it needs to identify stored responses that are suitable for
+    // updating with the new information provided, and then do so.
+    //
+    // The initial set of stored responses to update are those that could have been chosen for that request -- i.e.,
+    // those that meet the requirements in Section 4, except the last requirement to be fresh, able to be served stale,
+    // or just validated.
+    //
+    // NB: A changed Vary would prevent the validating request from selecting this entry.
+    if (not_modified_headers.contains("Vary"sv) && vary_field_names(not_modified_headers) != vary_field_names(stored_headers))
+        return false;
+
+    // Then, that initial set of stored responses is further filtered by the first match of:
+    auto entity_tag = not_modified_headers.get("ETag"sv);
+    auto stored_entity_tag = stored_headers.get("ETag"sv);
+
+    // * If the new response contains one or more "strong validators" (see Section 8.8.1 of [HTTP]), then each of those
+    //   strong validators identifies a selected representation for update. All the stored responses in the initial set
+    //   with one of those same strong validators are identified for update. If none of the initial set contains at
+    //   least one of the same strong validators, then the cache MUST NOT use the new response to update any stored
+    //   responses.
+    //
+    // NB: Last-Modified is implicitly weak, so only an entity tag is taken to be a strong validator here.
+    if (entity_tag.has_value() && !is_weak_entity_tag(*entity_tag))
+        return stored_entity_tag.has_value() && entity_tags_match_strongly(*stored_entity_tag, *entity_tag);
+
+    // * If the new response contains no strong validators but does contain one or more "weak validators", and those
+    //   validators correspond to one of the initial set's stored responses, then the most recent of those matching
+    //   stored responses is identified for update.
+    if (entity_tag.has_value())
+        return stored_entity_tag.has_value() && entity_tags_match_weakly(*stored_entity_tag, *entity_tag);
+
+    if (auto last_modified = not_modified_headers.get("Last-Modified"sv); last_modified.has_value())
+        return stored_headers.get("Last-Modified"sv) == last_modified;
+
+    // * If the new response does not include any form of validator (such as where a client generates an
+    //   If-Modified-Since request from a source other than the Last-Modified response header field), and there is only
+    //   one stored response in the initial set, and that stored response also lacks a validator, then that stored
+    //   response is identified for update.
+    //
+    // AD-HOC: Only this entry's validators made the request conditional, so a validator-less 304 refers to it.
+    return true;
+}
+
+// https://httpwg.org/specs/rfc9111.html#update
+void update_header_fields(HeaderList& stored_headers, HeaderList const& received_updated_headers)
+{
+    auto updated_headers_without_connection_specific_fields = remove_connection_specific_fields(received_updated_headers);
+    auto const& updated_headers = *updated_headers_without_connection_specific_fields;
+
+    // Caches are required to update a stored response's header fields from another (typically newer) response in
+    // several situations; for example, see Sections 3.4, 4.3.4, and 4.3.5.
+
+    // When doing so, the cache MUST add each header field in the provided response to the stored response, replacing
+    // field values that are already present, with the following exceptions:
+    auto is_header_exempted_from_update = [](StringView name) {
+        // * Header fields excepted from storage in Section 3.1,
+        if (is_header_exempted_from_storage(name))
+            return true;
+
+        // * Header fields that the cache's stored response depends upon, as described below,
+        //
+        // NB: The stored response is indexed by the request fields its Vary header nominates.
+        if (name.equals_ignoring_ascii_case("Vary"sv))
+            return true;
+
+        // * Header fields that are automatically processed and removed by the recipient, as described below, and
+
+        // * The Content-Length header field.
+        if (name.equals_ignoring_ascii_case("Content-Length"sv))
+            return true;
+
+        return false;
+    };
+
+    for (auto const& updated_header : updated_headers) {
+        if (!is_header_exempted_from_update(updated_header.name))
+            stored_headers.delete_(updated_header.name);
+    }
+
+    for (auto const& updated_header : updated_headers) {
+        if (!is_header_exempted_from_update(updated_header.name))
+            stored_headers.append({ updated_header.name, updated_header.value });
+    }
+}
+
+bool contains_cache_control_directive(StringView cache_control, StringView directive)
+{
+    return extract_cache_control_directive(cache_control, directive).has_value();
+}
+
+// This is a modified version of the "get, decode, and split" algorithm. This version stops at the first match found,
+// does not un-escape quoted strings, and deals only with ASCII encodings. See:
+// https://fetch.spec.whatwg.org/#header-value-get-decode-and-split
+Optional<StringView> extract_cache_control_directive(StringView cache_control, StringView directive)
+{
+    return extract_cache_control_directive(cache_control, directive, true);
+}
+
+static Optional<StringView> extract_cache_control_directive(StringView cache_control, StringView directive, bool allow_argument)
+{
+    VERIFY(!directive.is_empty());
+
+    GenericLexer lexer { cache_control };
+    size_t directive_start { 0 };
+
+    while (true) {
+        lexer.consume_until(is_any_of("\","sv));
+
+        if (!lexer.is_eof() && lexer.peek() == '"') {
+            auto quoted_string_start = lexer.tell();
+            lexer.consume_quoted_string('\\');
+
+            // FIXME: We currently bail if we come across an unterminated quoted string. Do other engines behave this
+            //        way, or do they try to move on by finding the next comma?
+            if (quoted_string_start == lexer.tell())
+                return {};
+
+            if (!lexer.is_eof())
+                continue;
+        }
+
+        auto name = cache_control.substring_view(directive_start, lexer.tell() - directive_start);
+        StringView value;
+
+        bool has_argument = false;
+        if (auto index = name.find_any_of("=\""sv); index.has_value() && name[*index] == '=') {
+            has_argument = true;
+            value = name.substring_view(*index + 1);
+            name = name.substring_view(0, *index);
+        }
+
+        if (name.trim(HTTP_WHITESPACE).equals_ignoring_ascii_case(directive) && (allow_argument || !has_argument))
+            return value.trim(HTTP_WHITESPACE);
+        if (lexer.is_eof())
+            return {};
+
+        VERIFY(lexer.peek() == ',');
+        lexer.ignore(1);
+
+        directive_start = lexer.tell();
+    }
+}
+
+Optional<AK::Duration> extract_cache_control_duration_directive(StringView cache_control, StringView directive, Optional<AK::Duration> valueless_fallback)
+{
+    if (auto value = extract_cache_control_directive(cache_control, directive); value.has_value()) {
+        if (value->is_empty())
+            return valueless_fallback;
+        return parse_delta_seconds(*value);
+    }
+
+    return {};
+}
+
+// Split on commas outside quoted-strings.
+static Vector<StringView> split_list_based_field_value(StringView value)
+{
+    Vector<StringView> members;
+    size_t member_start = 0;
+    bool in_quoted_string = false;
+
+    for (size_t i = 0; i < value.length(); ++i) {
+        auto character = value[i];
+
+        if (in_quoted_string) {
+            if (character == '\\')
+                ++i;
+            else if (character == '"')
+                in_quoted_string = false;
+        } else if (character == '"') {
+            in_quoted_string = true;
+        } else if (character == ',') {
+            members.append(value.substring_view(member_start, i - member_start));
+            member_start = i + 1;
+        }
+    }
+
+    members.append(value.substring_view(member_start));
+    return members;
+}
+
+// Quoted-string contents may be case-sensitive.
+static ByteString to_lowercase_outside_quoted_strings(StringView member)
+{
+    StringBuilder builder { member.length() };
+    bool in_quoted_string = false;
+
+    for (size_t i = 0; i < member.length(); ++i) {
+        auto character = member[i];
+
+        if (in_quoted_string) {
+            if (character == '\\' && i + 1 < member.length()) {
+                builder.append(character);
+                character = member[++i];
+            } else if (character == '"') {
+                in_quoted_string = false;
+            }
+        } else if (character == '"') {
+            in_quoted_string = true;
+        } else {
+            character = to_ascii_lowercase(character);
+        }
+
+        builder.append(character);
+    }
+
+    return builder.to_byte_string();
+}
+
+// https://httpwg.org/specs/rfc9111.html#caching.negotiated.responses
+Optional<Vector<ByteString>> normalize_request_vary_header_values(StringView header, HeaderList const& request_headers)
+{
+    // The header fields from two requests are defined to match if and only if those in the first request can be
+    // transformed to those in the second request by applying any of the following:
+    // * adding or removing whitespace, where allowed in the header field's syntax
+    // * combining multiple header field lines with the same field name (see Section 5.2 of [HTTP])
+    // * normalizing both header field values in a way that is known to have identical semantics, according to the
+    //   header field's specification (e.g., reordering field values when order is not significant;
+    //   case-normalization, where values are defined to be case-insensitive)
+    if (!request_headers.contains(header))
+        return {};
+
+    // FIXME: Find a definitive list of headers that are allowed to be normalized. The Cookie header, for example,
+    //        cannot be normalized as order and case matters. So we err on the side of caution here.
+    if (!header.is_one_of_ignoring_ascii_case("Accept"sv, "Accept-Encoding"sv, "Accept-Language"sv))
+        return Vector { request_headers.get(header).release_value() };
+
+    Vector<ByteString> values;
+
+    request_headers.for_each_header_value(header, [&](StringView value) {
+        for (auto member : split_list_based_field_value(value)) {
+            member = member.trim(HTTP_WHITESPACE);
+            if (!member.is_empty())
+                values.append(to_lowercase_outside_quoted_strings(member));
+        }
+        return IterationDecision::Continue;
+    });
+
+    quick_sort(values);
+    return values;
+}
+
+AK::Duration compute_current_time_offset_for_testing(Optional<DiskCache&> disk_cache, HeaderList const& request_headers)
+{
+    if (disk_cache.has_value() && disk_cache->mode() == DiskCache::Mode::Testing) {
+        if (auto header = request_headers.get(TEST_CACHE_REQUEST_TIME_OFFSET); header.has_value()) {
+            if (auto offset = header->to_number<i64>(); offset.has_value())
+                return AK::Duration::from_seconds(*offset);
+        }
+    }
+
+    return {};
+}
+
+}

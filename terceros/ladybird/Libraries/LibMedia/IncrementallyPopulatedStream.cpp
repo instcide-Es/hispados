@@ -1,0 +1,549 @@
+/*
+ * Copyright (c) 2025, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/AnyOf.h>
+#include <AK/Checked.h>
+#include <AK/Math.h>
+#include <AK/RefPtr.h>
+#include <AK/SaturatingMath.h>
+#include <LibCore/EventLoop.h>
+#include <LibMedia/IncrementallyPopulatedStream.h>
+
+namespace Media {
+
+static constexpr u64 PRECEDING_DATA_SIZE = 1 * KiB;
+static constexpr u64 FORWARD_REQUEST_THRESHOLD = 1 * MiB;
+static constexpr AK::Duration CURSOR_ACTIVE_TIME = AK::Duration::from_milliseconds(50);
+
+NonnullRefPtr<IncrementallyPopulatedStream> IncrementallyPopulatedStream::create_empty()
+{
+    return adopt_ref(*new IncrementallyPopulatedStream());
+}
+
+NonnullRefPtr<IncrementallyPopulatedStream> IncrementallyPopulatedStream::create_from_data(ReadonlyBytes data)
+{
+    auto stream = create_empty();
+    stream->add_chunk_at(0, data);
+    stream->close();
+    VERIFY(stream->size() == data.size());
+    return stream;
+}
+
+NonnullRefPtr<IncrementallyPopulatedStream> IncrementallyPopulatedStream::create_from_buffer(ByteBuffer const& buffer)
+{
+    return create_from_data(buffer.bytes());
+}
+
+IncrementallyPopulatedStream::IncrementallyPopulatedStream() = default;
+
+IncrementallyPopulatedStream::~IncrementallyPopulatedStream() = default;
+
+void IncrementallyPopulatedStream::set_data_request_callback(DataRequestCallback callback)
+{
+    MutexLocker locker { m_mutex };
+    note_request_state_changed_while_locked();
+
+    if (!callback) {
+        m_callback_event_loop = nullptr;
+        m_data_request_callback = nullptr;
+        return;
+    }
+
+    m_callback_event_loop = Core::EventLoop::current_weak();
+    m_data_request_callback = move(callback);
+}
+
+void IncrementallyPopulatedStream::add_chunk_at(u64 offset, ReadonlyBytes data)
+{
+    VERIFY(!data.is_null());
+    VERIFY(!data.is_empty());
+
+    MutexLocker locker { m_mutex };
+
+    Checked<u64> checked_new_chunk_end = offset;
+    checked_new_chunk_end += data.size();
+    if (checked_new_chunk_end.has_overflow()) {
+        dbgln("IncrementallyPopulatedStream: Ignoring {} bytes at {} that would end past the representable size", data.size(), offset);
+        return;
+    }
+
+    if (m_closed && checked_new_chunk_end.value() > m_expected_size.value()) {
+        auto stream_end = m_expected_size.value();
+        auto dropped_start = max(offset, stream_end);
+        dbgln("IncrementallyPopulatedStream: Ignoring {} bytes at {} appended past the end of the closed stream at {}", offset + data.size() - dropped_start, dropped_start, stream_end);
+        if (offset >= stream_end)
+            return;
+        data = data.trim(stream_end - offset);
+    }
+
+    auto new_chunk_end = offset + data.size();
+    m_current_append_head = new_chunk_end;
+    m_last_appended_chunk_end = new_chunk_end;
+
+    auto previous_chunk_iter = m_chunks.find_largest_not_above_iterator(offset);
+
+    // Add a new chunk to the collection if there's no overlapping previous chunk.
+    if (previous_chunk_iter.is_end() || previous_chunk_iter->end() < offset) {
+        DataChunk new_chunk { offset, MUST(ByteBuffer::copy(data)) };
+        m_chunks.insert(offset, move(new_chunk));
+        previous_chunk_iter = m_chunks.find_largest_not_above_iterator(offset);
+    } else if (previous_chunk_iter->end() >= new_chunk_end) {
+        // The chunk is fully covered by the existing chunk, skip until after it.
+        begin_new_request_while_locked(previous_chunk_iter->end());
+        return;
+    }
+
+    auto& chunk = *previous_chunk_iter;
+    auto& buffer = chunk.data();
+
+    // Expand the existing chunk to contain this new data.
+    buffer.resize(new_chunk_end - chunk.offset());
+    data.copy_to(buffer.bytes().slice(offset - chunk.offset()));
+
+    // Join the chunk to any following intersecting chunks.
+    auto next_chunk_iter = previous_chunk_iter;
+    ++next_chunk_iter;
+
+    while (!next_chunk_iter.is_end() && next_chunk_iter->offset() <= chunk.end()) {
+        auto next_chunk = m_chunks.remove_and_advance(next_chunk_iter);
+        auto joined_chunk_end = max(chunk.end(), next_chunk.end());
+        buffer.resize(joined_chunk_end - chunk.offset());
+        next_chunk.data().bytes().copy_to(buffer.bytes().slice(next_chunk.offset() - chunk.offset()));
+    }
+
+    if (chunk.end() != new_chunk_end)
+        begin_new_request_while_locked(chunk.end());
+    m_state_changed.broadcast();
+    notify_available_ranges_changed_while_locked();
+}
+
+void IncrementallyPopulatedStream::remove_byte_range(u64 start, u64 end)
+{
+    VERIFY(start < end);
+
+    MutexLocker locker { m_mutex };
+
+    auto chunk_iterator = m_chunks.find_largest_not_above_iterator(start);
+    if (chunk_iterator.is_end() || chunk_iterator->end() <= start)
+        chunk_iterator = m_chunks.find_smallest_not_below_iterator(start);
+
+    while (!chunk_iterator.is_end() && chunk_iterator->offset() < end) {
+        auto chunk = m_chunks.remove_and_advance(chunk_iterator);
+        auto chunk_start = chunk.offset();
+        auto chunk_end = chunk.end();
+
+        if (chunk_start < start) {
+            auto left_size = start - chunk_start;
+            m_chunks.insert(chunk_start, DataChunk { chunk_start, MUST(ByteBuffer::copy(chunk.data().bytes().trim(left_size))) });
+        }
+
+        if (chunk_end > end) {
+            auto right_offset_in_chunk = end - chunk_start;
+            m_chunks.insert(end, DataChunk { end, MUST(ByteBuffer::copy(chunk.data().bytes().slice(right_offset_in_chunk))) });
+        }
+    }
+
+    note_request_state_changed_while_locked();
+    m_state_changed.broadcast();
+    notify_available_ranges_changed_while_locked();
+}
+
+MediaStream::Availability IncrementallyPopulatedStream::availability() const
+{
+    MutexLocker locker { m_mutex };
+    Vector<ByteRange> ranges;
+    for (auto it = m_chunks.begin(); it != m_chunks.end(); ++it)
+        ranges.empend(it->offset(), it->end());
+    return { move(ranges), m_expected_size, m_closed };
+}
+
+void IncrementallyPopulatedStream::close()
+{
+    MutexLocker locker { m_mutex };
+    m_expected_size = m_last_appended_chunk_end;
+    m_closed = true;
+    note_request_state_changed_while_locked();
+    m_state_changed.broadcast();
+    notify_available_ranges_changed_while_locked();
+}
+
+bool IncrementallyPopulatedStream::is_closed() const
+{
+    MutexLocker locker { m_mutex };
+    return m_closed;
+}
+
+void IncrementallyPopulatedStream::make_missing_data_permanently_unavailable()
+{
+    MutexLocker locker { m_mutex };
+    m_missing_data_is_permanently_unavailable = true;
+    m_state_changed.broadcast();
+}
+
+void IncrementallyPopulatedStream::set_available_ranges_change_observer(Function<void()> observer)
+{
+    MutexLocker locker { m_mutex };
+    m_available_ranges_change_observer = move(observer);
+}
+
+void IncrementallyPopulatedStream::notify_available_ranges_changed_while_locked()
+{
+    if (m_available_ranges_change_observer)
+        m_available_ranges_change_observer();
+}
+
+u64 IncrementallyPopulatedStream::size()
+{
+    MutexLocker locker { m_mutex };
+    while (!m_expected_size.has_value() && !m_missing_data_is_permanently_unavailable)
+        m_state_changed.wait();
+    if (m_expected_size.has_value())
+        return m_expected_size.value();
+    auto const* last_chunk = m_chunks.find_largest_not_above(NumericLimits<u64>::max());
+    return last_chunk ? last_chunk->end() : 0;
+}
+
+void IncrementallyPopulatedStream::set_expected_size(u64 expected_size)
+{
+    MutexLocker locker { m_mutex };
+    if (m_expected_size == expected_size)
+        return;
+    m_expected_size = expected_size;
+    note_request_state_changed_while_locked();
+    m_state_changed.broadcast();
+    notify_available_ranges_changed_while_locked();
+}
+
+Optional<u64> IncrementallyPopulatedStream::expected_size() const
+{
+    MutexLocker locker { m_mutex };
+    return m_expected_size;
+}
+
+void IncrementallyPopulatedStream::begin_new_request_while_locked(u64 position)
+{
+    if (!m_callback_event_loop || m_may_idle)
+        return;
+    if (position == m_currently_requested_position)
+        return;
+
+    m_currently_requested_position = position;
+    m_current_append_head = position;
+    note_request_state_changed_while_locked();
+
+    if (m_expected_size.has_value() && position >= m_expected_size.value())
+        return;
+
+    dispatch_data_request_while_locked(position);
+}
+
+bool IncrementallyPopulatedStream::a_cursor_is_blocked_while_locked() const
+{
+    return any_of(m_cursors, [](auto const& cursor) { return cursor.m_blocked; });
+}
+
+void IncrementallyPopulatedStream::stop_request_if_idle_while_locked()
+{
+    if (!m_may_idle || !m_currently_requested_position.has_value() || a_cursor_is_blocked_while_locked())
+        return;
+    m_currently_requested_position = {};
+    note_request_state_changed_while_locked();
+    dispatch_data_request_while_locked({});
+}
+
+void IncrementallyPopulatedStream::dispatch_data_request_while_locked(Optional<u64> position)
+{
+    if (!m_callback_event_loop)
+        return;
+    auto event_loop = m_callback_event_loop->take();
+    if (!event_loop)
+        return;
+    event_loop->deferred_invoke([stream = NonnullRefPtr(*this), position] {
+        if (stream->m_data_request_callback)
+            stream->m_data_request_callback(position);
+    });
+}
+
+void IncrementallyPopulatedStream::set_may_idle(bool may_idle)
+{
+    MutexLocker locker { m_mutex };
+    if (m_may_idle == may_idle)
+        return;
+    m_may_idle = may_idle;
+    note_request_state_changed_while_locked();
+    if (may_idle) {
+        stop_request_if_idle_while_locked();
+        return;
+    }
+    if (m_currently_requested_position.has_value() || !a_cursor_is_blocked_while_locked())
+        return;
+    begin_new_request_while_locked(select_request_position_while_locked(NumericLimits<u64>::max()));
+}
+
+static u64 adjust_request_position(u64 position)
+{
+    if (position > PRECEDING_DATA_SIZE)
+        return position - PRECEDING_DATA_SIZE;
+    return 0;
+}
+
+u64 IncrementallyPopulatedStream::select_request_position_while_locked(u64 position)
+{
+    auto now = MonotonicTime::now_coarse();
+    auto request_position = adjust_request_position(position);
+    if (auto* chunk = m_chunks.find_largest_not_above(position); chunk)
+        request_position = max(chunk->end(), request_position);
+    for (auto const& other_cursor : m_cursors) {
+        if (!other_cursor.m_is_blocking)
+            continue;
+        if (now >= other_cursor.m_active_timeout && !other_cursor.m_blocked)
+            continue;
+        u64 other_position = other_cursor.m_position.load();
+        if (other_position < request_position) {
+            auto* other_cursor_chunk = m_chunks.find_largest_not_above(other_position);
+            if (other_cursor_chunk && other_cursor_chunk->end() >= other_position) {
+                request_position = other_cursor_chunk->end();
+                continue;
+            }
+            request_position = other_position;
+        }
+    }
+    return request_position;
+}
+
+bool IncrementallyPopulatedStream::check_if_data_is_available_or_begin_request_while_locked(Cursor& cursor, u64 position, u64 length)
+{
+    auto* chunk = m_chunks.find_largest_not_above(position);
+    auto data_is_available = m_closed && position >= m_expected_size.value();
+    if (chunk) {
+        VERIFY(position >= chunk->offset());
+        u64 end = saturating_add(position, length);
+        if (m_closed && end > m_expected_size.value())
+            end = m_expected_size.value();
+        data_is_available = end <= chunk->end();
+    }
+
+    if (!cursor.m_is_blocking)
+        return data_is_available;
+
+    // A read that has to wait depends on its own position, so only reads that can be satisfied reuse a decision.
+    auto request_decision_is_current = chunk && data_is_available && cursor.m_request_decided_chunk_offset == chunk->offset() && cursor.m_request_decided_generation == m_request_state_generation;
+    if (!request_decision_is_current) {
+        cursor.m_active_timeout = MonotonicTime::now_coarse() + CURSOR_ACTIVE_TIME;
+        auto request_position = select_request_position_while_locked(position);
+        if (!m_currently_requested_position.has_value() || *m_currently_requested_position > request_position || request_position > m_current_append_head + FORWARD_REQUEST_THRESHOLD)
+            begin_new_request_while_locked(request_position);
+        if (chunk) {
+            cursor.m_request_decided_chunk_offset = chunk->offset();
+            cursor.m_request_decided_generation = m_request_state_generation;
+        }
+    }
+
+    return data_is_available;
+}
+
+size_t IncrementallyPopulatedStream::read_from_chunks_while_locked(u64 position, Bytes& bytes) const
+{
+    auto chunk_iterator = m_chunks.find_largest_not_above_iterator(position);
+    if (chunk_iterator.is_end())
+        return 0;
+
+    auto const& chunk = *chunk_iterator;
+    if (position >= chunk.end())
+        return 0;
+
+    VERIFY(position >= chunk.offset());
+    auto end = saturating_add(position, static_cast<u64>(bytes.size()));
+    auto copy_size = bytes.size();
+    if (end > chunk.end()) {
+        end = chunk.end();
+        copy_size = end - position;
+    }
+
+    u64 offset_in_chunk = position - chunk.offset();
+    auto source = chunk.data().span().slice(offset_in_chunk, copy_size);
+    source.copy_to(bytes);
+    return copy_size;
+}
+
+DecoderErrorOr<void> IncrementallyPopulatedStream::wait_for_data_while_locked(Cursor& cursor, u64 position, u64 length)
+{
+    bool notified_blocked = false;
+    bool data_is_permanently_unavailable = false;
+    while (!cursor.m_aborted.load(AK::MemoryOrder::memory_order_relaxed) && cursor.m_is_blocking) {
+        if (check_if_data_is_available_or_begin_request_while_locked(cursor, position, length))
+            break;
+        if (m_missing_data_is_permanently_unavailable) {
+            data_is_permanently_unavailable = true;
+            break;
+        }
+
+        cursor.m_blocked = true;
+        if (!notified_blocked) {
+            notified_blocked = true;
+            if (cursor.m_read_blocked_change_handler)
+                cursor.m_read_blocked_change_handler(ReadBlocked::Yes);
+        }
+        m_state_changed.wait();
+        cursor.m_blocked = false;
+    }
+
+    if (notified_blocked) {
+        stop_request_if_idle_while_locked();
+        if (cursor.m_read_blocked_change_handler)
+            cursor.m_read_blocked_change_handler(ReadBlocked::No);
+    }
+
+    if (cursor.m_aborted.load(AK::MemoryOrder::memory_order_relaxed))
+        return DecoderError::with_description(DecoderErrorCategory::Aborted, "Blocking read was aborted"sv);
+    if (data_is_permanently_unavailable)
+        return DecoderError::with_description(DecoderErrorCategory::PermanentlyUnavailable, "The data will never arrive"sv);
+    return {};
+}
+
+DecoderErrorOr<size_t> IncrementallyPopulatedStream::read_at(Cursor& cursor, size_t position, Bytes& bytes)
+{
+    MutexLocker locker { m_mutex };
+    TRY(wait_for_data_while_locked(cursor, position, bytes.size()));
+
+    if (m_closed && position >= m_expected_size.value())
+        return DecoderError::with_description(DecoderErrorCategory::EndOfStream, "Blocking read reached end of stream"sv);
+
+    if (bytes.size() == 0)
+        return 0;
+
+    return read_from_chunks_while_locked(position, bytes);
+}
+
+DecoderErrorOr<void> IncrementallyPopulatedStream::wait_for_every_byte_while_locked(Cursor& cursor, size_t position, size_t length)
+{
+    auto extends_past_the_expected_size = [&] {
+        return m_expected_size.has_value() && (position >= m_expected_size.value() || length > m_expected_size.value() - position);
+    };
+    if (extends_past_the_expected_size())
+        return DecoderError::with_description(DecoderErrorCategory::EndOfStream, "The bytes extend past the end of the stream"sv);
+
+    TRY(wait_for_data_while_locked(cursor, position, length));
+
+    if (extends_past_the_expected_size())
+        return DecoderError::with_description(DecoderErrorCategory::EndOfStream, "The bytes extend past the end of the stream"sv);
+    if (!cursor.m_is_blocking && !check_if_data_is_available_or_begin_request_while_locked(cursor, position, length))
+        return DecoderError::with_description(DecoderErrorCategory::NeedsMoreInput, "The bytes are not all present"sv);
+    return {};
+}
+
+DecoderErrorOr<FixedArray<u8>> IncrementallyPopulatedStream::read_bytes_at(Cursor& cursor, size_t position, size_t length)
+{
+    MutexLocker locker { m_mutex };
+    TRY(wait_for_every_byte_while_locked(cursor, position, length));
+
+    auto buffer = DECODER_TRY_ALLOC(FixedArray<u8>::create(length));
+    auto bytes = buffer.span();
+    auto read_count = read_from_chunks_while_locked(position, bytes);
+    VERIFY(read_count == length);
+    return buffer;
+}
+
+DecoderErrorOr<void> IncrementallyPopulatedStream::discard_at(Cursor& cursor, size_t position, size_t length)
+{
+    MutexLocker locker { m_mutex };
+    return wait_for_every_byte_while_locked(cursor, position, length);
+}
+
+NonnullRefPtr<MediaStreamCursor> IncrementallyPopulatedStream::create_cursor()
+{
+    return adopt_ref(*new Cursor(NonnullRefPtr { *this }));
+}
+
+IncrementallyPopulatedStream::Cursor::Cursor(NonnullRefPtr<IncrementallyPopulatedStream> const& stream)
+    : m_stream(stream)
+{
+    MutexLocker locker { m_stream->m_mutex };
+    m_stream->m_cursors.append(*this);
+    m_stream->note_request_state_changed_while_locked();
+}
+
+IncrementallyPopulatedStream::Cursor::~Cursor()
+{
+    MutexLocker locker { m_stream->m_mutex };
+    VERIFY(m_stream->m_cursors.remove_first_matching([&](Cursor const& cursor) { return this == &cursor; }));
+    m_stream->note_request_state_changed_while_locked();
+}
+
+void IncrementallyPopulatedStream::Cursor::set_is_blocking(bool blocking)
+{
+    m_is_blocking = blocking;
+}
+
+void IncrementallyPopulatedStream::Cursor::set_blocked_change_handler(ReadBlockedChangeHandler handler)
+{
+    MutexLocker locker { m_stream->m_mutex };
+    m_read_blocked_change_handler = move(handler);
+}
+
+DecoderErrorOr<void> IncrementallyPopulatedStream::Cursor::seek(i64 offset, AK::SeekMode mode)
+{
+    Checked<i64> position;
+    switch (mode) {
+    case AK::SeekMode::SetPosition:
+        position = offset;
+        break;
+    case AK::SeekMode::FromCurrentPosition:
+        position = static_cast<i64>(m_position);
+        position += offset;
+        break;
+    case AK::SeekMode::FromEndPosition:
+        position = AK::clamp_to<i64>(this->blocking_size());
+        position += offset;
+        break;
+    default:
+        VERIFY_NOT_REACHED();
+    }
+    if (position.has_overflow() || position.value() < 0)
+        return DecoderError::corrupted("Seek target lies outside the stream"sv);
+
+    m_position.store(static_cast<size_t>(position.value()));
+    return {};
+}
+
+DecoderErrorOr<size_t> IncrementallyPopulatedStream::Cursor::read_into(Bytes bytes)
+{
+    auto read_count = TRY(m_stream->read_at(*this, m_position, bytes));
+    m_position += read_count;
+    return read_count;
+}
+
+DecoderErrorOr<void> IncrementallyPopulatedStream::Cursor::read_and_discard(size_t size)
+{
+    if (size == 0)
+        return {};
+
+    if (size > static_cast<size_t>(NumericLimits<i64>::max()) - m_position)
+        return DecoderError::corrupted("Discarded bytes extend outside the stream"sv);
+
+    TRY(m_stream->discard_at(*this, m_position, size));
+    m_position += size;
+    return {};
+}
+
+DecoderErrorOr<FixedArray<u8>> IncrementallyPopulatedStream::Cursor::read_bytes(size_t size)
+{
+    if (size == 0)
+        return FixedArray<u8>();
+
+    auto buffer = TRY(m_stream->read_bytes_at(*this, m_position, size));
+    m_position += size;
+    return buffer;
+}
+
+void IncrementallyPopulatedStream::Cursor::abort()
+{
+    MutexLocker locker { m_stream->m_mutex };
+    m_aborted.store(true, AK::MemoryOrder::memory_order_relaxed);
+    m_stream->m_state_changed.broadcast();
+}
+
+}

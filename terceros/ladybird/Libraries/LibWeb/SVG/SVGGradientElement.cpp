@@ -1,0 +1,192 @@
+/*
+ * Copyright (c) 2023, MacDue <macdue@dueutil.tech>
+ * Copyright (c) 2025, Jelle Raaijmakers <jelle@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/SVG/AttributeNames.h>
+#include <LibWeb/SVG/FragmentIdentifier.h>
+#include <LibWeb/SVG/SVGAnimatedTransformList.h>
+#include <LibWeb/SVG/SVGGradientElement.h>
+#include <LibWeb/SVG/SVGGraphicsElement.h>
+#include <LibWeb/SVG/SVGUnitTypes.h>
+
+namespace Web::SVG {
+
+SVGGradientElement::SVGGradientElement(DOM::Document& document, DOM::QualifiedName qualified_name)
+    : SVGElement(document, move(qualified_name))
+{
+}
+
+void SVGGradientElement::attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_)
+{
+    Base::attribute_changed(name, old_value, value, namespace_);
+
+    if (name == AttributeNames::gradientUnits) {
+        m_gradient_units = parse_units(value.value_or({}));
+    } else if (name == AttributeNames::spreadMethod) {
+        m_spread_method = parse_spread_method(value.value_or({}));
+    } else if (name == AttributeNames::gradientTransform) {
+        if (auto transform_list = parse_transform(value.value_or({})); transform_list.has_value()) {
+            m_gradient_transform = transform_from_transform_list(*transform_list);
+        } else {
+            m_gradient_transform = {};
+        }
+        if (m_gradient_transform_for_bindings)
+            m_gradient_transform_for_bindings->synchronize();
+    }
+}
+
+GradientUnits SVGGradientElement::gradient_units() const
+{
+    GC::RootHashTable<SVGGradientElement const*> seen_gradients;
+    return gradient_units_impl(seen_gradients);
+}
+
+GradientUnits SVGGradientElement::gradient_units_impl(GC::RootHashTable<SVGGradientElement const*>& seen_gradients) const
+{
+    if (m_gradient_units.has_value())
+        return *m_gradient_units;
+    if (auto gradient = linked_gradient(seen_gradients))
+        return gradient->gradient_units_impl(seen_gradients);
+    return GradientUnits::ObjectBoundingBox;
+}
+
+SpreadMethod SVGGradientElement::spread_method() const
+{
+    GC::RootHashTable<SVGGradientElement const*> seen_gradients;
+    return spread_method_impl(seen_gradients);
+}
+
+SpreadMethod SVGGradientElement::spread_method_impl(GC::RootHashTable<SVGGradientElement const*>& seen_gradients) const
+{
+    if (m_spread_method.has_value())
+        return *m_spread_method;
+    if (auto gradient = linked_gradient(seen_gradients))
+        return gradient->spread_method_impl(seen_gradients);
+    return SpreadMethod::Pad;
+}
+
+Gfx::InterpolationColorSpace SVGGradientElement::color_space() const
+{
+    auto style = computed_style();
+    VERIFY(style);
+    return CSS::to_interpolation_color_space(style->color_interpolation());
+}
+
+Optional<Gfx::AffineTransform> SVGGradientElement::gradient_transform() const
+{
+    GC::RootHashTable<SVGGradientElement const*> seen_gradients;
+    return gradient_transform_impl(seen_gradients);
+}
+
+Optional<Gfx::AffineTransform> SVGGradientElement::gradient_transform_impl(GC::RootHashTable<SVGGradientElement const*>& seen_gradients) const
+{
+    if (m_gradient_transform.has_value())
+        return m_gradient_transform;
+    if (auto gradient = linked_gradient(seen_gradients))
+        return gradient->gradient_transform_impl(seen_gradients);
+    return {};
+}
+
+// The gradient transform, appropriately scaled and combined with the paint transform.
+void SVGGradientElement::push_color_stops(void* sink) const
+{
+    auto largest_offset = 0.0f;
+    for_each_color_stop([&](auto& stop) {
+        // https://svgwg.org/svg2-draft/pservers.html#StopNotes
+        // Gradient offset values less than 0 (or less than 0%) are rounded up to 0%.
+        // Gradient offset values greater than 1 (or greater than 100%) are rounded down to 100%.
+        float stop_offset = AK::clamp(stop.stop_offset(), 0.0f, 1.0f);
+
+        // Each gradient offset value is required to be equal to or greater than the previous gradient
+        // stop's offset value. If a given gradient stop's offset value is not equal to or greater than all
+        // previous offset values, then the offset value is adjusted to be equal to the largest of all previous
+        // offset values.
+        stop_offset = AK::max(stop_offset, largest_offset);
+        largest_offset = stop_offset;
+
+        Layout::RustFFI::layout_arena_paint_push_color_stop(sink, stop.stop_color().with_opacity(stop.stop_opacity()), stop_offset);
+    });
+}
+
+Layout::RustFFI::FfiSvgGradientDescription SVGGradientElement::base_paint_server_description(Layout::RustFFI::FfiSvgGradientKind kind) const
+{
+    Layout::RustFFI::FfiSvgGradientDescription description {};
+    description.kind = kind;
+    description.units_are_object_bounding_box = gradient_units() == GradientUnits::ObjectBoundingBox;
+    description.spread_method = static_cast<Layout::RustFFI::FfiSvgGradientSpreadMethod>(to_underlying(spread_method()));
+    description.color_space = color_space();
+    description.gradient_transform = gradient_transform();
+    return description;
+}
+
+GC::Ptr<SVGGradientElement const> SVGGradientElement::linked_gradient(GC::RootHashTable<SVGGradientElement const*>& seen_gradients) const
+{
+    // FIXME: This entire function is an ad-hoc hack!
+
+    auto link = has_attribute(AttributeNames::href) ? get_attribute(AttributeNames::href) : get_attribute(AttributeNames::xlink_href);
+    if (auto href = link; href.has_value() && !link->is_empty()) {
+        auto url = document().encoding_parse_url(*href);
+        if (!url.has_value())
+            return {};
+        auto id = url->fragment();
+        if (!id.has_value() || id->is_empty())
+            return {};
+        auto id_as_utf16 = decode_fragment_identifier(id.value());
+        GC::Ptr<DOM::Element> element;
+        if (auto containing_shadow = containing_shadow_root())
+            element = containing_shadow->get_element_by_id(id_as_utf16);
+        if (!element)
+            element = document().get_element_by_id(id_as_utf16);
+        if (!element)
+            return {};
+        if (element == GC::Ref { *this })
+            return {};
+        if (!is<SVGGradientElement>(*element))
+            return {};
+        if (seen_gradients.set(&as<SVGGradientElement>(*element)) != AK::HashSetResult::InsertedNewEntry)
+            return {};
+        return &as<SVGGradientElement>(*element);
+    }
+    return {};
+}
+
+void SVGGradientElement::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    SVGURIReferenceMixin::visit_edges(visitor);
+    visitor.visit(m_gradient_transform_for_bindings);
+}
+
+// https://svgwg.org/svg2-draft/pservers.html#__svg__SVGGradientElement__gradientTransform
+GC::Ref<SVGAnimatedTransformList> SVGGradientElement::gradient_transform_for_bindings()
+{
+    // The gradientTransform IDL attribute reflects the computed value of the transform property and the
+    // 'gradientTransform' presentation attribute for ‘linearGradient’ and ‘radialGradient’ elements.
+    // FIXME: Reflect the computed value of the transform property rather than only the presentation attribute.
+    if (!m_gradient_transform_for_bindings)
+        m_gradient_transform_for_bindings = SVGAnimatedTransformList::create(*this, AttributeNames::gradientTransform);
+    return *m_gradient_transform_for_bindings;
+}
+
+// https://svgwg.org/svg2-draft/pservers.html#__svg__SVGGradientElement__gradientUnits
+GC::Ref<SVGAnimatedEnumeration> SVGGradientElement::gradient_units_for_bindings()
+{
+    return svg_animated_enumeration_for_attribute(AttributeNames::gradientUnits, svg_unit_type_keywords, to_underlying(SVGUnitType::ObjectBoundingBox));
+}
+
+// https://svgwg.org/svg2-draft/pservers.html#__svg__SVGGradientElement__spreadMethod
+GC::Ref<SVGAnimatedEnumeration> SVGGradientElement::spread_method_for_bindings()
+{
+    static constexpr Array keywords {
+        SVGAnimatedEnumeration::Keyword { "pad"sv, SVG_SPREADMETHOD_PAD },
+        SVGAnimatedEnumeration::Keyword { "reflect"sv, SVG_SPREADMETHOD_REFLECT },
+        SVGAnimatedEnumeration::Keyword { "repeat"sv, SVG_SPREADMETHOD_REPEAT },
+    };
+    return svg_animated_enumeration_for_attribute(AttributeNames::spreadMethod, keywords, SVG_SPREADMETHOD_PAD);
+}
+
+}

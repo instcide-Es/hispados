@@ -1,0 +1,37 @@
+/*
+ * Copyright (c) 2021-2025, Sam Atkins <sam@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/String.h>
+#include <AK/StringBuilder.h>
+#include <AK/StringView.h>
+#include <AK/Utf16StringBuilder.h>
+#include <AK/Utf16View.h>
+#include <AK/Vector.h>
+#include <LibGfx/Color.h>
+#include <LibGfx/Font/UnicodeRange.h>
+#include <LibWeb/CSS/SerializationMode.h>
+#include <LibWeb/CSS/StyleProperty.h>
+#include <LibWeb/Export.h>
+
+namespace Web::CSS {
+
+WEB_API void serialize_an_identifier(StringBuilder&, Utf16View ident);
+WEB_API void serialize_an_identifier(Utf16StringBuilder&, Utf16View ident);
+void serialize_a_string(StringBuilder&, Utf16View string);
+void serialize_a_string(Utf16StringBuilder&, Utf16View string);
+WEB_API void serialize_a_url(StringBuilder&, Utf16View url);
+void serialize_a_url(Utf16StringBuilder&, Utf16View url);
+WEB_API void serialize_a_number(StringBuilder&, double value);
+WEB_API void serialize_a_number(Utf16StringBuilder&, double value);
+
+String serialize_an_identifier(Utf16View ident);
+Utf16String serialize_an_identifier_to_utf16(Utf16View ident);
+String serialize_a_string(Utf16View string);
+String serialize_a_url(Utf16View url);
+
+}

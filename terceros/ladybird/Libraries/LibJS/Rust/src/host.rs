@@ -1,0 +1,69 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+//! Functions the parser and codegen import from the runtime that embeds them.
+//!
+//! The runtime implements them in frontend_host.rs. The cargo test binary, which
+//! builds the frontend without the runtime, uses the stand-ins in test_host.rs.
+
+use num_bigint::BigInt;
+
+use ak::Utf16String;
+
+#[cfg(not(test))]
+use crate::frontend_host as implementation;
+#[cfg(test)]
+use crate::test_host as implementation;
+
+/// Convert a JS number to its UTF-16 string representation using the
+/// ECMA-262 Number::toString algorithm, which the host implements.
+pub fn js_number_to_utf16(value: f64) -> Utf16String {
+    Utf16String::from_utf16(&implementation::number_to_utf16(value))
+}
+
+/// Why a regex pattern+flags did not pass the check of the host's regex engine.
+pub enum RegexError {
+    /// The pattern or flags are invalid, with the message of the error.
+    Invalid(String),
+    /// The stack that is left does not hold the check.
+    OutOfStack,
+}
+
+/// Check a regex pattern+flags with the host's regex engine, so that an invalid
+/// one becomes an early error.
+pub fn validate_regex(pattern: &[u16], flags: &[u16]) -> Result<(), RegexError> {
+    implementation::validate_regex(pattern, flags)
+}
+
+/// StringToNumber(str), which the host implements.
+pub fn string_to_number(string: &[u16]) -> f64 {
+    implementation::string_to_number(string)
+}
+
+/// StringToBigInt(str), which the host implements. Returns None where the spec returns undefined.
+pub fn string_to_bigint(string: &[u16]) -> Option<BigInt> {
+    implementation::string_to_bigint(string)
+}
+
+/// Number::exponentiate(base, exponent), which the host implements.
+pub fn exponentiate(base: f64, exponent: f64) -> f64 {
+    implementation::exponentiate(base, exponent)
+}
+
+/// BigInt::exponentiate(base, exponent), which the host implements. Returns None where it throws.
+pub fn bigint_exponentiate(base: &BigInt, exponent: &BigInt) -> Option<BigInt> {
+    implementation::bigint_exponentiate(base, exponent)
+}
+
+/// BigInt::leftShift(x, y), which the host implements. Returns None where it throws.
+pub fn bigint_left_shift(x: &BigInt, y: &BigInt) -> Option<BigInt> {
+    implementation::bigint_left_shift(x, y)
+}
+
+/// BigInt::signedRightShift(x, y), which the host implements. Returns None where it throws.
+pub fn bigint_signed_right_shift(x: &BigInt, y: &BigInt) -> Option<BigInt> {
+    implementation::bigint_signed_right_shift(x, y)
+}

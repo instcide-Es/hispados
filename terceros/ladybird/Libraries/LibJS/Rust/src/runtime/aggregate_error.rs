@@ -1,0 +1,58 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+use core::ops::Deref;
+
+use libjs_runtime_macros::Trace;
+
+use crate::gc::class::{GcCell, define_cell};
+use crate::interpreter::vm::Vm;
+use crate::layout::cell::Gc;
+use crate::layout::object::Object;
+use crate::runtime::error::Error;
+use crate::runtime::function_object::FunctionObject;
+use crate::runtime::realm::Realm;
+
+#[repr(C)]
+#[derive(Trace)]
+pub struct AggregateError {
+    base: Error,
+}
+
+define_cell!(AggregateError, Object, extends: [Error, Object]);
+
+impl Deref for AggregateError {
+    type Target = Error;
+
+    fn deref(&self) -> &Error {
+        &self.base
+    }
+}
+
+impl AggregateError {
+    pub fn new(vm: &Vm, realm: Gc<Realm>, prototype: Gc<Object>) -> AggregateError {
+        AggregateError {
+            base: Error::new(vm, realm, Self::CLASS, prototype),
+        }
+    }
+
+    pub fn new_in_constructor(
+        vm: &Vm,
+        realm: Gc<Realm>,
+        prototype: Gc<Object>,
+        new_target: Gc<FunctionObject>,
+    ) -> AggregateError {
+        AggregateError {
+            base: Error::new_in_constructor(vm, realm, Self::CLASS, prototype, new_target),
+        }
+    }
+
+    pub fn create(vm: &Vm, realm: Gc<Realm>) -> Gc<AggregateError> {
+        realm.create_object(vm, |_| {
+            AggregateError::new(vm, realm, realm.intrinsics().aggregate_error_prototype(vm))
+        })
+    }
+}

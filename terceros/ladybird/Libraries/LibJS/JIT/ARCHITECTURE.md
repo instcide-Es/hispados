@@ -1,0 +1,668 @@
+# The LibJS optimizing JIT
+
+This document describes how the optimizing JIT works. It is a living document: every change to the
+compiler's structure updates it, and the code reads like it. Where it and the code disagree, one of
+them has a bug.
+
+The compiler is the `libjs_jit` crate (`Libraries/LibJS/JIT/Rust`). Its runtime side, which takes
+snapshots, installs code, enters it and translates its state back into interpreter frames, is in
+`Libraries/LibJS/Rust/src/jit`.
+
+## 1. Overview
+
+LibJS has two tiers: the bytecode interpreter, whose instructions keep per-site caches and
+feedback, and this optimizing JIT. An executable that uses up its tier-up budget (calls and loop
+iterations) is snapshotted and compiled on one of the compile threads. The interpreter keeps running
+it meanwhile; the main thread installs the code when the job finishes. Loops that run long enough
+enter compiled code at their back edges (on-stack replacement), generators and async functions
+enter it where they resume (section 4.1), and exception handlers after their `Catch` (section 4.2). A call from compiled code into a function the interpreter
+runs counts as several invocations of it (`callee-boost`): code hot enough to be compiled calls it,
+so it is likely to be hot as well, and there is no baseline tier to run it in meanwhile.
+
+There is no baseline tier. The interpreter's caches are the baseline: the JIT translates what they
+saw into speculation, and leaves to the interpreter wherever a speculation fails.
+
+## 2. Phases
+
+| Phase | Where | What it does |
+|---|---|---|
+| Snapshot | `jit/snapshot.rs`, `snapshot.rs` | Captures the executable, its inlining candidates, their caches and feedback, and frame layouts as plain data. The compiler never sees the heap. |
+| Graph building | `builder/` | One forward walk over the bytecode in reverse post order builds SSA IR, translating caches and feedback into checks and typed nodes, inlining calls, and attaching frame states. It folds only locally, like a check of a value it knows or the unboxing of a box it just made. |
+| Passes | `passes/` | Simplify the graph, one transformation per pass (section 6). The verifier checks the graph after building and after every pass. |
+| Register allocation | `regalloc/` | One forward walk over the blocks in linear order, driven by the constraints each node declares. Its own verifier simulates every location. |
+| Code generation | `codegen/` | Lowers each node onto a `PortableMacroAssembler`, emits sites (section 4) and the stubs that reach the runtime. |
+| Install | `jit/tier_up.rs`, `jit/code.rs`, `jit/dependencies.rs` | Installs the code if every dependency still holds (section 5). |
+| Run | `jit/entry_exit.rs`, `jit/translate.rs`, `jit/calls.rs` | Enters the code; leaves it at exits, leaves and calls through the translator. |
+
+## 3. The IR
+
+A `Graph` is a list of blocks in linear order. Every block has phis, a body of nodes and exactly
+one control node. Nodes live in one arena and are named by `NodeId`. Constants belong to no block
+and are rematerialized at every use. Every value has a representation (`Repr`): tagged, int32,
+float64, bool or pointer. Cold blocks hold code that rarely runs (slow paths of checks); they come last
+in the final block order.
+
+Blocks without predecessors are entries: block 0, the on-stack replacement entries, the resume
+entries of generators (section 4.1) and the catch entries of exception handlers (section 4.2). Every
+block is reachable from one.
+
+The compiled function's slots are SSA values. The builder tracks, per slot (the reserved registers
+included), which value holds it and whether frame memory holds that value too. Values come from
+frame memory (`LoadSlot`) where the code starts using it: every slot live at an entry, and the slots
+a node that writes the frame wrote, right after it. Merges and loop headers never write frame
+memory: a slot the paths disagree on (or a loop assigns) gets a phi, except that a slot every path
+loaded, and memory still holds, is loaded again at the merge (loop invariant code motion takes such
+loads out of loops, those of `Graph::unwritten_slots` even out of loops that call). The arguments and the `this` value register that no instruction writes keep
+the values the function started with (`Graph::unwritten_slots`), and nothing stores to them, so the
+values loaded from them need no spill slots (section 7). Frame memory is written
+only where something reads it: before calls that read the frame and before `Suspend` (`StoreSlot`),
+where the compiled function assigns an argument that its legacy `arguments` shows (which any code it
+calls can read), and by exits and leaves through the translator.
+
+### 3.1 Effects
+
+`Op::info()` (`ir/info.rs`) decides, for every op in one exhaustive match, its effects
+(`NodeProperties`), its exit kind, the input it refines (section 3.2), whether it ends a block, and
+the inputs it takes (`Inputs`: how many, of which representations), which the verifier checks every
+node against. Every pass decides what it may do with a node from its effects alone:
+
+- **Exits.** `Op::can_eager_exit()`, whether the op has an exit kind (`Op::exit_kind()`): may exit
+  before its side effects, resuming at the current bytecode (needs the eager frame state).
+  `can_lazy_exit`: may need to exit after it returns, resuming after the current bytecode.
+- **Call.** `is_call`: calls out of compiled code and clobbers every caller-saved register. That
+  is no effect: a call without any of the other effects only computes its value, and passes treat
+  it like any other node that does.
+- **Memory.** `reads` and `writes`: sets of abstract locations (`ir::Locations`): `FRAME`,
+  `NAMED_SLOTS` (property values), `SHAPES` (shapes and prototypes), `ELEMENTS` (element values),
+  `ELEMENT_COUNTS` (element storage kind, length, capacity and the storage offset of typed arrays), `GLOBAL_BINDINGS` and `BINDINGS` (the
+  bindings of declarative environments), `ITERATORS` (the state of iterators), `COLLECTIONS` (the
+  entries of Map, Set, WeakMap and WeakSet objects), and `INTERRUPT`, which only `CheckInterrupt`
+  writes, so that loop invariant code motion leaves it in its loop and nothing else cares. Passes ask
+  one question: whether one node's writes intersect another's reads. `runs_code`: may run other
+  code, which may write anything, or invalidate the compiled code. The op table below names the
+  locations coarsely (Named for slots and shapes, Elements for values and counts, Any for all);
+  `Op::info()` has the exact sets.
+- **Allocation.** `allocates`: may allocate, so may run the garbage collector.
+
+Global value numbering shares nodes without effects that read no memory; check elimination reuses
+loads.
+
+Equality feedback records comparisons of two objects separately from other non-numeric operands.
+Loose equality that only saw pairs of objects checks both operands with `CheckObject` and compares
+their identities with `TaggedEquals`. A non-object operand exits before any coercion. Strict
+equality also treats this feedback as identity comparable.
+
+`GetLength` records whether its receivers have an array's magical length property in a keyed
+feedback slot. A site that only saw arrays uses `CheckArray`, `LoadElementsLength` and
+`CheckNonNegativeInt32`, exiting for other receivers or unsigned lengths above `i32::MAX`.
+Removing the fallback call lets pure scans hoist the length and other invariant loads.
+Loop-entry frame states include inlined callees and their caller chains, so hoisted checks
+can resume inside the callee. Speculation gates identify the executable as well as its pc.
+
+### 3.2 Refinements
+
+A node that relies on a check takes the check's value as its input, never the checked value
+itself. Checks that exit (`CheckObject`, `CheckShape`, `CheckValue`, `CheckClosure`,
+`CheckAccessorFunction`, `CheckElements`, `CheckTypedArray`, `CheckArray`,
+`CheckNonNegativeInt32`, `CheckIdentityComparable`, `CheckAppendableArray`, `CheckBounds`,
+`CheckTypedArrayStorage`, `CheckNotHole`, `CheckInitialized`) have their input 0 as their value,
+refined: known to pass. `CheckInt32` refines and unboxes at once. A branch refines on its edges
+with `Refine`, the textbook pi node: it takes the branch's inputs and returns input 0, at the
+head of the block that only that edge reaches. So every check is a data dependency of what relies
+on it: passes move or share a load exactly when they can move or share its check, without control
+dependencies and without pinning loads by making them read everything.
+
+Passes see through refinements where that is sound: check elimination keeps its facts about the
+unrefined value, and leaves the uses of a check it removes on the value the check refined.
+Global value numbering does not look through them, since a node shared with another of a weaker
+refinement would lose its dependency. After the last optimization pass, every use of a refined
+value becomes a use of the value itself (`edit::remove_refinements()`): `Refine` nodes go away,
+checks lose their values, and a final round of value numbering merges the nodes that differed only
+in their refinements. Register allocation and code generation never see a refinement.
+
+### 3.3 Op reference
+
+Exits: E = eager, L = lazy. Every node that can exit has a frame state. "Call" means `is_call`.
+`cse` marks ops two of which with the same inputs compute the same value.
+
+| Op | Semantics | Exits | Reads | Writes | Other |
+|---|---|---|---|---|---|
+| **Values** | | | | | |
+| Constant | A NaN-boxed constant. | | | | cse |
+| Phi | One input per predecessor, in predecessor order. | | | | |
+| LoadSlot | Reads a frame slot: at an entry, right after a node that writes it, or at a merge of loads of it. | | Frame | | |
+| StoreSlot | Writes input 0 to a frame slot: a written constant, an argument the legacy `arguments` shows, or a slot the next call reading the frame or `Suspend` reads. The verifier enforces this. | | | Frame | |
+| BoxInt32, BoxBool | The tagged value of an unboxed input. | | | | cse |
+| CheckInt32 | Input 0 as an int32; exits unless it is one. | E | | | cse |
+| CheckFloat64Int32 | The float64 input 0 as an int32; exits unless it is one (-0 is none). What an int32 check of a boxed double becomes once checks of doubles no longer go. | E | | | cse |
+| CheckNumber | Input 0 as a float64; exits unless it is a number. | E | | | cse |
+| EmptyToUndefined | Input 0 with the empty value replaced by `undefined`. | | | | cse |
+| CellAddress | The cell pointer of a tagged value, shared by the nodes accessing the object. | | | | cse |
+| UnboxInt32, UnboxDouble | The int32 or float64 of a tagged value that a branch established is an int32 or a double. | | | | cse |
+| BoxFloat64 | The tagged number of a float64 (an int32 where it is one, NaN canonicalized). | | | | cse |
+| StringAddress | The cell pointer of a string. | | | | cse |
+| **Arithmetic and tests** | | | | | |
+| Int32Binary | Int32 arithmetic; exits where the result is no int32 (overflow, -0, a zero divisor). | E if it can overflow | | | cse |
+| Uint32ShiftRight, Uint32ToFloat64 | `>>>` of int32 values as the bits of the unsigned result, and the float64 of such bits. | | | | cse |
+| Int32Compare | Int32 comparison as a bool. | | | | cse |
+| TaggedEquals | Bit equality of tagged values, for values where that is strict equality. | | | | cse |
+| Int32Abs, Int32ToFloat64, Float64Unary | Int32 absolute value, conversion to float64, negation and `Math` operations on float64. | | | | cse |
+| Int32Min, Int32Max, Float64Min, Float64Max | `Math.min` and `Math.max` of two int32 values, and of two float64 values (NaN if either is NaN, -0 below +0), without branches where the target can. | | | | cse |
+| Uint32Min | The smaller of two int32 values as unsigned numbers: the bound of packed and holey element indices, below both their counts. | | | | cse |
+| Float64Binary, Float64Compare, Float64ToInt32, Float64ToUint8Clamped | Float64 arithmetic, comparison as a bool (false for NaN but in inequalities), ToInt32, and ToUint8Clamp. | | | | cse |
+| IsCallable | Whether input 0 is a function object. | | | | cse |
+| Typeof, TypeofIs | `typeof` of input 0, or whether it is one kind. | | | | cse |
+| ToBoolean | Truthiness through the runtime's `to_boolean`; the slow path of `BranchTruthy`. | | | | call, cse |
+| CallFloat64Function | `Math.exp`, `log`, `sin`, `cos`, `tan` and `pow` of float64 values, through the runtime's function of doubles for each, which only computes. | | | | call, cse |
+| PrimitiveToString, ToObject | ToString of a primitive, and ToObject of a primitive (but undefined and null) as a builtin of the running realm makes it (else the empty value), through the runtime. | | | | call, allocates |
+| CallIntrinsic | A builtin of a `this` value and arguments of the kinds its `HelperCall` lists (like a string and an int32 position for `String.prototype.indexOf`), through its runtime helper, without a native frame; the helper runs in the realm of the calling code. Helpers that return any value return the empty value where they decline, having done nothing observable. | | Per `HelperCall` | Per `HelperCall` | call, allocates |
+| CallArraySplice | `Array.prototype.splice` of a plain packed array with int32 start and delete count and up to three inserted values, through the runtime without a native frame. The inserted values are passed on the native stack, where GC can see them. The helper checks the receiver, prototype chain and default species before allocating the removed-elements array and moving the suffix in bulk; it returns the empty value without observable effects for other cases, which take the call's slow path. | | Named, Elements | Elements | call, allocates |
+| ArrayCreate | `new Array(length)` as the running realm's `Array` constructor makes it, through the runtime. | | | | call, allocates |
+| **Checks** | | | | | |
+| CheckObject, CheckValue, CheckClosure, CheckIdentityComparable | Exit unless input 0 is an object, a given value, a closure of a given function, or identity comparable. The value is input 0, refined (section 3.2). | E | | | cse |
+| CheckShape | Exits unless the object has one of the shapes. The value is the object, refined. | E | Named | | |
+| CheckPrototypeChainValid | Exits unless a prototype chain validity cell is still valid. | E | Named | | |
+| CheckAccessorFunction | Exits unless an accessor property holds a given getter or setter. The value is the object, refined. | E | Named | | |
+| CheckElements | Exits unless the object has elements of a kind. The value is the object, refined. | E | Elements | | |
+| CheckTypedArray | Exits unless the object is a typed array, of any kind. The value is the object, refined. | E | | | |
+| CheckArray | Exits unless the object has an array's magical length property, independent of its elements storage kind. The value is the object, refined. | E | | | |
+| CheckNonNegativeInt32 | Exits unless the int32 input is nonnegative, guarding unsigned lengths above i32::MAX before boxing. The value is the input, refined. | E | | | |
+| Refine | Input 0, refined by the edge of a branch on the same condition and inputs: at the head of the block only that edge reaches (section 3.2). Never moved; gone before register allocation. | | | | cse |
+| CheckBounds | Exits unless the index (input 0) is below the count (input 1), unsigned. The value is the index, refined. | E | | | cse |
+| CheckTypedArrayStorage | Exits unless the storage offset of a typed array (input 0) is valid. Typed arrays whose length the snapshot knows to be fixed use it as a constant past this check, so accesses with a constant index rely on it alone. The value is the offset, refined. | E | | | cse |
+| CheckNotHole | Exits at holes (the empty value). The value is input 0, refined. | E | | | cse |
+| CheckInitialized | Exits unless the binding or local variable (input 0) is initialized (not the empty value). The value is input 0, refined. | E | | | cse |
+| AssumeValid | Exits if the code was invalidated; a patchable no-op (section 5). | E | Any | | |
+| CheckInterrupt | Exits if another thread interrupted the VM (section 9, "Interrupts"). At every loop back edge; never moved. | E | | Interrupt | |
+| AssumeLegacyArgumentsUnread | After an instruction whose calls may run code reading the legacy `arguments` of inlined frames; escape analysis makes it an `AssumeValid` or removes it (section 4, "Legacy arguments"). | E | Any | | |
+| **Object memory** | | | | | |
+| LoadNamed | A named property at an offset; exits for accessors, unless the shape check of its object input ensures that it `holds_data` (the own property is writable in the checked shape, and accessor properties never are). Loads from prototypes always check: no check guards their constant object as an input, so they could move above their guards. | E unless `holds_data` | Named | | cse |
+| StoreNamed | Stores an existing named property; exits for accessors, unless it `holds_data` like a `LoadNamed`. | E unless `holds_data` | Named | Named | |
+| AddNamed | Adds a property to a fresh object and gives it the new shape. | | Named | Named | |
+| LoadAccessorFunction | The getter or setter of an accessor property. | E | Named | | |
+| HasInPrototypeChain | Whether input 1 is on input 0's prototype chain (the OrdinaryHasInstance loop). | E | Named | | |
+| LoadElementAt, StoreElementAt | An element of a known elements kind at an index in bounds, without checks; holes load as the empty value. Typed arrays load int32 or float64 and store int32 (integer kinds) or float64; their accesses take the `TypedArrayDataAddress` of the typed array in place of the object, and address their element at it plus the zero-extended index, scaled. | | (Load) Elements | (Store) Elements | |
+| LoadTypedArrayLength | The length of a typed array, or 0 while its data is not cached (detached or resizable buffers). | | Elements | | |
+| LoadTypedArrayDataOffset | The offset of the cached data of a typed array in the primitive storage cage, invalid while its data is not cached. Calls that may detach a buffer invalidate it; stores of elements in bounds do not. | | Elements | | |
+| TypedArrayDataAddress | The address of the elements of a typed array: the base of the primitive storage cage, a constant of the process, plus its storage offset (input 0, a `LoadTypedArrayDataOffset` or its `CheckTypedArrayStorage` where a fixed length bounds the index, which the verifier enforces) masked into the cage. Whatever the offset, accesses at a zero-extended 32-bit index scaled by at most 8 from it stay within the cage or the 32 GiB guard region LibGC reserves past it. | | | | cse |
+| CheckAppendableArray | Exits unless `push` can append to the array without observable steps. The value is the array, refined. | E | Any | | |
+| LoadElementsLength, LoadElementsCapacity | The array-like size, and the room of packed or holey storage (which holey elements may have less of than their size). | | Elements | | |
+| ProbePropertyCache | The data property (own or of an unchanged prototype chain), or `undefined` for a missing one, that the instruction's property lookup cache has for the object, like `GetById` reads it; the empty value if none. The runtime probes the other entries out of line. One atomic read of a cache the interpreter keeps changing. | | Named | | saves GPRs |
+| ProbeKeyedCache | The own data property, or `undefined` for a missing one, that the keyed cache or the VM's keyed cache has for the object and key; the empty value if none. | | Named | | |
+| ProbePropertyStore, ProbeKeyedStore | Stores (or adds) the property through such an entry, like `PutById` and `PutByValue`, as a bool telling whether it did. The named one also probes through the runtime, outside inlined callees. | | Named | Named | allocates, saves GPRs |
+| ProbeGlobalCache, ProbeGlobalStore | The global variable a global variable cache is for (a data property of the global object of the cached shape, or an initialized binding of the global declarative environment), like `GetGlobal` and `SetGlobal`; the empty value, or false, where the cache does not apply. Inputs: the realm and the executable (and for stores, the value first). | | Any | (Store) Any | |
+| ProbeHasProperty | Whether the object has the property the key names, as its own (`hasOwnProperty`) or at all (`in`), where the VM can tell without running code: from the VM's keyed cache and, for `in`, the elements inline, and from the runtime's lookup out of line; the empty value otherwise. | | Any | | saves GPRs |
+| AppendElement | Appends an element below the capacity. | | Elements | Elements | |
+| CallArrayPush | Appends an element, growing the elements, preserving every register. Pushes of several values that do not fit call it for each, and so do stores at the length that do not fit. | | Elements | Elements | allocates |
+| CallStoreHoleyElement | Stores an element below the length of the holey elements of an array that `BranchCondition::HoleFillableArray` established runs no code, growing the elements where they have no room for it (or making them a dictionary, where the store is sparse), and making them packed where it filled their last hole, preserving every register. | | Elements | Elements | allocates |
+| **Strings and for-in** | | | | | |
+| StringLength, LoadStringCodeUnit | The length of a string, and a code unit of a readable string at an index in bounds, which the refinements of their branches establish. Strings never change. | | | | cse |
+| SingleCharacterString | The VM's string of an ASCII code unit (refined below 128). | | | | cse |
+| StringsEqual | Whether two strings are equal, as a tagged boolean, or the empty value where only the slow path can tell. | | | | cse |
+| ConcatenateStrings | The concatenation of two strings, a rope or a cached short string, or the empty value where only the slow path makes it. If it is a `key` (`ConcatenateKeyStrings` in dumps), it is the string that the same two strings made when it became a property key before, where the VM remembers that, which the caches of keyed accesses know. | | | | allocates |
+| IntegerToString | The VM's cached string of an int32, or the empty value. | | | | cse |
+| LoadPropertyIteratorKeyCount, LoadPropertyIteratorKey | The keys of a property iterator cache, at an index refined to be in bounds. The keys never change. | | | | cse |
+| OpenArrayIteration | `GetIterator` in fast array mode, through a runtime call that preserves every register: the iterable, if it is an array that iterates with `%Array.prototype.values%` and whose array iterators have the builtin `next`, or the empty value. The iteration then keeps the index of the next element in the iterator operand and the array in the next operand, and makes no iterator. | | Any | | |
+| LoadArrayIteratorArray, LoadArrayIteratorIndex | The iterated array (`undefined` once done) and the low 32 bits of the next index of an array iterator (a `Repr::Pointer` that `BranchCondition::ArrayIterator` established is one). | | Iterators | | |
+| StoreArrayIteratorIndex, FinishArrayIterator | Sets the next index of an array iterator, or makes it done. | | | Iterators | |
+| LoadGeneratorCompletionType, LoadGeneratorCompletionValue | The type (as an int32) and the value of the completion a generator object (which a branch on `GeneratorObject` established it is) resumed with. | | Iterators | | |
+| LoadGlobalBinding | A binding of the global declarative environment; exits while uninitialized. | E | Global | | cse |
+| StoreGlobalBinding | Stores a mutable global binding; exits while uninitialized. | E | Global | Global | |
+| **Allocation** | | | | | |
+| AllocateObject, AllocateArray | A new plain object or packed array; nothing can see it before it is stored. | | | | allocates |
+| AllocateFunction, AllocateEnvironment | A new closure or lexical environment from its template. | | | | allocates |
+| InitializeNamed, InitializeElement | Initializing stores into an object or array nothing else has seen. | | | Named / Elements | |
+| VirtualObject | An object escape analysis removed, as frame states need it; in no block, no code. Names the `AllocateObject` it stands for, which is the same object at every site of the code. | | | | |
+| **Frames and environments** | | | | | |
+| InitializeFrame, EnsureFrameInitialized | The `Enter` bytecode: publishes the frame, empties the registers and locals, copies the constants (the second only if the frame is not initialized yet). | | | Frame | |
+| PublishFrame | Makes the frame the running execution context, which direct calls leave to their callee's code. | | | Frame | |
+| Suspend | Records where the frame's generator or async function resumes (a continuation, or none once it completes) and what the value it returns is (yielded, an iterator result, or awaited), right before the `Return` of a `Yield`, `YieldIteratorResult` or `Await` (section 4.1). | | Frame | Frame | |
+| LoadFrameField | A field of the running execution context (an environment, the realm, the executable) as a pointer. The builder loads each once per path, until an instruction may replace it. | | Frame | | |
+| SetLexicalEnvironment | Makes a cell value the frame's lexical environment; its value is the environment's pointer. | | Frame | Frame | |
+| LeavePrivateEnvironment | Makes the private environment's outer one the frame's. | | Frame | Frame | |
+| BoxCell | The tagged cell value of a pointer to an environment, as registers hold it. | | | | cse |
+| LoadFunctionEnvironment | A closure's lexical or private environment as a pointer, fixed for its lifetime. | | | | cse |
+| LoadOuterEnvironment | The outer environment of an environment, which never changes. | | | | cse |
+| LoadEnvironmentBinding | A binding of a declarative environment, or the empty value while it is uninitialized. | | Bindings | | |
+| StoreEnvironmentBinding | Stores a binding of a declarative environment. | | | Bindings | |
+| AppendEnvironmentBinding | Appends the uninitialized binding a declarative environment's shape has next, where a branch on `NextBindingOfShape` found room. | | | Bindings | |
+| ArgumentCount | The running frame's passed argument count. | | Frame | | cse |
+| LoadArgument | `arguments[i]` of an arguments object never created; exits out of range. | E | Frame | | cse |
+| SliceArguments | `Array.prototype.slice.call(arguments, start)` of an arguments object never created. | E | Frame | | call, allocates |
+| **Calls** | | | | | |
+| CallDirect | A `Call` to its feedback's ECMAScript target, entering its code directly. | L, throws | Any | Any | call, allocates |
+| CallNative | A `Call` to its feedback's raw or capturing native target, in the interpreter's lightweight frame. Capturing functions enter through a thunk that reads the function from that frame. | L, throws | Any | Any | call, allocates |
+| CallNativeAccessor | The raw native getter (of a `GetById` or `GetLength`) or setter (of a `PutById`) that the checks before it established the property has, called like `CallNative` calls its target. A getter of a platform object attribute backed by a field reads the main world wrapper it would return inline where there is one, if the interpreter validated the cache entries for that. The getter's result (for the setter, its result too). | L, throws | Any | Any | call, allocates |
+| CallForwardingArguments | `f.apply(this, arguments)` with an arguments object never created. | L, throws | Any | Any | call, allocates |
+| CallSlowPath | One bytecode instruction through the interpreter's slow path, on SSA operands, with SSA outputs, with a frame state after the instruction. `saves_registers`: in a cold block, preserving every register. | L unless it saves registers; throws per opcode | Any | Any | call unless it saves registers; allocates |
+| SlowPathOutput | A further output of the `CallSlowPath` right before it, which is its input (the verifier checks that it follows it). | | | | |
+| Generic | One instruction through its slow path, on frame memory only. Left for instructions that read the whole frame (`eval`, `CreateArguments`, ...) and reads of an arguments object never created. | L, throws per opcode | Any | Any | call, allocates |
+| **Control** | | | | | |
+| Jump, Branch, BranchTruthy, BranchOnPc | Unconditional and conditional control flow. `Branch` conditions include `ElementsKind` (as `CheckElements` checks), `IndexInBounds` (as `CheckBounds` checks), `MagicalLength`, `Extensible`, `ArrayIterator` (whether an object is an array iterator over values), `BindingMutable` (whether a binding of a declarative environment is mutable, which never changes) and `NextBindingOfShape` (whether an environment can append the binding its shape has next). Code generation fuses a probe with the branch on its result where the result is not live into the branch's target for failure. | | | | |
+| ShapeSwitch | Continues at the case of the object's shape; exits for other shapes. Each case starts with a `Refine` on `Shape` of the object. | E | Named | | |
+| Return | Returns input 0. | | | | |
+| Exit | Exits to the interpreter unconditionally. | E | | | |
+| Unreachable | Control never reaches the end of the block. | | | | |
+
+### 3.4 Representations
+
+To be written: tagged values, unboxed int32, float64 and bool, pointers, where boxing happens
+(`passes/representation.rs`), and what frame states accept.
+
+## 4. Frame states, sites and the translator
+
+Compiled code keeps the interpreter's state in SSA values. Wherever the runtime may need that
+state as interpreter frames, the IR carries a **frame state**: the bytecode position (`executable`,
+`pc`), how to resume there (`ResumeAt` the instruction, or `ResumeAfter` it with the result in a
+destination slot), and every live slot of the frame, as a value or as held by the frame
+(`in_frame`). Frame states of inlined calls chain to the frame state of their caller.
+
+Rules (enforced by `passes/verify.rs`):
+
+- every node that can exit, eagerly or lazily, has a frame state;
+- every live slot is listed exactly once, so the translator can clear every unlisted register and
+  local;
+- a `ResumeAfter` destination may be listed with its value from before the instruction (handlers
+  of a throw read it); exits never write it, since the interpreter resumes with the result there.
+
+Code generation turns each point where the runtime may read the state into a **site**
+(`code::Site`): its kind, its chain of frame states with the location of every value (register,
+stack slot, a slot of the compiled function's frame that nothing writes, constant, an arguments
+object or a virtual object to create), and the virtual objects.
+
+| Site kind | Where | What the runtime does |
+|---|---|---|
+| `Exit(reason)` | exits | Writes the frames (Full mode), records the reason so recompiles do not repeat the speculation, and resumes in the interpreter. |
+| `Leave` | a slow path or call that did not continue in compiled code (a throw, a return through the interpreter) | Writes the frames that are still on the stack; nothing is counted. |
+| `Publish` | a slow path or call in an inlined callee that runs in the inlined frames, where compiled code cannot write a header value itself | Pushes the inlined frames with their headers only (Header mode: function, `this`, arguments, pc), uninitialized; the slow path runs in the innermost one, and compiled code pops them if it continues. Compiled code publishes the same headers inline everywhere else. |
+| `Call` | a call in an inlined callee, which runs without the inlined frames | Describes the inlined frames for stack walks (View mode); materializes them for the call's slow paths (Full mode). |
+
+The **translator** (`jit/translate.rs`) is the only code that turns compiled state into
+interpreter state. Full mode writes interpreter frames; Header mode pushes the frames of inlined
+calls with their headers for slow paths and calls that take their operands as values; View mode
+describes inlined frames without writing them.
+
+**Publication.** A direct call builds its callee's frame without making it the running execution
+context. Until the callee's code publishes it (`PublishFrame`, or `InitializeFrame` on the first
+node that observes its slots), the frame is invisible: the garbage collector, stack walks and
+runtime functions only see the running frame and its callers, so nothing may run other code,
+collect garbage or exit lazily before that. Eager exits publish the frame in the translator, and
+the prologue's resumption in the interpreter publishes it inline.
+
+**Legacy arguments.** Code that a call in an inlined function runs may read the function's
+arguments through its legacy `f.arguments`, which may be objects the code never allocated. They
+stay virtual: the frames of inlined calls that the runtime publishes or materializes while compiled
+code keeps running get a marker in such an argument slot (an empty value with the low half of the
+JIT frame's frame pointer), where the frame state's `legacy_arguments` include it. Reading
+`f.arguments` (or the debugger) replaces the marker with the object, created from the values of the
+site the JIT frame is suspended at: in stack slots for a call site, and in the JIT frame's register
+dump for a publication (the frame stores the site's index where
+`CompiledCode::site_index_frame_offset` says). The runtime remembers the
+object for the frame (by the allocation its `VirtualObject` names), and every later
+materialization for that frame uses it, as it is. It then invalidates and discards the code and
+records `ExitKind::LegacyArgumentsRead` at the call. The builder ends every instruction whose
+calls run code in a frame chain with legacy arguments with an `AssumeLegacyArgumentsUnread`, which
+escape analysis keeps as an `AssumeValid` where the call has such objects, so the frame exits
+right after the call and the interpreter continues with the objects that code read and maybe
+changed. Recompiles keep the objects allocated at calls where code read them before. Calls
+without such a node after them keep the objects among legacy arguments allocated too.
+
+
+### 4.1 Generators and async functions
+
+A generator runs in its own frame, which it keeps while it is suspended. Compiled code suspends it
+like the interpreter's `Yield` and `YieldIteratorResult` do: `StoreSlot`s put every slot live at
+the continuation in frame memory, `Suspend` records the continuation in the frame, and `Return`
+returns the yielded value to the runtime. So a suspended generator's frame is the frame the
+interpreter would have left, whichever of the two ran it.
+
+Async functions and async generators are generators to the runtime: `AsyncFunctionDriverWrapper`
+and `AsyncGenerator` resume them the same way, and their `Await` suspends them like a `Yield`, except
+that `Suspend` marks the value as awaited (`yield_is_await`), which tells an async generator to
+await it rather than yield it.
+
+Each continuation then gets a resume entry (`builder/osr.rs`), like an on-stack replacement entry:
+a block without predecessors that loads the slots live there from the frame (the accumulator the
+runtime resumes with among them) and jumps to the
+continuation's block, which nothing else in compiled code reaches. Both kinds of entry are listed in
+`Graph::osr_entries` by pc, since both continue a frame whose memory holds every value at that pc.
+`GeneratorObject::execute()` runs the generator from its continuation through `run_executable()`,
+which enters compiled code at the resume entry if the executable has code with one there, and
+interprets it otherwise. A continuation starts by reading the completion the generator resumed
+with (`GetCompletionFields`), which compiled code loads from the generator object; an async
+generator's completion comes from its `AsyncGenerator` through the slow path. The function's start
+is compiled like any function's: its `Enter`, and for generators and async generators the initial
+`Yield`. Async functions have no initial `Yield`; their call runs the body until it first awaits.
+
+### 4.2 Exception handlers
+
+The graph has no exceptional edges. An exception thrown in compiled code, or in a call it makes,
+reaches its slow path's leave like any slow path that does not continue: the runtime unwinds to the
+handler (`Vm::handle_exception()`), which puts the exception in the frame and moves its pc to the
+handler. The frame state of the throwing node lists everything live into the handler
+(`bytecode/liveness.rs`). Where the handler is in the compiled function's frame and has a catch
+entry (below), the leave stub continues in compiled code (`Codegen::emit_catch_in_frame()`): it
+writes the frame state into the frame with compiled stores, initializing the frame first if nothing
+observed it yet, runs the handler's `Catch`, and jumps to the catch entry, which loads the values
+back. Once the code is invalidated, a patched jump skips this. Otherwise the leave writes the frame
+state through the runtime, and the interpreter runs the handler's `Catch`, which compiled code never
+builds.
+
+Handlers start with a `Catch`, and the block after it is where the handler continues. Each handler
+that caught an exception before the compile (the value feedback of its `Catch`) gets a catch entry
+there (`builder/osr.rs`), like a resume entry: a block without predecessors that loads the slots live
+there from the frame. Handlers that never caught anything get none, so their blocks are not built
+and do not merge into the paths after them. Catch entries are listed in `Graph::osr_entries` too.
+
+The profiling interpreter's `Catch` continues the frame in compiled code at the catch entry after it,
+if the code has one (`entry_exit::helper_enter_jit_code_after_catch()`). An exit from there resumes
+after the `Catch`, so a frame never enters and exits at the same pc. A catch where the code has no
+entry counts like an exit, so that code compiled before the handler first caught is discarded and
+compiled again with the entry once catches keep happening there.
+
+Callees with handlers are inlined only if none of their handlers caught an exception before the
+compile, and their handlers get no blocks at all. An exception that one of them catches unwinds into
+the callee's materialized frame, the leave writes the frames, and the interpreter runs the handler.
+No frame state lists an exception register, which only the runtime writes, so the leave keeps the
+exception the unwinder put there. The leave counts such a catch like an exit, so that the code is
+compiled again once catches keep happening there, and the recompile calls the callee instead.
+
+## 5. Dependencies and invalidation
+
+Compiled code may assume facts that hold until a rare runtime event (`code::Dependency`): a
+prototype chain stays valid, a shape stays stable, a prototype keeps the value of a property, a
+global binding or a property of the global object is never assigned, the global declarative
+environment gets no bindings, no `[[IsHTMLDDA]]` object exists. Each of the first, the third and
+the last kinds is a `WatchpointSet` that stays valid (`runtime/watchpoint_set.rs`), such as one of
+a realm for the iterator protocol (`runtime/realm_watchpoints.rs`) or the one of a prototype's slot
+(`Shape::watch_slot_for_replacements()`).
+
+- The builder and check elimination record the dependencies they rely on in
+  `Graph::dependencies`.
+- The runtime installs code only if all of them still hold (`jit/dependencies.rs`), which also
+  covers what changed while it compiled.
+- Each kind of dependency stops holding at exactly one place in the runtime, the event every fast
+  path writing the watched state needs first. That place calls `invalidate_dependents()`: the code
+  is discarded, so nothing enters it anymore, and invalidated, so frames still running it exit
+  where they next rely on it.
+- Only code that runs while compiled code is suspended in a call or slow path can invalidate it.
+  The first node after such a call that relies on a dependency is an `AssumeValid`: a no-op the
+  runtime patches into a jump to its exit (`CompiledCode::invalidation_patches`).
+- Properties of the global object (`GlobalPropertyUnassigned`) are written by the interpreter's
+  caches and by compiled stores without the runtime, so their dependency rests on one rule: the
+  runtime caches no write to a slot of a global object that is not assigned yet. The runtime's
+  write path (`Object::storage_set()` and `storage_delete()`) is then the only writer of such a
+  slot. It notes the slot as assigned when it replaces a value other than undefined with another
+  one, or moves the property by deleting it or one before it, and invalidates the code depending
+  on the slot. Initializing a slot (a `var` initializer, a lazily created intrinsic) or storing the
+  value it holds (CreateGlobalFunctionBinding) is no assignment. Code only depends on this while
+  the global object's shape is a dictionary: no other object gets that shape or one it leads to,
+  so caches filled by writes to other objects never apply to the global object.
+
+## 6. Passes
+
+`passes::optimize()` runs the passes in this order, after removing the blocks graph building left
+unreachable. Each one keeps the graph valid (`passes/verify.rs`), and IR tests in
+`Tests/LibJS/JIT/ir` check their results.
+
+| Pass | Contract |
+|---|---|
+| Loop rotation | A loop that an on-stack replacement entry enters at another block than the code before it does (the entry at a test at the bottom that does more than branch, like `i < this.length`, enters the body) has no header that dominates it. The blocks that the block entered from before the loop dominates (the test) are copied for the way in from before the loop, so that the loop has one entry, unless that would merge it with an inner loop. |
+| Trivial phi removal | Phis whose inputs are all one value (or the phi itself) become that value. |
+| Truncation | Int32 additions, subtractions and unsigned right shifts whose users only read the low 32 bits of their results (bitwise operations, shifts, wrapping arithmetic, integer typed array stores) and no frame state holds become `Int32WrappingBinary`, which never exits. Comparisons of uint32 values (`x >>> 0`) first become unsigned comparisons of the shifted values. |
+| Simplification | Constant folding and strength reduction; branches on constants become jumps; unboxing a box is the boxed value, and so is an int32 check of the boxed double of an int32; int32 operations that leave their left-hand side as it is, like `x \| 0`, become it. |
+| Representation selection | Phis of int32, bool or float64 values become unboxed phis, and int32 inputs of float64 phis are converted. Tagged inputs of an int32 phi that the code checks somewhere (or of the phis connected to it) are checked where they enter, exiting to the start of the phi's block, unless such a check exited there before. |
+| Simplification | Again, for what unboxing made foldable. |
+| Global value numbering | A CSE-able node computing what a dominating node computed is replaced by it, so that check elimination sees one value where the builder computed it twice (like the index of `k[Math.abs(j)]` in two expressions). Memory reads are left to check elimination. |
+| Check elimination | A forward dataflow of facts removes checks that passed already, decides branches that a branch on the same values decided before, and reuses loads whose value is known; may turn shape checks into `AssumeValid` plus a stable shape dependency. |
+| Simplification | Again, for what the branches that check elimination decided left foldable (like the double path of `Math.abs` of an int32). Int32 checks of boxed doubles become `CheckFloat64Int32` of the doubles. |
+| Global value numbering | Again, for the nodes that check elimination and simplification made the same. |
+| Loop invariant code motion | Gives loops entered from several blocks a merged preheader, then moves effect-free nodes with inputs from outside the loop to it (but calls in cold blocks), and loads of slots nothing writes even where the loop calls; nodes that may exit too, exiting to the loop header, and not where that kind of exit was taken there before. Those from blocks that not every iteration runs, but for cold ones, move speculatively: they exit with `Hoisted`, and stay in the loop where such an exit was taken there before. |
+| Bounds check elimination | Bounds checks against constant counts go away where the index is known to be in range: induction variables of loops whose back edge compares the grown counter with a constant bound, merges of values from outside a loop, and int32 arithmetic on them that cannot overflow. The counter an on-stack replacement entry brings is checked against the bound once where it enters, unless such a check exited there before. With the same ranges, `((x << k) + c) >> k` becomes `x + (c >> k)` where nothing overflows and `c` is a multiple of 2^k. Int32 additions, subtractions and multiplications become `Int32WrappingBinary` where the ranges of their operands keep the result an int32 (and not -0), with operands also bounded by the masks and shifts of any int32, and by the dominating bounds checks and in-bounds branches of indices. |
+| Interrupt check elimination | Small innermost loops that count towards an end lose their `CheckInterrupt`, if they run under 5000 times or a loop around them keeps its check (section 9, "Interrupts"). |
+| Exit unboxing | Frame states take the unboxed value of an int32, float64 or bool boxing that only frame states use, so that exits box it instead of the fast path. |
+| Dead code elimination | Removes nodes without uses and without effects; frame states count as uses. Branches whose edges lead to the same place doing the same thing become jumps. |
+| Escape analysis | Allocations that do not escape become their properties' SSA values; frame states refer to `VirtualObject`s. `AssumeLegacyArgumentsUnread` nodes after calls whose frame states have virtual objects among legacy arguments become `AssumeValid` nodes; the others go away. |
+| Dead code elimination | Again, for what escape analysis left unused. |
+| Branch fusion | A branch on a single-use comparison (int32, float64 or tagged) compares itself, after a block that only branches on a phi of booleans hands the branch to its predecessors. |
+| Key strings | A `ConcatenateStrings` whose value is the key of a `ProbeKeyedCache`, `ProbeKeyedStore` or `ProbeHasProperty`, or one of the strings of such a concatenation, through refinements and phis other than those of loop headers, becomes a `key`: the rope it would make is a new string for every access, which the caches of the access never know. A concatenation that adds to the phi of a loop header stays as it is: it makes a piece of a string that a loop puts together. |
+| Refinement removal | Every use of a refined value becomes a use of the value itself; `Refine` nodes go away and checks lose their values; value numbering then merges what differed only in refinements (section 3.2), and dead code elimination removes what only the merged checks' frame states kept alive. |
+| Frame initialization | Moves `InitializeFrame` to the first node that observes the frame's slots on each path, and puts `PublishFrame` before nodes that only need the frame visible (allocations, calls in inlined callees) where it may not be yet. |
+| Frame state cleanup | Drops the frame states no node uses. |
+| Cold block layout | Moves the cold blocks after all others. |
+
+## 7. Register allocation
+
+Every node declares what its lowering needs in `codegen::lowering_info()`, one exhaustive match next
+to the lowerings: where each input must be (a register, a register of the calling convention, a
+register or an immediate constant, the register the target shifts by
+(`RegisterSet::shift_amount_gpr`, RCX on x86-64, any register on AArch64) or an immediate constant,
+or anywhere, its stack slot included), where its output goes (a register or the return register),
+how many temps it takes (with a comment saying what each is for), what its code clobbers beyond
+those (nothing; every floating point register, for nodes whose out of line code calls the runtime
+saving only the general purpose registers; or every caller-saved register, for calls), whether its
+output may take the register of its first input where that dies, and which parts of the JIT frame it
+uses (the saves area, the operand record). The register allocator, its verifier and the frame layout
+read it instead of keeping lists of ops of their own. In debug builds and with `verify-ir`, code
+generation checks the lowerings against it: each lowering takes exactly the temps it declares
+(through `Codegen::temp()`, also on paths that do not use them), and only nodes that declare it use
+the saves area. The verifier of the allocation checks that every node got the temps it declares,
+that inputs of a fixed register are in it, and that no value an exit needs is in the node's output
+register.
+
+A value loaded from one of `Graph::unwritten_slots` has that frame slot as its home
+(`regalloc::frame_home()`): it gets no spill slot and no store after its definition, and wherever
+no register holds it, moves reload it from the frame and exits find it there
+(`code::ValueLocation::Frame`). Code inside a node that published the frames of inlined calls
+reads it through the compiled function's frame the entry saved, since the frame register then
+holds another frame. The verifier names the value of such a slot by the slot, which holds it
+everywhere, and reports stores to it.
+
+To be written: the forward walk, spills at definition, merges and their state predecessor, cold
+blocks, the verifier.
+
+## 8. Code generation and the runtime interface
+
+To be written: per-op lowering, slow path calling conventions and the operand record, the call
+stub, cache probes, the allocation contract, the entry and exit stubs.
+
+### 8.1 The calling convention of JIT code
+
+JIT code uses the System V calling convention on every x86-64 target and AAPCS64 on AArch64, which
+keeps code generation the same across operating systems. Windows x86-64 is the one target where
+that is not what the platform uses, so everything that crosses into or out of JIT code says so
+explicitly:
+
+- Native code enters JIT code through `extern "sysv64"` function pointers (`JitEntry`,
+  `EntryTrampoline`). The compiler then treats RSI, RDI and XMM6-15, which are callee-saved on
+  Windows only, as clobbered by the call, and takes two-register results where System V returns
+  them.
+- Every function JIT code calls has the `#[jit_abi]` attribute, which makes it `extern "sysv64"` on
+  Windows x86-64 and leaves it `extern "C"` elsewhere. Taking the address of a function erases its
+  calling convention, so JIT code gets the addresses of these functions from
+  `jit_function_address!`, which does not build for a function that lacks the attribute.
+- The interpreter calls the runtime functions in `interpreter::runtime_functions` with the Win64
+  convention on Windows, so `runtime_function_addresses()` gives JIT code System V forwarders to
+  them there.
+- Windows commits a thread's stack as code touches its guard pages, so JIT code that moves the
+  stack pointer goes through `emit_prologue()` or `allocate_stack()`, which touch the pages on the
+  way down (with the stack probes in `asm::x86_64`, which the Wasm JIT shares). Code that moves it
+  any other way can skip the guard pages and fault. Compiled functions check the native stack limit
+  before their prologue moves the stack pointer (`Codegen::emit_prologue()` compares the lowest
+  address of the frame with `Vm::jit_native_stack_limit`), so that a frame that does not fit makes
+  the code exit instead of touching past the end of the stack.
+
+## 9. Speculation and exits
+
+**Values of bindings.** The snapshot records the object values of global variables, and of the
+captured bindings of functions whose lexical environment is always their closure's
+(`ExecutableSnapshot::captured_bindings`), while the function has only one closure, so that every
+frame running the code reads the same bindings. The builder checks each load of such a binding
+against its value (`CheckValue`, exiting with `UnexpectedValue`) and uses the value as a constant
+from there on, so checks and calls on the object fold. Assignments and closures created later may
+change the binding, which the check catches. The object stays alive while the code embeds it, and
+nodes that rely on its state still take the values of their own checks. Where the check exited
+before, loads of the binding stay plain loads; for a captured binding, that holds at all of its
+loads. Closures are counted where they are created (`SharedFunctionInstanceData::closure_count()`),
+so compiled code only copies closure templates of functions that have several closures already.
+
+**Methods of prototypes.** A property lookup cache entry that found an object in a prototype (like
+a method) is a constant to the builder. Where the prototype's shape watches the property's slot
+(`PropertyCacheEntrySnapshot::prototype_property_watchpoint`), the code depends on the slot's
+watchpoint set and loads nothing; otherwise it loads the property and checks it against the
+constant. Slots that property lookup caches write to have no watchpoint set, and neither do slots
+whose value was replaced while watched (`Shape::was_slot_replaced()`): the code their replacement
+invalidated learned nothing, while a failed check is an exit that the recompile avoids.
+
+**Polymorphic calls.** A call whose callee is a phi of a few function constants, like the methods
+that a `GetById` found for the shapes it switched on, inlines each of them (or calls the slow
+path for those it cannot inline). Where the phi's block is a join of nothing but the edges that
+bring the constants, each inlined call starts on its edges, which keep what the code knew there
+(the shape of the receiver); otherwise the code branches on the callee, and calls generically
+where it could inline none of them. Callees that are small but for moves and jumps
+(`OpCode::is_free_when_inlined()`) are always inlined, whatever the budget, except as cases of
+such calls, which may each inline several and nest.
+
+**Shapes the caches learned.** A speculation that failed is never made again at the same place,
+with one exception: a `BadShape` exit at an instruction whose property lookup cache the code
+speculated on records how many entries the cache had when the code was compiled. Recompiles leave
+the exit out of the sites they avoid once the cache has more (`Executable::jit_exit_sites_for_recompile()`),
+since the interpreter added the shapes the code did not know. Each such exit needs a larger cache,
+and caches stop growing once megamorphic, so this ends.
+
+**Interrupts.** Another thread can stop script on a VM (`Vm::request_interrupt()`). It cannot patch
+compiled code the VM's thread is running, so it raises `Vm::jit_native_stack_limit` above every
+stack pointer. Every entry of compiled code and every call out of it then takes the path it takes
+when the stack is nearly exhausted, to the interpreter, at no cost to running code, since those
+paths compare with the limit anyway. A `CheckInterrupt` right before each loop back edge compares
+the same limit, for code that never calls, and exits to the back edge. The interrupt also made
+every dispatch table entry of the VM the fallback handler, so the interpreter does not run the
+back edge: it unwinds (`Vm::handle_exception()` catches nothing on an interrupted VM), and the frame
+runs no further script.
+
+A `CheckInterrupt` also exits where the stack really got that deep, which only a frame that entered
+compiled code below the limit does; the interpreter then continues the frame, like after any exit.
+The exit counts as nothing learned, and not towards discarding the code.
+
+The check is two instructions, which costs a loop of a few instructions up to 18% of them. So
+interrupt check elimination removes it from small innermost loops without calls that count: a
+branch on every iteration tests an int32 that changes by a constant on every back edge against a
+bound in that direction. A loop whose constant start and bound say it runs under 5000 times (V8's
+bound for the same thing) goes wherever it is. Any other counting loop ends within 2^32 iterations,
+like a builtin that goes through a huge array, and only goes where it has a loop around it: an edge
+path from its exits back to its header, whose back edge keeps a check. An interrupt can thus take as
+long as one such loop takes to finish, up to seconds for one of 2^31 iterations, but only in a loop
+around it. An on-stack replacement entry into an inner loop keeps the outer one from being a natural
+loop, which is why this follows edges. Loops with an edge to a block before them, like a `continue`
+of the loop around them, keep their check, as that may be the only one of the loop around them.
+
+To be written: exit reasons, recompiles.
+
+## 10. The snapshot and the caches
+
+To be written: what a snapshot captures, the thread rules, the one cache entry form
+(`builder/caches.rs`) and its three consumers.
+
+## 11. Testing
+
+- Unit tests: `ninja libjs_jit-test`, per module (`builder/tests.rs`, `passes/tests.rs`, ...).
+- IR tests: `Tests/LibJS/JIT/ir`, run by `Tests/LibJS/JIT/irtest.py`.
+- `Tests/LibJS/JIT/matrix.py` runs test-js and the programs under every JIT mode and compares the
+  results with the interpreter's.
+- `Tests/LibJS/JIT/fuzz.py` generates programs and compares the JIT with the interpreter.
+- Stress options (`LIBJS_JIT=on,...`, see 13.2): `stress-exits`, `stress-osr`, `stress-registers`,
+  `stress-install`, `stress-invalidate`, `random-thresholds`; `verify-ir` checks the graph after
+  every pass in release builds.
+
+## 12. Where the ideas come from
+
+To be written: how this design relates to the textbook designs of optimizing compilers.
+
+## 13. Configuration
+
+How to build without the JIT, and how to turn it off and tune it at run time.
+
+### 13.1 Building without the JIT
+
+The `ENABLE_JS_JIT` CMake option builds the JIT. It is on by default on x86-64 and AArch64 Linux and
+macOS and on x86-64 Windows, the platforms the JIT generates code for, and off elsewhere. To build
+without it:
+
+```bash
+cmake --preset Release -DENABLE_JS_JIT=OFF
+```
+
+The option maps to the default `jit` feature of the `libjs_rust` crate. Without it, the `libjs_jit`
+compiler crate is neither built nor linked, only the plain build of the interpreter is assembled
+(not the profiling one, which collects feedback and counts tier-up budgets), and
+`Libraries/LibJS/Rust/src/jit/disabled.rs` stands in for the runtime's JIT module. Such builds leave
+out the JIT's tests (`test-js-jit`, `test-jit-ir`, `libjs_jit-test`, and the runtime tests in `jit`
+directories, which use the `jit` object), and ignore `LIBJS_JIT` with a warning if it asks for the
+JIT.
+
+### 13.2 The LIBJS_JIT environment variable
+
+Builds with the JIT run it unless the `LIBJS_JIT` environment variable says otherwise. LibJS reads
+it whenever it creates a VM, in every process that runs JavaScript: `js`, `test-js`,
+`test262-runner`, and the browser's WebContent processes, to which the browser passes on every
+`LIBJS_` variable. Each worker on a thread of a WebContent process has a VM of its own.
+
+`LIBJS_JIT` holds comma-separated options, applied left to right from the defaults. A value with an
+unknown option, or with an option written wrong, stops the process with a message that says why.
+`LIBJS_JIT=help` lists the options and the values in effect, which also works together with other
+options:
+
+```bash
+LIBJS_JIT=off ./Build/release/bin/js script.js
+LIBJS_JIT=threshold=100,warmup=2 ./Build/release/bin/js script.js
+LIBJS_JIT=threshold=100,help ./Build/release/bin/js script.js
+```
+
+| Option                  | Default | What it does                                                                                                       |
+|-------------------------|---------|--------------------------------------------------------------------------------------------------------------------|
+| `on`                    | on      | Compile hot functions.                                                                                             |
+| `off`                   |         | Run everything in the interpreter, which then collects no feedback.                                                |
+| `help`                  |         | List the options and the values in effect on stderr.                                                               |
+| `threshold=N`           | 400     | How many invocations make a function hot, after its warm-up. Loop iterations count as a fraction of an invocation. |
+| `warmup=N`              | 8       | How many invocations a function runs before the interpreter collects feedback for it.                              |
+| `sync`                  | off     | Compile on the main thread when a function gets hot, at the same points in every run, instead of on a compile thread. |
+| `compile-threads=N`     | 0       | How many threads compile hot functions; 0 starts one per processor core but one, up to 8.                         |
+| `callee-boost=N`        | 16      | How many invocations a call from compiled code into a function the interpreter runs counts as; 1 for one.          |
+| `inline-budget=N`       | 250     | How many bytecode instructions the inlined callees of one compile may have together.                               |
+| `inline-max-size=N`     | 30      | How many bytecode instructions one inlined callee may have.                                                        |
+| `inline-depth=N`        | 5       | How deeply inlined calls may nest; 0 turns inlining off.                                                           |
+
+The thresholds are the knobs for tuning: `threshold=0,warmup=0` compiles every function at its first
+call (without feedback), and larger values compile less and later.
+
+Options for debugging the JIT:
+
+| Option               | What it does                                                                                    |
+|----------------------|-------------------------------------------------------------------------------------------------|
+| `dump-ir`            | Print the IR of every compile.                                                                  |
+| `dump-passes`        | Print the IR after building it and after every pass.                                            |
+| `dump-asm`           | Print the machine code of every compile.                                                        |
+| `dump-feedback`      | Print the interpreter feedback of each function the first time it gets hot.                     |
+| `verify-ir`          | Check the IR, the register allocation and the lowerings (sections 6 and 7), also in release builds.|
+| `log-exits`          | Print every exit from compiled code to the interpreter, and every discard of compiled code.     |
+| `perf-map`           | Describe compiled code in `/tmp/perf-<pid>.map` for `perf`.                                     |
+| `coverage=DIRECTORY` | Write what compiled code contained and did into `DIRECTORY`, one JSON file per VM.              |
+
+Stress options for testing, which make compiled code take its rarely taken paths. With `sync` and
+the same `seed`, a run makes the same random choices every time.
+
+| Option                  | What it does                                                                                                   |
+|-------------------------|----------------------------------------------------------------------------------------------------------------|
+| `seed=N`                | Seed the random choices of the stress options (1 by default).                                                  |
+| `stress-exits[=N]`      | Exit from compiled code at a random one of every N checks (20 if bare); 0 never does.                          |
+| `stress-osr`            | Give compiled code an on-stack replacement entry at every loop that ran.                                       |
+| `stress-registers`      | Let the register allocator use only the registers of call arguments and results.                               |
+| `random-thresholds`     | Give each function a random part of its warm-up and threshold.                                                 |
+| `stress-install`        | Install the code of asynchronous compiles after a random number of later tier-up checks.                       |
+| `stress-invalidate[=N]` | Invalidate code as if a random dependency stopped holding, at a random one of every N tier-up checks (10 if bare); 0 never does. |
+
+`Tests/LibJS/JIT/modes.py` names the combinations the JIT's test tools run, which compare every mode
+with `LIBJS_JIT=off`.
+
+The options are defined in one table, `DEFINITIONS` in `Libraries/LibJS/JIT/Rust/src/options.rs`,
+which the parser and `help` both use; a new option goes there and in this section.

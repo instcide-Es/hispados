@@ -1,0 +1,108 @@
+/*
+ * Copyright (c) 2020, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2023, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <LibGC/Heap.h>
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/ResponseView.h>
+#include <LibWeb/HTML/LocalNavigable.h>
+#include <LibWeb/HTML/UserNavigationInvolvement.h>
+
+namespace Web {
+
+enum class XMLScriptingSupport;
+
+bool build_xml_document(DOM::Document& document, ByteBuffer const& data, Optional<StringView> content_encoding, XMLScriptingSupport);
+GC::Ptr<HTML::DocumentToCreate> load_document(GC::Ref<HTML::NavigationParams> navigation_params, ReadonlyBytes sniff_bytes);
+bool can_load_document_with_type(MimeSniff::MimeType const&);
+
+// https://html.spec.whatwg.org/multipage/document-lifecycle.html#read-ua-inline
+// AD-HOC: Steps 1 to 4 run when the navigation's response arrives. Steps 5 to 8 run in
+//         create_document_for_inline_content() once navigable's active document is unloaded.
+inline GC::Ref<HTML::NavigationParams> create_navigation_params_for_inline_content(GC::Ptr<HTML::LocalNavigable> navigable, Optional<Utf16String> navigation_id, Bindings::NavigationTimingType navigation_timing_type, HTML::UserNavigationInvolvement user_involvement, URL::Origin origin, Optional<HTML::CrossProcessId> document_id)
+{
+    VERIFY(navigable->active_document());
+
+    // 1. Let origin be a new opaque origin.
+    // NB: The UI process generated it with the navigation's population result, as it holds the document too.
+
+    // 2. Let coop be a new opener policy.
+    auto coop = HTML::OpenerPolicy {};
+
+    // 3. Let coopEnforcementResult be a new opener policy enforcement result with
+    //    url: response's URL
+    //    origin: origin
+    //    opener policy: coop
+    HTML::OpenerPolicyEnforcementResult coop_enforcement_result {
+        .url = URL::about_error(), // AD-HOC: https://github.com/whatwg/html/issues/9122
+        .origin = origin,
+        .opener_policy = coop
+    };
+
+    // 4. Let navigationParams be a new navigation params with
+    //    id: navigationId
+    //    navigable: navigable
+    //    request: null
+    //    response: a new response
+    //    origin: origin
+    //    fetch controller: null
+    //    commit early hints: null
+    //    COOP enforcement result: coopEnforcementResult
+    //    reserved environment: null
+    //    policy container: a new policy container
+    //    final sandboxing flag set: an empty set
+    //    iframe element referrer policy: the empty string
+    //    opener policy: coop
+    //    navigation timing type: navTimingType
+    //    about base URL: null
+    //    user involvement: userInvolvement
+    auto response = Fetch::Infrastructure::Response::create();
+    response->url_list().append(URL::about_error()); // AD-HOC: https://github.com/whatwg/html/issues/9122
+    auto& heap = GC::Heap::the();
+    auto navigation_params = heap.allocate<HTML::NavigationParams>(
+        move(navigation_id),
+        navigable,
+        nullptr,
+        Fetch::Infrastructure::ResponseView::create(response, nullptr),
+        nullptr,
+        nullptr,
+        move(coop_enforcement_result),
+        nullptr,
+        move(origin),
+        HTML::PolicyContainer::create(),
+        HTML::SandboxingFlagSet {},
+        ReferrerPolicy::ReferrerPolicy::EmptyString,
+        move(coop),
+        navigation_timing_type,
+        OptionalNone {},
+        user_involvement);
+    navigation_params->document_id = document_id;
+    return navigation_params;
+}
+
+// https://html.spec.whatwg.org/multipage/document-lifecycle.html#read-ua-inline
+// AD-HOC: Steps 5 to 8, given the navigationParams create_navigation_params_for_inline_content() made.
+template<typename MutateDocument>
+GC::Ref<DOM::Document> create_document_for_inline_content(HTML::NavigationParams const& navigation_params, MutateDocument mutate_document)
+{
+    // 5. Let document be the result of creating and initializing a Document object given "html", "text/html", and navigationParams.
+    auto document = DOM::Document::create_and_initialize(DOM::Document::Type::HTML, "text/html"_utf16_fly_string, navigation_params).release_value_but_fixme_should_propagate_errors();
+
+    // 6. Either associate document with a custom rendering that is not rendered using the normal Document rendering
+    //    rules, or mutate document until it represents the content the user agent wants to render.
+    document->set_ready_to_run_scripts();
+    mutate_document(*document);
+
+    // FIXME: 7. Act as if the user agent had stopped parsing document.
+    // We currently do this in the caller instead, to avoid deadlocks.
+
+    // 8. Return document.
+    return document;
+}
+
+}

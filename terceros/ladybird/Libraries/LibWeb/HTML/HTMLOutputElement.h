@@ -1,0 +1,74 @@
+/*
+ * Copyright (c) 2020, the SerenityOS developers.
+ * Copyright (c) 2022, Luke Wilde <lukew@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Utf16FlyString.h>
+#include <AK/Utf16String.h>
+#include <AK/Utf16View.h>
+#include <LibWeb/ARIA/Roles.h>
+#include <LibWeb/HTML/HTMLElement.h>
+
+namespace Web::HTML {
+
+class HTMLOutputElement final
+    : public HTMLElement {
+    WEB_WRAPPABLE(HTMLOutputElement, HTMLElement);
+    GC_DECLARE_ALLOCATOR(HTMLOutputElement);
+
+public:
+    virtual ~HTMLOutputElement() override;
+
+    GC::Ref<DOM::DOMTokenList> html_for();
+
+    Utf16FlyString type() const
+    {
+        return "output"_utf16_fly_string;
+    }
+
+    Utf16String default_value() const;
+    void set_default_value(Utf16View);
+
+    Utf16String value() const;
+    virtual Utf16String form_value() const override { return value(); }
+    void set_value(Utf16View);
+
+    // ^FormAssociatedElement
+    virtual bool is_form_associated_element() const override { return true; }
+
+    // ^FormAssociatedElement
+    // https://html.spec.whatwg.org/multipage/forms.html#category-listed
+    virtual bool is_listed() const override { return true; }
+
+    // https://html.spec.whatwg.org/multipage/forms.html#category-autocapitalize
+    virtual bool is_resettable() const override { return true; }
+
+    // https://html.spec.whatwg.org/multipage/forms.html#category-autocapitalize
+    virtual bool is_autocapitalize_and_autocorrect_inheriting() const override { return true; }
+
+    // ^HTMLElement
+    // https://html.spec.whatwg.org/multipage/forms.html#category-label
+    virtual bool is_labelable() const override { return true; }
+
+    virtual void reset_algorithm() override;
+    virtual void clear_algorithm() override;
+
+    // https://www.w3.org/TR/html-aria/#el-output
+    virtual Optional<ARIA::Role> default_role() const override { return ARIA::Role::status; }
+
+private:
+    HTMLOutputElement(DOM::Document&, DOM::QualifiedName);
+    virtual void visit_edges(Cell::Visitor& visitor) override;
+
+    virtual void form_associated_element_attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_) override;
+
+    GC::Ptr<DOM::DOMTokenList> m_html_for;
+
+    Optional<Utf16String> m_default_value_override;
+};
+
+}

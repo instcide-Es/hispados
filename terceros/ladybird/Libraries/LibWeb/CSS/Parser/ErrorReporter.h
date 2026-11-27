@@ -1,0 +1,114 @@
+/*
+ * Copyright (c) 2025-2026, Sam Atkins <sam@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/HashMap.h>
+#include <AK/String.h>
+#include <AK/Utf16FlyString.h>
+#include <AK/Utf16String.h>
+#include <AK/kmalloc.h>
+#include <LibWeb/Export.h>
+
+namespace Web::CSS::Parser {
+
+struct UnknownPropertyError {
+    Utf16FlyString rule_name { "style"_utf16_fly_string };
+    Utf16FlyString property_name;
+    bool operator==(UnknownPropertyError const&) const = default;
+    unsigned hash() const
+    {
+        return pair_int_hash(rule_name.hash(), property_name.hash());
+    }
+};
+
+struct UnknownRuleError {
+    Utf16FlyString rule_name;
+    bool operator==(UnknownRuleError const&) const = default;
+    unsigned hash() const { return rule_name.hash(); }
+};
+
+struct InvalidPropertyError {
+    Utf16FlyString rule_name { "style"_utf16_fly_string };
+    Utf16FlyString property_name;
+    Utf16String value_string;
+    String description;
+    bool operator==(InvalidPropertyError const&) const = default;
+    unsigned hash() const
+    {
+        return pair_int_hash(rule_name.hash(), pair_int_hash(property_name.hash(), pair_int_hash(value_string.hash(), description.hash())));
+    }
+};
+
+struct InvalidRuleError {
+    Utf16FlyString rule_name;
+    Utf16String prelude;
+    String description;
+    bool operator==(InvalidRuleError const&) const = default;
+    unsigned hash() const
+    {
+        return pair_int_hash(rule_name.hash(), pair_int_hash(prelude.hash(), description.hash()));
+    }
+};
+
+struct InvalidRuleLocationError {
+    Utf16FlyString outer_rule_name;
+    Utf16FlyString inner_rule_name;
+    bool operator==(InvalidRuleLocationError const&) const = default;
+    unsigned hash() const
+    {
+        return pair_int_hash(outer_rule_name.hash(), inner_rule_name.hash());
+    }
+};
+
+enum class SyntaxDiagnosticCode : u8 {
+    BadString,
+    BadUrl,
+};
+
+struct SyntaxDiagnosticError {
+    SyntaxDiagnosticCode code;
+    u32 start_line;
+    u32 start_column;
+    u32 end_line;
+    u32 end_column;
+    bool operator==(SyntaxDiagnosticError const&) const = default;
+    unsigned hash() const
+    {
+        return pair_int_hash(to_underlying(code), pair_int_hash(pair_int_hash(start_line, start_column), pair_int_hash(end_line, end_column)));
+    }
+};
+
+using ParsingError = Variant<UnknownPropertyError, UnknownRuleError, InvalidPropertyError, InvalidRuleError, InvalidRuleLocationError, SyntaxDiagnosticError>;
+
+String serialize_parsing_error(ParsingError const&);
+
+class WEB_API ErrorReporter {
+public:
+    AK_ALLOC_WITH_KMALLOC;
+
+    static ErrorReporter& the();
+
+    void report(ParsingError&&);
+    void dump() const;
+
+private:
+    explicit ErrorReporter() = default;
+    struct Metadata {
+        u32 occurrences { 1 };
+    };
+    HashMap<ParsingError, Metadata> m_errors;
+};
+
+}
+
+template<>
+struct AK::Traits<Web::CSS::Parser::ParsingError> : public DefaultTraits<Web::CSS::Parser::ParsingError> {
+    static unsigned hash(Web::CSS::Parser::ParsingError const& error)
+    {
+        return error.visit([](auto const& it) { return it.hash(); });
+    }
+};

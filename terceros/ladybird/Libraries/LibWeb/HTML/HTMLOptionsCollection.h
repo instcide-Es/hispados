@@ -1,0 +1,43 @@
+/*
+ * Copyright (c) 2022, the SerenityOS developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Variant.h>
+#include <LibWeb/DOM/HTMLCollection.h>
+#include <LibWeb/WebIDL/ExceptionOr.h>
+#include <LibWebCommon/WebIDL/Types.h>
+
+namespace Web::HTML {
+
+using HTMLOptionOrOptGroupElement = Variant<GC::Ref<HTMLOptionElement>, GC::Ref<HTMLOptGroupElement>>;
+using HTMLElementOrElementIndex = Variant<GC::Ref<HTMLElement>, i32>;
+using NullableHTMLElementOrElementIndex = Variant<GC::Ref<HTMLElement>, i32, Empty>;
+
+class HTMLOptionsCollection final : public DOM::HTMLCollection {
+    WEB_WRAPPABLE(HTMLOptionsCollection, DOM::HTMLCollection);
+    GC_DECLARE_ALLOCATOR(HTMLOptionsCollection);
+
+public:
+    [[nodiscard]] static GC::Ref<HTMLOptionsCollection> create(DOM::ParentNode& root, Filter filter);
+    virtual ~HTMLOptionsCollection() override;
+
+    WebIDL::ExceptionOr<void> set_value_of_indexed_property(u32, Optional<GC::Ref<DOM::Element>>);
+
+    WebIDL::ExceptionOr<void> set_length(WebIDL::UnsignedLong);
+
+    WebIDL::ExceptionOr<void> add(HTMLOptionOrOptGroupElement element, NullableHTMLElementOrElementIndex before = { Empty {} });
+
+    void remove(WebIDL::Long);
+
+    WebIDL::Long selected_index() const;
+    WebIDL::ExceptionOr<void> set_selected_index(WebIDL::Long);
+
+private:
+    HTMLOptionsCollection(DOM::ParentNode& root, Filter filter);
+};
+
+}

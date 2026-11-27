@@ -1,0 +1,378 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+//! The EventTarget or Event that an object of an interface implemented in Rust owns when its interface inherits from
+//! one of them, which LibWeb implements in C++ (Libraries/LibWeb/Bindings/RustEventTarget.h). The object's wrappers
+//! hold it as their wrappable, so that the C++ bindings of EventTarget and Event run on it, and its wrappers are the
+//! object's.
+
+use core::ffi::c_void;
+use core::ptr::NonNull;
+
+use ak::{Utf16FlyString, Utf16String};
+use libjs_rust::api::{FunctionObject, Gc, Realm, Trace, Value};
+
+use crate::bindings::CallContext;
+use crate::bindings::callback::CallbackInterface;
+use crate::bindings::cpp_cell::{CppCell, LentCppCell, cpp_class};
+use crate::bindings::interface::{Interface, Ref, Wrappable, cell_from_abi, cell_into_abi};
+
+unsafe extern "C" {
+    fn web_bindings_create_event_target() -> *mut c_void;
+    fn web_bindings_set_event_target_owner(
+        event_target: *mut c_void,
+        interface_name: u16,
+        owner: *mut c_void,
+        get_the_parent: unsafe extern "C" fn(*mut c_void) -> *mut c_void,
+    );
+    fn web_bindings_set_event_listener_list_changed_steps(
+        event_target: *mut c_void,
+        steps: unsafe extern "C" fn(*mut c_void),
+    );
+    fn web_bindings_has_event_listener(event_target: *mut c_void, r#type: ak::Span<'_, u8>) -> bool;
+    fn web_bindings_has_event_listeners(event_target: *mut c_void) -> bool;
+    fn web_bindings_event_handler_attribute(event_target: *mut c_void, name: ak::Span<'_, u8>) -> u64;
+    fn web_bindings_set_event_handler_attribute(event_target: *mut c_void, name: ak::Span<'_, u8>, value: u64);
+    fn web_bindings_add_event_listener(
+        realm: *mut c_void,
+        event_target: *mut c_void,
+        r#type: ak::Span<'_, u8>,
+        callback: *mut c_void,
+    );
+    fn web_bindings_add_event_listener_without_options(
+        event_target: *mut c_void,
+        r#type: ak::Span<'_, u8>,
+        callback: *mut c_void,
+    );
+    fn web_bindings_remove_event_listener_without_options(
+        event_target: *mut c_void,
+        r#type: ak::Span<'_, u8>,
+        callback: *mut c_void,
+    );
+    fn web_bindings_create_event(
+        realm: *mut c_void,
+        r#type: ak::Span<'_, u8>,
+        bubbles: bool,
+        cancelable: bool,
+        composed: bool,
+    ) -> *mut c_void;
+    fn web_bindings_create_rust_event(
+        realm: *mut c_void,
+        r#type: usize,
+        bubbles: bool,
+        cancelable: bool,
+        composed: bool,
+    ) -> *mut c_void;
+    fn web_bindings_set_has_pending_activity(realm: *mut c_void, event_target: *mut c_void, has_pending_activity: bool);
+    fn web_bindings_set_event_owner(event: *mut c_void, interface_name: u16, owner: *mut c_void);
+    fn web_bindings_event_set_is_trusted(event: *mut c_void, is_trusted: bool);
+    fn web_bindings_dispatch_event(target: *mut c_void, event: *mut c_void) -> bool;
+    fn web_bindings_dispatch_event_with_legacy_output_did_listeners_throw_flag(
+        target: *mut c_void,
+        event: *mut c_void,
+    ) -> bool;
+    fn web_bindings_event_canceled(event: *mut c_void) -> bool;
+    fn web_bindings_event_dispatched(event: *mut c_void) -> bool;
+    fn web_bindings_event_type(event: *mut c_void) -> usize;
+    fn web_bindings_event_is_trusted(event: *mut c_void) -> bool;
+    fn web_bindings_event_time_stamp(event: *mut c_void) -> f64;
+    fn web_bindings_event_cancelable(event: *mut c_void) -> bool;
+    fn web_bindings_initialize_event(event: *mut c_void, r#type: usize, bubbles: bool, cancelable: bool);
+    fn web_bindings_event_retarget_against_current_target(event: *mut c_void, object: *mut c_void) -> *mut c_void;
+}
+
+/// The EventTarget that an object owns.
+#[derive(Clone, Trace)]
+#[gc(crate = libjs_rust)]
+pub(crate) struct CppEventTarget(CppCell);
+
+/// https://dom.spec.whatwg.org/#get-the-parent
+pub(crate) trait GetTheParent: Interface {
+    fn get_the_parent(&self) -> Option<CppEventTarget>;
+}
+
+/// The steps that run whenever an event listener is added to or removed from the EventTarget of an owner.
+pub(crate) trait EventListenerListChanged: Interface {
+    fn event_listener_list_changed(this: Ref<Self>);
+}
+
+impl CppEventTarget {
+    pub(crate) fn new() -> Self {
+        // SAFETY: LibWeb returns a new, live EventTarget.
+        Self(unsafe { CppCell::from_raw(web_bindings_create_event_target()) })
+    }
+
+    /// An EventTarget of LibWeb's C++ code, which this keeps alive.
+    pub(crate) fn from_lent(event_target: &LentCppCell<cpp_class::EventTarget>) -> Self {
+        Self(CppCell::from_lent(event_target))
+    }
+
+    /// An EventTarget of LibWeb's C++ code, which this keeps alive.
+    ///
+    /// # Safety
+    ///
+    /// `event_target` must be a live EventTarget.
+    pub(crate) unsafe fn from_raw(event_target: *mut c_void) -> Self {
+        // SAFETY: The caller passes a live EventTarget.
+        Self(unsafe { CppCell::from_raw(event_target) })
+    }
+
+    pub(crate) fn set_owner<T: GetTheParent>(&self, owner: Ref<T>) {
+        unsafe extern "C" fn get_the_parent<T: GetTheParent>(owner: *mut c_void) -> *mut c_void {
+            // SAFETY: LibWeb passes the owner that set_owner() gave it, which is the live cell of an object of T.
+            let owner = unsafe { cell_from_abi::<T>(owner) };
+            owner
+                .get_the_parent()
+                .map_or(core::ptr::null_mut(), |parent| parent.as_ptr())
+        }
+        // SAFETY: The EventTarget and the owner are live, and the owner keeps the EventTarget alive.
+        unsafe {
+            web_bindings_set_event_target_owner(
+                self.as_ptr(),
+                T::INTERFACE_NAME,
+                cell_into_abi(owner),
+                get_the_parent::<T>,
+            );
+        }
+    }
+
+    /// Runs the owner's event_listener_list_changed() whenever the event listener list changes. The owner must be the
+    /// one that set_owner() gave.
+    pub(crate) fn set_event_listener_list_changed_steps<T: EventListenerListChanged>(&self) {
+        unsafe extern "C" fn event_listener_list_changed<T: EventListenerListChanged>(owner: *mut c_void) {
+            // SAFETY: LibWeb passes the owner that set_owner() gave it, which is the live cell of an object of T.
+            T::event_listener_list_changed(unsafe { cell_from_abi::<T>(owner) });
+        }
+        // SAFETY: The EventTarget is live.
+        unsafe { web_bindings_set_event_listener_list_changed_steps(self.as_ptr(), event_listener_list_changed::<T>) };
+    }
+
+    pub(crate) fn as_ptr(&self) -> *mut c_void {
+        self.0.as_ptr()
+    }
+
+    /// Whether the event listener list has a listener for the event type.
+    pub(crate) fn has_event_listener(&self, event_type: &str) -> bool {
+        // SAFETY: The EventTarget is live, and the type is lent for the call.
+        unsafe { web_bindings_has_event_listener(self.as_ptr(), ak::Span::new(event_type.as_bytes())) }
+    }
+
+    pub(crate) fn has_event_listeners(&self) -> bool {
+        // SAFETY: The EventTarget is live.
+        unsafe { web_bindings_has_event_listeners(self.as_ptr()) }
+    }
+
+    /// Adds an event listener for the event type whose callback is the function, with no options,
+    /// https://dom.spec.whatwg.org/#add-an-event-listener
+    pub(crate) fn add_event_listener(&self, cx: &CallContext, event_type: &str, callback: Gc<FunctionObject>) {
+        // SAFETY: The realm, the EventTarget and the callback are live, and the type is lent for the call.
+        unsafe {
+            web_bindings_add_event_listener(
+                cx.realm().as_ptr().cast(),
+                self.as_ptr(),
+                ak::Span::new(event_type.as_bytes()),
+                callback.as_ptr().cast(),
+            );
+        }
+    }
+
+    /// Adds an event listener for the event type whose callback is the EventListener, with no options,
+    /// https://dom.spec.whatwg.org/#add-an-event-listener
+    pub(crate) fn add_event_listener_without_options(&self, event_type: &str, callback: &CallbackInterface) {
+        // SAFETY: The EventTarget and the callback are live, and the type is lent for the call.
+        unsafe {
+            web_bindings_add_event_listener_without_options(
+                self.as_ptr(),
+                ak::Span::new(event_type.as_bytes()),
+                callback.as_ptr(),
+            );
+        }
+    }
+
+    /// Removes the event listener for the event type whose callback is the EventListener and whose capture is false,
+    /// https://dom.spec.whatwg.org/#remove-an-event-listener
+    pub(crate) fn remove_event_listener_without_options(&self, event_type: &str, callback: &CallbackInterface) {
+        // SAFETY: The EventTarget and the callback are live, and the type is lent for the call.
+        unsafe {
+            web_bindings_remove_event_listener_without_options(
+                self.as_ptr(),
+                ak::Span::new(event_type.as_bytes()),
+                callback.as_ptr(),
+            );
+        }
+    }
+
+    /// https://dom.spec.whatwg.org/#concept-event-dispatch
+    pub(crate) fn dispatch_event(&self, event: &CppEvent) -> bool {
+        // SAFETY: The EventTarget and the event are live.
+        unsafe { web_bindings_dispatch_event(self.as_ptr(), event.as_ptr()) }
+    }
+
+    pub(crate) fn set_has_pending_activity(&self, realm: Gc<Realm>, has_pending_activity: bool) {
+        // SAFETY: The realm and the EventTarget are live.
+        unsafe { web_bindings_set_has_pending_activity(realm.as_ptr().cast(), self.as_ptr(), has_pending_activity) };
+    }
+
+    /// Returns the legacyOutputDidListenersThrowFlag.
+    pub(crate) fn dispatch_event_with_legacy_output_did_listeners_throw_flag(&self, event: &CppEvent) -> bool {
+        // SAFETY: The EventTarget and the event are live.
+        unsafe {
+            web_bindings_dispatch_event_with_legacy_output_did_listeners_throw_flag(self.as_ptr(), event.as_ptr())
+        }
+    }
+}
+
+/// An Event: a plain one, or the one that an object owns.
+#[derive(Clone, Trace)]
+#[gc(crate = libjs_rust)]
+pub(crate) struct CppEvent(CppCell);
+
+impl CppEvent {
+    pub(crate) fn from_lent(event: &LentCppCell<cpp_class::Event>) -> Self {
+        Self(CppCell::from_lent(event))
+    }
+
+    pub(crate) fn create(realm: Gc<Realm>, r#type: &str, bubbles: bool, cancelable: bool, composed: bool) -> Self {
+        // SAFETY: The realm is live, the type is lent for the call, and LibWeb returns a live event.
+        Self(unsafe {
+            CppCell::from_raw(web_bindings_create_event(
+                realm.as_ptr().cast(),
+                ak::Span::new(r#type.as_bytes()),
+                bubbles,
+                cancelable,
+                composed,
+            ))
+        })
+    }
+
+    pub(crate) fn create_for_owner(
+        realm: Gc<Realm>,
+        r#type: &Utf16String,
+        bubbles: bool,
+        cancelable: bool,
+        composed: bool,
+    ) -> Self {
+        // SAFETY: The realm is live, the type is lent for the call, and LibWeb returns a live event.
+        Self(unsafe {
+            CppCell::from_raw(web_bindings_create_rust_event(
+                realm.as_ptr().cast(),
+                r#type.raw_identity(),
+                bubbles,
+                cancelable,
+                composed,
+            ))
+        })
+    }
+
+    pub(crate) fn set_owner<T: Interface>(&self, owner: Ref<T>) {
+        // SAFETY: The event and the owner are live, and the owner keeps the event alive.
+        unsafe { web_bindings_set_event_owner(self.as_ptr(), T::INTERFACE_NAME, cell_into_abi(owner)) };
+    }
+
+    pub(crate) fn as_ptr(&self) -> *mut c_void {
+        self.0.as_ptr()
+    }
+
+    /// https://dom.spec.whatwg.org/#dom-event-istrusted
+    pub(crate) fn set_is_trusted(&self, is_trusted: bool) {
+        // SAFETY: The event is live.
+        unsafe { web_bindings_event_set_is_trusted(self.as_ptr(), is_trusted) };
+    }
+
+    /// https://dom.spec.whatwg.org/#dom-event-type
+    pub(crate) fn r#type(&self) -> Utf16String {
+        // SAFETY: The event is live, and LibWeb lends its type, which this copies.
+        unsafe { Utf16FlyString::from_raw_borrowed(web_bindings_event_type(self.as_ptr())) }.into()
+    }
+
+    /// https://dom.spec.whatwg.org/#dom-event-istrusted
+    pub(crate) fn is_trusted(&self) -> bool {
+        // SAFETY: The event is live.
+        unsafe { web_bindings_event_is_trusted(self.as_ptr()) }
+    }
+
+    /// https://dom.spec.whatwg.org/#dom-event-timestamp
+    pub(crate) fn time_stamp(&self) -> f64 {
+        // SAFETY: The event is live.
+        unsafe { web_bindings_event_time_stamp(self.as_ptr()) }
+    }
+
+    /// https://dom.spec.whatwg.org/#dom-event-cancelable
+    pub(crate) fn cancelable(&self) -> bool {
+        // SAFETY: The event is live.
+        unsafe { web_bindings_event_cancelable(self.as_ptr()) }
+    }
+
+    /// The result of retargeting the object, an EventTarget, against the event's currentTarget,
+    /// https://dom.spec.whatwg.org/#retarget
+    pub(crate) fn retarget_against_current_target(&self, object: &CppCell) -> CppCell {
+        // SAFETY: The event and the object are live, and LibWeb returns a live EventTarget.
+        unsafe {
+            CppCell::from_raw(web_bindings_event_retarget_against_current_target(
+                self.as_ptr(),
+                object.as_ptr(),
+            ))
+        }
+    }
+
+    /// https://dom.spec.whatwg.org/#canceled-flag
+    pub(crate) fn canceled(&self) -> bool {
+        // SAFETY: The event is live.
+        unsafe { web_bindings_event_canceled(self.as_ptr()) }
+    }
+
+    /// https://dom.spec.whatwg.org/#dispatch-flag
+    pub(crate) fn dispatched(&self) -> bool {
+        // SAFETY: The event is live.
+        unsafe { web_bindings_event_dispatched(self.as_ptr()) }
+    }
+
+    /// https://dom.spec.whatwg.org/#concept-event-initialize
+    pub(crate) fn initialize_event(&self, r#type: &Utf16String, bubbles: bool, cancelable: bool) {
+        // SAFETY: The event is live, and the type is lent for the call.
+        unsafe { web_bindings_initialize_event(self.as_ptr(), r#type.raw_identity(), bubbles, cancelable) };
+    }
+}
+
+fn event_target_of(object: &impl Wrappable) -> *mut c_void {
+    object
+        .cpp_parent()
+        .expect("an object with event handler IDL attributes owns an EventTarget")
+        .as_ptr()
+}
+
+/// https://html.spec.whatwg.org/multipage/webappapis.html#event-handler-idl-attributes
+pub(crate) fn event_handler_attribute(object: &impl Wrappable, event_type: &str) -> Value {
+    // SAFETY: The EventTarget is live, and the name is lent for the call.
+    let value =
+        unsafe { web_bindings_event_handler_attribute(event_target_of(object), ak::Span::new(event_type.as_bytes())) };
+    // SAFETY: LibWeb returns a live value.
+    unsafe { Value::from_raw(value) }
+}
+
+/// https://html.spec.whatwg.org/multipage/webappapis.html#event-handler-idl-attributes
+pub(crate) fn set_event_handler_attribute(object: &impl Wrappable, event_type: &str, value: Value) {
+    // SAFETY: The EventTarget and the value are live, and the name is lent for the call.
+    unsafe {
+        web_bindings_set_event_handler_attribute(
+            event_target_of(object),
+            ak::Span::new(event_type.as_bytes()),
+            value.to_raw(),
+        );
+    }
+}
+
+impl CppEventTarget {
+    pub(crate) fn as_cpp_parent(&self) -> Option<NonNull<c_void>> {
+        NonNull::new(self.as_ptr())
+    }
+}
+
+impl CppEvent {
+    pub(crate) fn as_cpp_parent(&self) -> Option<NonNull<c_void>> {
+        NonNull::new(self.as_ptr())
+    }
+}

@@ -1,0 +1,52 @@
+/*
+ * Copyright (c) 2023, Tim Flynn <trflynn89@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Utf16String.h>
+#include <LibGC/Cell.h>
+#include <LibGC/Ptr.h>
+#include <LibURL/URL.h>
+#include <LibWeb/Forward.h>
+#include <LibWebCommon/FileAPI/BlobURLStore.h>
+#include <LibWebCommon/FileAPI/SerializedBlobURLEntry.h>
+#include <LibWebCommon/StorageAPI/StorageKey.h>
+
+namespace Web::FileAPI {
+
+// https://w3c.github.io/FileAPI/#blob-url-entry
+struct BlobURLEntry {
+    using Object = Variant<GC::Ref<Blob>, GC::Ref<MediaSourceExtensions::MediaSource>>;
+
+    Object object;
+    GC::Ref<HTML::EnvironmentSettingsObject> environment;
+
+    // The token the user agent's blob URL store gave this entry.
+    URL::BlobURLEntry::Token token { 0 };
+
+    void visit_edges(GC::Cell::Visitor&) const;
+};
+
+Utf16String generate_new_blob_url();
+ErrorOr<Utf16String> add_entry_to_blob_url_store(BlobURLEntry::Object);
+bool check_for_same_partition_blob_url_usage(URL::Origin const& blob_url_entry_origin, GC::Ref<HTML::Environment>);
+struct TopLevelNavigation { };
+struct TopLevelSelfFetch { };
+WEB_API Optional<SerializedBlobURLEntry::Object> obtain_a_blob_object(SerializedBlobURLEntry const&, Variant<StorageAPI::StorageKey, TopLevelNavigation, TopLevelSelfFetch> environment);
+WEB_API void remove_entry_from_blob_url_store(URL::URL const& url);
+Optional<URL::BlobURLEntry> resolve_a_blob_url(URL::URL const&);
+WEB_API Optional<SerializedBlobURLEntry> blob_url_entry_in_the_user_agent_store(Page&, URL::URL const&);
+Optional<BlobURLEntry const&> local_blob_url_entry(URL::URL const&);
+
+void run_unloading_cleanup_steps(GC::Ref<DOM::Document>);
+
+// The store is tied to the heap of the agent that goes away.
+void forget_blob_url_store_of_this_agent();
+
+// The steps of run_unloading_cleanup_steps() after the first, which a worker that closes runs for its own environment.
+WEB_API void remove_entries_of_environment(HTML::EnvironmentSettingsObject&, Page&);
+
+}

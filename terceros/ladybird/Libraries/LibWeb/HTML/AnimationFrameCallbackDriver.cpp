@@ -1,0 +1,74 @@
+/*
+ * Copyright (c) 2022, the SerenityOS developers.
+ * Copyright (c) 2024, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2024, Tim Flynn <trflynn89@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/ScopeGuard.h>
+#include <LibGC/Heap.h>
+#include <LibWeb/HTML/AnimationFrameCallbackDriver.h>
+
+namespace Web::HTML {
+
+GC_DEFINE_ALLOCATOR(AnimationFrameCallbackDriver);
+
+GC::Ref<AnimationFrameCallbackDriver> AnimationFrameCallbackDriver::create()
+{
+    return GC::Heap::the().allocate<AnimationFrameCallbackDriver>();
+}
+
+void AnimationFrameCallbackDriver::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_callbacks);
+    visitor.visit(m_executing_callbacks);
+    visitor.visit(m_after_callbacks);
+    visitor.visit(m_executing_after_callbacks);
+}
+
+WebIDL::UnsignedLong AnimationFrameCallbackDriver::add(Callback handler)
+{
+    auto id = ++m_animation_frame_callback_identifier;
+    m_callbacks.set(id, handler);
+    return id;
+}
+
+WebIDL::UnsignedLong AnimationFrameCallbackDriver::add_after_callbacks(Callback handler)
+{
+    auto id = ++m_animation_frame_callback_identifier;
+    m_after_callbacks.set(id, handler);
+    return id;
+}
+
+bool AnimationFrameCallbackDriver::remove(WebIDL::UnsignedLong id)
+{
+    return m_callbacks.remove(id) || m_executing_callbacks.remove(id) || m_after_callbacks.remove(id) || m_executing_after_callbacks.remove(id);
+}
+
+bool AnimationFrameCallbackDriver::has_callbacks() const
+{
+    return !m_callbacks.is_empty() || !m_after_callbacks.is_empty();
+}
+
+void AnimationFrameCallbackDriver::run(double now)
+{
+    AK::ScopeGuard guard { [&]() { m_executing_callbacks.clear(); } };
+    m_executing_callbacks = move(m_callbacks);
+    // NB: Work added while callbacks run waits for the next invocation of the algorithm.
+    m_executing_after_callbacks = move(m_after_callbacks);
+
+    // NB: A callback may cancel a callback that comes after it.
+    while (!m_executing_callbacks.is_empty())
+        m_executing_callbacks.take_first()->function()(now);
+}
+
+void AnimationFrameCallbackDriver::run_after_callbacks(double now)
+{
+    AK::ScopeGuard guard { [&]() { m_executing_after_callbacks.clear(); } };
+    while (!m_executing_after_callbacks.is_empty())
+        m_executing_after_callbacks.take_first()->function()(now);
+}
+
+}

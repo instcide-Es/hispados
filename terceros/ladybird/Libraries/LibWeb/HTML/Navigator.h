@@ -1,0 +1,139 @@
+/*
+ * Copyright (c) 2022, Andrew Kaster <akaster@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <LibWeb/Bindings/Wrappable.h>
+#include <LibWeb/Forward.h>
+#include <LibWeb/GPC/GlobalPrivacyControl.h>
+#include <LibWeb/Gamepad/NavigatorGamepad.h>
+#include <LibWeb/HTML/MimeTypeArray.h>
+#include <LibWeb/HTML/NavigatorBeacon.h>
+#include <LibWeb/HTML/NavigatorConcurrentHardware.h>
+#include <LibWeb/HTML/NavigatorDeviceMemory.h>
+#include <LibWeb/HTML/NavigatorID.h>
+#include <LibWeb/HTML/NavigatorLanguage.h>
+#include <LibWeb/HTML/NavigatorOnLine.h>
+#include <LibWeb/HTML/PluginArray.h>
+#include <LibWeb/HTML/UserActivation.h>
+#include <LibWeb/MediaCapabilitiesAPI/MediaCapabilities.h>
+#include <LibWeb/MediaCapture/MediaDevices.h>
+#include <LibWeb/StorageAPI/NavigatorStorage.h>
+#include <LibWeb/WebLocks/NavigatorLocks.h>
+
+namespace Web::HTML {
+
+class Navigator
+    : public Bindings::GCAllocatedWrappable
+    , public NavigatorBeaconPartial
+    , public NavigatorConcurrentHardwareMixin
+    , public NavigatorDeviceMemoryMixin
+    , public Gamepad::NavigatorGamepadPartial
+    , public GlobalPrivacyControl::GlobalPrivacyControlMixin
+    , public NavigatorIDMixin
+    , public NavigatorLanguageMixin
+    , public NavigatorOnLineMixin
+    , public StorageAPI::NavigatorStorage
+    , public WebLocks::NavigatorLocks {
+    WEB_WRAPPABLE(Navigator, Bindings::GCAllocatedWrappable);
+    GC_DECLARE_ALLOCATOR(Navigator);
+
+public:
+    [[nodiscard]] static GC::Ref<Navigator> create(Window&);
+
+    // FIXME: Implement NavigatorContentUtilsMixin
+
+    // NavigatorCookies
+    // FIXME: Hook up to Agent level state
+    // https://html.spec.whatwg.org/multipage/system-state.html#dom-navigator-cookieenabled
+    bool cookie_enabled() const { return true; }
+
+    // NavigatorPlugins
+    // https://html.spec.whatwg.org/multipage/system-state.html#dom-navigator-javaenabled
+    bool java_enabled() const { return false; }
+
+    bool pdf_viewer_enabled() const;
+
+    bool webdriver() const;
+
+    Window& window() const { return *m_window; }
+
+    [[nodiscard]] GC::Ref<MimeTypeArray> mime_types();
+    [[nodiscard]] GC::Ref<PluginArray> plugins();
+    [[nodiscard]] GC::Ref<Clipboard::Clipboard> clipboard();
+    [[nodiscard]] GC::Ref<Geolocation::Geolocation> geolocation();
+    [[nodiscard]] GC::Ref<UserActivation> user_activation();
+    [[nodiscard]] GC::Ref<CredentialManagement::CredentialsContainer> credentials();
+    GC::Ref<WebIDL::Promise> get_battery();
+    void start_get_battery_steps(GC::Ref<WebIDL::Promise>);
+    [[nodiscard]] GC::Ref<PermissionsAPI::Permissions> permissions();
+
+    GC::Ref<ServiceWorker::ServiceWorkerContainer> service_worker();
+
+    GC::Ref<MediaCapabilitiesAPI::MediaCapabilities> media_capabilities();
+    GC::Ref<MediaSession::MediaSession> media_session();
+    GC::Ref<MediaCapture::MediaDevices> media_devices();
+    void webkit_get_user_media(MediaCapture::MediaStreamConstraints const&, GC::Ref<WebIDL::CallbackType> success_callback, GC::Ref<WebIDL::CallbackType> error_callback);
+    GC::Ptr<MediaCapture::MediaDevices> media_devices_if_created() const { return m_media_devices; }
+
+    static WebIDL::Long max_touch_points();
+
+    virtual ~Navigator() override;
+
+protected:
+    virtual void visit_edges(GC::Cell::Visitor&) override;
+
+private:
+    explicit Navigator(Window&);
+
+    virtual EnvironmentSettingsObject const& navigator_id_settings_object() const override { return navigator_storage_settings_object(); }
+
+    // ^StorageAPI::NavigatorStorage
+    virtual EnvironmentSettingsObject& navigator_storage_settings_object() const override;
+
+    GC::Ref<Window> m_window;
+
+    // ^WebLocks::NavigatorLocks
+    virtual Bindings::Wrappable const& this_navigator_locks_object() const override { return *this; }
+    virtual EnvironmentSettingsObject& this_navigator_locks_settings_object() const override { return navigator_storage_settings_object(); }
+
+    GC::Ptr<PluginArray> m_plugin_array;
+    GC::Ptr<MimeTypeArray> m_mime_type_array;
+
+    // https://w3c.github.io/clipboard-apis/#dom-navigator-clipboard
+    GC::Ptr<Clipboard::Clipboard> m_clipboard;
+
+    // https://w3c.github.io/geolocation/#navigator_interface
+    GC::Ptr<Geolocation::Geolocation> m_geolocation;
+
+    // https://html.spec.whatwg.org/multipage/interaction.html#dom-navigator-useractivation
+    GC::Ptr<UserActivation> m_user_activation;
+
+    // https://w3c.github.io/ServiceWorker/#navigator-serviceworker
+    GC::Ptr<ServiceWorker::ServiceWorkerContainer> m_service_worker_container;
+
+    // https://w3c.github.io/media-capabilities/#dom-navigator-mediacapabilities
+    GC::Ptr<MediaCapabilitiesAPI::MediaCapabilities> m_media_capabilities;
+
+    // https://w3c.github.io/mediasession/#dom-navigator-mediasession
+    GC::Ptr<MediaSession::MediaSession> m_media_session;
+
+    // https://w3c.github.io/mediacapture-main/#dom-navigator-mediadevices
+    GC::Ptr<MediaCapture::MediaDevices> m_media_devices;
+
+    // https://w3c.github.io/webappsec-credential-management/#framework-credential-management
+    GC::Ptr<CredentialManagement::CredentialsContainer> m_credentials;
+
+    // https://w3c.github.io/permissions/#navigator-and-workernavigator-extension
+    GC::Ptr<PermissionsAPI::Permissions> m_permissions;
+
+    // https://w3c.github.io/battery/#dom-navigator-getbattery
+    // The [[BatteryPromise]] internal slot. Held strongly (and visited) so its
+    // identity stays stable across getBattery() calls for the Navigator's lifetime.
+    GC::Ptr<WebIDL::Promise> m_battery_promise;
+};
+
+}

@@ -1,0 +1,121 @@
+/*
+ * Copyright (c) 2023, Bastiaan van der Plaat <bastiaan.v.d.plaat@gmail.com>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/NumberFormat.h>
+#include <AK/QuickSort.h>
+#include <AK/SourceGenerator.h>
+#include <AK/Time.h>
+#include <LibCore/Directory.h>
+#include <LibCore/Resource.h>
+#include <LibCore/System.h>
+#include <LibURL/URL.h>
+#include <LibWeb/Loader/GeneratedPagesLoader.h>
+
+namespace Web {
+
+ErrorOr<String> load_error_page(URL::URL const& url, StringView error_message, MentionCertificateSetting mention_certificate_setting)
+{
+    // Generate HTML error page from error template file
+    // FIXME: Use an actual templating engine (our own one when it's built, preferably with a way to check these usages at compile time)
+    auto template_file = TRY(Core::Resource::load_from_uri("resource://ladybird/templates/error.html"sv));
+    StringBuilder builder;
+    SourceGenerator generator { builder, '%', '%' };
+    generator.set("failed_url", escape_html_entities(url.to_byte_string()));
+    // NB: The page names the site it could not reach by its host, with the port when the URL has one, or by the whole URL
+    //     when it has no host.
+    auto host = url.host().has_value() ? url.serialized_host() : StringView {};
+    ByteString failed_host = host.is_empty() ? url.to_byte_string() : ByteString { host };
+    if (!host.is_empty() && url.port().has_value())
+        failed_host = ByteString::formatted("{}:{}", failed_host, *url.port());
+    generator.set("failed_host", escape_html_entities(failed_host));
+    generator.set("error_message", escape_html_entities(error_message));
+    auto certificate_setting_hint = ""sv;
+    switch (mention_certificate_setting) {
+    case MentionCertificateSetting::No:
+        break;
+    case MentionCertificateSetting::SelfSigned:
+        certificate_setting_hint = "Advanced user? Turn on “Offer to trust self-signed certificates” in Settings, under Advanced."sv;
+        break;
+    case MentionCertificateSetting::Invalid:
+        certificate_setting_hint = "To be asked about certificates like this one too, turn on “Offer to trust any certificate that fails verification” in Settings, under Advanced."sv;
+        break;
+    }
+    generator.set("certificate_setting_hint", certificate_setting_hint);
+    generator.set("certificate_setting_hidden", certificate_setting_hint.is_empty() ? "hidden"sv : ""sv);
+    generator.append(template_file->data());
+    return TRY(String::from_utf8(generator.as_string_view()));
+}
+
+// NB: Percent-encodes each path segment byte by byte, so names with characters like '#', '?' or '%', or names that are
+//     not valid UTF-8, still link to the right file.
+static String file_url_for_path(LexicalPath const& path)
+{
+    StringBuilder builder;
+    builder.append("file://"sv);
+    for (auto part : path.parts_view()) {
+        builder.append('/');
+        for (auto byte : part.bytes()) {
+            if (byte < 0x80 && !URL::code_point_is_in_percent_encode_set(byte, URL::PercentEncodeSet::Component))
+                builder.append(static_cast<char>(byte));
+            else
+                builder.appendff("%{:02X}", byte);
+        }
+    }
+    if (path.parts_view().is_empty())
+        builder.append('/');
+    return builder.to_string_without_validation();
+}
+
+// NB: File names are not necessarily valid UTF-8, so decode them leniently before showing them.
+static String display_name(StringView name)
+{
+    return String::from_utf8_with_replacement_character(name, String::WithBOMHandling::No);
+}
+
+ErrorOr<String> load_file_directory_page(URL::URL const& url)
+{
+    // Generate HTML contents entries table
+    auto lexical_path = LexicalPath(url.file_path());
+    Core::DirIterator dt(lexical_path.string(), Core::DirIterator::Flags::SkipParentAndBaseDir);
+    Vector<ByteString> names;
+    while (dt.has_next())
+        names.append(dt.next_path());
+    quick_sort(names);
+
+    auto directory = TRY(Core::Directory::create(lexical_path, Core::Directory::CreateDirectories::No));
+
+    StringBuilder contents;
+    contents.append("<table>"sv);
+    for (auto& name : names) {
+        auto path = lexical_path.append(name);
+        auto maybe_st = directory.stat(name);
+        if (!maybe_st.is_error()) {
+            auto st = maybe_st.release_value();
+            auto is_directory = S_ISDIR(st.st_mode);
+
+            contents.append("<tr>"sv);
+            contents.appendff("<td><span class=\"{}\"></span></td>", is_directory ? "folder" : "file");
+            contents.appendff("<td><a href=\"{}\">{}</a></td><td>&nbsp;</td>", escape_html_entities(file_url_for_path(path)), escape_html_entities(display_name(name)));
+            contents.appendff("<td>{:10}</td><td>&nbsp;</td>", is_directory ? "-"_string : human_readable_size(st.st_size));
+            contents.appendff("<td>{}</td>", AK::UnixDateTime::from_seconds_since_epoch(st.st_mtime).to_byte_string());
+            contents.append("</tr>\n"sv);
+        }
+    }
+    contents.append("</table>"sv);
+
+    // Generate HTML directory page from directory template file
+    // FIXME: Use an actual templating engine (our own one when it's built, preferably with a way to check these usages at compile time)
+    auto template_file = TRY(Core::Resource::load_from_uri("resource://ladybird/templates/directory.html"sv));
+    StringBuilder builder;
+    SourceGenerator generator { builder, '%', '%' };
+    generator.set("path", escape_html_entities(display_name(lexical_path.string())));
+    generator.set("parent_url", escape_html_entities(file_url_for_path(lexical_path.parent())));
+    generator.set("contents", contents.to_string_without_validation());
+    generator.append(template_file->data());
+    return TRY(String::from_utf8(generator.as_string_view()));
+}
+
+}

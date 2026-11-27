@@ -1,0 +1,142 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+use crate::css::style::index::StyleAtomID;
+use crate::layout::node_data::NodeSlotId;
+use crate::painting::paint_read::GeometryRead;
+use crate::painting::record::paint::text::SelectionStyleAnswer;
+use crate::painting::selection::{
+    CustomHighlights, HighlightPseudoElement, SearchTextHighlights, SelectionRange, SpellingErrorHighlights,
+};
+use std::collections::HashMap;
+use std::sync::Arc;
+
+pub(crate) struct PendingRecording {
+    pub(crate) recording: crate::painting::record::RecordingResult,
+    pub(crate) publishes_recording: bool,
+    /// The SVG paint resources the recording's frame was published with, whose filter images
+    /// its publication hands to the host.
+    pub(crate) svg_paint_resources: Arc<crate::painting::svg_paint_resources::SvgPaintResourceRows>,
+}
+
+pub(crate) struct PendingRecordingTrace {
+    pub(crate) viewport: NodeSlotId,
+    pub(crate) should_paint_overlay: bool,
+}
+
+#[derive(Clone, Default)]
+pub struct PaintState {
+    pub(crate) trace_recordings: bool,
+    pub(crate) visual_context: crate::painting::visual_context::VisualContextState,
+    pub(crate) root_background_source: Option<crate::painting::host::RootBackgroundSource>,
+    pub(crate) last_recording: Option<Arc<crate::painting::record::RecordingOutput>>,
+    /// The window of the document that the recording published last holds, with the visual context tree the recording
+    /// was made against, or none where that holds all of it.
+    pub(crate) window_of_published_recording: Option<(
+        Arc<crate::painting::record::window::RecordedWindow>,
+        Arc<crate::painting::visual_context::VisualContextTree>,
+    )>,
+    /// The selection, shared with the frames published while it holds.
+    pub(crate) selection: Option<Arc<SelectionRange>>,
+    /// The `::selection` styles, shared with the frames published while they hold, so a write
+    /// copies the table only while a frame still holds it.
+    pub(crate) selection_pseudo_styles: Arc<SelectionPseudoStyles>,
+    /// The find-in-page matches, shared with the frames published while they hold.
+    pub(crate) search_text: Arc<SearchTextHighlights>,
+    /// The `::search-text` styles, shared as the `::selection` styles are.
+    pub(crate) search_text_pseudo_styles: Arc<SelectionPseudoStyles>,
+    /// The `::search-text:current` styles, shared as the `::selection` styles are.
+    pub(crate) search_text_current_pseudo_styles: Arc<SelectionPseudoStyles>,
+    /// The misspelled runs, shared with the frames published while they hold.
+    pub(crate) spelling_errors: Arc<SpellingErrorHighlights>,
+    /// The `::spelling-error` styles, shared as the `::selection` styles are.
+    pub(crate) spelling_error_pseudo_styles: Arc<SelectionPseudoStyles>,
+    /// The registered custom highlights and what they cover, shared with the frames published while they hold.
+    pub(crate) custom_highlights: Arc<CustomHighlights>,
+    /// The `::highlight()` styles of each custom highlight name, shared as the `::selection` styles are.
+    pub(crate) custom_highlight_pseudo_styles: Arc<CustomHighlightPseudoStyles>,
+    /// Whether a registered custom highlight holds a range.
+    pub(crate) has_registered_custom_highlight_ranges: bool,
+    /// Counts the rows tree builds made or retired that a registered custom highlight may cover.
+    pub(crate) custom_highlight_row_generation: u64,
+}
+
+/// Each row's committed style for one highlight pseudo-element.
+pub(crate) type SelectionPseudoStyles = HashMap<NodeSlotId, Arc<SelectionStyleAnswer>>;
+
+/// Each row's committed `::highlight()` style, for each custom highlight name.
+pub(crate) type CustomHighlightPseudoStyles = HashMap<StyleAtomID, Arc<SelectionPseudoStyles>>;
+
+impl PaintState {
+    pub(crate) fn highlight_pseudo_styles_mut(
+        &mut self,
+        highlight: HighlightPseudoElement,
+    ) -> &mut Arc<SelectionPseudoStyles> {
+        match highlight {
+            HighlightPseudoElement::Selection => &mut self.selection_pseudo_styles,
+            HighlightPseudoElement::SearchText => &mut self.search_text_pseudo_styles,
+            HighlightPseudoElement::SearchTextCurrent => &mut self.search_text_current_pseudo_styles,
+            HighlightPseudoElement::SpellingError => &mut self.spelling_error_pseudo_styles,
+        }
+    }
+
+    pub(crate) fn bump_custom_highlight_row_generation(&mut self) {
+        if self.has_registered_custom_highlight_ranges {
+            self.custom_highlight_row_generation += 1;
+        }
+    }
+
+    pub(crate) fn reset_visual_context_state(&mut self) {
+        self.visual_context = crate::painting::visual_context::VisualContextState {
+            needs_to_refresh_scroll_state: true,
+            trace: self.visual_context.trace.take(),
+            ..Default::default()
+        };
+        self.visual_context
+            .dirty_boxes
+            .request_full_rebuild(crate::painting::visual_context::dirty::VisualContextUpdateScope::FreshTree);
+    }
+}
+
+impl crate::layout::LayoutNodeArena {
+    /// Makes `source` the root background source, and stamps the boxes the move changes which paints
+    /// the root's background. Answers whether the source moved.
+    pub(crate) fn update_root_background_source(
+        &mut self,
+        source: crate::painting::host::RootBackgroundSource,
+    ) -> bool {
+        let Some(previous) = self.paint_state_mut().root_background_source.replace(source) else {
+            return false;
+        };
+        if previous == source {
+            return false;
+        }
+        use crate::painting::record::change_ticks::RowPaintChange;
+        // Propagation changes which box paints the body's background. Stamp both the old
+        // and new owners, including inline pieces painted by their containing block.
+        for source in [previous, source] {
+            for slot in [source.root_layout_node, source.body_layout_node] {
+                self.note_paint_change_for_repaint(slot, RowPaintChange::DRAWING);
+            }
+            // The viewport's scrollbars take their colors from the propagated background.
+            if let Some(viewport) = self.node_parent_if_live(source.root_layout_node) {
+                self.note_paint_change(viewport, RowPaintChange::DRAWING | RowPaintChange::SCROLL_METADATA);
+            }
+        }
+        true
+    }
+
+    /// Lends the visual context state to `update`, which can read the rows and stamp paint changes beside it.
+    pub(crate) fn with_visual_context_state_lent<T>(
+        &mut self,
+        update: impl FnOnce(&mut Self, &mut crate::painting::visual_context::VisualContextState) -> T,
+    ) -> T {
+        let mut state = std::mem::take(&mut self.paint_state_mut().visual_context);
+        let answer = update(self, &mut state);
+        self.paint_state_mut().visual_context = state;
+        answer
+    }
+}

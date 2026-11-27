@@ -1,0 +1,581 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+use super::*;
+
+/// What the layout stage keeps for itself besides what each of its runs keeps: what the runs of a layout pass share. It
+/// is the stage's scratch rather than arena columns: nothing outside a running pass reads it, but for the memos it
+/// keeps for later passes.
+#[derive(Default)]
+pub(crate) struct LayoutScratch {
+    /// The intrinsic sizes passes measured, kept for the passes after them.
+    pub(super) intrinsic_size_caches: super::layout_node_arena::IntrinsicSizeCaches,
+    /// The results of formatting context runs, kept for the runs after them in this pass and the passes after it.
+    fc_run_cache_store: super::fc_run_cache::FcRunCacheStore,
+    /// The layouts of in-flow blocks, kept for the passes after the one that laid them out.
+    in_flow_block_cache_store: super::in_flow_block_cache::InFlowBlockCacheStore,
+    /// The document's layout trace while a stage lays the document out, which the stage takes from the arena and hands
+    /// back once it is done.
+    pub(super) layout_trace: super::trace::LayoutTrace,
+    /// The chunks and grapheme segmenters of the text rows the passes laid out.
+    text_memos: super::rendered_text::TextMemos,
+    prepared_inline_content_memos: super::prepared_inline_content::PreparedInlineContentMemos,
+    fragment_builder_scratch: fragment_tree::FragmentBuilderScratch,
+}
+
+/// What layout found out that the host hears of once the layout that found it is committed: what the
+/// container-relative lengths it resolved depend on, and the natural size it negotiated for the box of an `<svg>`
+/// document element. A run hands them to its parent with its result, so a discarded result tells the host nothing.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct HostFindings {
+    pub(crate) messages: Vec<super::commit::FfiCommitMessage>,
+    pub(crate) document_svg_root_natural_size: Option<(NodeSlotId, crate::css::style::NaturalSize)>,
+    pub(crate) container_length_reads: Vec<ContainerLengthRead>,
+}
+
+/// What a run found out besides its result, which the run that takes in its result receives with it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct RunResidue {
+    pub(crate) host_findings: HostFindings,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ContainerLengthRead {
+    pub(crate) reader: NodeSlotId,
+    pub(crate) element: crate::css::style::tree::StyleNodeID,
+    pub(crate) bases: crate::css::style::ContainerUnitBases,
+}
+
+#[derive(Default)]
+pub(crate) struct HostFindingsSink {
+    findings: std::sync::Mutex<HostFindings>,
+    noted_any: std::sync::atomic::AtomicBool,
+    notes: std::sync::atomic::AtomicU64,
+}
+
+impl HostFindingsSink {
+    pub(crate) fn note(&self, note: impl FnOnce(&mut HostFindings)) {
+        let mut findings = self.findings.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        note(&mut findings);
+        self.noted_any.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.notes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub(crate) fn notes_so_far(&self) -> u64 {
+        self.notes.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub(crate) fn take(&self) -> HostFindings {
+        if !self.noted_any.load(std::sync::atomic::Ordering::Relaxed) {
+            return HostFindings::default();
+        }
+        let mut findings = self.findings.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.noted_any.store(false, std::sync::atomic::Ordering::Relaxed);
+        std::mem::take(&mut *findings)
+    }
+}
+
+impl HostFindings {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.messages.is_empty()
+            && self.document_svg_root_natural_size.is_none()
+            && self.container_length_reads.is_empty()
+    }
+
+    pub(crate) fn note_container_length_dependencies(
+        &mut self,
+        reader: NodeSlotId,
+        element: crate::css::style::tree::StyleNodeID,
+        bases: &crate::css::style::ContainerUnitBases,
+    ) {
+        use super::commit::{FfiCommitMessage, FfiCommitMessageKind};
+        self.note_container_length_read(ContainerLengthRead {
+            reader,
+            element,
+            bases: *bases,
+        });
+        self.note_message(FfiCommitMessage::new(
+            element.raw(),
+            FfiCommitMessageKind::StyleDependsOnSizeContainerQuery,
+        ));
+        for basis in bases.width_and_height() {
+            if let Some(container) = basis.container() {
+                self.note_message(FfiCommitMessage::new(
+                    container.raw(),
+                    FfiCommitMessageKind::SizeQueryContainerResolvedAgainst,
+                ));
+            }
+            if let Some(boxless_container) = basis.boxless_container() {
+                self.note_message(FfiCommitMessage::new(
+                    boxless_container.raw(),
+                    FfiCommitMessageKind::SizeQueryContainerResolvedAgainst,
+                ));
+                self.note_message(FfiCommitMessage::new(
+                    boxless_container.raw(),
+                    FfiCommitMessageKind::ContainerQueryEvaluationNeededAfterLayout,
+                ));
+            }
+        }
+    }
+
+    fn note_message(&mut self, message: super::commit::FfiCommitMessage) {
+        if !self.messages.contains(&message) {
+            self.messages.push(message);
+        }
+    }
+
+    fn note_container_length_read(&mut self, read: ContainerLengthRead) {
+        if !self.container_length_reads.contains(&read) {
+            self.container_length_reads.push(read);
+        }
+    }
+
+    pub(crate) fn receive(&mut self, other: HostFindings) {
+        for message in other.messages {
+            self.note_message(message);
+        }
+        for read in other.container_length_reads {
+            self.note_container_length_read(read);
+        }
+        if other.document_svg_root_natural_size.is_some() {
+            self.document_svg_root_natural_size = other.document_svg_root_natural_size;
+        }
+    }
+}
+
+// The scratch can move to the thread a layout stage runs on, and the runs of a pass can share it across threads.
+const _: () = {
+    const fn assert_send_and_sync<T: Send + Sync>() {}
+    assert_send_and_sync::<LayoutScratch>();
+};
+
+impl LayoutScratch {
+    /// The scratch of a fork of the arena, which keeps the run memos the arena's entries were stored for and starts
+    /// the rest anew.
+    pub(super) fn fork(&self) -> Self {
+        Self {
+            fc_run_cache_store: self.fc_run_cache_store.fork(),
+            in_flow_block_cache_store: self.in_flow_block_cache_store.fork(),
+            text_memos: self.text_memos.fork(),
+            prepared_inline_content_memos: self.prepared_inline_content_memos.fork(),
+            ..Self::default()
+        }
+    }
+
+    pub(super) fn fc_run_cache_store(&self) -> &super::fc_run_cache::FcRunCacheStore {
+        &self.fc_run_cache_store
+    }
+
+    pub(super) fn fragment_builder_scratch(&self) -> &fragment_tree::FragmentBuilderScratch {
+        &self.fragment_builder_scratch
+    }
+
+    pub(super) fn in_flow_block_cache_store(&self) -> &super::in_flow_block_cache::InFlowBlockCacheStore {
+        &self.in_flow_block_cache_store
+    }
+
+    pub(super) fn text_memos(&self) -> &super::rendered_text::TextMemos {
+        &self.text_memos
+    }
+
+    pub(super) fn prepared_inline_content_memos(&self) -> &super::prepared_inline_content::PreparedInlineContentMemos {
+        &self.prepared_inline_content_memos
+    }
+
+    /// Brings the run memos up to date with what the arena's writes since the last call did to their boxes.
+    pub(super) fn apply_memo_invalidations(&mut self, arena: &mut LayoutNodeArena) {
+        let slot_count = arena.slot_capacity();
+        self.intrinsic_size_caches.cover_slots(slot_count);
+        self.text_memos.cover_text_states(arena.text_state_capacity());
+        self.fragment_builder_scratch.cover_slots(slot_count);
+        self.fc_run_cache_store.cover_slots(slot_count);
+        self.in_flow_block_cache_store.cover_slots(slot_count);
+        self.prepared_inline_content_memos.cover_slots(slot_count);
+        arena.take_memo_invalidations().apply_to(
+            &mut self.fc_run_cache_store,
+            &mut self.in_flow_block_cache_store,
+            &mut self.text_memos,
+            &mut self.prepared_inline_content_memos,
+            &mut self.intrinsic_size_caches,
+        );
+    }
+
+    /// Brings the run memos up to date with what the commit into `arena` did to their boxes, and sweeps the run cache.
+    pub(crate) fn end_layout_pass(&mut self, arena: &mut LayoutNodeArena) {
+        self.apply_memo_invalidations(arena);
+        arena.sweep_stale_fc_run_cache_entries(&mut self.fc_run_cache_store);
+    }
+}
+
+/// What a run keeps while it is in progress: its root, the percentage block size dependencies it resolves, the
+/// anchor-size() resolutions of its root and what it found out for the host. It keeps no metrics of any box: the
+/// formatting context or call that lays out a box holds the box's cells, or hands the box to a run of its own. The
+/// scoped constructors lend this to the run, so callers cannot extend its lifetime.
+pub(crate) struct RunState {
+    root: Node,
+    content_sizing: ContentSizing,
+    /// What the run found so far about the percentage block size dependency of its root and of the boxes whose
+    /// layout in it is in progress, the innermost last. Only these boxes have their dependency resolved.
+    percentage_block_size_dependencies_in_progress: PercentageBlockSizeDependenciesInProgress,
+    /// The anchor-size() resolutions of an absolutely positioned root, a run input that is constant for the run.
+    root_anchor_resolved_values: Option<Box<style_values::AnchorResolvedValues>>,
+    /// What the run found out for the host so far, which the pass the run is handed notes into.
+    host_findings: HostFindingsSink,
+    fragments: Option<fragment_tree::RunFragmentBuilder>,
+    /// For the run of a fragmentainer, what it found out so far about breaking in it.
+    fragmentainer_outcome: RefCell<super::fragmentation::FragmentainerOutcome>,
+}
+
+/// Where a box is placed: the offset of its content box in the containing block it is placed in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct BoxPlacement {
+    pub(crate) content_offset_in_containing_block: FfiCssPixelPoint,
+    pub(crate) containing_block: Node,
+}
+
+/// What the placement of a box shows of the layout of its parent, which decides it: the link that places the box's
+/// fragment shows the table and line clamp facts and the clip, and the fragment shows whether fragmentation broke the
+/// box.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct FragmentFactsDecidedByParent {
+    pub(crate) show: fragment_tree::ParentShowFacts,
+    pub(crate) breaks: fragment_tree::BreakFacts,
+}
+
+/// What the parent of a box decides about the box, kept with the box by the run that holds it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct FactsDecidedByParent {
+    pub(crate) placement: Option<BoxPlacement>,
+    pub(crate) used_insets: UsedInsets,
+    /// The scroll shift the anchor positioning of the box's insets compensates for.
+    pub(crate) default_scroll_shift: Option<abspos_inputs::DefaultScrollShift>,
+    pub(crate) fragment_facts: FragmentFactsDecidedByParent,
+}
+
+impl FactsDecidedByParent {
+    /// What the parent decided about a box, as the committed link of the box shows it, read in `frame`, where the
+    /// content box of the box's containing block has the physical size `containing_block_size`.
+    pub(crate) fn of_committed_link(
+        link: &fragment_tree::FragmentLink,
+        frame: geometry::Frame,
+        containing_block_size: FfiCssPixelSize,
+    ) -> Self {
+        let insets = link.placement.insets.in_frame(geometry::Frame::PHYSICAL, frame);
+        Self {
+            placement: Some(BoxPlacement {
+                content_offset_in_containing_block: link.offset_in_frame(frame, containing_block_size),
+                containing_block: link.placement.containing_block,
+            }),
+            used_insets: UsedInsets {
+                left: insets.left,
+                right: insets.right,
+                top: insets.top,
+                bottom: insets.bottom,
+            },
+            default_scroll_shift: None,
+            fragment_facts: FragmentFactsDecidedByParent {
+                show: link.placement.shown_as.facts,
+                breaks: fragment_tree::BreakFacts::default(),
+            },
+        }
+    }
+}
+
+/// The used values of a box's inset properties.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct UsedInsets {
+    pub(crate) left: CssPixels,
+    pub(crate) right: CssPixels,
+    pub(crate) top: CssPixels,
+    pub(crate) bottom: CssPixels,
+}
+
+/// Whether a box depends on the block size its percentages resolve against, and whether a box it contains does.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct PercentageBlockSizeDependency {
+    pub(crate) depends_on_percentage_block_size: bool,
+    pub(crate) has_descendant_that_depends_on_percentage_block_size: bool,
+}
+
+type PercentageBlockSizeDependenciesInProgress =
+    RefCell<smallvec::SmallVec<[(Node, PercentageBlockSizeDependency); 8]>>;
+
+/// Keeps tracking the percentage block size dependency of a box while its layout is in progress.
+pub(crate) struct PercentageBlockSizeDependencyTracking<'state> {
+    dependencies_in_progress: &'state PercentageBlockSizeDependenciesInProgress,
+    node: Node,
+}
+
+impl Drop for PercentageBlockSizeDependencyTracking<'_> {
+    fn drop(&mut self) {
+        let finished = self.dependencies_in_progress.borrow_mut().pop();
+        if !std::thread::panicking() {
+            assert_eq!(
+                finished.map(|(node, _)| node),
+                Some(self.node),
+                "the layouts of boxes in progress finished out of order"
+            );
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ContentSizing {
+    Layout,
+    RootContributions,
+    RootContentInlineSizes,
+}
+
+impl RunState {
+    /// Runs `run` with what a run rooted at `root` keeps, and the pass as that run sees it. The style reads of an
+    /// absolutely positioned root see `root_anchor_resolved_values`.
+    pub(crate) fn with_root<R>(
+        pass: LayoutPass<'_>,
+        root: Node,
+        root_containing_block: Node,
+        root_anchor_resolved_values: Option<Box<style_values::AnchorResolvedValues>>,
+        run: impl for<'run> FnOnce(&'run Self, LayoutPass<'run>) -> R,
+    ) -> R {
+        Self::enter(
+            pass,
+            root,
+            root_containing_block,
+            root_anchor_resolved_values,
+            ContentSizing::Layout,
+            None,
+            run,
+        )
+    }
+
+    pub(crate) fn with_root_building_fragments<R>(
+        pass: LayoutPass<'_>,
+        root: Node,
+        root_containing_block: Node,
+        root_anchor_resolved_values: Option<Box<style_values::AnchorResolvedValues>>,
+        fragments: Option<fragment_tree::RunFragmentBuilder>,
+        run: impl for<'run> FnOnce(&'run Self, LayoutPass<'run>) -> R,
+    ) -> R {
+        Self::enter(
+            pass,
+            root,
+            root_containing_block,
+            root_anchor_resolved_values,
+            ContentSizing::Layout,
+            fragments,
+            run,
+        )
+    }
+
+    pub(crate) fn with_content_sizing_root<R>(
+        pass: LayoutPass<'_>,
+        root: Node,
+        root_containing_block: Node,
+        run: impl for<'run> FnOnce(&'run Self, LayoutPass<'run>) -> R,
+    ) -> R {
+        Self::enter(
+            pass,
+            root,
+            root_containing_block,
+            None,
+            ContentSizing::RootContributions,
+            None,
+            run,
+        )
+    }
+
+    pub(crate) fn with_content_inline_sizes_root<R>(
+        pass: LayoutPass<'_>,
+        root: Node,
+        root_containing_block: Node,
+        run: impl for<'run> FnOnce(&'run Self, LayoutPass<'run>) -> R,
+    ) -> R {
+        Self::enter(
+            pass,
+            root,
+            root_containing_block,
+            None,
+            ContentSizing::RootContentInlineSizes,
+            None,
+            run,
+        )
+    }
+
+    fn enter<R>(
+        pass: LayoutPass<'_>,
+        root: Node,
+        root_containing_block: Node,
+        root_anchor_resolved_values: Option<Box<style_values::AnchorResolvedValues>>,
+        content_sizing: ContentSizing,
+        fragments: Option<fragment_tree::RunFragmentBuilder>,
+        run: impl for<'run> FnOnce(&'run Self, LayoutPass<'run>) -> R,
+    ) -> R {
+        let state = Self {
+            root,
+            content_sizing,
+            percentage_block_size_dependencies_in_progress: RefCell::new(smallvec::smallvec![(
+                root,
+                PercentageBlockSizeDependency::default()
+            )]),
+            root_anchor_resolved_values,
+            host_findings: HostFindingsSink::default(),
+            fragments,
+            fragmentainer_outcome: RefCell::default(),
+        };
+        run(&state, pass.for_run(root, root_containing_block, &state.host_findings))
+    }
+
+    pub(crate) fn fragments(&self) -> Option<&fragment_tree::RunFragmentBuilder> {
+        self.fragments.as_ref()
+    }
+
+    /// Where the run of a fragmentainer keeps what it found out so far about breaking in it.
+    pub(crate) fn fragmentainer_outcome(&self) -> &RefCell<super::fragmentation::FragmentainerOutcome> {
+        &self.fragmentainer_outcome
+    }
+
+    /// What this run found out besides its result, which the result carries to the run that takes it in.
+    pub(crate) fn take_residue(&self) -> Option<Box<RunResidue>> {
+        let host_findings = self.host_findings.take();
+        (!host_findings.is_empty()).then(|| Box::new(RunResidue { host_findings }))
+    }
+
+    /// What this run found out for the host, which its outputs carry to the run that uses its result.
+    pub(crate) fn take_host_findings(&self) -> Option<Box<HostFindings>> {
+        let findings = self.host_findings.take();
+        (!findings.is_empty()).then(|| Box::new(findings))
+    }
+
+    pub(crate) fn is_content_sizing(&self) -> bool {
+        self.content_sizing != ContentSizing::Layout
+    }
+
+    pub(crate) fn measures_content_inline_sizes_of(&self, node: Node) -> bool {
+        self.content_sizing == ContentSizing::RootContentInlineSizes && node == self.root
+    }
+
+    pub(crate) fn root(&self) -> Node {
+        self.root
+    }
+
+    /// The anchor-size() resolutions the style reads of `node` see, which only an absolutely positioned run root has.
+    pub(crate) fn anchor_resolved_values_of(&self, node: Node) -> Option<&style_values::AnchorResolvedValues> {
+        if node != self.root {
+            return None;
+        }
+        self.root_anchor_resolved_values.as_deref()
+    }
+
+    /// Tracks the percentage block size dependency of `node` until the returned tracking is dropped, which the layout
+    /// of `node` holds while it is in progress.
+    pub(crate) fn track_percentage_block_size_dependency_while_laying_out(
+        &self,
+        node: Node,
+    ) -> PercentageBlockSizeDependencyTracking<'_> {
+        self.percentage_block_size_dependencies_in_progress
+            .borrow_mut()
+            .push((node, PercentageBlockSizeDependency::default()));
+        PercentageBlockSizeDependencyTracking {
+            dependencies_in_progress: &self.percentage_block_size_dependencies_in_progress,
+            node,
+        }
+    }
+
+    /// The percentage block size dependency found so far for the run's root or a box whose layout is in progress.
+    #[track_caller]
+    pub(crate) fn percentage_block_size_dependency_of(&self, node: Node) -> PercentageBlockSizeDependency {
+        self.percentage_block_size_dependencies_in_progress
+            .borrow()
+            .iter()
+            .rev()
+            .find(|(tracked, _)| *tracked == node)
+            .map(|(_, dependency)| *dependency)
+            .expect("only the run root and boxes whose layout is in progress have their dependency resolved")
+    }
+
+    /// Notes that `node` depends on the block size its percentages resolve against. Nothing resolves the dependency of
+    /// a box that is neither the run root nor in progress, so the note is dropped for such a box.
+    pub(crate) fn note_box_depends_on_percentage_block_size(&self, node: Node) {
+        self.update_percentage_block_size_dependency_of(node, |dependency| {
+            dependency.depends_on_percentage_block_size = true;
+        });
+    }
+
+    /// Whether this run resolves the percentage block size dependency of `node`: the run root, or a box whose layout is
+    /// in progress.
+    pub(crate) fn resolves_percentage_block_size_dependency_of(&self, node: Node) -> bool {
+        self.percentage_block_size_dependencies_in_progress
+            .borrow()
+            .iter()
+            .any(|(tracked, _)| *tracked == node)
+    }
+
+    /// Notes that a box `containing_block` contains depends on the block size its percentages resolve against.
+    /// Nothing resolves the dependency of a box that is neither the run root nor in progress, so the note is dropped for
+    /// such a box.
+    pub(crate) fn note_descendant_depends_on_percentage_block_size(&self, containing_block: Node) {
+        self.update_percentage_block_size_dependency_of(containing_block, |dependency| {
+            dependency.has_descendant_that_depends_on_percentage_block_size = true;
+        });
+    }
+
+    fn update_percentage_block_size_dependency_of(
+        &self,
+        node: Node,
+        update: impl FnOnce(&mut PercentageBlockSizeDependency),
+    ) {
+        if let Some((_, dependency)) = self
+            .percentage_block_size_dependencies_in_progress
+            .borrow_mut()
+            .iter_mut()
+            .rev()
+            .find(|(tracked, _)| *tracked == node)
+        {
+            update(dependency);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_nested_run_keeps_its_own_root_and_host_findings() {
+        let mut arena = LayoutNodeArena::new();
+        let scratch = LayoutScratch::default();
+        let host_findings_outside_runs = HostFindingsSink::default();
+        let root = arena.allocate_for_test().slot;
+        let child = arena.allocate_for_test().slot;
+        RunState::with_root(
+            LayoutPass::for_test(&arena, &scratch, &host_findings_outside_runs),
+            root,
+            NodeSlotId::INVALID,
+            None,
+            |parent, parent_pass| {
+                assert_eq!(parent.root(), root);
+                let nested_findings = RunState::with_root(parent_pass, child, root, None, |nested, pass| {
+                    assert_eq!(nested.root(), child);
+                    assert!(nested.resolves_percentage_block_size_dependency_of(child));
+                    assert!(!nested.resolves_percentage_block_size_dependency_of(root));
+                    assert!(!parent.resolves_percentage_block_size_dependency_of(child));
+                    assert!(nested.anchor_resolved_values_of(child).is_none());
+                    pass.note_host_findings(|findings| {
+                        findings.document_svg_root_natural_size =
+                            Some((child, crate::css::style::NaturalSize::default()));
+                    });
+                    nested.take_host_findings()
+                });
+                assert_eq!(parent.root(), root);
+                assert!(parent.take_host_findings().is_none());
+                assert_eq!(
+                    nested_findings.and_then(|findings| findings.document_svg_root_natural_size),
+                    Some((child, crate::css::style::NaturalSize::default()))
+                );
+            },
+        );
+        assert!(host_findings_outside_runs.take().is_empty());
+    }
+}

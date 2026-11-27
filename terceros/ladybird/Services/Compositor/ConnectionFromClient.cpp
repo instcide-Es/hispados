@@ -1,0 +1,121 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/IDAllocator.h>
+#include <Compositor/ConnectionFromClient.h>
+#include <Compositor/ConnectionFromPresentation.h>
+#include <Compositor/ConnectionFromWebContent.h>
+#include <LibCompositing/FontServiceClient.h>
+#include <LibCore/Process.h>
+#include <LibIPC/Transport.h>
+
+namespace Compositor {
+
+static IDAllocator s_web_content_connection_ids;
+
+ConnectionFromClient::ConnectionFromClient(NonnullOwnPtr<IPC::Transport> transport, RefPtr<Gfx::SkiaBackendContext> skia_backend_context, bool scrollbars_always_shown)
+    : IPC::ConnectionFromClient<CompositorControlClientEndpoint, CompositorControlServerEndpoint>(*this, move(transport), 1)
+    , m_compositor_state(CompositorState::create(move(skia_backend_context), scrollbars_always_shown))
+{
+}
+
+void ConnectionFromClient::die()
+{
+    for (auto& [id, connection] : m_web_content_connections)
+        connection->notify_compositor_lost();
+    Core::Process::terminate_immediately(0);
+}
+
+void ConnectionFromClient::set_font_service(IPC::TransportHandle handle, IPC::File catalog, u64 catalog_size, u64 generation)
+{
+    MUST(Compositing::install_font_service(move(handle), move(catalog), catalog_size, generation));
+}
+
+Messages::CompositorControlServer::ConnectWebContentResponse ConnectionFromClient::connect_web_content()
+{
+    auto paired_transport = MUST(IPC::Transport::create_paired());
+    auto web_content_connection_id = s_web_content_connection_ids.allocate();
+    auto connection = ConnectionFromWebContent::construct(move(paired_transport.local), m_compositor_state, web_content_connection_id);
+    connection->set_on_death([this](ConnectionFromWebContent& dead) {
+        auto client_id = dead.client_id();
+        m_web_content_connections.remove(client_id);
+        s_web_content_connection_ids.deallocate(client_id);
+    });
+    m_web_content_connections.set(web_content_connection_id, move(connection));
+    return { move(paired_transport.remote_handle), web_content_connection_id };
+}
+
+void ConnectionFromClient::connect_render_clock(i32 web_content_connection_id, IPC::TransportHandle handle)
+{
+    if (auto connection = m_web_content_connections.get(web_content_connection_id); connection.has_value())
+        (*connection)->install_render_clock_channel(move(handle));
+}
+
+void ConnectionFromClient::connect_video_presentation(i32 web_content_connection_id, IPC::TransportHandle handle)
+{
+    if (auto connection = m_web_content_connections.get(web_content_connection_id); connection.has_value())
+        (*connection)->install_video_presentation_channel(move(handle));
+}
+
+Messages::CompositorControlServer::CreatePresentationConnectionResponse ConnectionFromClient::create_presentation_connection(bool synthesizes_scroll_momentum, bool scrolls_elastically, Optional<u64> gpu_presentation_adapter_luid)
+{
+    auto paired_transport = MUST(IPC::Transport::create_paired());
+    // NB: The capabilities come with the connection, so the first backing stores of a context bound to it match them.
+    auto capabilities = CompositorState::PresentationCapabilities {
+        .synthesizes_scroll_momentum = synthesizes_scroll_momentum,
+        .scrolls_elastically = scrolls_elastically,
+        .gpu_presentation_adapter_luid = gpu_presentation_adapter_luid,
+    };
+    auto connection = ConnectionFromPresentation::construct(move(paired_transport.local), m_compositor_state, capabilities);
+    auto presentation_id = connection->presentation_id().value();
+    connection->set_on_death([this, presentation_id] {
+        m_presentation_connections.remove(presentation_id);
+    });
+    m_presentation_connections.set(presentation_id, move(connection));
+    return { move(paired_transport.remote_handle), presentation_id };
+}
+
+ErrorOr<OwnPtr<IPC::MessageBuffer>> ConnectionFromClient::handle_raw(IPC::RawMessage& message)
+{
+    auto outcome = m_compositor_state->handle_message_from_control(message);
+    if (outcome.misbehavior.has_value()) {
+        did_misbehave(outcome.misbehavior->characters());
+        return nullptr;
+    }
+    return move(outcome.response);
+}
+
+void ConnectionFromClient::create_context(Web::CompositorContextId context_id, Optional<u64> page_id, i32 web_content_connection_id)
+{
+    auto* connection = web_content_connection(web_content_connection_id);
+    if (!connection) {
+        dbgln("Compositor: Ignoring context {} for WebContent connection {}, which is already gone", context_id, web_content_connection_id);
+        return;
+    }
+
+    m_compositor_state->create_context(context_id, page_id, *connection);
+}
+
+void ConnectionFromClient::set_context_visibility(Web::CompositorContextId context_id, Compositing::ContextVisibility visibility)
+{
+    m_compositor_state->set_context_visibility(context_id, visibility);
+}
+
+void ConnectionFromClient::crash()
+{
+    warnln("Crashing Compositor process by request from Browser");
+    VERIFY_NOT_REACHED();
+}
+
+ConnectionFromWebContent* ConnectionFromClient::web_content_connection(i32 web_content_connection_id)
+{
+    auto it = m_web_content_connections.find(web_content_connection_id);
+    if (it == m_web_content_connections.end())
+        return nullptr;
+    return it->value.ptr();
+}
+
+}

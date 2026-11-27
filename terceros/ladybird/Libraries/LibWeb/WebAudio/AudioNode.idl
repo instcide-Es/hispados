@@ -1,0 +1,43 @@
+// https://webaudio.github.io/web-audio-api/#enumdef-channelcountmode
+enum ChannelCountMode {
+    "max",
+    "clamped-max",
+    "explicit"
+};
+
+// https://webaudio.github.io/web-audio-api/#enumdef-channelinterpretation
+enum ChannelInterpretation {
+    "speakers",
+    "discrete"
+};
+
+// https://webaudio.github.io/web-audio-api/#AudioNodeOptions
+dictionary AudioNodeOptions {
+    unsigned long channelCount;
+    ChannelCountMode channelCountMode;
+    ChannelInterpretation channelInterpretation;
+};
+
+// https://webaudio.github.io/web-audio-api/#AudioNode
+[Exposed=Window, ImplementedIn=Rust]
+interface AudioNode : EventTarget {
+    [ImplementedAs=connect_to_node] AudioNode connect(AudioNode destinationNode,
+                      optional unsigned long output = 0,
+                      optional unsigned long input = 0);
+    [ImplementedAs=connect_to_param] undefined connect(AudioParam destinationParam, optional unsigned long output = 0);
+    [ImplementedAs=disconnect_all] undefined disconnect();
+    [ImplementedAs=disconnect_output] undefined disconnect(unsigned long output);
+    [ImplementedAs=disconnect_node] undefined disconnect(AudioNode destinationNode);
+    [ImplementedAs=disconnect_node_output] undefined disconnect(AudioNode destinationNode, unsigned long output);
+    [ImplementedAs=disconnect_node_output_input] undefined disconnect(AudioNode destinationNode,
+                         unsigned long output,
+                         unsigned long input);
+    [ImplementedAs=disconnect_param] undefined disconnect(AudioParam destinationParam);
+    [ImplementedAs=disconnect_param_output] undefined disconnect(AudioParam destinationParam, unsigned long output);
+    readonly attribute BaseAudioContext context;
+    readonly attribute unsigned long numberOfInputs;
+    readonly attribute unsigned long numberOfOutputs;
+    attribute unsigned long channelCount;
+    attribute ChannelCountMode channelCountMode;
+    attribute ChannelInterpretation channelInterpretation;
+};

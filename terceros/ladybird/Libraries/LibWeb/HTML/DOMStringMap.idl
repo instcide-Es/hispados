@@ -1,0 +1,8 @@
+// https://html.spec.whatwg.org/multipage/dom.html#domstringmap
+[Exposed=Window, LegacyOverrideBuiltIns, ImplementedIn=Rust]
+interface DOMStringMap {
+    getter DOMString (DOMString name);
+
+    [CEReactions] setter undefined (DOMString name, DOMString value);
+    [CEReactions] deleter undefined (DOMString name);
+};

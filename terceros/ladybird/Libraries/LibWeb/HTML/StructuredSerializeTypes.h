@@ -1,0 +1,68 @@
+/*
+ * Copyright (c) 2024, Kenneth Myhra <kennethmyhra@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Array.h>
+#include <AK/ByteBuffer.h>
+#include <AK/Vector.h>
+#include <LibIPC/Forward.h>
+#include <LibJS/Forward.h>
+#include <LibWeb/Export.h>
+#include <LibWebCommon/HTML/SerializationRecords.h>
+
+namespace Web::HTML {
+
+// A storage-golden expectation, not a deserializer rule.
+enum class Expectation : u8 {
+    PositiveGolden,
+    DocumentedReject,
+};
+
+struct ValueTagExpectation {
+    ValueTag tag;
+    Expectation expectation;
+};
+
+// Only tags listed here decode as values. Empty and EndObject are reserved.
+static constexpr Array<ValueTagExpectation, 25> s_value_tag_expectations { {
+    { ValueTag::UndefinedPrimitive, Expectation::PositiveGolden },
+    { ValueTag::NullPrimitive, Expectation::PositiveGolden },
+    { ValueTag::BooleanPrimitive, Expectation::PositiveGolden },
+    { ValueTag::NumberPrimitive, Expectation::PositiveGolden },
+    { ValueTag::StringPrimitive, Expectation::PositiveGolden },
+    { ValueTag::BigIntPrimitive, Expectation::PositiveGolden },
+    { ValueTag::BooleanObject, Expectation::PositiveGolden },
+    { ValueTag::NumberObject, Expectation::PositiveGolden },
+    { ValueTag::StringObject, Expectation::PositiveGolden },
+    { ValueTag::BigIntObject, Expectation::PositiveGolden },
+    { ValueTag::DateObject, Expectation::PositiveGolden },
+    { ValueTag::RegExpObject, Expectation::PositiveGolden },
+    { ValueTag::MapObject, Expectation::PositiveGolden },
+    { ValueTag::SetObject, Expectation::PositiveGolden },
+    { ValueTag::ArrayObject, Expectation::PositiveGolden },
+    { ValueTag::ErrorObject, Expectation::PositiveGolden },
+    { ValueTag::Object, Expectation::PositiveGolden },
+    { ValueTag::ObjectReference, Expectation::PositiveGolden },
+    { ValueTag::GrowableSharedArrayBuffer, Expectation::DocumentedReject },
+    { ValueTag::SharedArrayBuffer, Expectation::DocumentedReject },
+    { ValueTag::ResizeableArrayBuffer, Expectation::PositiveGolden },
+    { ValueTag::ArrayBuffer, Expectation::PositiveGolden },
+    { ValueTag::ArrayBufferView, Expectation::PositiveGolden },
+    { ValueTag::SerializableObject, Expectation::PositiveGolden },
+    { ValueTag::Int32Primitive, Expectation::PositiveGolden },
+} };
+
+static constexpr bool value_tag_is_decodable(ValueTag tag)
+{
+    for (auto const& entry : s_value_tag_expectations) {
+        if (entry.tag == tag)
+            return true;
+    }
+    return false;
+}
+
+}

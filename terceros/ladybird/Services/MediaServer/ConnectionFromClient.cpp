@@ -1,0 +1,561 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/AnyOf.h>
+#include <AK/Checked.h>
+#include <AK/HashMap.h>
+#include <AK/NeverDestroyed.h>
+#include <AK/NumericLimits.h>
+#include <LibCore/Process.h>
+#include <LibMedia/DecodeAudioStream.h>
+#include <LibMedia/IncrementallyPopulatedStream.h>
+#include <LibMedia/MediaSourceExtensions/ByteStreamParser.h>
+#include <LibMedia/MediaSupport.h>
+#include <LibMedia/PlaybackManager.h>
+#include <LibMediaCodecs/CodecParameters.h>
+#include <LibMediaCodecs/DecoderCapabilities.h>
+#include <LibThreading/Thread.h>
+#include <LibThreading/ThreadPool.h>
+#include <MediaServer/ConnectionFromClient.h>
+#include <MediaServer/PlaybackSession.h>
+
+namespace MediaServer {
+
+namespace Commands = Media::MediaSourceExtensions::Commands;
+
+static NeverDestroyed<HashMap<int, NonnullRefPtr<ConnectionFromClient>>> s_connections;
+static int s_next_client_id { 1 };
+
+static int allocate_client_id()
+{
+    VERIFY(s_next_client_id != NumericLimits<int>::max());
+    return s_next_client_id++;
+}
+
+ConnectionFromClient::ConnectionFromClient(NonnullOwnPtr<IPC::Transport> transport, Role role)
+    : IPC::ConnectionFromClient<MediaClientEndpoint, MediaServerEndpoint>(*this, move(transport), allocate_client_id())
+    , m_role(role)
+{
+    s_connections->set(client_id(), *this);
+}
+
+ConnectionFromClient::~ConnectionFromClient()
+{
+    for (auto& [stream_id, stream] : m_media_streams) {
+        stream->set_data_request_callback(nullptr);
+        stream->make_missing_data_permanently_unavailable();
+    }
+}
+
+void ConnectionFromClient::die()
+{
+    auto connection = s_connections->take(client_id());
+    // A renderer can be connected while the previous one is going away, and the server must stay up for it.
+    auto a_renderer_remains = any_of(*s_connections, [](auto const& entry) { return entry.value->m_role == Role::Renderer; });
+    if (m_role == Role::Controller || !a_renderer_remains)
+        Core::Process::terminate_immediately(0);
+}
+
+ErrorOr<NonnullOwnPtr<IPC::Transport>> ConnectionFromClient::request_audio_server_transport()
+{
+    VERIFY(m_role == Role::Controller);
+    auto response = send_sync_but_allow_failure<Messages::MediaClient::RequestAudioServerConnection>();
+    if (!response || !response->handle().has_value())
+        return Error::from_string_literal("The Browser did not connect an audio server");
+    return response->take_handle()->create_transport();
+}
+
+void ConnectionFromClient::request_video_decoder_server_transport(VideoDecoderServerTransportCallback callback)
+{
+    VERIFY(m_role == Role::Controller);
+    auto request_id = m_next_video_decoder_server_transport_request_id++;
+    m_video_decoder_server_transport_requests.set(request_id, move(callback));
+    async_request_video_decoder_server_connection(request_id);
+}
+
+void ConnectionFromClient::report_unresponsive_video_decoder_server()
+{
+    VERIFY(m_role == Role::Controller);
+    async_video_decoder_server_unresponsive();
+}
+
+void ConnectionFromClient::video_decoder_server_connection_ready(u64 request_id, Optional<IPC::TransportHandle> handle)
+{
+    if (m_role != Role::Controller) {
+        did_misbehave("Only the controller may connect a video decoder server");
+        return;
+    }
+    auto callback = m_video_decoder_server_transport_requests.take(request_id);
+    if (!callback.has_value()) {
+        did_misbehave("A video decoder server connection answered no request");
+        return;
+    }
+    if (!handle.has_value()) {
+        (*callback)(Error::from_string_literal("The Browser did not connect a video decoder server"));
+        return;
+    }
+    (*callback)(handle->create_transport());
+}
+
+ErrorOr<ConnectionFromClient::RendererConnection> ConnectionFromClient::create_renderer_connection()
+{
+    auto paired_transports = TRY(IPC::Transport::create_paired());
+    auto handle = move(paired_transports.remote_handle);
+
+    // The static connection map owns this connection until its peer disconnects.
+    auto client = adopt_ref(*new ConnectionFromClient(move(paired_transports.local), Role::Renderer));
+
+    return RendererConnection { move(handle), client->client_id() };
+}
+
+Messages::MediaServer::ConnectNewClientResponse ConnectionFromClient::connect_new_client()
+{
+    if (m_role != Role::Controller) {
+        did_misbehave("Only the controller may connect a new media client");
+        return { OptionalNone {}, -1 };
+    }
+
+    auto connection = create_renderer_connection();
+    if (connection.is_error()) {
+        dbgln("Failed to connect a media client: {}", connection.error());
+        return { OptionalNone {}, -1 };
+    }
+    return { move(connection.value().handle), connection.value().client_id };
+}
+
+bool ConnectionFromClient::verify_renderer_role()
+{
+    if (m_role == Role::Renderer)
+        return true;
+    did_misbehave("Only the renderer may use media sessions");
+    return false;
+}
+
+void ConnectionFromClient::connect_video_presentation_channel(int client_id, IPC::TransportHandle handle)
+{
+    if (m_role != Role::Controller) {
+        did_misbehave("Only the controller may connect a video presentation channel");
+        return;
+    }
+
+    auto renderer = s_connections->get(client_id);
+    if (!renderer.has_value() || (*renderer)->m_role != Role::Renderer) {
+        dbgln("MediaServer: No renderer connection {} to take a video presentation channel", client_id);
+        return;
+    }
+    (*renderer)->install_video_presentation_channel(move(handle));
+}
+
+void ConnectionFromClient::install_video_presentation_channel(IPC::TransportHandle handle)
+{
+    auto transport = handle.create_transport();
+    if (transport.is_error()) {
+        dbgln("MediaServer: Could not take up a video presentation channel: {}", transport.error());
+        return;
+    }
+
+    // A replaced connection releases its edges; the presentation client that held them is gone or will ask again.
+    m_video_presentation_connection = Media::VideoPresentationServerConnection::construct(transport.release_value());
+}
+
+static Media::MediaSupportInfo file_media_support_for(String type, String subtype, Optional<String> codecs_parameter)
+{
+    OrderedHashMap<String, String> parameters;
+    if (codecs_parameter.has_value())
+        parameters.set("codecs"_string, codecs_parameter.release_value());
+    return Media::file_media_support({ move(type), move(subtype), parameters });
+}
+
+// The type is decodable only if every codec it lists is, and it plays as well as its weakest codec does.
+static Optional<Media::DecoderCapabilities> decoder_capabilities_for_codecs(StringView codecs_parameter)
+{
+    Optional<Media::DecoderCapabilities> combined_capabilities;
+    for (auto codec_string : codecs_parameter.split_view(',', SplitBehavior::KeepEmpty)) {
+        auto codec = Media::parse_codec_parameters_string(codec_string.trim_whitespace());
+        if (!codec.has_value())
+            return {};
+        auto codec_capabilities = Media::decoder_capabilities(*codec);
+        if (!codec_capabilities.has_value())
+            return {};
+        if (!combined_capabilities.has_value()) {
+            combined_capabilities = codec_capabilities;
+            continue;
+        }
+        combined_capabilities->smooth &= codec_capabilities->smooth;
+        combined_capabilities->power_efficient &= codec_capabilities->power_efficient;
+    }
+    return combined_capabilities;
+}
+
+void ConnectionFromClient::request_file_media_support(u64 request_id, String type, String subtype, Optional<String> codecs_parameter)
+{
+    auto& main_thread_event_loop = Core::EventLoop::current();
+    auto thread = Threading::Thread::construct("MediaSupport"sv, [strong_this = NonnullRefPtr(*this), &main_thread_event_loop, request_id, type = move(type), subtype = move(subtype), codecs_parameter = move(codecs_parameter)] mutable -> intptr_t {
+        auto info = file_media_support_for(move(type), move(subtype), move(codecs_parameter));
+        main_thread_event_loop.deferred_invoke([strong_this = move(strong_this), request_id, info = move(info)] {
+            if (strong_this->is_open())
+                strong_this->async_file_media_support_reported(request_id, info);
+        });
+        return 0;
+    });
+    thread->start();
+    thread->detach();
+}
+
+void ConnectionFromClient::request_decoder_capabilities(u64 request_id, String codecs_parameter)
+{
+    auto& main_thread_event_loop = Core::EventLoop::current();
+    auto thread = Threading::Thread::construct("Capabilities"sv, [strong_this = NonnullRefPtr(*this), &main_thread_event_loop, request_id, codecs_parameter = move(codecs_parameter)] mutable -> intptr_t {
+        auto capabilities = decoder_capabilities_for_codecs(codecs_parameter);
+        main_thread_event_loop.deferred_invoke([strong_this = move(strong_this), request_id, capabilities] {
+            if (strong_this->is_open())
+                strong_this->async_decoder_capabilities_reported(request_id, capabilities);
+        });
+        return 0;
+    });
+    thread->start();
+    thread->detach();
+}
+
+struct DecodedAudioSamples {
+    u32 sample_rate { 0 };
+    u32 channel_count { 0 };
+    u64 frame_count { 0 };
+    Core::AnonymousBuffer planar_samples;
+};
+
+static Media::DecoderErrorOr<DecodedAudioSamples> decode_audio_data_to_shared_buffer(Core::AnonymousBuffer const& data, u32 output_sample_rate)
+{
+    auto stream = Media::IncrementallyPopulatedStream::create_from_data({ data.data<u8>(), data.size() });
+    auto decoded = TRY(Media::decode_entire_audio_stream(stream, output_sample_rate));
+    if (decoded.channels.is_empty() || decoded.channels.first().is_empty())
+        return Media::DecoderError::with_description(Media::DecoderErrorCategory::Corrupted, "The stream decoded to no audio"sv);
+
+    auto frame_count = decoded.channels.first().size();
+    Checked<size_t> byte_count = frame_count;
+    byte_count *= decoded.channels.size();
+    byte_count *= sizeof(float);
+    if (byte_count.has_overflow())
+        return Media::DecoderError::with_description(Media::DecoderErrorCategory::Memory, "Decoded audio is too large to share"sv);
+    auto planar_samples_or_error = Core::AnonymousBuffer::create_with_size(byte_count.value());
+    if (planar_samples_or_error.is_error())
+        return Media::DecoderError::with_description(Media::DecoderErrorCategory::Memory, "Unable to allocate shared sample storage"sv);
+    auto planar_samples = planar_samples_or_error.release_value();
+
+    auto* destination = planar_samples.data<float>();
+    for (auto& channel : decoded.channels) {
+        VERIFY(channel.size() == frame_count);
+        memcpy(destination, channel.data(), frame_count * sizeof(float));
+        destination += frame_count;
+        channel.clear();
+    }
+    return DecodedAudioSamples { decoded.sample_specification.sample_rate(), static_cast<u32>(decoded.channels.size()), frame_count, move(planar_samples) };
+}
+
+void ConnectionFromClient::decode_audio_data(u64 request_id, Core::AnonymousBuffer data, u32 output_sample_rate)
+{
+    if (!verify_renderer_role())
+        return;
+    if (!data.is_valid() || output_sample_rate == 0) {
+        did_misbehave("Invalid audio data decode request");
+        return;
+    }
+
+    auto& main_thread_event_loop = Core::EventLoop::current();
+    Threading::ThreadPool::the().submit([strong_this = NonnullRefPtr(*this), &main_thread_event_loop, request_id, data = move(data), output_sample_rate] mutable {
+        auto result = decode_audio_data_to_shared_buffer(data, output_sample_rate);
+        main_thread_event_loop.deferred_invoke([strong_this = move(strong_this), request_id, result = move(result)] mutable {
+            if (!strong_this->is_open())
+                return;
+            if (result.is_error()) {
+                strong_this->async_audio_data_decode_failed(request_id, result.release_error());
+                return;
+            }
+            auto decoded = result.release_value();
+            strong_this->async_audio_data_decoded(request_id, decoded.sample_rate, decoded.channel_count, decoded.frame_count, move(decoded.planar_samples));
+        });
+    });
+}
+
+Media::IncrementallyPopulatedStream* ConnectionFromClient::find_media_stream(u64 stream_id)
+{
+    auto it = m_media_streams.find(stream_id);
+    if (it == m_media_streams.end())
+        return nullptr;
+    return it->value.ptr();
+}
+
+void ConnectionFromClient::create_media_stream(u64 stream_id)
+{
+    if (!verify_renderer_role())
+        return;
+    if (m_media_streams.contains(stream_id)) {
+        did_misbehave("Duplicate media stream ID");
+        return;
+    }
+    auto stream = Media::IncrementallyPopulatedStream::create_empty();
+    stream->set_data_request_callback([this, stream_id](Optional<u64> offset) {
+        async_media_stream_data_requested(stream_id, offset);
+    });
+    m_media_streams.set(stream_id, move(stream));
+}
+
+void ConnectionFromClient::destroy_media_stream(u64 stream_id)
+{
+    auto stream = m_media_streams.take(stream_id);
+    if (!stream.has_value())
+        return;
+    (*stream)->set_data_request_callback(nullptr);
+    (*stream)->make_missing_data_permanently_unavailable();
+}
+
+void ConnectionFromClient::add_media_stream_chunk(u64 stream_id, u64 offset, ByteBuffer data)
+{
+    if (auto* stream = find_media_stream(stream_id))
+        stream->add_chunk_at(offset, data.bytes());
+}
+
+void ConnectionFromClient::set_media_stream_expected_size(u64 stream_id, u64 size)
+{
+    if (auto* stream = find_media_stream(stream_id))
+        stream->set_expected_size(size);
+}
+
+void ConnectionFromClient::close_media_stream(u64 stream_id)
+{
+    if (auto* stream = find_media_stream(stream_id))
+        stream->close();
+}
+
+void ConnectionFromClient::set_media_stream_may_idle(u64 stream_id, bool may_idle)
+{
+    if (auto* stream = find_media_stream(stream_id))
+        stream->set_may_idle(may_idle);
+}
+
+PlaybackSession* ConnectionFromClient::find_playback_session(u64 session_id)
+{
+    auto it = m_playback_sessions.find(session_id);
+    if (it == m_playback_sessions.end())
+        return nullptr;
+    return it->value.ptr();
+}
+
+void ConnectionFromClient::create_playback_session(u64 session_id, Audio::PlaybackGroupId audio_group)
+{
+    if (!verify_renderer_role())
+        return;
+    if (m_playback_sessions.contains(session_id)) {
+        did_misbehave("Duplicate playback session ID");
+        return;
+    }
+    m_playback_sessions.set(session_id, make<PlaybackSession>(*this, session_id, audio_group));
+}
+
+void ConnectionFromClient::destroy_playback_session(u64 session_id)
+{
+    m_playback_sessions.remove(session_id);
+}
+
+void ConnectionFromClient::add_media_stream_source(u64 session_id, u64 stream_id)
+{
+    auto* session = find_playback_session(session_id);
+    auto* stream = find_media_stream(stream_id);
+    if (!session || !stream)
+        return;
+    session->add_media_stream_source(stream_id, NonnullRefPtr<Media::MediaStream>(*stream));
+}
+
+void ConnectionFromClient::start_playback(u64 session_id, u64 seek_request_id)
+{
+    if (auto* session = find_playback_session(session_id))
+        session->start(seek_request_id);
+}
+
+void ConnectionFromClient::play(u64 session_id)
+{
+    if (auto* session = find_playback_session(session_id))
+        session->manager().play();
+}
+
+void ConnectionFromClient::pause(u64 session_id)
+{
+    if (auto* session = find_playback_session(session_id))
+        session->manager().pause();
+}
+
+void ConnectionFromClient::seek(u64 session_id, u64 seek_request_id, AK::Duration timestamp, Media::SeekMode mode)
+{
+    if (mode > Media::SeekMode::FastAfter) {
+        did_misbehave("Invalid seek mode");
+        return;
+    }
+    if (auto* session = find_playback_session(session_id))
+        session->seek(seek_request_id, timestamp, mode);
+}
+
+void ConnectionFromClient::set_volume(u64 session_id, double volume)
+{
+    if (auto* session = find_playback_session(session_id))
+        session->manager().set_volume(volume);
+}
+
+void ConnectionFromClient::set_playback_rate(u64 session_id, float rate)
+{
+    if (!isfinite(rate) || rate < 0) {
+        did_misbehave("Invalid playback rate");
+        return;
+    }
+    if (auto* session = find_playback_session(session_id))
+        session->manager().set_playback_rate(rate);
+}
+
+void ConnectionFromClient::set_audio_group(u64 session_id, Audio::PlaybackGroupId audio_group)
+{
+    if (auto* session = find_playback_session(session_id))
+        session->set_audio_group(audio_group);
+}
+
+void ConnectionFromClient::set_duration(u64 session_id, AK::Duration duration)
+{
+    if (auto* session = find_playback_session(session_id))
+        session->manager().set_duration(duration);
+}
+
+void ConnectionFromClient::set_live_seekable_range(u64 session_id, Optional<Media::TimeRanges::Range> range)
+{
+    if (auto* session = find_playback_session(session_id))
+        session->manager().set_live_seekable_range(range);
+}
+
+void ConnectionFromClient::set_audio_track_enabled(u64 session_id, u64 seek_request_id, Media::Track track, bool enabled, bool resume_ended_playback)
+{
+    auto* session = find_playback_session(session_id);
+    if (!session)
+        return;
+    session->set_audio_track_enabled(seek_request_id, track, enabled, resume_ended_playback);
+}
+
+void ConnectionFromClient::reserve_video_sink(u64 session_id, u64 seek_request_id, Media::Track track, Media::VideoSinkHandle handle, bool resume_ended_playback)
+{
+    auto* session = find_playback_session(session_id);
+    if (!session)
+        return;
+    session->reserve_video_sink(seek_request_id, track, handle, resume_ended_playback);
+    if (m_video_presentation_connection)
+        m_video_presentation_connection->retry_pending_video_edges();
+}
+
+void ConnectionFromClient::disable_video_sink(u64 session_id, u64 seek_request_id, Media::VideoSinkHandle handle)
+{
+    if (auto* session = find_playback_session(session_id))
+        session->disable_video_sink(seek_request_id, handle);
+}
+
+void ConnectionFromClient::set_video_sink_ticking(u64 session_id, Media::VideoSinkHandle handle, bool ticking)
+{
+    if (find_playback_session(session_id))
+        Media::PlaybackManager::set_video_sink_ticking(handle, ticking);
+}
+
+void ConnectionFromClient::create_source_buffer(u64 session_id, u64 source_buffer_id)
+{
+    if (auto* session = find_playback_session(session_id))
+        session->create_source_buffer(source_buffer_id);
+}
+
+void ConnectionFromClient::destroy_source_buffer(u64 session_id, u64 source_buffer_id)
+{
+    if (auto* session = find_playback_session(session_id))
+        session->destroy_source_buffer(source_buffer_id);
+}
+
+void ConnectionFromClient::set_source_buffer_content_type(u64 session_id, u64 source_buffer_id, String subtype)
+{
+    if (auto* session = find_playback_session(session_id))
+        session->set_source_buffer_content_type(source_buffer_id, subtype);
+}
+
+void ConnectionFromClient::add_to_source_buffer_input(u64 session_id, u64 source_buffer_id, ByteBuffer data)
+{
+    if (auto* session = find_playback_session(session_id))
+        session->add_to_source_buffer_input(source_buffer_id, data.bytes());
+}
+
+void ConnectionFromClient::run_source_buffer_append(u64 session_id, u64 source_buffer_id, u64 append_generation)
+{
+    if (auto* session = find_playback_session(session_id))
+        session->run_source_buffer_append(source_buffer_id, append_generation);
+}
+
+void ConnectionFromClient::reset_source_buffer_parser(u64 session_id, u64 source_buffer_id)
+{
+    if (auto* session = find_playback_session(session_id))
+        session->run_source_buffer_command(source_buffer_id, Commands::ResetParserState {});
+}
+
+void ConnectionFromClient::remove_source_buffer_coded_frames(u64 session_id, u64 source_buffer_id, AK::Duration start, AK::Duration end)
+{
+    if (auto* session = find_playback_session(session_id))
+        session->remove_source_buffer_coded_frames(source_buffer_id, start, end);
+}
+
+void ConnectionFromClient::run_source_buffer_coded_frame_eviction(u64 session_id, u64 source_buffer_id, u64 new_data_size)
+{
+    if (auto* session = find_playback_session(session_id))
+        session->run_source_buffer_coded_frame_eviction(source_buffer_id, new_data_size);
+}
+
+Messages::MediaServer::RunSourceBufferCodedFrameEvictionSynchronouslyResponse ConnectionFromClient::run_source_buffer_coded_frame_eviction_synchronously(u64 session_id, u64 source_buffer_id, u64 new_data_size)
+{
+    auto* session = find_playback_session(session_id);
+    if (!session)
+        return OptionalNone {};
+    session->run_source_buffer_coded_frame_eviction(source_buffer_id, new_data_size);
+    return session->source_buffer_published_state(source_buffer_id);
+}
+
+void ConnectionFromClient::set_source_buffer_mode(u64 session_id, u64 source_buffer_id, Media::MediaSourceExtensions::AppendMode mode)
+{
+    if (mode > Media::MediaSourceExtensions::AppendMode::Sequence) {
+        did_misbehave("Invalid append mode");
+        return;
+    }
+    if (auto* session = find_playback_session(session_id))
+        session->run_source_buffer_command(source_buffer_id, Commands::SetMode { mode });
+}
+
+void ConnectionFromClient::set_source_buffer_timestamp_offset(u64 session_id, u64 source_buffer_id, AK::Duration timestamp_offset)
+{
+    if (auto* session = find_playback_session(session_id))
+        session->run_source_buffer_command(source_buffer_id, Commands::SetTimestampOffset { timestamp_offset });
+}
+
+void ConnectionFromClient::set_source_buffer_append_window(u64 session_id, u64 source_buffer_id, AK::Duration start, AK::Duration end)
+{
+    if (auto* session = find_playback_session(session_id))
+        session->run_source_buffer_command(source_buffer_id, Commands::SetAppendWindow { start, end });
+}
+
+void ConnectionFromClient::set_source_buffer_generate_timestamps_flag(u64 session_id, u64 source_buffer_id, bool flag)
+{
+    if (auto* session = find_playback_session(session_id))
+        session->run_source_buffer_command(source_buffer_id, Commands::SetGenerateTimestampsFlag { flag });
+}
+
+void ConnectionFromClient::set_source_buffer_pending_initialization_segment_for_change_type_flag(u64 session_id, u64 source_buffer_id, bool flag)
+{
+    if (auto* session = find_playback_session(session_id))
+        session->run_source_buffer_command(source_buffer_id, Commands::SetPendingInitializationSegmentForChangeTypeFlag { flag });
+}
+
+void ConnectionFromClient::set_source_buffer_reached_end_of_stream(u64 session_id, u64 source_buffer_id, bool reached)
+{
+    if (auto* session = find_playback_session(session_id))
+        session->run_source_buffer_command(source_buffer_id, Commands::SetReachedEndOfStream { reached });
+}
+
+}

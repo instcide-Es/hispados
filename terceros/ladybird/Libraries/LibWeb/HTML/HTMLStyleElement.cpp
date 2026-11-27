@@ -1,0 +1,92 @@
+/*
+ * Copyright (c) 2018-2021, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2021, the SerenityOS developers.
+ * Copyright (c) 2024, Jamie Mansfield <jmansfield@cadixdev.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/DOM/DOMTokenList.h>
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/HTML/HTMLStyleElement.h>
+
+namespace Web::HTML {
+
+GC_DEFINE_ALLOCATOR(HTMLStyleElement);
+
+HTMLStyleElement::HTMLStyleElement(DOM::Document& document, DOM::QualifiedName qualified_name)
+    : HTMLElement(document, move(qualified_name))
+{
+}
+
+HTMLStyleElement::~HTMLStyleElement() = default;
+
+// https://html.spec.whatwg.org/multipage/urls-and-fetching.html#blocking-attribute
+GC::Ref<DOM::DOMTokenList> HTMLStyleElement::blocking()
+{
+    if (!m_blocking)
+        m_blocking = DOM::DOMTokenList::create(*this, AttributeNames::blocking);
+    return *m_blocking;
+}
+
+void HTMLStyleElement::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_blocking);
+    visit_style_element_edges(visitor);
+}
+
+void HTMLStyleElement::adopted_from(DOM::Document& old_document)
+{
+    Base::adopted_from(old_document);
+
+    retarget_style_load_event_delayer(document());
+}
+
+void HTMLStyleElement::children_changed(ChildrenChangedMetadata const& metadata)
+{
+    Base::children_changed(metadata);
+    update_a_style_block_for_dynamic_change();
+}
+
+void HTMLStyleElement::inserted()
+{
+    Base::inserted();
+    update_a_style_block_for_dynamic_change();
+}
+
+void HTMLStyleElement::removed_from(IsSubtreeRoot is_subtree_root, Node* old_ancestor, Node& old_root)
+{
+    Base::removed_from(is_subtree_root, old_ancestor, old_root);
+    update_a_style_block_for_dynamic_change();
+}
+
+void HTMLStyleElement::moved_from(IsSubtreeRoot is_subtree_root, GC::Ptr<Node> old_ancestor)
+{
+    Base::moved_from(is_subtree_root, old_ancestor);
+    style_element_moved();
+}
+
+void HTMLStyleElement::attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_)
+{
+    Base::attribute_changed(name, old_value, value, namespace_);
+    if (!namespace_.has_value() && name == AttributeNames::blocking && m_blocking)
+        m_blocking->associated_attribute_changed(value);
+    style_element_attribute_changed(name, value);
+}
+
+// https://html.spec.whatwg.org/multipage/semantics.html#the-style-element
+bool HTMLStyleElement::is_implicitly_potentially_render_blocking() const
+{
+    // A style element is implicitly potentially render-blocking if the element was created by its node document's parser.
+    return style_element_was_created_by_parser();
+}
+
+// https://html.spec.whatwg.org/multipage/semantics.html#contributes-a-script-blocking-style-sheet
+bool HTMLStyleElement::contributes_a_script_blocking_style_sheet() const
+{
+    return style_element_contributes_a_script_blocking_style_sheet();
+}
+
+}

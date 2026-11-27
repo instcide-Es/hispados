@@ -1,0 +1,81 @@
+/*
+ * Copyright (c) 2023, Tim Flynn <trflynn89@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Utf16FlyString.h>
+#include <AK/Variant.h>
+#include <LibGC/Ptr.h>
+#include <LibGC/RootVector.h>
+#include <LibJS/Heap/Cell.h>
+#include <LibWeb/Export.h>
+#include <LibWeb/Forward.h>
+
+namespace Web::DOM {
+
+// https://dom.spec.whatwg.org/#concept-slotable
+using Slottable = Variant<GC::Ref<Element>, GC::Ref<Text>>;
+
+// https://dom.spec.whatwg.org/#mixin-slotable
+class WEB_API SlottableMixin {
+public:
+    virtual ~SlottableMixin();
+
+    virtual Node& slottable_as_node() = 0;
+
+    Utf16FlyString const& slottable_name() const; // Not called `name` to distinguish from `Element::name`.
+    void set_slottable_name(Utf16FlyString name);
+
+    GC::Ptr<HTML::HTMLSlotElement> assigned_slot();
+
+    GC::Ptr<HTML::HTMLSlotElement> assigned_slot_internal() const;
+    void set_assigned_slot(GC::Ptr<HTML::HTMLSlotElement> assigned_slot);
+
+    GC::Ptr<HTML::HTMLSlotElement> manual_slot_assignment();
+    void set_manual_slot_assignment(GC::Ptr<HTML::HTMLSlotElement> manual_slot_assignment);
+
+protected:
+    struct RareData {
+        void visit_edges(JS::Cell::Visitor&);
+
+        // https://dom.spec.whatwg.org/#slotable-name
+        Utf16FlyString name;
+
+        // https://dom.spec.whatwg.org/#slotable-assigned-slot
+        GC::Ptr<HTML::HTMLSlotElement> assigned_slot;
+
+        // https://dom.spec.whatwg.org/#slottable-manual-slot-assignment
+        GC::Ptr<HTML::HTMLSlotElement> manual_slot_assignment;
+    };
+
+    virtual RareData* slottable_rare_data() = 0;
+    virtual RareData const* slottable_rare_data() const = 0;
+    virtual RareData& ensure_slottable_rare_data() = 0;
+};
+
+enum class OpenFlag {
+    Set,
+    Unset,
+};
+
+enum class SignalSlotChange {
+    No,
+    Yes,
+};
+
+GC::Ptr<HTML::HTMLSlotElement> assigned_slot_for_node(GC::Ref<Node>);
+bool is_an_assigned_slottable(GC::Ref<Node>);
+
+GC::Ptr<HTML::HTMLSlotElement> find_a_slot(Slottable const&, OpenFlag = OpenFlag::Unset);
+GC::RootVector<Slottable> find_slottables(GC::Ref<HTML::HTMLSlotElement>);
+GC::RootVector<Slottable> find_flattened_slottables(GC::Ref<HTML::HTMLSlotElement>);
+void assign_slottables(GC::Ref<HTML::HTMLSlotElement>, SignalSlotChange = SignalSlotChange::Yes);
+void assign_slottables_for_a_tree(GC::Ref<Node>);
+void assign_a_slot(Slottable const&);
+void unassign_a_slot(Node&);
+void signal_a_slot_change(GC::Ref<HTML::HTMLSlotElement>);
+
+}

@@ -1,0 +1,4988 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+use super::*;
+use box_alignment::{
+    AxisDirections, ContentAlignment, ContentDistribution, ContentKeyword, OverflowSafety, SelfAlignment, SelfKeyword,
+    SelfPosition, SpaceDistribution,
+};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FlexFactor {
+    Grow,
+    Shrink,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum AxisDirection {
+    HorizontalLr,
+    HorizontalRl,
+    VerticalTb,
+    VerticalBt,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct DirectionAgnosticMargins {
+    main_before: CssPixels,
+    main_after: CssPixels,
+    cross_before: CssPixels,
+    cross_after: CssPixels,
+    main_before_is_auto: bool,
+    main_after_is_auto: bool,
+    cross_before_is_auto: bool,
+    cross_after_is_auto: bool,
+}
+
+#[derive(Clone, Copy)]
+enum UsedFlexBasis<'pass> {
+    Content,
+    Size { value: &'pass ComputedSize },
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct DirectionAgnosticSides {
+    main_before: CssPixels,
+    main_after: CssPixels,
+    cross_before: CssPixels,
+    cross_after: CssPixels,
+}
+
+#[derive(Clone, Copy)]
+struct FlexItemInputs<'pass> {
+    style: StyleValues<'pass>,
+    preferred_main_size: &'pass ComputedSize,
+    min_main_size: &'pass ComputedSize,
+    max_main_size: &'pass ComputedSize,
+    preferred_cross_size: &'pass ComputedSize,
+    min_cross_size: &'pass ComputedSize,
+    max_cross_size: &'pass ComputedSize,
+    flex_basis: &'pass ComputedSize,
+    flex_basis_is_content: bool,
+    flex_grow_factor: f64,
+    flex_shrink_factor: f64,
+    is_replaced_box: bool,
+    is_table_wrapper: bool,
+    is_scroll_container: bool,
+    preferred_aspect_ratio: Option<formatting_context::PixelFraction>,
+    auto_content_size: formatting_context::ReplacedIntrinsicSize,
+    inline_axis_is_horizontal: bool,
+    establishes_orthogonal_flow: bool,
+}
+
+#[derive(Clone, Copy)]
+struct FlexItemAlignmentFacts {
+    /// The item's alignment along the cross axis, where Start and End are the frame's left/top and right/bottom.
+    alignment: SelfAlignment,
+    is_stretched: bool,
+    uses_button_layout: bool,
+    centers_its_content: bool,
+}
+
+#[derive(Clone, Copy)]
+struct FlexItem {
+    box_: Node,
+    alignment_facts: FlexItemAlignmentFacts,
+    max_main_size_is_none: bool,
+    max_cross_size_is_none: bool,
+    used_flex_basis_is_definite: bool,
+    main_size_was_resolved_from_aspect_ratio: bool,
+    cross_size_was_resolved_from_aspect_ratio: bool,
+    frozen: bool,
+    is_min_violation: bool,
+    is_max_violation: bool,
+    cross_size_is_stretch: bool,
+    cross_size_is_calc_size: bool,
+    cross_min_or_max_size_is_stretch: bool,
+    main_min_size_is_auto: bool,
+    main_min_size_is_calc_size: bool,
+    flex_base_size: CssPixels,
+    automatic_minimum_size_before_flexing: Option<CssPixels>,
+    hypothetical_main_size: CssPixels,
+    hypothetical_cross_size: CssPixels,
+    hypothetical_cross_size_before_clamp: CssPixels,
+    target_main_size: CssPixels,
+    flex_factor: f64,
+    scaled_flex_shrink_factor: f64,
+    // The used main size of this flex item. Empty until determined.
+    main_size: Option<CssPixels>,
+    // The used cross size of this flex item. Empty until determined.
+    cross_size: Option<CssPixels>,
+    main_offset: CssPixels,
+    cross_offset: CssPixels,
+    margins: DirectionAgnosticMargins,
+    borders_and_padding: DirectionAgnosticSides,
+}
+
+#[derive(Clone, Copy)]
+struct FlexItemDetails<'pass> {
+    inputs: FlexItemInputs<'pass>,
+    /// The item's input cells as this flex container sizes it, which its run takes.
+    cells: used_values::RootInputCells,
+    used_flex_basis: UsedFlexBasis<'pass>,
+    // The cross size transferred through the aspect ratio before the automatic minimum size grew it to fit the
+    // content. The content resolves percentages against it.
+    cross_size_transferred_through_aspect_ratio: Option<CssPixels>,
+    content_baselines: DerivedBaselines,
+    /// For an item that establishes an orthogonal flow, its baselines along the horizontal axis of the container's
+    /// frame, as its run handed them back.
+    orthogonal_flow_baselines: Option<DerivedBaselines>,
+    // For a table wrapper stretched in the block axis, its measured table box and content block sizes.
+    stretched_table_wrapper_block_sizes: Option<sizing_context::TableWrapperBlockSizes>,
+}
+
+impl<'pass> FlexItemDetails<'pass> {
+    fn new(inputs: FlexItemInputs<'pass>, cells: used_values::RootInputCells) -> Self {
+        Self {
+            inputs,
+            cells,
+            used_flex_basis: UsedFlexBasis::Content,
+            cross_size_transferred_through_aspect_ratio: None,
+            content_baselines: DerivedBaselines::default(),
+            orthogonal_flow_baselines: None,
+            stretched_table_wrapper_block_sizes: None,
+        }
+    }
+}
+
+const _: () = assert!(size_of::<FlexItem>() <= 128);
+
+impl FlexItem {
+    fn new(
+        box_: Node,
+        alignment_facts: FlexItemAlignmentFacts,
+        inputs: &FlexItemInputs<'_>,
+        main_axis_is_horizontal: bool,
+    ) -> Self {
+        // https://drafts.csswg.org/css-sizing-3/#valdef-width-min-content
+        // NB: In a box's block axis, min-content, max-content and fit-content are equivalent to its automatic size, so
+        //     such a minimum main size is an automatic minimum size where the main axis is the item's block axis.
+        let main_axis_is_block_axis = main_axis_is_horizontal != inputs.inline_axis_is_horizontal;
+        let main_min_size_is_auto = inputs.min_main_size.is_auto()
+            || (main_axis_is_block_axis && inputs.min_main_size.is_intrinsic_sizing_constraint());
+        Self {
+            box_,
+            alignment_facts,
+            cross_size_is_stretch: inputs.preferred_cross_size.is_stretch(),
+            cross_size_is_calc_size: inputs.preferred_cross_size.calc_size().is_some(),
+            cross_min_or_max_size_is_stretch: inputs.min_cross_size.is_stretch() || inputs.max_cross_size.is_stretch(),
+            main_min_size_is_auto,
+            main_min_size_is_calc_size: inputs.min_main_size.calc_size().is_some(),
+            max_main_size_is_none: false,
+            max_cross_size_is_none: false,
+            used_flex_basis_is_definite: false,
+            main_size_was_resolved_from_aspect_ratio: false,
+            cross_size_was_resolved_from_aspect_ratio: false,
+            frozen: false,
+            is_min_violation: false,
+            is_max_violation: false,
+            flex_base_size: CssPixels::default(),
+            automatic_minimum_size_before_flexing: None,
+            hypothetical_main_size: CssPixels::default(),
+            hypothetical_cross_size: CssPixels::default(),
+            hypothetical_cross_size_before_clamp: CssPixels::default(),
+            target_main_size: CssPixels::default(),
+            flex_factor: 0.0,
+            scaled_flex_shrink_factor: 0.0,
+            main_size: None,
+            cross_size: None,
+            main_offset: CssPixels::default(),
+            cross_offset: CssPixels::default(),
+            margins: DirectionAgnosticMargins::default(),
+            borders_and_padding: DirectionAgnosticSides::default(),
+        }
+    }
+
+    fn hypothetical_cross_size_with_margins(&self) -> CssPixels {
+        self.hypothetical_cross_size
+            + self.margins.cross_before
+            + self.margins.cross_after
+            + self.borders_and_padding.cross_after
+            + self.borders_and_padding.cross_before
+    }
+
+    fn outer_hypothetical_main_size(&self) -> CssPixels {
+        self.add_main_margin_box_sizes(self.hypothetical_main_size)
+    }
+
+    fn outer_cross_size(&self) -> CssPixels {
+        self.add_cross_margin_box_sizes(self.cross_size.unwrap())
+    }
+
+    fn outer_target_main_size(&self) -> CssPixels {
+        self.add_main_margin_box_sizes(self.target_main_size)
+    }
+
+    fn outer_flex_base_size(&self) -> CssPixels {
+        self.add_main_margin_box_sizes(self.flex_base_size)
+    }
+
+    fn add_main_margin_box_sizes(&self, content_size: CssPixels) -> CssPixels {
+        content_size
+            + self.margins.main_before
+            + self.margins.main_after
+            + self.borders_and_padding.main_before
+            + self.borders_and_padding.main_after
+    }
+
+    fn add_cross_margin_box_sizes(&self, content_size: CssPixels) -> CssPixels {
+        content_size
+            + self.margins.cross_before
+            + self.margins.cross_after
+            + self.borders_and_padding.cross_before
+            + self.borders_and_padding.cross_after
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+struct FlexLineItems {
+    first: usize,
+    count: usize,
+    reversed: bool,
+}
+
+impl FlexLineItems {
+    fn len(&self) -> usize {
+        self.count
+    }
+
+    fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+
+    fn at(&self, position: usize) -> usize {
+        debug_assert!(position < self.count);
+        if self.reversed {
+            self.first + self.count - 1 - position
+        } else {
+            self.first + position
+        }
+    }
+
+    fn iter(&self) -> impl DoubleEndedIterator<Item = usize> + ExactSizeIterator + use<> {
+        let items = *self;
+        (0..items.count).map(move |position| items.at(position))
+    }
+}
+
+#[derive(Clone, Copy)]
+struct FlexLine {
+    items: FlexLineItems,
+    cross_size: CssPixels,
+    has_baseline_aligned_items: bool,
+    remaining_free_space: Option<CssPixels>,
+    growth_state: formatting_context::FlexLayoutGrowthState,
+}
+
+impl Default for FlexLine {
+    fn default() -> Self {
+        Self {
+            items: FlexLineItems::default(),
+            cross_size: CssPixels::default(),
+            has_baseline_aligned_items: false,
+            remaining_free_space: None,
+            growth_state: formatting_context::FlexLayoutGrowthState::Growing,
+        }
+    }
+}
+
+struct UnfrozenItemsOfLine {
+    remaining_free_space: Option<CssPixels>,
+    unfrozen_count: usize,
+    unfrozen_flex_factor_sum: f64,
+}
+
+#[derive(Clone, Copy)]
+struct AxisAgnosticAvailableSpace {
+    main: AvailableSize,
+    cross: AvailableSize,
+    space: AvailableSpace,
+}
+
+#[derive(Clone, Copy)]
+enum ItemBlockSizeMeasuredAt {
+    UsedMainSize,
+    IntrinsicBlockInlineSize,
+}
+
+#[derive(Clone, Copy)]
+struct ItemRunsOfferedToBlockSizeMeasurements {
+    measured_at: ItemBlockSizeMeasuredAt,
+    space_for_items: AvailableSpace,
+}
+
+#[derive(Clone, Copy)]
+struct FlexContainerConstants<'pass> {
+    style: StyleValues<'pass>,
+    is_row_layout: bool,
+    inline_axis_is_horizontal: bool,
+    main_axis_is_horizontal: bool,
+    is_legacy_webkit_box: bool,
+    used_flex_wrap: u8,
+    is_direction_reverse: bool,
+    cross_axis_is_reverse: bool,
+    /// How the container aligns its items along the main axis and its lines along the cross axis.
+    justify_content: ContentAlignment,
+    align_content: ContentAlignment,
+    /// The directions of the cross axis, but for the start side of an item.
+    cross_axis_directions: AxisDirections,
+    main_gap: &'pass ComputedGap,
+    cross_gap: &'pass ComputedGap,
+}
+
+impl<'pass> FlexContainerConstants<'pass> {
+    // https://www.w3.org/TR/css-flexbox-1/#flex-direction-property
+    fn of(run: &FormattingContextRun<'pass>) -> Self {
+        let style = StyleValues::for_node(&run.pass, run.box_);
+        let flex_direction = style.effective_flex_direction();
+        let is_row_layout = matches!(flex_direction, flex_direction::ROW | flex_direction::ROW_REVERSE);
+        let inline_axis_is_horizontal = !geometry::Frame::of(style.writing_mode()).is_orthogonal_to(run.pass.frame);
+        let main_axis_is_horizontal = inline_axis_is_horizontal == is_row_layout;
+        let is_legacy_webkit_box = style.display().inside == display_inside::_WEBKIT_BOX;
+        // AD-HOC: A legacy webkit box is always single-line; `flex-wrap` does not apply, matching other engines.
+        let used_flex_wrap = if is_legacy_webkit_box {
+            flex_wrap::NOWRAP
+        } else {
+            style.flex_wrap()
+        };
+        let main_axis_is_parallel_to_inline_axis = main_axis_is_horizontal == inline_axis_is_horizontal;
+        let mut cross_axis_is_reverse = if main_axis_is_parallel_to_inline_axis {
+            style.block_axis_is_reverse()
+        } else {
+            style.inline_axis_is_reverse()
+        };
+        // https://drafts.csswg.org/css-flexbox/#flex-wrap-property
+        // When flex-wrap is wrap-reverse, the cross-start and cross-end directions are swapped.
+        // NB: The writing mode of the container decides where 'start' and 'end' are, without that swap.
+        let cross_axis_directions = AxisDirections {
+            flex_start_is_low: cross_axis_is_reverse == (used_flex_wrap == flex_wrap::WRAP_REVERSE),
+            ..AxisDirections::of(!cross_axis_is_reverse, None)
+        };
+        if used_flex_wrap == flex_wrap::WRAP_REVERSE {
+            cross_axis_is_reverse = !cross_axis_is_reverse;
+        }
+        let main_axis_writing_mode_start_is_reverse = if is_row_layout {
+            style.inline_axis_is_reverse()
+        } else {
+            style.block_axis_is_reverse()
+        };
+        let flex_direction_is_reverse = matches!(
+            flex_direction,
+            flex_direction::COLUMN_REVERSE | flex_direction::ROW_REVERSE
+        );
+        let is_direction_reverse = main_axis_writing_mode_start_is_reverse != flex_direction_is_reverse;
+        // https://drafts.csswg.org/css-align-3/#positional-values
+        // left: Aligns the alignment subject to be flush with the alignment container's line-left or physical left
+        //       edge, whichever is in the appropriate axis.
+        //       If the property's axis is not parallel with either left↔right axis, this value behaves as start.
+        // NB: The frame's left side is the line-left side. The main axis of a column flex container runs along the
+        //     physical left↔right axis in a vertical writing mode.
+        let frame = run.pass.frame;
+        let main_axis_line_left_is_low = if is_row_layout {
+            Some(true)
+        } else if frame.is_transposed() {
+            Some(frame.frame_side(geometry::Side::Left) != geometry::Side::Bottom)
+        } else {
+            None
+        };
+        let main_axis_directions = AxisDirections {
+            flex_start_is_low: !is_direction_reverse,
+            ..AxisDirections::of(!main_axis_writing_mode_start_is_reverse, main_axis_line_left_is_low)
+        };
+        // AD-HOC: A legacy webkit box distributes its items along the main axis as its -webkit-box-pack says, and
+        //         ignores justify-content, matching other engines. The compat spec makes -webkit-box-pack an alias of
+        //         justify-content, which it notes isn't web-compatible: https://github.com/whatwg/compat/issues/87
+        let (justify_content, justify_content_safety) = if is_legacy_webkit_box {
+            (ContentKeyword::webkit_box_pack_of(*style), OverflowSafety::Unsafe)
+        } else {
+            ContentKeyword::justify_content_of(*style)
+        };
+        let (align_content, align_content_safety) = ContentKeyword::align_content_of(*style);
+        let (main_gap, cross_gap) = if is_row_layout {
+            (style.column_gap(), style.row_gap())
+        } else {
+            (style.row_gap(), style.column_gap())
+        };
+        Self {
+            style,
+            is_row_layout,
+            inline_axis_is_horizontal,
+            main_axis_is_horizontal,
+            is_legacy_webkit_box,
+            used_flex_wrap,
+            is_direction_reverse,
+            cross_axis_is_reverse,
+            justify_content: justify_content.resolve(justify_content_safety, main_axis_directions),
+            align_content: align_content.resolve(align_content_safety, cross_axis_directions),
+            cross_axis_directions,
+            main_gap,
+            cross_gap,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(super) struct FlexFormattingContext<'pass> {
+    run: FormattingContextRun<'pass>,
+    flex_lines: Vec<FlexLine>,
+    flex_items: Vec<FlexItem>,
+    flex_item_details: Vec<FlexItemDetails<'pass>>,
+    derived_baselines_of_root_box: DerivedBaselines,
+    /// The lines and items the devtools show of the container, where the run collects devtools data.
+    flex_layout_data: Option<std::sync::Arc<formatting_context::FlexLayoutData>>,
+    container: FlexContainerConstants<'pass>,
+    available_space_for_items: Option<AxisAgnosticAvailableSpace>,
+    available_space: Option<AvailableSpace>,
+    layout_input: Option<LayoutInput>,
+    /// The space in which the container resolves its own automatic block size, if its run left that to it.
+    own_automatic_block_size_resolution_space: Option<AvailableSpace>,
+    item_percentage_bases: ContainingBlockConstraints,
+    item_runs_offered_to_block_size_measurements: Option<ItemRunsOfferedToBlockSizeMeasurements>,
+    flex_item_index_by_node: OnceCell<HashMap<Node, usize>>,
+    items_to_fork: OnceCell<Vec<usize>>,
+    in_flow_items_margin_box_block_extent: Option<CssPixels>,
+    /// The cells in which this context sizes the flex container, in the frame its items are laid out in. The context
+    /// takes them again after the run sizes the container's own box.
+    container_cells: Cell<used_values::RootInputCells>,
+}
+
+impl formatting_context::ChildRunShapes for FlexFormattingContext<'_> {
+    fn child_run_shape_at(
+        &self,
+        node: Node,
+        inline_size: CssPixels,
+        constraints: ContainingBlockConstraints,
+    ) -> Option<formatting_context::ChildRunShape> {
+        let offered = self.item_runs_offered_to_block_size_measurements?;
+        let index = self.index_of_flex_item(node)?;
+        let measured_inline_size = match offered.measured_at {
+            ItemBlockSizeMeasuredAt::UsedMainSize => {
+                if self.has_definite_cross_size(index) {
+                    return None;
+                }
+                clamp_to_max_dimension_value(self.flex_items[index].main_size?)
+            }
+            ItemBlockSizeMeasuredAt::IntrinsicBlockInlineSize => {
+                if self.has_definite_main_size(index) {
+                    return None;
+                }
+                self.intrinsic_block_inline_size(index)
+            }
+        };
+        self.item_run_shape(index, measured_inline_size, offered.space_for_items)
+            .filter(|shape| shape.lays_out_at(inline_size, constraints))
+    }
+}
+
+impl<'pass> formatting_context::FormattingContextAlgorithm<'pass> for FlexFormattingContext<'pass> {
+    fn lay_out(
+        &mut self,
+        run: &FormattingContextRun<'pass>,
+        input: formatting_context::AlgorithmInput<'_>,
+    ) -> formatting_context::AlgorithmOutput {
+        self.run(run, input.body_input, input.flex_self_block_size_resolution_space);
+        let container_cells = self.container_cells.get();
+        let mut root_payload = fragment_tree::PendingPayload::default();
+        if let Some(flex_layout_data) = self.flex_layout_data.take() {
+            root_payload.set(fragment_tree::FcPayload::Flex(flex_layout_data));
+        }
+        formatting_context::AlgorithmOutput::of_root(
+            formatting_context::ChildLayoutResult {
+                automatic_content_block_size: container_cells.content_block_size,
+                baselines: self.derived_baselines_of_root_box,
+                in_flow_children_margin_box_block_extent: self.in_flow_items_margin_box_block_extent,
+                ..formatting_context::ChildLayoutResult::default()
+            },
+            container_cells,
+        )
+        .with_root_payload(root_payload)
+    }
+
+    fn after_root_is_dimensioned(
+        &self,
+        _run: &FormattingContextRun<'pass>,
+        root_cells_in_own_frame: used_values::RootInputCells,
+    ) -> formatting_context::AfterDimensioning {
+        self.parent_did_dimension(root_cells_in_own_frame);
+        formatting_context::AfterDimensioning::LaysOutAbsposContainedByRoot
+    }
+}
+
+impl<'pass> FlexFormattingContext<'pass> {
+    pub(super) fn new(run: &FormattingContextRun<'pass>, container_cells: used_values::RootInputCells) -> Self {
+        Self {
+            run: run.clone(),
+            flex_layout_data: None,
+            flex_lines: Vec::new(),
+            flex_items: Vec::new(),
+            flex_item_details: Vec::new(),
+            derived_baselines_of_root_box: DerivedBaselines::default(),
+            container: FlexContainerConstants::of(run),
+            available_space_for_items: None,
+            available_space: None,
+            layout_input: None,
+            own_automatic_block_size_resolution_space: None,
+            item_percentage_bases: ContainingBlockConstraints::default(),
+            item_runs_offered_to_block_size_measurements: None,
+            flex_item_index_by_node: OnceCell::new(),
+            items_to_fork: OnceCell::new(),
+            in_flow_items_margin_box_block_extent: None,
+            container_cells: Cell::new(container_cells),
+        }
+    }
+
+    #[inline]
+    fn style(&self, node: Node) -> StyleValues<'pass> {
+        StyleValues::for_node(&self.run.pass, node)
+    }
+
+    #[inline]
+    fn facts(&self, node: Node) -> NodeFacts<'_> {
+        NodeFacts::new(&self.run.pass, node)
+    }
+
+    #[inline]
+    fn sizing(&self) -> sizing_context::SizingContext<'pass, '_> {
+        sizing_context::SizingContext::new(self.run.state, self.run.pass).with_child_run_shapes(self)
+    }
+
+    fn keep_item_for_its_run(&self, node: Node) -> used_values::RootInputCells {
+        let constraints = self.item_percentage_bases;
+        used_values::cells_before_sizing(&self.run.pass, node, constraints)
+    }
+
+    /// The constraints the children of the container are laid out with, where the container is laid out with the
+    /// constraints `constraints`.
+    fn constraints_for_children(&self, constraints: ContainingBlockConstraints) -> ContainingBlockConstraints {
+        self.sizing()
+            .constraints_for_child_context(self.run.box_, &self.container_cells, constraints)
+    }
+
+    fn item_containing_block_constraints(&self) -> ContainingBlockConstraints {
+        self.item_percentage_bases
+    }
+
+    fn is_row_layout(&self) -> bool {
+        self.container.is_row_layout
+    }
+
+    fn is_legacy_webkit_box(&self) -> bool {
+        self.container.is_legacy_webkit_box
+    }
+
+    fn item_of_legacy_webkit_box_fits_its_content(&self, index: usize) -> bool {
+        let inputs = &self.flex_item_details[index].inputs;
+        self.is_legacy_webkit_box()
+            && self.is_row_layout()
+            && !inputs.flex_basis_is_content
+            && inputs.flex_basis.is_auto()
+            && inputs.preferred_main_size.is_auto()
+    }
+
+    /// The order of an item styled `style` in order-modified document order.
+    fn order_of_item(&self, style: StyleValues<'_>) -> i32 {
+        // AD-HOC: The items of a legacy webkit box are ordered by their -webkit-box-ordinal-group, and order doesn't
+        //         apply, matching other engines.
+        if self.is_legacy_webkit_box() {
+            style.webkit_box_ordinal_group()
+        } else {
+            style.order()
+        }
+    }
+
+    fn used_flex_wrap(&self) -> u8 {
+        self.container.used_flex_wrap
+    }
+
+    fn is_single_line(&self) -> bool {
+        self.used_flex_wrap() == flex_wrap::NOWRAP
+    }
+
+    fn main_axis_is_horizontal(&self) -> bool {
+        self.container.main_axis_is_horizontal
+    }
+
+    fn cross_axis_is_horizontal(&self) -> bool {
+        !self.main_axis_is_horizontal()
+    }
+
+    // Picks whichever of the two values describes the main (resp. cross) axis of this flex container.
+    fn select_main<T>(&self, horizontal: T, vertical: T) -> T {
+        if self.main_axis_is_horizontal() {
+            horizontal
+        } else {
+            vertical
+        }
+    }
+
+    fn select_cross<T>(&self, horizontal: T, vertical: T) -> T {
+        self.select_main(vertical, horizontal)
+    }
+
+    fn main_sizing_axis(&self) -> SizingAxis {
+        self.select_main(SizingAxis::Inline, SizingAxis::Block)
+    }
+
+    fn cross_sizing_axis(&self) -> SizingAxis {
+        self.select_cross(SizingAxis::Inline, SizingAxis::Block)
+    }
+
+    fn main_axis_is_parallel_to_inline_axis_of_item(&self, index: usize) -> bool {
+        self.main_axis_is_horizontal() == self.flex_item_details[index].inputs.inline_axis_is_horizontal
+    }
+
+    fn cross_axis_is_reverse(&self) -> bool {
+        self.container.cross_axis_is_reverse
+    }
+
+    fn is_direction_reverse(&self) -> bool {
+        self.container.is_direction_reverse
+    }
+
+    // Both sizes are content sizes; the ratio applies to the border box under box-sizing: border-box.
+    fn main_size_from_cross_size_and_aspect_ratio(&self, index: usize, cross_size: CssPixels) -> CssPixels {
+        self.content_size_transferred_through_aspect_ratio(index, cross_size, self.main_axis_is_horizontal())
+    }
+
+    fn cross_size_from_main_size_and_aspect_ratio(&self, index: usize, main_size: CssPixels) -> CssPixels {
+        self.content_size_transferred_through_aspect_ratio(index, main_size, self.cross_axis_is_horizontal())
+    }
+
+    fn content_size_transferred_through_aspect_ratio(
+        &self,
+        index: usize,
+        size_in_ratio_determining_axis: CssPixels,
+        ratio_dependent_axis_is_horizontal: bool,
+    ) -> CssPixels {
+        let inputs = &self.flex_item_details[index].inputs;
+        sizing_context::SizingContext::content_size_transferred_through_aspect_ratio(
+            inputs.style,
+            &self.flex_item_details[index].cells,
+            inputs.preferred_aspect_ratio.unwrap(),
+            size_in_ratio_determining_axis,
+            if ratio_dependent_axis_is_horizontal {
+                SizingAxis::Inline
+            } else {
+                SizingAxis::Block
+            },
+        )
+    }
+
+    // The content size that a min/max size in an axis of the item allows, per its box-sizing.
+    fn inner_size_for_min_max_through_aspect_ratio(
+        &self,
+        index: usize,
+        size: &ComputedSize,
+        reference: CssPixels,
+        horizontal: bool,
+    ) -> CssPixels {
+        let value = size.to_px(reference);
+        let style = self.flex_item_details[index].inputs.style;
+        if style.box_sizing() != box_sizing::BORDER_BOX {
+            return value;
+        }
+        let metrics = &self.flex_item_details[index].cells;
+        if horizontal {
+            formatting_context::subtract_border_box_adjustment(
+                value,
+                style.border_left_width(),
+                metrics.padding_left(),
+                style.border_right_width(),
+                metrics.padding_right(),
+            )
+        } else {
+            formatting_context::subtract_border_box_adjustment(
+                value,
+                style.border_top_width(),
+                metrics.padding_top(),
+                style.border_bottom_width(),
+                metrics.padding_bottom(),
+            )
+        }
+    }
+
+    fn has_definite_main_size_used(&self, metrics: &impl BoxMetricCells) -> bool {
+        self.select_main(metrics.has_definite_inline_size(), metrics.has_definite_block_size())
+    }
+
+    fn has_definite_cross_size_used(&self, metrics: &impl BoxMetricCells) -> bool {
+        self.select_cross(metrics.has_definite_inline_size(), metrics.has_definite_block_size())
+    }
+
+    fn container_cross_size_is_known_for_layout(&self) -> bool {
+        self.has_definite_cross_size_used(&self.container_cells)
+            || (self.layout_input.as_ref().unwrap().participation == ParticipationInParentFormattingContext::Item
+                && !self
+                    .available_space_for_items
+                    .unwrap()
+                    .cross
+                    .is_intrinsic_sizing_constraint())
+    }
+
+    fn has_definite_main_size(&self, index: usize) -> bool {
+        self.has_definite_main_size_used(&self.flex_item_details[index].cells)
+    }
+
+    fn has_definite_cross_size(&self, index: usize) -> bool {
+        self.has_definite_cross_size_used(&self.flex_item_details[index].cells)
+    }
+
+    fn inner_main_size_used(&self, metrics: &impl BoxMetricCells) -> CssPixels {
+        self.select_main(metrics.content_inline_size(), metrics.content_block_size())
+    }
+
+    fn inner_cross_size_used(&self, metrics: &impl BoxMetricCells) -> CssPixels {
+        self.select_cross(metrics.content_inline_size(), metrics.content_block_size())
+    }
+
+    fn inner_main_size(&self, index: usize) -> CssPixels {
+        self.inner_main_size_used(&self.flex_item_details[index].cells)
+    }
+
+    fn inner_cross_size(&self, index: usize) -> CssPixels {
+        self.inner_cross_size_used(&self.flex_item_details[index].cells)
+    }
+
+    fn set_has_definite_main_size(&mut self, index: usize) {
+        let main_axis_is_horizontal = self.main_axis_is_horizontal();
+        let cells = &mut self.flex_item_details[index].cells;
+        if main_axis_is_horizontal {
+            cells.has_definite_inline_size = true;
+        } else {
+            cells.has_definite_block_size = true;
+        }
+    }
+
+    fn set_has_definite_cross_size(&mut self, index: usize) {
+        let cross_axis_is_horizontal = self.cross_axis_is_horizontal();
+        let cells = &mut self.flex_item_details[index].cells;
+        if cross_axis_is_horizontal {
+            cells.has_definite_inline_size = true;
+        } else {
+            cells.has_definite_block_size = true;
+        }
+    }
+
+    fn set_main_size(&mut self, index: usize, size: CssPixels) {
+        let main_axis_is_horizontal = self.main_axis_is_horizontal();
+        Self::set_size_of_item_cells(&mut self.flex_item_details[index].cells, main_axis_is_horizontal, size);
+    }
+
+    fn set_cross_size(&mut self, index: usize, size: CssPixels) {
+        let cross_axis_is_horizontal = self.cross_axis_is_horizontal();
+        Self::set_size_of_item_cells(&mut self.flex_item_details[index].cells, cross_axis_is_horizontal, size);
+    }
+
+    fn set_size_of_item_cells(cells: &mut used_values::RootInputCells, axis_is_horizontal: bool, size: CssPixels) {
+        if axis_is_horizontal {
+            cells.set_content_inline_size(size);
+        } else {
+            cells.set_content_block_size(size);
+        }
+    }
+
+    fn set_container_main_size(&mut self, size: CssPixels) {
+        self.set_main_size_used(&self.container_cells, size);
+    }
+
+    fn set_container_cross_size(&mut self, size: CssPixels) {
+        self.set_cross_size_used(&self.container_cells, size);
+    }
+
+    fn set_main_size_used(&self, used: &Cell<used_values::RootInputCells>, size: CssPixels) {
+        if self.main_axis_is_horizontal() {
+            used.set_content_inline_size(size);
+        } else {
+            used.set_content_block_size(size);
+        }
+    }
+
+    fn set_cross_size_used(&self, used: &Cell<used_values::RootInputCells>, size: CssPixels) {
+        if self.cross_axis_is_horizontal() {
+            used.set_content_inline_size(size);
+        } else {
+            used.set_content_block_size(size);
+        }
+    }
+
+    fn computed_main_size(&self, index: usize) -> &'pass ComputedSize {
+        self.flex_item_details[index].inputs.preferred_main_size
+    }
+
+    fn computed_main_min_size(&self, index: usize) -> &'pass ComputedSize {
+        self.flex_item_details[index].inputs.min_main_size
+    }
+
+    fn computed_main_max_size(&self, index: usize) -> &'pass ComputedSize {
+        self.flex_item_details[index].inputs.max_main_size
+    }
+
+    fn computed_cross_size(&self, index: usize) -> &'pass ComputedSize {
+        self.flex_item_details[index].inputs.preferred_cross_size
+    }
+
+    fn computed_cross_min_size(&self, index: usize) -> &'pass ComputedSize {
+        self.flex_item_details[index].inputs.min_cross_size
+    }
+
+    fn computed_cross_max_size(&self, index: usize) -> &'pass ComputedSize {
+        self.flex_item_details[index].inputs.max_cross_size
+    }
+
+    fn container_computed_main_size(&self) -> &'pass ComputedSize {
+        let style = self.container.style;
+        self.select_main(style.width(), style.height())
+    }
+
+    fn container_computed_cross_min_size(&self) -> (&'pass ComputedSize, SizingProperty) {
+        let style = self.container.style;
+        self.select_cross(
+            (style.min_width(), SizingProperty::MinWidth),
+            (style.min_height(), SizingProperty::MinHeight),
+        )
+    }
+
+    fn container_computed_cross_max_size(&self) -> (&'pass ComputedSize, SizingProperty) {
+        let style = self.container.style;
+        self.select_cross(
+            (style.max_width(), SizingProperty::MaxWidth),
+            (style.max_height(), SizingProperty::MaxHeight),
+        )
+    }
+
+    fn calculate_inner_size(
+        &self,
+        index: usize,
+        axis: SizingAxis,
+        value: &ComputedSize,
+        available_space: AvailableSpace,
+    ) -> CssPixels {
+        let sized = sizing_context::SizedBox::new(self.flex_items[index].box_, &self.flex_item_details[index].cells);
+        let constraints = self.item_containing_block_constraints();
+        match axis {
+            SizingAxis::Inline => {
+                self.sizing()
+                    .calculate_inner_inline_size(sized, available_space.inline_size, value, constraints)
+            }
+            SizingAxis::Block => self
+                .sizing()
+                .calculate_inner_block_size(sized, available_space, value, constraints),
+        }
+    }
+
+    fn calculate_inner_size_with_constraints(
+        &self,
+        sized: sizing_context::SizedBox<'_>,
+        axis: SizingAxis,
+        property: SizingProperty,
+        available_space: AvailableSpace,
+        constraints: ContainingBlockConstraints,
+    ) -> CssPixels {
+        self.sizing()
+            .calculate_inner_size_for_property(sized, axis, property, available_space, constraints)
+    }
+
+    fn resolve_inner_inline_size(&self, index: usize, value: &ComputedSize) -> CssPixels {
+        self.calculate_inner_size(
+            index,
+            SizingAxis::Inline,
+            value,
+            AvailableSpace {
+                inline_size: self.available_space.unwrap().inline_size,
+                block_size: AvailableSize::Indefinite,
+            },
+        )
+    }
+
+    fn resolve_inner_block_size(&self, index: usize, value: &ComputedSize) -> CssPixels {
+        // NOTE: When the main axis is horizontal, after we've determined the main size, we use that as the
+        //       available inline size for any intrinsic sizing layout needed to resolve the block size.
+        let available_space = if self.main_axis_is_horizontal() && value.is_intrinsic_sizing_constraint() {
+            AvailableSpace {
+                inline_size: self.flex_items[index]
+                    .main_size
+                    .map(|size| AvailableSize::definite(clamp_to_max_dimension_value(size)))
+                    .unwrap_or(AvailableSize::Indefinite),
+                block_size: AvailableSize::Indefinite,
+            }
+        } else {
+            self.available_space.unwrap()
+        };
+        self.calculate_inner_size(index, SizingAxis::Block, value, available_space)
+    }
+
+    fn resolve_size_for_axis(&self, index: usize, axis_is_horizontal: bool, value: &ComputedSize) -> CssPixels {
+        if axis_is_horizontal {
+            self.resolve_inner_inline_size(index, value)
+        } else {
+            self.resolve_inner_block_size(index, value)
+        }
+    }
+
+    fn calculate_fit_content_size(&self, index: usize, axis: SizingAxis, space: AvailableSpace) -> CssPixels {
+        self.sizing().calculate_fit_content_size(
+            sizing_context::SizedBox::new(self.flex_items[index].box_, &self.flex_item_details[index].cells),
+            axis,
+            space,
+            self.item_containing_block_constraints(),
+        )
+    }
+
+    fn should_treat_size_as_auto(&self, sized: sizing_context::SizedBox<'_>, axis: SizingAxis) -> bool {
+        self.sizing().should_treat_size_as_auto(
+            sized,
+            axis,
+            self.available_space_for_items.unwrap().space,
+            self.item_containing_block_constraints(),
+        )
+    }
+
+    fn should_treat_main_size_as_auto(&self, index: usize) -> bool {
+        self.should_treat_size_as_auto(
+            sizing_context::SizedBox::new(self.flex_items[index].box_, &self.flex_item_details[index].cells),
+            self.main_sizing_axis(),
+        )
+    }
+
+    fn should_treat_cross_size_as_auto(&self, index: usize) -> bool {
+        self.should_treat_size_as_auto(
+            sizing_context::SizedBox::new(self.flex_items[index].box_, &self.flex_item_details[index].cells),
+            if self.cross_axis_is_horizontal() {
+                SizingAxis::Inline
+            } else {
+                SizingAxis::Block
+            },
+        )
+    }
+
+    fn max_size_is_treated_as_none(
+        &self,
+        max_size: &ComputedSize,
+        is_replaced_box: bool,
+        axis_is_horizontal: bool,
+        available: AvailableSize,
+        constraints: ContainingBlockConstraints,
+    ) -> bool {
+        if axis_is_horizontal {
+            sizing_context::SizingContext::max_inline_size_value_is_treated_as_none(
+                max_size,
+                || is_replaced_box,
+                available,
+                constraints,
+            )
+        } else {
+            sizing_context::SizingContext::max_block_size_value_is_treated_as_none(max_size, available, constraints)
+        }
+    }
+
+    fn resolve_whether_max_sizes_of_items_are_treated_as_none(&mut self) {
+        let available = self.available_space_for_items.unwrap();
+        let constraints = self.item_containing_block_constraints();
+        let main_axis_is_horizontal = self.main_axis_is_horizontal();
+        for index in 0..self.flex_items.len() {
+            let inputs = self.flex_item_details[index].inputs;
+            let max_main_size_is_none = self.max_size_is_treated_as_none(
+                inputs.max_main_size,
+                inputs.is_replaced_box,
+                main_axis_is_horizontal,
+                available.main,
+                constraints,
+            );
+            let max_cross_size_is_none = self.max_size_is_treated_as_none(
+                inputs.max_cross_size,
+                inputs.is_replaced_box,
+                !main_axis_is_horizontal,
+                available.cross,
+                constraints,
+            );
+            let item = &mut self.flex_items[index];
+            item.max_main_size_is_none = max_main_size_is_none;
+            item.max_cross_size_is_none = max_cross_size_is_none;
+        }
+    }
+
+    fn should_treat_max_size_as_none(&self, index: usize, cross: bool) -> bool {
+        let item = &self.flex_items[index];
+        if cross {
+            item.max_cross_size_is_none
+        } else {
+            item.max_main_size_is_none
+        }
+    }
+
+    fn should_treat_max_inline_size_as_none(&self, index: usize) -> bool {
+        self.should_treat_max_size_as_none(index, self.cross_axis_is_horizontal())
+    }
+
+    fn container_should_treat_max_cross_size_as_none(&self) -> bool {
+        let (max_cross_size, _) = self.container_computed_cross_max_size();
+        self.max_size_is_treated_as_none(
+            max_cross_size,
+            self.facts(self.run.box_).is_replaced_box(),
+            self.cross_axis_is_horizontal(),
+            self.available_space_for_items.unwrap().cross,
+            self.layout_input.as_ref().unwrap().containing_block_constraints,
+        )
+    }
+
+    fn has_main_min_size(&self, index: usize) -> bool {
+        !self.flex_items[index].main_min_size_is_auto
+    }
+
+    fn has_cross_min_size(&self, index: usize) -> bool {
+        !crate::layout::sizing_context::is_plain_auto(self.computed_cross_min_size(index))
+    }
+
+    fn has_main_max_size(&self, index: usize) -> bool {
+        !self.should_treat_max_size_as_none(index, false)
+    }
+
+    fn has_cross_max_size(&self, index: usize) -> bool {
+        !self.should_treat_max_size_as_none(index, true)
+    }
+
+    fn specified_main_min_size(&self, index: usize) -> CssPixels {
+        self.resolve_size_for_axis(
+            index,
+            self.main_axis_is_horizontal(),
+            self.computed_main_min_size(index),
+        )
+    }
+
+    fn specified_cross_min_size(&self, index: usize) -> CssPixels {
+        self.resolve_size_for_axis(
+            index,
+            self.cross_axis_is_horizontal(),
+            self.computed_cross_min_size(index),
+        )
+    }
+
+    fn specified_main_max_size(&self, index: usize) -> CssPixels {
+        self.resolve_size_for_axis(
+            index,
+            self.main_axis_is_horizontal(),
+            self.computed_main_max_size(index),
+        )
+    }
+
+    fn specified_cross_max_size(&self, index: usize) -> CssPixels {
+        self.resolve_size_for_axis(
+            index,
+            self.cross_axis_is_horizontal(),
+            self.computed_cross_max_size(index),
+        )
+    }
+
+    // https://drafts.csswg.org/css-flexbox-1/#algo-available
+    fn determine_available_space_for_items(&mut self, available_space: AvailableSpace) {
+        self.available_space_for_items = Some(if self.main_axis_is_horizontal() {
+            AxisAgnosticAvailableSpace {
+                main: available_space.inline_size,
+                cross: available_space.block_size,
+                space: available_space,
+            }
+        } else {
+            AxisAgnosticAvailableSpace {
+                main: available_space.block_size,
+                cross: available_space.inline_size,
+                space: available_space,
+            }
+        });
+        self.resolve_whether_max_sizes_of_items_are_treated_as_none();
+    }
+
+    fn populate_specified_margins(&mut self, index: usize) {
+        let style = self.flex_item_details[index].inputs.style;
+        // Percentages on flex item box-model metrics resolve against the flex container's inline size.
+        let basis = self.item_percentage_bases.inline_basis();
+        let padding_left = style.padding_left().to_px(basis);
+        let padding_right = style.padding_right().to_px(basis);
+        let padding_top = style.padding_top().to_px(basis);
+        let padding_bottom = style.padding_bottom().to_px(basis);
+        {
+            let cells = &mut self.flex_item_details[index].cells;
+            cells.padding_left = padding_left;
+            cells.padding_right = padding_right;
+            cells.padding_top = padding_top;
+            cells.padding_bottom = padding_bottom;
+        }
+
+        let main_axis_is_horizontal = self.main_axis_is_horizontal();
+        let item = &mut self.flex_items[index];
+        if main_axis_is_horizontal {
+            item.borders_and_padding = DirectionAgnosticSides {
+                main_before: style.border_left_width() + padding_left,
+                main_after: style.border_right_width() + padding_right,
+                cross_before: style.border_top_width() + padding_top,
+                cross_after: style.border_bottom_width() + padding_bottom,
+            };
+            item.margins.main_before = style.margin_left().to_px(basis);
+            item.margins.main_after = style.margin_right().to_px(basis);
+            item.margins.cross_before = style.margin_top().to_px(basis);
+            item.margins.cross_after = style.margin_bottom().to_px(basis);
+            item.margins.main_before_is_auto = style.margin_left().is_auto();
+            item.margins.main_after_is_auto = style.margin_right().is_auto();
+            item.margins.cross_before_is_auto = style.margin_top().is_auto();
+            item.margins.cross_after_is_auto = style.margin_bottom().is_auto();
+        } else {
+            item.borders_and_padding = DirectionAgnosticSides {
+                main_before: style.border_top_width() + padding_top,
+                main_after: style.border_bottom_width() + padding_bottom,
+                cross_before: style.border_left_width() + padding_left,
+                cross_after: style.border_right_width() + padding_right,
+            };
+            item.margins.main_before = style.margin_top().to_px(basis);
+            item.margins.main_after = style.margin_bottom().to_px(basis);
+            item.margins.cross_before = style.margin_left().to_px(basis);
+            item.margins.cross_after = style.margin_right().to_px(basis);
+            item.margins.main_before_is_auto = style.margin_top().is_auto();
+            item.margins.main_after_is_auto = style.margin_bottom().is_auto();
+            item.margins.cross_before_is_auto = style.margin_left().is_auto();
+            item.margins.cross_after_is_auto = style.margin_right().is_auto();
+        }
+    }
+
+    fn resolve_item_inputs(&self, node: Node) -> (FlexItemInputs<'pass>, FlexItemAlignmentFacts) {
+        let style = self.style(node);
+        let facts = self.facts(node);
+        let main_axis_is_horizontal = self.main_axis_is_horizontal();
+        let select_main = |horizontal, vertical| {
+            if main_axis_is_horizontal { horizontal } else { vertical }
+        };
+        let select_cross = |horizontal, vertical| select_main(vertical, horizontal);
+        let preferred_cross_size = select_cross(style.width(), style.height());
+        // AD-HOC: Items in a legacy webkit box resolve both their flex grow and flex shrink factors from
+        //         -webkit-box-flex, and flex-grow and flex-shrink don't apply, matching other engines. A negative
+        //         -webkit-box-flex, which the property accepts, flexes the item as zero would.
+        let (flex_grow_factor, flex_shrink_factor) = if self.is_legacy_webkit_box() {
+            let factor = style.webkit_box_flex().max(0.0);
+            (factor, factor)
+        } else {
+            (style.flex_grow(), style.flex_shrink())
+        };
+        // NB: A flex or grid button has no anonymous button content box, so it does not center its content.
+        let uses_button_layout =
+            facts.uses_button_layout() && !style.display().is_flex_inside() && !style.display().is_grid_inside();
+        let is_table_wrapper = facts.is_table_wrapper();
+        let alignment = self.cross_alignment_of(style);
+        let alignment_facts = FlexItemAlignmentFacts {
+            alignment,
+            is_stretched: self.item_is_stretched(node, style, alignment, is_table_wrapper, preferred_cross_size),
+            uses_button_layout,
+            centers_its_content: uses_button_layout || facts.is_text_input(),
+        };
+        let inputs = FlexItemInputs {
+            style,
+            preferred_main_size: select_main(style.width(), style.height()),
+            min_main_size: select_main(style.min_width(), style.min_height()),
+            max_main_size: select_main(style.max_width(), style.max_height()),
+            preferred_cross_size,
+            min_cross_size: select_cross(style.min_width(), style.min_height()),
+            max_cross_size: select_cross(style.max_width(), style.max_height()),
+            flex_basis: style.flex_basis(),
+            flex_basis_is_content: style.flex_basis_is_content(),
+            flex_grow_factor,
+            flex_shrink_factor,
+            is_replaced_box: facts.is_replaced_box(),
+            is_table_wrapper,
+            is_scroll_container: facts.is_scroll_container(),
+            preferred_aspect_ratio: facts.preferred_aspect_ratio(),
+            auto_content_size: facts.auto_content_size(),
+            inline_axis_is_horizontal: !geometry::Frame::of(style.writing_mode()).is_orthogonal_to(self.run.pass.frame),
+            establishes_orthogonal_flow: self.sizing().establishes_orthogonal_flow(node),
+        };
+        (inputs, alignment_facts)
+    }
+
+    // https://www.w3.org/TR/css-flexbox-1/#flex-items
+    fn generate_anonymous_flex_items(&mut self) {
+        // More like, sift through the already generated items.
+        // After this step no items are to be added or removed from flex_items!
+        // It holds every item we need to consider and there should be nothing in the following
+        // calculations that could change that.
+        // This is particularly important since we take references to the items stored in flex_items
+        // later, whose addresses won't be stable if we added or removed any items.
+        let first_new_item = self.flex_items.len();
+        let child_count = self.run.pass.children(self.run.box_).count();
+        self.flex_items.reserve(child_count);
+        self.flex_item_details.reserve(child_count);
+        let mut order_of_first_item = None;
+        let mut items_have_different_orders = false;
+        for child in self.run.pass.children(self.run.box_) {
+            let facts = self.facts(child);
+            if facts.is_box() {
+                let skip = self.run.pass.can_skip_is_anonymous_text_run(child);
+                // Skip any "out-of-flow" children
+                if !skip && !facts.is_absolutely_positioned() {
+                    // Flex inhibits floating, so only absolute positioning is out of flow here.
+                    debug_assert!(
+                        node_facts::has_flag(facts.data(), NodeFlag::IsFlexItem),
+                        "the facts of a flex item are derived before layout"
+                    );
+                    let cells = self.keep_item_for_its_run(child);
+                    let (inputs, alignment_facts) = self.resolve_item_inputs(child);
+                    let order = self.order_of_item(inputs.style);
+                    items_have_different_orders |= *order_of_first_item.get_or_insert(order) != order;
+                    self.flex_items.push(FlexItem::new(
+                        child,
+                        alignment_facts,
+                        &inputs,
+                        self.main_axis_is_horizontal(),
+                    ));
+                    self.items_to_fork.take();
+                    self.flex_item_details.push(FlexItemDetails::new(inputs, cells));
+                    self.populate_specified_margins(self.flex_items.len() - 1);
+                }
+            }
+        }
+
+        // https://drafts.csswg.org/css-display-3/#order-modified-document-order
+        // A stable sort keeps items with equal order in document order.
+        // NB: The items stay in order-modified document order for a reversed flex direction too: Placing them along
+        //     the main axis is what reverses them.
+        if items_have_different_orders {
+            let mut order_modified_document_order: Vec<usize> = (first_new_item..self.flex_items.len()).collect();
+            order_modified_document_order.sort_by(|&left, &right| {
+                self.order_of_item(self.flex_item_details[left].inputs.style)
+                    .cmp(&self.order_of_item(self.flex_item_details[right].inputs.style))
+            });
+            fn reorder<T: Copy>(items: &mut Vec<T>, first_new_item: usize, order: &[usize]) {
+                let reordered: Vec<T> = order.iter().map(|&index| items[index]).collect();
+                items.truncate(first_new_item);
+                items.extend(reordered);
+            }
+            reorder(&mut self.flex_items, first_new_item, &order_modified_document_order);
+            reorder(
+                &mut self.flex_item_details,
+                first_new_item,
+                &order_modified_document_order,
+            );
+        }
+        self.flex_item_index_by_node.take();
+    }
+
+    // https://drafts.csswg.org/css-flexbox-1/#propdef-flex-basis
+    fn used_flex_basis_for_item(&self, index: usize) -> UsedFlexBasis<'pass> {
+        let inputs = &self.flex_item_details[index].inputs;
+        if inputs.flex_basis_is_content {
+            return UsedFlexBasis::Content;
+        }
+        let mut value = inputs.flex_basis;
+        let mut value_is_main_size = false;
+        if value.is_auto() {
+            // https://drafts.csswg.org/css-flexbox-1/#valdef-flex-basis-auto
+            // When specified on a flex item, the auto keyword retrieves the value of the main size property as the used flex-basis.
+            // If that value is itself auto, then the used value is content.
+            value = inputs.preferred_main_size;
+            value_is_main_size = true;
+            if value.is_auto() {
+                return UsedFlexBasis::Content;
+            }
+        }
+        // For example, percentage values of flex-basis are resolved against the flex item’s containing block
+        // (i.e. its flex container); and if that containing block’s size is indefinite,
+        // the used value for flex-basis is content.
+        // NB: A main size property that contains a percentage of an indefinite size behaves as auto, as in block layout.
+        // NB: So does a stretch flex basis, which resolves against the same size.
+        let percentage_is_unresolvable =
+            value.is_percentage() || value.is_stretch() || (value_is_main_size && value.contains_percentage());
+        if percentage_is_unresolvable && !self.has_definite_main_size_used(&self.container_cells) {
+            return UsedFlexBasis::Content;
+        }
+        UsedFlexBasis::Size { value }
+    }
+
+    // This function takes a size in the main axis and adjusts it according to the aspect ratio of the box
+    // if the min/max constraints in the cross axis forces us to come up with a new main axis size.
+    fn adjust_main_size_through_aspect_ratio(
+        &self,
+        index: usize,
+        mut main_size: CssPixels,
+        min_cross_size: &ComputedSize,
+        max_cross_size: &ComputedSize,
+    ) -> CssPixels {
+        let reference = self.inner_cross_size_used(&self.container_cells);
+        let cross_is_horizontal = !self.main_axis_is_horizontal();
+        if !self.should_treat_max_size_as_none(index, true) {
+            let max_cross =
+                self.inner_size_for_min_max_through_aspect_ratio(index, max_cross_size, reference, cross_is_horizontal);
+            main_size = main_size.min(self.main_size_from_cross_size_and_aspect_ratio(index, max_cross));
+        }
+        if !min_cross_size.is_auto()
+            && (!min_cross_size.contains_percentage() || self.has_definite_cross_size_used(&self.container_cells))
+        {
+            let min_cross =
+                self.inner_size_for_min_max_through_aspect_ratio(index, min_cross_size, reference, cross_is_horizontal);
+            main_size = main_size.max(self.main_size_from_cross_size_and_aspect_ratio(index, min_cross));
+        }
+        main_size
+    }
+
+    fn adjust_cross_size_through_aspect_ratio(
+        &self,
+        index: usize,
+        mut cross_size: CssPixels,
+        min_main_size: &ComputedSize,
+        max_main_size: &ComputedSize,
+    ) -> CssPixels {
+        let reference = self.inner_main_size_used(&self.container_cells);
+        let main_is_horizontal = self.main_axis_is_horizontal();
+        if !self.should_treat_max_size_as_none(index, false) {
+            let max_main =
+                self.inner_size_for_min_max_through_aspect_ratio(index, max_main_size, reference, main_is_horizontal);
+            cross_size = cross_size.min(self.cross_size_from_main_size_and_aspect_ratio(index, max_main));
+        }
+        if !min_main_size.is_auto() {
+            let min_main =
+                self.inner_size_for_min_max_through_aspect_ratio(index, min_main_size, reference, main_is_horizontal);
+            cross_size = cross_size.max(self.cross_size_from_main_size_and_aspect_ratio(index, min_main));
+        }
+        cross_size
+    }
+
+    fn calculate_min_content_inline_size(&self, index: usize) -> CssPixels {
+        let sizing = self.sizing();
+        let node = self.flex_items[index].box_;
+        let constraints = self.item_containing_block_constraints();
+        let cells = &self.flex_item_details[index].cells;
+        if cells.has_definite_block_size {
+            sizing.calculate_min_content_inline_size_at_definite_block_size(
+                sizing_context::SizedBox::new(node, &self.flex_item_details[index].cells),
+                constraints,
+                cells.content_block_size,
+            )
+        } else {
+            sizing.calculate_min_content_inline_size(
+                sizing_context::SizedBox::new(node, &self.flex_item_details[index].cells),
+                constraints,
+            )
+        }
+    }
+
+    fn calculate_max_content_inline_size(&self, index: usize) -> CssPixels {
+        let sizing = self.sizing();
+        let node = self.flex_items[index].box_;
+        let constraints = self.item_containing_block_constraints();
+        let cells = &self.flex_item_details[index].cells;
+        if cells.has_definite_block_size {
+            sizing.calculate_max_content_inline_size_at_definite_block_size(
+                sizing_context::SizedBox::new(node, &self.flex_item_details[index].cells),
+                constraints,
+                cells.content_block_size,
+            )
+        } else {
+            sizing.calculate_max_content_inline_size_with_available_space(
+                sizing_context::SizedBox::new(node, &self.flex_item_details[index].cells),
+                self.available_space_for_items.unwrap().space.inline_size,
+                constraints,
+            )
+        }
+    }
+
+    fn calculate_min_content_block_size(&self, index: usize, inline_size: CssPixels) -> CssPixels {
+        self.sizing().calculate_min_content_block_size(
+            sizing_context::SizedBox::new(self.flex_items[index].box_, &self.flex_item_details[index].cells),
+            inline_size,
+            self.item_containing_block_constraints(),
+        )
+    }
+
+    fn calculate_max_content_block_size(&self, index: usize, inline_size: CssPixels) -> CssPixels {
+        self.sizing().calculate_max_content_block_size(
+            sizing_context::SizedBox::new(self.flex_items[index].box_, &self.flex_item_details[index].cells),
+            inline_size,
+            self.item_containing_block_constraints(),
+        )
+    }
+
+    fn calculate_inline_size_for_intrinsic_block_size(&self, index: usize) -> CssPixels {
+        let node = self.flex_items[index].box_;
+        let style = self.flex_item_details[index].inputs.style;
+        // We can resolve percentage min/max-width if the available inline size is definite.
+        let can_resolve_percentages = matches!(
+            self.available_space_for_items.unwrap().space.inline_size,
+            AvailableSize::Definite(_)
+        );
+        let min_inline_size =
+            if !style.min_width().is_auto() && (!style.min_width().contains_percentage() || can_resolve_percentages) {
+                self.resolve_inner_inline_size(index, style.min_width())
+            } else {
+                CssPixels::default()
+            };
+        let max_inline_size = if !self.should_treat_max_inline_size_as_none(index)
+            && (!style.max_width().contains_percentage() || can_resolve_percentages)
+        {
+            self.resolve_inner_inline_size(index, style.max_width())
+        } else {
+            CssPixels::from_raw(i32::MAX)
+        };
+
+        let inline_size = if self.should_treat_size_as_auto(
+            sizing_context::SizedBox::new(node, &self.flex_item_details[index].cells),
+            SizingAxis::Inline,
+        ) || style.width().is_fit_content()
+        {
+            self.calculate_fit_content_size(index, SizingAxis::Inline, self.available_space_for_items.unwrap().space)
+        } else if style.width().is_min_content() {
+            self.calculate_min_content_inline_size(index)
+        } else if style.width().is_max_content() {
+            self.calculate_max_content_inline_size(index)
+        } else {
+            CssPixels::default()
+        };
+        css_clamp(inline_size, min_inline_size, max_inline_size)
+    }
+
+    fn intrinsic_block_inline_size(&self, index: usize) -> CssPixels {
+        let mut available = self.flex_item_details[index]
+            .cells
+            .available_inner_space_or_constraints_from(self.available_space_for_items.unwrap().space);
+        // https://drafts.csswg.org/css-flexbox-1/#algo-main-item
+        // If a cross size is needed to determine the main size (e.g. when the flex item's main size is in its block
+        // axis) and the flex item's cross size is auto and not definite, in this calculation use fit-content as the
+        // flex item's cross size.
+        // NB: Under a min-content or max-content constraint, that's the item's min-content or max-content inline size.
+        if matches!(
+            available.inline_size,
+            AvailableSize::Indefinite | AvailableSize::MinContent | AvailableSize::MaxContent
+        ) {
+            available.inline_size = AvailableSize::definite(self.calculate_inline_size_for_intrinsic_block_size(index));
+        }
+        available.inline_size.to_px_or_zero()
+    }
+
+    fn calculate_min_content_main_size(&self, index: usize) -> CssPixels {
+        if self.main_axis_is_horizontal() {
+            self.calculate_min_content_inline_size(index)
+        } else {
+            self.calculate_min_content_block_size(index, self.intrinsic_block_inline_size(index))
+        }
+    }
+
+    fn calculate_max_content_main_size(&self, index: usize) -> CssPixels {
+        if self.main_axis_is_horizontal() {
+            self.calculate_max_content_inline_size(index)
+        } else {
+            self.calculate_max_content_block_size(index, self.intrinsic_block_inline_size(index))
+        }
+    }
+
+    fn calculate_min_content_cross_size(&self, index: usize) -> CssPixels {
+        if self.cross_axis_is_horizontal() {
+            self.calculate_min_content_inline_size(index)
+        } else {
+            self.calculate_min_content_block_size(index, self.intrinsic_block_inline_size(index))
+        }
+    }
+
+    fn calculate_max_content_cross_size(&self, index: usize) -> CssPixels {
+        if self.cross_axis_is_horizontal() {
+            self.calculate_max_content_inline_size(index)
+        } else {
+            self.calculate_max_content_block_size(index, self.intrinsic_block_inline_size(index))
+        }
+    }
+
+    fn calculate_fit_content_main_size(&self, index: usize) -> CssPixels {
+        let mut available_space = self.available_space_for_items.unwrap().space;
+        let axis = if self.main_axis_is_horizontal() {
+            SizingAxis::Inline
+        } else {
+            available_space.inline_size = AvailableSize::definite(self.intrinsic_block_inline_size(index));
+            SizingAxis::Block
+        };
+        self.calculate_fit_content_size(index, axis, available_space)
+    }
+
+    fn determine_used_flex_basis(&mut self, index: usize) {
+        let basis = self.used_flex_basis_for_item(index);
+        let basis_is_definite = match basis {
+            UsedFlexBasis::Content => false,
+            UsedFlexBasis::Size { value, .. } => {
+                if value.is_auto() || value.is_none() || value.is_intrinsic_sizing_constraint() {
+                    false
+                } else if value.is_length() {
+                    true
+                } else if value.kind == ComputedSizeKind::Calculated {
+                    !value.contains_percentage() || self.has_definite_main_size_used(&self.container_cells)
+                } else {
+                    debug_assert!(value.is_percentage() || value.is_stretch());
+                    self.has_definite_main_size_used(&self.container_cells)
+                }
+            }
+        };
+        self.flex_item_details[index].used_flex_basis = basis;
+        self.flex_items[index].used_flex_basis_is_definite = basis_is_definite;
+    }
+
+    // https://drafts.csswg.org/css-flexbox-1/#algo-main-item
+    fn determine_flex_base_size(&mut self, index: usize) {
+        let node = self.flex_items[index].box_;
+        self.determine_used_flex_basis(index);
+        let basis = self.flex_item_details[index].used_flex_basis;
+        let basis_is_definite = self.flex_items[index].used_flex_basis_is_definite;
+
+        let mut flex_base_size = match basis {
+            // A. If the item has a definite used flex basis, that’s the flex base size.
+            UsedFlexBasis::Size { value } if basis_is_definite => {
+                self.resolve_size_for_axis(index, self.main_axis_is_horizontal(), value)
+            }
+            // AD-HOC: If we're sizing the flex container under a min-content constraint in the main axis,
+            //         non-replaced flex items resolve percentages in the main axis to 0.
+            // https://drafts.csswg.org/css-sizing-3/#cyclic-percentage-contribution
+            _ if self.flex_item_details[index].inputs.is_replaced_box
+                && self.available_space_for_items.unwrap().main == AvailableSize::MinContent
+                && self.computed_main_size(index).contains_percentage() =>
+            {
+                CssPixels::default()
+            }
+            // B. If the flex item has ...
+            //    - an intrinsic aspect ratio,
+            //    - a used flex basis of content, and
+            //    - a definite cross size,
+            UsedFlexBasis::Content
+                if self.flex_item_details[index].inputs.preferred_aspect_ratio.is_some()
+                    && self.has_definite_cross_size(index) =>
+            {
+                // flex_base_size is calculated from definite cross size and intrinsic aspect ratio
+
+                // AD-HOC: Mark that we resolved the main size from the aspect ratio,
+                //         so that we can mark the item as having definite main size after resolving flexible lengths.
+                self.flex_items[index].main_size_was_resolved_from_aspect_ratio = true;
+                let min_cross = self.computed_cross_min_size(index);
+                let max_cross = self.computed_cross_max_size(index);
+                self.adjust_main_size_through_aspect_ratio(
+                    index,
+                    self.main_size_from_cross_size_and_aspect_ratio(index, self.inner_cross_size(index)),
+                    min_cross,
+                    max_cross,
+                )
+            }
+            // AD-HOC: An item of a horizontal legacy webkit box whose flex basis and width are auto gets a flex base
+            //         size of its fit-content width rather than its max-content width, so it's never wider than the
+            //         box unless its content can't fit, matching other engines.
+            UsedFlexBasis::Content if self.item_of_legacy_webkit_box_fits_its_content(index) => {
+                self.calculate_fit_content_main_size(index)
+            }
+            // C. If the used flex basis is content or depends on its available space,
+            //    and the flex container is being sized under a min-content or max-content constraint
+            //    (e.g. when performing automatic table layout [CSS21]), size the item under that constraint.
+            //    The flex base size is the item’s resulting main size.
+            UsedFlexBasis::Content
+                if self.available_space_for_items.unwrap().main == AvailableSize::MinContent
+                    && self.flex_item_details[index].inputs.flex_shrink_factor != 0.0 =>
+            {
+                self.calculate_min_content_main_size(index)
+            }
+            UsedFlexBasis::Content if self.available_space_for_items.unwrap().main == AvailableSize::MaxContent => {
+                self.calculate_max_content_main_size(index)
+            }
+            // E. Otherwise, size the item into the available space using its used flex basis in place of its main size,
+            //    treating a value of content as max-content. If a cross size is needed to determine the main size
+            //    (e.g. when the flex item’s main size is in its block axis) and the flex item’s cross size is auto and not definite,
+            //    in this calculation use fit-content as the flex item’s cross size.
+            //    The flex base size is the item’s resulting main size.
+            UsedFlexBasis::Size { value, .. } if value.is_fit_content() => self.calculate_fit_content_main_size(index),
+            UsedFlexBasis::Size { value, .. } if value.is_max_content() => self.calculate_max_content_main_size(index),
+            UsedFlexBasis::Size { value, .. } if value.is_min_content() => self.calculate_min_content_main_size(index),
+            // NOTE: If the flex item has a definite main size, just use that as the flex base size.
+            // NB: A used flex basis of content sizes the item by its content, whatever its main size.
+            UsedFlexBasis::Size { .. } if self.has_definite_main_size(index) => self.inner_main_size(index),
+            // NOTE: There's a fundamental problem with many CSS specifications in that they neglect to mention
+            //       which inline size to provide when calculating the intrinsic block size of a box in various situations.
+            //       Spec bug: https://github.com/w3c/csswg-drafts/issues/2890
+
+            // NOTE: This is one of many situations where that causes trouble: if this is a flex column layout,
+            //       we may need to calculate the intrinsic block size of a flex item. This requires an inline size,
+            //       but an inline size won't be determined until later on in the flex layout algorithm.
+            //       In the specific case above (E), the spec mentions using `fit-content` in place of `auto`
+            //       if "a cross size is needed to determine the main size", so that's exactly what we do.
+
+            // NOTE: Finding a suitable inline size for intrinsic block-size determination actually happens elsewhere,
+            //       in the various helpers that calculate the intrinsic sizes of a flex item,
+            //       e.g. calculate_min_content_main_size().
+            UsedFlexBasis::Content => self.calculate_max_content_main_size(index),
+            UsedFlexBasis::Size { .. } => self.calculate_fit_content_main_size(index),
+        };
+
+        // https://drafts.csswg.org/css-values-5/#calc-size
+        // A calc-size() with a sizing keyword basis resolves against the size that keyword gave the item. The main
+        // size property acts as the flex basis where the flex basis is auto, and the flex basis then applies to that.
+        if self.flex_items[index].main_size_was_resolved_from_aspect_ratio {
+            // NB: The main size of this item came through its aspect ratio, not from its keyword size.
+        } else {
+            let inputs = self.flex_item_details[index].inputs;
+            let main_axis = if self.main_axis_is_horizontal() {
+                SizingAxis::Inline
+            } else {
+                SizingAxis::Block
+            };
+            let percentage_basis = self
+                .has_definite_main_size_used(&self.container_cells)
+                .then(|| self.inner_main_size_used(&self.container_cells));
+            // NB: A stretch basis resolves its calc-size() along with its stretch-fit size.
+            let has_keyword_basis = |size: &ComputedSize| {
+                size.calc_size().is_some()
+                    && !matches!(size.kind, ComputedSizeKind::Calculated | ComputedSizeKind::Stretch)
+            };
+            let flex_basis = inputs.flex_basis;
+            let basis_retrieves_main_size = !inputs.flex_basis_is_content && flex_basis.is_auto();
+            let main_size = self.computed_main_size(index);
+            if basis_retrieves_main_size && has_keyword_basis(main_size) {
+                flex_base_size = self.sizing().resolve_calc_size(
+                    sizing_context::SizedBox::new(node, &self.flex_item_details[index].cells),
+                    main_axis,
+                    main_size,
+                    flex_base_size,
+                    percentage_basis,
+                );
+            }
+            if has_keyword_basis(flex_basis) {
+                flex_base_size = self.sizing().resolve_calc_size(
+                    sizing_context::SizedBox::new(node, &self.flex_item_details[index].cells),
+                    main_axis,
+                    flex_basis,
+                    flex_base_size,
+                    percentage_basis,
+                );
+            }
+        }
+
+        // AD-HOC: This is not mentioned in the spec, but if the item has an aspect ratio, we may need
+        //         to adjust the main size in these ways:
+        //         - using stretch-fit main size if the flex basis is indefinite, there is no
+        //           intrinsic size and no cross size to resolve the ratio against. Only along the
+        //           inline axis: in the block axis, the size comes from the fit-content inline size
+        //           through the ratio, as for any other block.
+        //         - in response to cross size min/max constraints.
+        let inputs = self.flex_item_details[index].inputs;
+        if inputs.auto_content_size.aspect_ratio.is_some()
+            && !basis_is_definite
+            && self.main_axis_is_parallel_to_inline_axis_of_item(index)
+            && !inputs.auto_content_size.width.is_some()
+            && !inputs.auto_content_size.height.is_some()
+            && !self.has_definite_cross_size(index)
+            && self.has_definite_main_size_used(&self.container_cells)
+        {
+            flex_base_size = self.inner_main_size_used(&self.container_cells);
+        }
+        // https://drafts.csswg.org/css-sizing-4/#aspect-ratio-size-transfers
+        // NB: Cross axis limits transfer to an indefinite main size.
+        if inputs.preferred_aspect_ratio.is_some() && !basis_is_definite {
+            let min_cross = self.computed_cross_min_size(index);
+            let max_cross = self.computed_cross_max_size(index);
+            flex_base_size = self.adjust_main_size_through_aspect_ratio(index, flex_base_size, min_cross, max_cross);
+        }
+        // https://drafts.csswg.org/css-flexbox-1/#flex-items
+        // "[...] the flex longhands apply to the table box as follows: the flex item's final size is calculated by
+        // performing layout as if the distance between the table wrapper box's edges and the table box's content edges
+        // were all part of the table box's border+padding area, and the table box were the flex item."
+        // NB: So a definite flex basis along the block axis of a table leaves out its captions.
+        if inputs.is_table_wrapper
+            && basis_is_definite
+            && matches!(basis, UsedFlexBasis::Size { .. })
+            && !self.main_axis_is_parallel_to_inline_axis_of_item(index)
+        {
+            let sizes = self.measure_table_wrapper_block_sizes(index);
+            flex_base_size += sizes.wrapper_content_block_size - sizes.table_box_border_box_block_size;
+        }
+        // NOTE: We don't clamp the main size until we have them for all items.
+        self.flex_items[index].flex_base_size = flex_base_size;
+        self.flex_items[index].automatic_minimum_size_before_flexing = None;
+    }
+
+    // https://drafts.csswg.org/css-flexbox-1/#min-size-auto
+    fn automatic_minimum_size(&self, index: usize) -> CssPixels {
+        // AD-HOC: Items in a legacy webkit box have an automatic minimum size of zero, matching other engines.
+        if self.is_legacy_webkit_box() {
+            return CssPixels::default();
+        }
+
+        // To provide a more reasonable default minimum size for flex items,
+        // the used value of a main axis automatic minimum size on a flex item that is not a scroll container is its content-based minimum size;
+        // for scroll containers the automatic minimum size is zero, as usual.
+        let node = self.flex_items[index].box_;
+        let size = if !self.flex_item_details[index].inputs.is_scroll_container {
+            self.content_based_minimum_size(index)
+        } else {
+            CssPixels::default()
+        };
+        // https://drafts.csswg.org/css-values-5/#calc-size
+        // NB: A calc-size() with an auto basis resolves against the automatic minimum size, and its percentages against
+        //     the flex container's inner main size, where that is definite.
+        let min_size = self.computed_main_min_size(index);
+        if min_size.calc_size().is_none() {
+            return size;
+        }
+        let axis = if self.main_axis_is_horizontal() {
+            SizingAxis::Inline
+        } else {
+            SizingAxis::Block
+        };
+        let container = &self.container_cells;
+        let percentage_basis = self
+            .has_definite_main_size_used(container)
+            .then(|| self.inner_main_size_used(container));
+        self.sizing().resolve_calc_size(
+            sizing_context::SizedBox::new(node, &self.flex_item_details[index].cells),
+            axis,
+            min_size,
+            size,
+            percentage_basis,
+        )
+    }
+
+    fn automatic_minimum_size_for_clamping(
+        &mut self,
+        index: usize,
+        size_capped_by_max_main_size: CssPixels,
+    ) -> CssPixels {
+        if let Some(size) = self.flex_items[index].automatic_minimum_size_before_flexing {
+            return size;
+        }
+        if let Some(upper_bound) = self.automatic_minimum_size_upper_bound_without_content(index)
+            && upper_bound <= size_capped_by_max_main_size
+        {
+            return upper_bound;
+        }
+        let size = self.automatic_minimum_size(index);
+        self.flex_items[index].automatic_minimum_size_before_flexing = Some(size);
+        size
+    }
+
+    fn automatic_minimum_size_upper_bound_without_content(&self, index: usize) -> Option<CssPixels> {
+        if self.computed_main_min_size(index).calc_size().is_some() {
+            return None;
+        }
+        let max_main_size = self
+            .has_main_max_size(index)
+            .then(|| self.specified_main_max_size(index));
+        match (self.specified_size_suggestion(index), max_main_size) {
+            (Some(specified), Some(max)) => Some(specified.min(max)),
+            (specified, max) => specified.or(max),
+        }
+    }
+
+    // https://drafts.csswg.org/css-flexbox-1/#specified-size-suggestion
+    fn specified_size_suggestion(&self, index: usize) -> Option<CssPixels> {
+        // If the item’s preferred main size is definite and not automatic,
+        // then the specified size suggestion is that size. It is otherwise undefined.
+        if self.has_definite_main_size(index) && !self.should_treat_main_size_as_auto(index) {
+            // NOTE: We use resolve_inner_{inline,block}_size to ensure that CSS box-sizing is respected.
+            let value = self.computed_main_size(index);
+            Some(self.resolve_size_for_axis(index, self.main_axis_is_horizontal(), value))
+        } else {
+            None
+        }
+    }
+
+    // https://drafts.csswg.org/css-flexbox-1/#content-size-suggestion
+    fn content_size_suggestion(&self, index: usize) -> CssPixels {
+        // The content size suggestion is the min-content size in the main axis
+        // NB: A cyclic percentage in a replaced box's width or max-width is resolved against zero only for its
+        //     min-content contribution, which is how its min-content inline size is answered. But the content size
+        //     suggestion is its min-content size, which for a replaced box is its max-content size.
+        let style = &self.flex_item_details[index].inputs.style;
+        let mut suggestion = if self.main_axis_is_horizontal()
+            && self.flex_item_details[index].inputs.is_replaced_box
+            && (style.width().contains_percentage() || style.max_width().contains_percentage())
+        {
+            self.calculate_max_content_inline_size(index)
+        } else {
+            self.calculate_min_content_main_size(index)
+        };
+        if self.flex_item_details[index].inputs.preferred_aspect_ratio.is_some() {
+            suggestion = self.adjust_main_size_through_aspect_ratio(
+                index,
+                suggestion,
+                self.computed_cross_min_size(index),
+                self.computed_cross_max_size(index),
+            );
+        }
+        suggestion
+    }
+
+    // https://drafts.csswg.org/css-flexbox-1/#transferred-size-suggestion
+    fn transferred_size_suggestion(&self, index: usize) -> Option<CssPixels> {
+        // If the item has a preferred aspect ratio and its preferred cross size is definite,
+        // then the transferred size suggestion is that size
+        // (clamped by its minimum and maximum cross sizes if they are definite), converted through the aspect ratio.
+        self.flex_item_details[index].inputs.preferred_aspect_ratio?;
+        if !self.has_definite_cross_size(index) {
+            // It is otherwise undefined.
+            return None;
+        }
+        Some(self.adjust_main_size_through_aspect_ratio(
+            index,
+            self.main_size_from_cross_size_and_aspect_ratio(index, self.inner_cross_size(index)),
+            self.computed_cross_min_size(index),
+            self.computed_cross_max_size(index),
+        ))
+    }
+
+    // https://drafts.csswg.org/css-flexbox-1/#content-based-minimum-size
+    fn content_based_minimum_size(&self, index: usize) -> CssPixels {
+        let content = self.content_size_suggestion(index);
+        let transferred = self.transferred_size_suggestion(index);
+        let specified = self.specified_size_suggestion(index);
+        // The content-based minimum size of a flex item differs depending on whether the flex item is replaced or not:
+        // -> For replaced elements
+        let mut size = if self.flex_item_details[index].inputs.is_replaced_box {
+            // Use the smaller of the content size suggestion and the transferred size suggestion (if one exists),
+            // capped by the specified size suggestion (if one exists).
+            transferred.map_or(content, |value| content.min(value))
+        } else {
+            // -> For non-replaced elements
+
+            // Use the larger of the content size suggestion and the transferred size suggestion (if one exists),
+            // capped by the specified size suggestion (if one exists).
+            transferred.map_or(content, |value| content.max(value))
+        };
+        if let Some(specified) = specified {
+            size = size.min(specified);
+        }
+        // In either case, the size is clamped by the maximum main size if it’s definite.
+        if self.has_main_max_size(index) {
+            size.min(self.specified_main_max_size(index))
+        } else {
+            size
+        }
+    }
+
+    fn main_gap(&self) -> CssPixels {
+        self.container
+            .main_gap
+            .to_px(self.inner_main_size_used(&self.container_cells))
+    }
+
+    fn cross_gap(&self) -> CssPixels {
+        self.container
+            .cross_gap
+            .to_px(self.inner_cross_size_used(&self.container_cells))
+    }
+
+    // https://www.w3.org/TR/css-flexbox-1/#algo-line-break
+    fn collect_flex_items_into_flex_lines(&mut self) {
+        let reverse = self.is_direction_reverse();
+        // If the flex container is single-line, collect all the flex items into a single flex line.
+        if self.is_single_line() {
+            self.flex_lines.push(FlexLine {
+                items: FlexLineItems {
+                    first: 0,
+                    count: self.flex_items.len(),
+                    reversed: reverse,
+                },
+                ..Default::default()
+            });
+            return;
+        }
+
+        // Otherwise, starting from the first uncollected item, collect consecutive items one by one
+        // until the first time that the next collected item would not fit into the flex container’s inner main size
+        // (or until a forced break is encountered, see §10 Fragmenting Flex Layout).
+        // If the very first uncollected item wouldn't fit, collect just it into the line.
+
+        // For this step, the size of a flex item is its outer hypothetical main size. (Note: This can be negative.)
+
+        // Repeat until all flex items have been collected into flex lines.
+
+        // NB: A column container resolves its automatic block size, including min/max constraints, before wrapping.
+        //     During intrinsic inline sizing that size is not yet known, and calc-size(auto, ...) keeps an
+        //     indefinite available main size even when its calculation changes the used size.
+        let available_main_size = if !self.main_axis_is_horizontal()
+            && crate::layout::sizing_context::is_plain_auto(self.container_computed_main_size())
+            && self.own_automatic_block_size_resolution_space.is_some()
+        {
+            AvailableSize::definite(self.inner_main_size_used(&self.container_cells))
+        } else {
+            self.available_space_for_items.unwrap().main
+        };
+        let main_gap = self.main_gap();
+        let line_starting_at = |first| FlexLine {
+            items: FlexLineItems {
+                first,
+                count: 0,
+                reversed: reverse,
+            },
+            ..Default::default()
+        };
+        let mut line = line_starting_at(0);
+        let mut line_main_size = CssPixels::default();
+        for index in 0..self.flex_items.len() {
+            let outer = self.flex_items[index].outer_hypothetical_main_size();
+            if !line.items.is_empty() && available_main_size.pixels_greater_than(line_main_size + outer) {
+                self.flex_lines.push(line);
+                line = line_starting_at(index);
+                line_main_size = CssPixels::default();
+            }
+            line.items.count += 1;
+            line_main_size += outer;
+            // CSS-FLEXBOX-2: Account for gap between flex items.
+            line_main_size += main_gap;
+        }
+        self.flex_lines.push(line);
+    }
+
+    fn unfrozen_items_of_line(&self, line_index: usize, available_main_size: AvailableSize) -> UnfrozenItemsOfLine {
+        let line = &self.flex_lines[line_index];
+        // Sum the outer sizes of all items on the line, and subtract this from the flex container’s inner main size.
+        // For frozen items, use their outer target main size; for other items, use their outer flex base size.
+        let mut sum = CssPixels::default();
+        let mut unfrozen_count = 0;
+        let mut unfrozen_flex_factor_sum = 0.0;
+        for index in line.items.iter() {
+            let item = &self.flex_items[index];
+            if item.frozen {
+                sum += item.outer_target_main_size();
+            } else {
+                sum += item.outer_flex_base_size();
+                unfrozen_count += 1;
+                unfrozen_flex_factor_sum += item.flex_factor;
+            }
+        }
+        // AD-HOC: If the container is sized under max-content constraints, then remaining_free_space won't have
+        //         a value to avoid leaking an infinite value into layout calculations.
+        let remaining_free_space = (!available_main_size.is_intrinsic_sizing_constraint()).then(|| {
+            // CSS-FLEXBOX-2: Account for gap between flex items.
+            sum += self.main_gap() * line.items.len().wrapping_sub(1);
+            // AD-HOC: Note that we're using our own "available main size" explained above
+            //         instead of the flex container’s inner main size.
+            available_main_size.to_px_or_zero() - sum
+        });
+        UnfrozenItemsOfLine {
+            remaining_free_space,
+            unfrozen_count,
+            unfrozen_flex_factor_sum,
+        }
+    }
+
+    // https://drafts.csswg.org/css-flexbox-1/#resolve-flexible-lengths
+    fn resolve_flexible_lengths_for_line(&mut self, line_index: usize) {
+        // AD-HOC: The spec tells us to use the "flex container’s inner main size" in this algorithm,
+        //         but that doesn't work when we're sizing under a max-content constraint.
+        //         In that case, there is effectively infinite size available in the main axis,
+        //         but the inner main size has not been assigned yet.
+        //         We solve this by calculating our own "available main size" here, which is essentially
+        //         infinity under max-content, 0 under min-content, and the inner main size otherwise.
+        let available_main_size = if self
+            .available_space_for_items
+            .unwrap()
+            .main
+            .is_intrinsic_sizing_constraint()
+        {
+            self.available_space_for_items.unwrap().main
+        } else {
+            AvailableSize::definite(self.inner_main_size_used(&self.container_cells))
+        };
+        let item_count = self.flex_lines[line_index].items.len();
+        // 1. Determine the used flex factor.
+
+        // Sum the outer hypothetical main sizes of all items on the line.
+        // If the sum is less than the flex container’s inner main size,
+        // use the flex grow factor for the rest of this algorithm; otherwise, use the flex shrink factor
+        let mut hypothetical_sum = CssPixels::default();
+        for item_position in 0..item_count {
+            let index = self.flex_lines[line_index].items.at(item_position);
+            hypothetical_sum += self.flex_items[index].outer_hypothetical_main_size();
+        }
+        // CSS-FLEXBOX-2: Account for gap between flex items.
+        hypothetical_sum += self.main_gap() * item_count.wrapping_sub(1);
+        // AD-HOC: Note that we're using our own "available main size" explained above
+        //         instead of the flex container’s inner main size.
+        let factor = if available_main_size.pixels_less_than(hypothetical_sum) {
+            FlexFactor::Grow
+        } else {
+            FlexFactor::Shrink
+        };
+        self.flex_lines[line_index].growth_state = if factor == FlexFactor::Grow {
+            formatting_context::FlexLayoutGrowthState::Growing
+        } else {
+            formatting_context::FlexLayoutGrowthState::Shrinking
+        };
+
+        for item_position in 0..item_count {
+            let index = self.flex_lines[line_index].items.at(item_position);
+            let flex_factor = if factor == FlexFactor::Grow {
+                self.flex_item_details[index].inputs.flex_grow_factor
+            } else {
+                self.flex_item_details[index].inputs.flex_shrink_factor
+            };
+            let item = &mut self.flex_items[index];
+            // 2. Each item in the flex line has a target main size, initially set to its flex base size.
+            //    Each item is initially unfrozen and may become frozen.
+            item.target_main_size = item.flex_base_size;
+            item.frozen = false;
+            // 3. Size inflexible items.
+            item.flex_factor = flex_factor;
+            // Freeze, setting its target main size to its hypothetical main size…
+            // - any item that has a flex factor of zero
+            // - if using the flex grow factor: any item that has a flex base size greater than its hypothetical main size
+            // - if using the flex shrink factor: any item that has a flex base size smaller than its hypothetical main size
+            if item.flex_factor == 0.0
+                || (factor == FlexFactor::Grow && item.flex_base_size > item.hypothetical_main_size)
+                || (factor == FlexFactor::Shrink && item.flex_base_size < item.hypothetical_main_size)
+            {
+                item.frozen = true;
+                item.target_main_size = item.hypothetical_main_size;
+            }
+        }
+
+        // 4. Calculate initial free space
+        let mut unfrozen_items = self.unfrozen_items_of_line(line_index, available_main_size);
+        let initial_free_space = unfrozen_items.remaining_free_space;
+        // 5. Loop
+        // a. Check for flexible items.
+        //    If all the flex items on the line are frozen, exit this loop.
+        while unfrozen_items.unfrozen_count > 0 {
+            // b. Calculate the remaining free space as for initial free space, above.
+            let mut remaining = unfrozen_items.remaining_free_space;
+            // If the sum of the unfrozen flex items’ flex factors is less than one, multiply the initial free space by this sum.
+            let factor_sum = unfrozen_items.unfrozen_flex_factor_sum;
+            if factor_sum < 1.0
+                && let Some(initial) = initial_free_space
+            {
+                let value = CssPixels::nearest_value_for(initial.to_double() * factor_sum);
+                // If the magnitude of this value is less than the magnitude of the remaining free space, use this as the remaining free space.
+                if remaining.is_none_or(|current| abs(value) < abs(current)) {
+                    remaining = Some(value);
+                }
+            }
+            self.flex_lines[line_index].remaining_free_space = remaining;
+            // AD-HOC: We allow the remaining free space to be infinite, but we can't let infinity
+            //         leak into the layout geometry, so we treat infinity as zero when used in arithmetic.
+            let arithmetic_free_space = remaining.unwrap_or_default();
+
+            // c. If the remaining free space is non-zero, distribute it proportional to the flex factors:
+            if remaining != Some(CssPixels::default()) {
+                // If using the flex grow factor
+                if factor == FlexFactor::Grow {
+                    // For every unfrozen item on the line,
+                    // find the ratio of the item’s flex grow factor to the sum of the flex grow factors of all unfrozen items on the line.
+                    let sum = factor_sum;
+                    // NB: Each item takes the part of the free space between the running sums of the ratios before and
+                    //     after it, so that rounding the fractions does not make the items overflow or underfill the
+                    //     line.
+                    let mut cumulative_factor = 0.0;
+                    let mut distributed = CssPixels::default();
+                    for item_position in 0..item_count {
+                        let index = self.flex_lines[line_index].items.at(item_position);
+                        if self.flex_items[index].frozen {
+                            continue;
+                        }
+                        cumulative_factor += self.flex_items[index].flex_factor;
+                        let distributed_including_item = arithmetic_free_space.scaled(cumulative_factor / sum);
+                        // Set the item’s target main size to its flex base size plus a fraction of the remaining free space proportional to the ratio.
+                        self.flex_items[index].target_main_size =
+                            self.flex_items[index].flex_base_size + (distributed_including_item - distributed);
+                        distributed = distributed_including_item;
+                    }
+                } else {
+                    // If using the flex shrink factor
+
+                    // For every unfrozen item on the line, multiply its flex shrink factor by its inner flex base size, and note this as its scaled flex shrink factor.
+                    let mut sum = 0.0;
+                    for item_position in 0..item_count {
+                        let index = self.flex_lines[line_index].items.at(item_position);
+                        let item = &mut self.flex_items[index];
+                        if item.frozen {
+                            continue;
+                        }
+                        item.scaled_flex_shrink_factor = item.flex_factor * item.flex_base_size.to_double();
+                        sum += item.scaled_flex_shrink_factor;
+                    }
+                    // NB: As when growing, each item takes the part of the free space between the running sums of the
+                    //     ratios before and after it.
+                    let mut cumulative_ratio = 0.0;
+                    let mut distributed = CssPixels::default();
+                    for item_position in 0..item_count {
+                        let index = self.flex_lines[line_index].items.at(item_position);
+                        if self.flex_items[index].frozen {
+                            continue;
+                        }
+                        // Find the ratio of the item’s scaled flex shrink factor to the sum of the scaled flex shrink factors of all unfrozen items on the line.
+
+                        // Set the item’s target main size to its flex base size minus a fraction of the absolute value of the remaining free space proportional to the ratio.
+                        // (Note this may result in a negative inner main size; it will be corrected in the next step.)
+                        if sum == 0.0 {
+                            self.flex_items[index].target_main_size =
+                                self.flex_items[index].flex_base_size - abs(arithmetic_free_space);
+                            continue;
+                        }
+                        cumulative_ratio += self.flex_items[index].scaled_flex_shrink_factor / sum;
+                        let distributed_including_item = abs(arithmetic_free_space).scaled(cumulative_ratio);
+                        self.flex_items[index].target_main_size =
+                            self.flex_items[index].flex_base_size - (distributed_including_item - distributed);
+                        distributed = distributed_including_item;
+                    }
+                }
+            } else {
+                // INTEROP: Distributing no free space leaves the unfrozen items at their flex base size, rather than at
+                //          a target main size left over from a previous iteration of this loop. Otherwise, an item
+                //          that was shrunk before another item froze at its max size stays shrunk, even though the
+                //          line now has room for it.
+                for item_position in 0..item_count {
+                    let index = self.flex_lines[line_index].items.at(item_position);
+                    if !self.flex_items[index].frozen {
+                        self.flex_items[index].target_main_size = self.flex_items[index].flex_base_size;
+                    }
+                }
+            }
+
+            // d. Fix min/max violations.
+            let mut total_violation = CssPixels::default();
+            // Clamp each non-frozen item’s target main size by its used min and max main sizes and floor its content-box size at zero.
+            for item_position in 0..item_count {
+                let index = self.flex_lines[line_index].items.at(item_position);
+                if self.flex_items[index].frozen {
+                    continue;
+                }
+                let max_size = if self.has_main_max_size(index) {
+                    self.specified_main_max_size(index)
+                } else {
+                    CssPixels::from_raw(i32::MAX)
+                };
+                let original = self.flex_items[index].target_main_size;
+                let min_size = if self.has_main_min_size(index) {
+                    self.specified_main_min_size(index)
+                } else {
+                    self.automatic_minimum_size_for_clamping(index, original.min(max_size))
+                };
+                let target = css_clamp(original, min_size, max_size).max(CssPixels::default());
+                self.flex_items[index].target_main_size = target;
+                if target < original {
+                    // If the item’s target main size was made smaller by this, it’s a max violation.
+                    self.flex_items[index].is_max_violation = true;
+                }
+                if target > original {
+                    // If the item’s target main size was made larger by this, it’s a min violation.
+                    self.flex_items[index].is_min_violation = true;
+                }
+                total_violation += target - original;
+            }
+
+            // e. Freeze over-flexed items.
+            //    The total violation is the sum of the adjustments from the previous step ∑(clamped size - unclamped size).
+
+            // If the total violation is:
+            // Zero
+            //   Freeze all items.
+
+            // Positive
+            //   Freeze all the items with min violations.
+
+            // Negative
+            //   Freeze all the items with max violations.
+            for item_position in 0..item_count {
+                let index = self.flex_lines[line_index].items.at(item_position);
+                if self.flex_items[index].frozen {
+                    continue;
+                }
+                if total_violation == CssPixels::default()
+                    || (total_violation > CssPixels::default() && self.flex_items[index].is_min_violation)
+                    || (total_violation < CssPixels::default() && self.flex_items[index].is_max_violation)
+                {
+                    self.flex_items[index].frozen = true;
+                }
+            }
+            // NOTE: This freezes at least one item, ensuring that the loop makes progress and eventually terminates.
+
+            // f. Return to the start of this loop.
+            unfrozen_items = self.unfrozen_items_of_line(line_index, available_main_size);
+        }
+
+        // NOTE: Calculate the remaining free space once again here, since it's needed later when aligning items.
+        self.flex_lines[line_index].remaining_free_space = unfrozen_items.remaining_free_space;
+        // 6. Set each item’s used main size to its target main size.
+        for item_position in 0..item_count {
+            let index = self.flex_lines[line_index].items.at(item_position);
+            let target = self.flex_items[index].target_main_size;
+            self.flex_items[index].main_size = Some(target);
+            self.flex_items[index].automatic_minimum_size_before_flexing = None;
+            self.set_main_size(index, target);
+            if self.post_flexing_main_size_is_definite(index) {
+                self.set_has_definite_main_size(index);
+            }
+        }
+    }
+
+    // https://drafts.csswg.org/css-flexbox-1/#definite-sizes
+    fn post_flexing_main_size_is_definite(&self, index: usize) -> bool {
+        // 1. If the flex container has a definite main size, then the post-flexing main sizes of its flex items are treated as definite.
+        // 2. If a flex item’s flex basis is definite, then its post-flexing main size is also definite.
+        // AD-HOC: 3. If a flex item’s main size was resolved from its intrinsic aspect ratio, then its post-flexing main size is also definite.
+        let item_is_orthogonal =
+            self.flex_item_details[index].inputs.inline_axis_is_horizontal != self.container.inline_axis_is_horizontal;
+        let container_has_vertical_inline_main_axis = self.is_row_layout() && !self.container.inline_axis_is_horizontal;
+        // INTEROP: The block size of a non-replaced item with an aspect ratio follows from its inline size, so other
+        //          engines treat its post-flexing main size as definite when the main axis is its block axis.
+        let aspect_ratio_provides_block_main_size = !self.main_axis_is_parallel_to_inline_axis_of_item(index)
+            && !self.flex_item_details[index].inputs.is_replaced_box
+            && self.flex_item_details[index].inputs.preferred_aspect_ratio.is_some();
+        self.has_definite_main_size_used(&self.container_cells)
+            || self.flex_items[index].used_flex_basis_is_definite
+            || self.flex_items[index].main_size_was_resolved_from_aspect_ratio
+            || aspect_ratio_provides_block_main_size
+            || container_has_vertical_inline_main_axis
+            || (item_is_orthogonal && self.main_axis_is_parallel_to_inline_axis_of_item(index))
+    }
+
+    // https://drafts.csswg.org/css-flexbox-1/#resolve-flexible-lengths
+    fn resolve_flexible_lengths(&mut self) {
+        for line_index in 0..self.flex_lines.len() {
+            self.resolve_flexible_lengths_for_line(line_index);
+        }
+    }
+
+    // The size that a stretch cross size resolves against, or None where it behaves as auto because percentages of
+    // the cross size would not resolve.
+    // https://drafts.csswg.org/css-sizing-3/#stretch-fit-sizing
+    fn cross_axis_stretch_basis(&self) -> Option<CssPixels> {
+        let constraints = self.item_containing_block_constraints();
+        self.select_cross(
+            constraints.percentage_basis_inline_size,
+            constraints.percentage_basis_block_size,
+        )
+    }
+
+    // The inner cross size of an item with a stretch cross size, filling `basis` with its margin box.
+    fn stretch_fit_inner_cross_size(&self, index: usize, basis: CssPixels) -> CssPixels {
+        let node = self.flex_items[index].box_;
+        let axis = self.cross_sizing_axis();
+        let constraints = self.item_containing_block_constraints();
+        let sizing = self.sizing();
+        let stretch_fit_size = sizing.stretch_fit_inner_size(
+            sizing_context::SizedBox::new(node, &self.flex_item_details[index].cells),
+            axis,
+            basis,
+            constraints,
+        );
+        sizing.resolve_calc_size(
+            sizing_context::SizedBox::new(node, &self.flex_item_details[index].cells),
+            axis,
+            self.computed_cross_size(index),
+            stretch_fit_size,
+            self.cross_axis_stretch_basis(),
+        )
+    }
+
+    fn flex_item_is_stretched(&self, index: usize) -> bool {
+        self.flex_items[index].alignment_facts.is_stretched
+    }
+
+    // https://drafts.csswg.org/css-flexbox-1/#stretched
+    fn item_is_stretched(
+        &self,
+        node: Node,
+        style: StyleValues<'pass>,
+        alignment: SelfAlignment,
+        is_table_wrapper: bool,
+        preferred_cross_size: &'pass ComputedSize,
+    ) -> bool {
+        if !matches!(alignment.position, SelfPosition::Stretch | SelfPosition::Normal) {
+            return false;
+        }
+        // If the cross size property of the flex item computes to auto, and neither of the cross-axis margins are auto, the flex item is stretched.
+        // https://drafts.csswg.org/css-flexbox-1/#flex-items
+        // Like width and height, the cross size property of a display: table item applies to the table box.
+        // NB: A table box resolves its own inline size inside the wrapper, so this only matters in the block axis.
+        let cross_size = if is_table_wrapper && !self.cross_axis_is_horizontal() {
+            let table_box_style = self.style(self.sizing().table_box_inside_wrapper(node));
+            self.select_cross(table_box_style.width(), table_box_style.height())
+        } else {
+            preferred_cross_size
+        };
+        let behaves_as_auto =
+            cross_size.is_auto() || (cross_size.is_stretch() && self.cross_axis_stretch_basis().is_none());
+        let (cross_margin_before, cross_margin_after) = self.select_cross(
+            (style.margin_left(), style.margin_right()),
+            (style.margin_top(), style.margin_bottom()),
+        );
+        behaves_as_auto && !cross_margin_before.is_auto() && !cross_margin_after.is_auto()
+    }
+
+    /// The alignment along the cross axis of a box styled `style`.
+    fn cross_alignment_of(&self, style: StyleValues<'_>) -> SelfAlignment {
+        // AD-HOC: The items of a legacy webkit box align as its -webkit-box-align says, whatever their align-self and
+        //         its safety are, and the box's align-items doesn't apply, matching other engines.
+        let (keyword, safety) = if self.is_legacy_webkit_box() {
+            (
+                SelfKeyword::webkit_box_align_of(*self.container.style),
+                OverflowSafety::Unsafe,
+            )
+        } else {
+            SelfKeyword::align_self_of(*style, Some(*self.container.style))
+        };
+        let self_start_is_low = geometry::start_is_low_side_in_frame(
+            self.run.pass.frame,
+            style.writing_mode(),
+            style.direction(),
+            self.cross_axis_is_horizontal(),
+        );
+        keyword.resolve(
+            safety,
+            AxisDirections {
+                self_start_is_low,
+                ..self.container.cross_axis_directions
+            },
+        )
+    }
+
+    /// The flex-start side of the cross axis.
+    fn cross_start_edge(&self) -> AxisEdge {
+        AxisEdge::low_side_if(!self.cross_axis_is_reverse())
+    }
+
+    // The used min and max cross sizes of an item, with an automatic minimum of zero and no maximum for none.
+    fn cross_size_limits(&self, index: usize) -> (CssPixels, CssPixels) {
+        let min = if crate::layout::sizing_context::is_plain_auto(self.computed_cross_min_size(index)) {
+            CssPixels::default()
+        } else {
+            self.specified_cross_min_size(index)
+        };
+        let max = if self.should_treat_max_size_as_none(index, true) {
+            CssPixels::from_raw(i32::MAX)
+        } else {
+            self.specified_cross_max_size(index)
+        };
+        (min, max)
+    }
+
+    fn set_hypothetical_cross_size(&mut self, index: usize, size: CssPixels, min: CssPixels, max: CssPixels) {
+        self.flex_items[index].hypothetical_cross_size_before_clamp = size;
+        self.flex_items[index].hypothetical_cross_size = css_clamp(size, min, max);
+    }
+
+    fn hypothetical_cross_size_is_fit_content_block_size(&self, index: usize) -> bool {
+        if self.cross_axis_is_horizontal()
+            || self.has_definite_cross_size(index)
+            || self.flex_item_details[index].inputs.preferred_aspect_ratio.is_some()
+        {
+            return false;
+        }
+        let computed = self.computed_cross_size(index);
+        !(computed.is_stretch() && self.cross_axis_stretch_basis().is_some())
+            && !computed.is_min_content()
+            && !computed.is_max_content()
+    }
+
+    fn fork_candidates(&self) -> Vec<usize> {
+        self.items_to_fork
+            .get_or_init(|| {
+                parallel_layout::fork_candidates(&self.run.pass, 0..self.flex_items.len(), |index| {
+                    self.flex_items[index].box_
+                })
+            })
+            .clone()
+    }
+
+    fn measure_content_inline_sizes_of_items_ahead(&self) {
+        let candidates = self.fork_candidates();
+        if candidates.is_empty() {
+            return;
+        }
+        let sizing = self.sizing();
+        let constraints = self.item_containing_block_constraints();
+        let inline_size_is_main_size = self.main_axis_is_horizontal();
+        let measurements = candidates
+            .into_iter()
+            .filter(|&index| {
+                if inline_size_is_main_size {
+                    !self.has_definite_main_size(index)
+                } else {
+                    !self.has_definite_cross_size(index)
+                }
+            })
+            .filter_map(|index| {
+                let cells = &self.flex_item_details[index].cells;
+                sizing.content_inline_size_measurement_ahead(
+                    sizing_context::SizedBox::new(self.flex_items[index].box_, cells),
+                    constraints,
+                    cells.has_definite_block_size.then_some(cells.content_block_size),
+                )
+            })
+            .collect();
+        sizing.measure_content_inline_sizes_ahead(measurements);
+    }
+
+    fn lay_out_fit_content_cross_size_measurements_ahead(&self) {
+        let candidates = self.fork_candidates();
+        if candidates.is_empty() {
+            return;
+        }
+        let sizing = self.sizing();
+        let constraints = self.item_containing_block_constraints();
+        let shapes = candidates
+            .into_iter()
+            .filter(|&index| self.hypothetical_cross_size_is_fit_content_block_size(index))
+            .filter_map(|index| {
+                let inline_size = clamp_to_max_dimension_value(self.flex_items[index].main_size?);
+                sizing.max_content_block_size_run_shape(
+                    sizing_context::SizedBox::new(self.flex_items[index].box_, &self.flex_item_details[index].cells),
+                    inline_size,
+                    constraints,
+                )
+            })
+            .collect();
+        parallel_layout::lay_out_shapes_ahead(&self.run.pass, shapes);
+    }
+
+    // https://drafts.csswg.org/css-flexbox/#hypothetical-cross-size
+    fn determine_hypothetical_cross_size_of_item(&mut self, index: usize) {
+        // Determine the hypothetical cross size of each item by performing layout as if it were an in-flow block-level box
+        // with the used main size and the given available space, treating auto as fit-content.
+
+        let node = self.flex_items[index].box_;
+        let (clamp_min, clamp_max) = self.cross_size_limits(index);
+
+        // If we have a definite cross size, this is easy! No need to perform layout, we can just use it as-is.
+        if self.has_definite_cross_size(index) {
+            let preferred = self.computed_cross_size(index);
+            let min_or_max_is_stretch =
+                self.computed_cross_min_size(index).is_stretch() || self.computed_cross_max_size(index).is_stretch();
+            // NB: Initial cells can already contain a provisional min/max clamp. Keep the preferred size so a
+            //     stretch maximum that grows with the final line can restore it.
+            let size = if min_or_max_is_stretch && !preferred.is_auto() && !preferred.is_stretch() {
+                self.resolve_size_for_axis(index, self.cross_axis_is_horizontal(), preferred)
+            } else {
+                self.inner_cross_size(index)
+            };
+            self.set_hypothetical_cross_size(index, size, clamp_min, clamp_max);
+            return;
+        }
+
+        if self.flex_item_details[index].inputs.preferred_aspect_ratio.is_some() {
+            // https://drafts.csswg.org/css-sizing-4/#aspect-ratio-automatic
+            // When a box has a preferred aspect ratio, its automatic sizes are calculated the same as for a
+            // replaced element with a natural aspect ratio and no natural size in that axis, see e.g. CSS2 § 10
+            // and CSS Flexible Box Model Level 1 § 9.2. The axis in which the preferred size calculation depends
+            // on this aspect ratio is called the ratio-dependent axis, and the resulting size is definite if its
+            // input sizes are also definite.
+            let main_size = self.flex_items[index].main_size.unwrap();
+            let transferred_cross_size = self.cross_size_from_main_size_and_aspect_ratio(index, main_size);
+            // https://drafts.csswg.org/css-sizing-4/#aspect-ratio-minimum
+            let automatic_minimum = self.sizing().automatic_minimum_size_from_aspect_ratio(
+                sizing_context::SizedBox::new(node, &self.flex_item_details[index].cells),
+                self.cross_sizing_axis(),
+                main_size,
+                transferred_cross_size,
+                self.available_space_for_items.unwrap().space,
+                self.item_containing_block_constraints(),
+                None,
+            );
+            let transferred = css_clamp(transferred_cross_size, clamp_min, clamp_max);
+            self.flex_item_details[index].cross_size_transferred_through_aspect_ratio = automatic_minimum
+                .filter(|&minimum| minimum > transferred)
+                .map(|_| transferred);
+            let clamp_min = automatic_minimum.unwrap_or(clamp_min);
+            self.set_hypothetical_cross_size(
+                index,
+                transferred_cross_size.max(automatic_minimum.unwrap_or_default()),
+                clamp_min,
+                clamp_max,
+            );
+            self.flex_items[index].cross_size_was_resolved_from_aspect_ratio = self.has_definite_main_size(index);
+            return;
+        }
+
+        let computed = self.computed_cross_size(index);
+        // NB: In a multi-line flex container, the stretch-fit size resolves against the containing block directly, and
+        //     contributes that size to the cross size of the line.
+        if computed.is_stretch()
+            && let Some(basis) = self.cross_axis_stretch_basis()
+        {
+            self.set_hypothetical_cross_size(
+                index,
+                self.stretch_fit_inner_cross_size(index, basis),
+                clamp_min,
+                clamp_max,
+            );
+            return;
+        }
+        if computed.is_min_content() {
+            self.set_hypothetical_cross_size(
+                index,
+                self.calculate_min_content_cross_size(index),
+                clamp_min,
+                clamp_max,
+            );
+            return;
+        }
+        if computed.is_max_content() {
+            self.set_hypothetical_cross_size(
+                index,
+                self.calculate_max_content_cross_size(index),
+                clamp_min,
+                clamp_max,
+            );
+            return;
+        }
+
+        // "... treating auto as fit-content"
+        let fit_content = if !self.cross_axis_is_horizontal() {
+            self.calculate_fit_content_size(
+                index,
+                SizingAxis::Block,
+                AvailableSpace {
+                    inline_size: self.flex_items[index]
+                        .main_size
+                        .map(|size| AvailableSize::definite(clamp_to_max_dimension_value(size)))
+                        .unwrap_or(AvailableSize::Indefinite),
+                    block_size: AvailableSize::Indefinite,
+                },
+            )
+        } else {
+            self.calculate_fit_content_size(index, SizingAxis::Inline, self.available_space_for_items.unwrap().space)
+        };
+        // https://drafts.csswg.org/css-values-5/#resolving-calc-size
+        // NB: A calc-size() with an auto basis resolves against this size, unless the item is stretched, in which case
+        //     it resolves against the stretched size instead.
+        let fit_content = if computed.calc_size().is_some() && !self.flex_item_is_stretched(index) {
+            self.resolve_calc_size_cross_size(index, fit_content)
+        } else {
+            fit_content
+        };
+        self.set_hypothetical_cross_size(index, fit_content, clamp_min, clamp_max);
+    }
+
+    // The cross size that a cross size property given as calc-size() with an auto basis gives the item, when auto
+    // gives it `auto_size`.
+    fn resolve_calc_size_cross_size(&self, index: usize, auto_size: CssPixels) -> CssPixels {
+        let node = self.flex_items[index].box_;
+        let container = &self.container_cells;
+        let percentage_basis = self
+            .has_definite_cross_size_used(container)
+            .then(|| self.inner_cross_size_used(container));
+        self.sizing().resolve_calc_size(
+            sizing_context::SizedBox::new(node, &self.flex_item_details[index].cells),
+            self.cross_sizing_axis(),
+            self.computed_cross_size(index),
+            auto_size,
+            percentage_basis,
+        )
+    }
+
+    fn calculate_inner_container_cross_size(&self, property: SizingProperty) -> CssPixels {
+        let axis = self.cross_sizing_axis();
+        let container_cells = self.container_cells.get();
+        self.calculate_inner_size_with_constraints(
+            sizing_context::SizedBox::new(self.run.box_, &container_cells),
+            axis,
+            property,
+            self.available_space.unwrap(),
+            self.layout_input.as_ref().unwrap().containing_block_constraints,
+        )
+    }
+
+    // https://www.w3.org/TR/css-flexbox-1/#algo-cross-line
+    fn calculate_cross_size_of_each_flex_line(&mut self) {
+        // If the flex container is single-line and has a definite cross size, the cross size of the flex line is the flex container’s inner cross size.
+        // https://drafts.csswg.org/css-flexbox-1/#flex-lines
+        // In a single-line flex container, the cross size of the line is the cross size of the flex container,
+        // and align-content has no effect.
+        // NB: A parent formatting context can assign a used size that is still indefinite for resolving percentages.
+        if self.is_single_line() && self.container_cross_size_is_known_for_layout() {
+            self.flex_lines[0].cross_size = self.inner_cross_size_used(&self.container_cells);
+            return;
+        }
+        // Otherwise, for each flex line:
+        for line_index in 0..self.flex_lines.len() {
+            // FIXME: 1. Collect all the flex items whose inline-axis is parallel to the main-axis, whose align-self is baseline,
+            //           and whose cross-axis margins are both non-auto. Find the largest of the distances between each item’s baseline
+            //           and its hypothetical outer cross-start edge, and the largest of the distances between each item’s baseline
+            //           and its hypothetical outer cross-end edge, and sum these two values.
+
+            // 2. Among all the items not collected by the previous step, find the largest outer hypothetical cross size.
+            let largest = self.flex_lines[line_index]
+                .items
+                .iter()
+                .map(|index| self.flex_items[index].hypothetical_cross_size_with_margins())
+                .max()
+                .unwrap_or_default();
+            // 3. The used cross-size of the flex line is the largest of the numbers found in the previous two steps and zero.
+            self.flex_lines[line_index].cross_size = largest.max(CssPixels::default());
+        }
+        // If the flex container is single-line, then clamp the line’s cross-size to be within the container’s computed min and max cross sizes.
+        // Note that if CSS 2.1’s definition of min/max-width/height applied more generally, this behavior would fall out automatically.
+        // AD-HOC: We don't do this when the flex container is being sized under a min-content or max-content constraint.
+        if self.is_single_line()
+            && !self
+                .available_space_for_items
+                .unwrap()
+                .cross
+                .is_intrinsic_sizing_constraint()
+            && !self
+                .layout_input
+                .as_ref()
+                .unwrap()
+                .sizing
+                .root_is_measured_for_its_content_block_size
+        {
+            let (min, min_property) = self.container_computed_cross_min_size();
+            let cross_min = if crate::layout::sizing_context::is_plain_auto(min) {
+                CssPixels::default()
+            } else {
+                self.calculate_inner_container_cross_size(min_property)
+            };
+            let cross_max = if self.container_should_treat_max_cross_size_as_none() {
+                CssPixels::from_raw(i32::MAX)
+            } else {
+                self.calculate_inner_container_cross_size(self.container_computed_cross_max_size().1)
+            };
+            self.flex_lines[0].cross_size = css_clamp(self.flex_lines[0].cross_size, cross_min, cross_max);
+        }
+    }
+
+    // https://drafts.csswg.org/css-flexbox-1/#algo-line-stretch
+    fn handle_align_content_stretch(&mut self) {
+        // If the flex container has a definite cross size, or its automatic
+        // cross size is increased by a minimum cross size,
+        if (!self.container_cross_size_is_known_for_layout()
+            && self.container_computed_cross_min_size().0.is_auto())
+            // align-content is stretch,
+            || self.container.align_content.distribution != Some(ContentDistribution::Stretch)
+        {
+            return;
+        }
+        let mut sum = self
+            .flex_lines
+            .iter()
+            .fold(CssPixels::default(), |sum, line| sum + line.cross_size);
+        // CSS-FLEXBOX-2: Account for gap between flex lines.
+        sum += self.cross_gap() * self.flex_lines.len().wrapping_sub(1);
+        let container_size = self.inner_cross_size_used(&self.container_cells);
+        // and the sum of the flex lines' cross sizes is less than the flex container’s inner cross size,
+        if sum >= container_size {
+            return;
+        }
+        // increase the cross size of each flex line by equal amounts
+        // such that the sum of their cross sizes exactly equals the flex container’s inner cross size.
+        let extra = (container_size - sum) / self.flex_lines.len();
+        for line in &mut self.flex_lines {
+            line.cross_size += extra;
+        }
+    }
+
+    // https://drafts.csswg.org/css-flexbox-1/#algo-stretch
+    fn determine_used_cross_size_of_each_flex_item(&mut self) {
+        for line_index in 0..self.flex_lines.len() {
+            let line_cross_size = self.flex_lines[line_index].cross_size;
+            for item_position in 0..self.flex_lines[line_index].items.len() {
+                let index = self.flex_lines[line_index].items.at(item_position);
+                self.determine_used_cross_size_of_item(index, line_cross_size);
+                if self.flex_items[index].cross_size_is_calc_size && self.flex_item_is_stretched(index) {
+                    self.resolve_calc_size_cross_size_of_stretched_item(index);
+                }
+                if self.flex_items[index].cross_min_or_max_size_is_stretch {
+                    self.resolve_stretch_cross_size_limits_of_item(index, line_cross_size);
+                }
+            }
+        }
+    }
+
+    fn determine_used_cross_size_of_item(&mut self, index: usize, line_cross_size: CssPixels) {
+        // If a flex item’s cross size depends on the available space in the cross axis, recalculate its cross
+        // size using the flex line’s cross size (rather than the flex container’s) as the available space.
+        if self.flex_item_is_stretched(index) {
+            let item = &self.flex_items[index];
+            let unclamped = line_cross_size
+                - item.margins.cross_before
+                - item.margins.cross_after
+                - item.borders_and_padding.cross_before
+                - item.borders_and_padding.cross_after;
+            // https://drafts.csswg.org/css-flexbox-1/#definite-sizes
+            // Once the cross size of a flex line has been determined, the cross sizes of items in auto-sized flex
+            // containers are also considered definite for the purpose of layout.
+            let (mut cross_min, cross_max) = self.cross_size_limits(index);
+            if self.flex_item_details[index].inputs.is_table_wrapper
+                && self.main_axis_is_parallel_to_inline_axis_of_item(index)
+            {
+                // A table is never smaller than its content, so neither is its stretched wrapper.
+                let sizes = self.measure_table_wrapper_block_sizes(index);
+                self.flex_item_details[index].stretched_table_wrapper_block_sizes = Some(sizes);
+                cross_min = cross_min.max(sizes.wrapper_content_block_size);
+            }
+            let cross_size = css_clamp(unclamped, cross_min, cross_max);
+            self.flex_items[index].cross_size = Some(cross_size);
+            // If the flex item’s cross size changed as a result, redo layout for its contents, treating this used
+            // size as its definite cross size so that percentage-sized children can be resolved.
+            self.set_cross_size(index, cross_size);
+            self.set_has_definite_cross_size(index);
+        } else if self.flex_items[index].cross_size_is_stretch && self.cross_axis_stretch_basis().is_some() {
+            // NB: A stretch cross size finally resolves against the cross size of the flex line.
+            let (cross_min, cross_max) = self.cross_size_limits(index);
+            let cross_size = css_clamp(
+                self.stretch_fit_inner_cross_size(index, line_cross_size),
+                cross_min,
+                cross_max,
+            );
+            self.flex_items[index].cross_size = Some(cross_size);
+            self.set_cross_size(index, cross_size);
+            self.set_has_definite_cross_size(index);
+        } else {
+            // Otherwise, the used cross size is the item’s hypothetical cross size.
+            let size = self.flex_items[index].hypothetical_cross_size;
+            self.flex_items[index].cross_size = Some(size);
+            // https://drafts.csswg.org/css-sizing-4/#aspect-ratio-automatic
+            // The axis in which the preferred size calculation depends on this aspect ratio is called the
+            // ratio-dependent axis, and the resulting size is definite if its input sizes are also definite.
+            if self.flex_items[index].cross_size_was_resolved_from_aspect_ratio {
+                // NB: When the automatic minimum size grew the transferred size to fit the content, the content
+                //     is laid out against the transferred size, and the item takes its grown size afterwards.
+                let percentage_basis = if self.cross_axis_is_horizontal() {
+                    size
+                } else {
+                    self.flex_item_details[index]
+                        .cross_size_transferred_through_aspect_ratio
+                        .unwrap_or(size)
+                };
+                self.set_cross_size(index, percentage_basis);
+                self.set_has_definite_cross_size(index);
+            }
+        }
+    }
+
+    // https://drafts.csswg.org/css-values-5/#resolving-calc-size
+    // NB: A calc-size() with an auto basis, or a stretch basis that behaves as auto, resolves against the stretched
+    //     cross size of a stretched item. Other items resolved it in their hypothetical cross size, and their
+    //     cross size stays indefinite like auto.
+    fn resolve_calc_size_cross_size_of_stretched_item(&mut self, index: usize) {
+        let Some(stretched_size) = self.flex_items[index].cross_size else {
+            return;
+        };
+        let (min, max) = self.cross_size_limits(index);
+        let size = css_clamp(self.resolve_calc_size_cross_size(index, stretched_size), min, max);
+        self.flex_items[index].cross_size = Some(size);
+        self.set_cross_size(index, size);
+        self.set_has_definite_cross_size(index);
+    }
+
+    // https://drafts.csswg.org/css-flexbox-1/#algo-stretch
+    // If a flex item’s cross size depends on the available space in the cross axis, recalculate its cross
+    // size using the flex line’s cross size (rather than the flex container’s) as the available space.
+    // NB: A stretch minimum or maximum also depends on this final available space, even for a non-auto item.
+    fn resolve_stretch_cross_size_limits_of_item(&mut self, index: usize, line_cross_size: CssPixels) {
+        let node = self.flex_items[index].box_;
+        let min_size = self.computed_cross_min_size(index);
+        let max_size = self.computed_cross_max_size(index);
+        if self.flex_items[index].cross_size.is_none() {
+            return;
+        }
+        let (mut min, mut max) = self.cross_size_limits(index);
+        let sizing = self.sizing();
+        let constraints = self.item_containing_block_constraints();
+        let sized = sizing_context::SizedBox::new(node, &self.flex_item_details[index].cells);
+        for (size, limit) in [(min_size, &mut min), (max_size, &mut max)] {
+            if size.is_stretch() {
+                let stretched =
+                    sizing.stretch_fit_inner_size(sized, self.cross_sizing_axis(), line_cross_size, constraints);
+                *limit = sizing.resolve_calc_size(
+                    sized,
+                    self.cross_sizing_axis(),
+                    size,
+                    stretched,
+                    self.cross_axis_stretch_basis(),
+                );
+            }
+        }
+        let preferred_cross_size = if self.flex_item_is_stretched(index) {
+            let item = &self.flex_items[index];
+            let size = line_cross_size
+                - item.margins.cross_before
+                - item.margins.cross_after
+                - item.borders_and_padding.cross_before
+                - item.borders_and_padding.cross_after;
+            // NB: Keep the content minimum used by the earlier stretched-table pass.
+            if let Some(sizes) = self.flex_item_details[index].stretched_table_wrapper_block_sizes {
+                min = min.max(sizes.wrapper_content_block_size);
+            }
+            self.resolve_calc_size_cross_size(index, size)
+        } else if self.flex_items[index].cross_size_is_stretch && self.cross_axis_stretch_basis().is_some() {
+            self.stretch_fit_inner_cross_size(index, line_cross_size)
+        } else {
+            self.flex_items[index].hypothetical_cross_size_before_clamp
+        };
+        let cross_size = css_clamp(preferred_cross_size, min, max);
+        self.flex_items[index].cross_size = Some(cross_size);
+        self.set_cross_size(index, cross_size);
+    }
+
+    fn set_main_axis_first_margin(&mut self, index: usize, margin: CssPixels) {
+        let main_axis_is_horizontal = self.main_axis_is_horizontal();
+        self.flex_items[index].margins.main_before = margin;
+        let cells = &mut self.flex_item_details[index].cells;
+        if main_axis_is_horizontal {
+            cells.margin_left = margin;
+        } else {
+            cells.margin_top = margin;
+        }
+    }
+
+    fn set_main_axis_second_margin(&mut self, index: usize, margin: CssPixels) {
+        let main_axis_is_horizontal = self.main_axis_is_horizontal();
+        self.flex_items[index].margins.main_after = margin;
+        let cells = &mut self.flex_item_details[index].cells;
+        if main_axis_is_horizontal {
+            cells.margin_right = margin;
+        } else {
+            cells.margin_bottom = margin;
+        }
+    }
+
+    // https://www.w3.org/TR/css-flexbox-1/#algo-main-align
+    fn distribute_any_remaining_free_space(&mut self) {
+        for line_index in 0..self.flex_lines.len() {
+            // 12.1.
+            let item_count = self.flex_lines[line_index].items.len();
+            let mut used_main_space = CssPixels::default();
+            let mut auto_margins = 0usize;
+            for item_position in 0..item_count {
+                let index = self.flex_lines[line_index].items.at(item_position);
+                let item = &self.flex_items[index];
+                used_main_space += item.main_size.unwrap();
+                auto_margins += item.margins.main_before_is_auto as usize;
+                auto_margins += item.margins.main_after_is_auto as usize;
+                used_main_space += item.margins.main_before
+                    + item.margins.main_after
+                    + item.borders_and_padding.main_before
+                    + item.borders_and_padding.main_after;
+            }
+            // CSS-FLEXBOX-2: Account for gap between flex items.
+            used_main_space += self.main_gap() * item_count.wrapping_sub(1);
+
+            let remaining = self.flex_lines[line_index].remaining_free_space;
+            if remaining.is_some_and(|value| value > CssPixels::default()) && auto_margins > 0 {
+                let distribution = SpaceDistribution::new(remaining.unwrap(), auto_margins, 0, 1);
+                let mut auto_margin_index = 0;
+                for item_position in 0..item_count {
+                    let index = self.flex_lines[line_index].items.at(item_position);
+                    if self.flex_items[index].margins.main_before_is_auto {
+                        self.set_main_axis_first_margin(index, distribution.space_after(auto_margin_index));
+                        auto_margin_index += 1;
+                    }
+                    if self.flex_items[index].margins.main_after_is_auto {
+                        self.set_main_axis_second_margin(index, distribution.space_after(auto_margin_index));
+                        auto_margin_index += 1;
+                    }
+                }
+            } else {
+                for item_position in 0..item_count {
+                    let index = self.flex_lines[line_index].items.at(item_position);
+                    if self.flex_items[index].margins.main_before_is_auto {
+                        self.set_main_axis_first_margin(index, CssPixels::default());
+                    }
+                    if self.flex_items[index].margins.main_after_is_auto {
+                        self.set_main_axis_second_margin(index, CssPixels::default());
+                    }
+                }
+            }
+
+            // 12.2.
+            // NB: The free space that justify-content distributes around the items.
+            let mut space_distribution = SpaceDistribution::default();
+            let mut initial_offset = CssPixels::default();
+            // NB: Where the cursor starts at the right or bottom, the items are placed backwards from there.
+            let mut cursor_right = false;
+            if auto_margins == 0 && item_count > 0 {
+                let inner_main_size = self.inner_main_size_used(&self.container_cells);
+                let justify = self
+                    .container
+                    .justify_content
+                    .for_free_space(inner_main_size - used_main_space, OverflowSafety::Unsafe);
+                space_distribution = justify.distributed_space(remaining.unwrap_or_default(), item_count);
+                let leading_space = if justify.distribution.is_none() && justify.edge == AxisEdge::Center {
+                    (inner_main_size - used_main_space) / 2
+                } else {
+                    space_distribution.space_before(0)
+                };
+                // NB: Centered and distributed items are placed from the main-start side.
+                cursor_right = match justify.edge {
+                    AxisEdge::Start => false,
+                    AxisEdge::Center => self.is_direction_reverse(),
+                    AxisEdge::End => true,
+                };
+                initial_offset = if cursor_right {
+                    inner_main_size - leading_space
+                } else {
+                    leading_space
+                };
+            }
+
+            let direction_reverse = self.is_direction_reverse();
+            let main_gap = self.main_gap();
+            let mut cursor = initial_offset;
+            for iteration_position in 0..item_count {
+                let position = if cursor_right {
+                    item_count - 1 - iteration_position
+                } else {
+                    iteration_position
+                };
+                let index = self.flex_lines[line_index].items.at(position);
+                let item = &self.flex_items[index];
+                // CSS-FLEXBOX-2: Account for gap between items.
+                let mut amount = item.main_size.unwrap()
+                    + item.margins.main_before
+                    + item.borders_and_padding.main_before
+                    + item.margins.main_after
+                    + item.borders_and_padding.main_after
+                    + space_distribution.space_after(iteration_position);
+                if !direction_reverse && cursor_right {
+                    if position < item_count - 1 {
+                        amount += main_gap;
+                    }
+                } else {
+                    amount += main_gap;
+                }
+                if direction_reverse && cursor_right {
+                    self.flex_items[index].main_offset = cursor
+                        - self.flex_items[index].main_size.unwrap()
+                        - self.flex_items[index].margins.main_after
+                        - self.flex_items[index].borders_and_padding.main_after;
+                    cursor -= amount;
+                } else if cursor_right {
+                    cursor -= amount;
+                    self.flex_items[index].main_offset = cursor
+                        + self.flex_items[index].margins.main_before
+                        + self.flex_items[index].borders_and_padding.main_before;
+                } else {
+                    self.flex_items[index].main_offset = cursor
+                        + self.flex_items[index].margins.main_before
+                        + self.flex_items[index].borders_and_padding.main_before;
+                    cursor += amount;
+                }
+            }
+        }
+    }
+
+    // https://drafts.csswg.org/css-flexbox-1/#algo-cross-margins
+    fn resolve_cross_axis_auto_margins(&mut self) {
+        for line_index in 0..self.flex_lines.len() {
+            let line_size = self.flex_lines[line_index].cross_size;
+            for item_position in 0..self.flex_lines[line_index].items.len() {
+                let index = self.flex_lines[line_index].items.at(item_position);
+                let item = &self.flex_items[index];
+                //  If a flex item has auto cross-axis margins:
+                if !item.margins.cross_before_is_auto && !item.margins.cross_after_is_auto {
+                    continue;
+                }
+                let outer = item.cross_size.unwrap()
+                    + item.borders_and_padding.cross_before
+                    + item.borders_and_padding.cross_after
+                    + item.margins.cross_before
+                    + item.margins.cross_after;
+                // If its outer cross size (treating those auto margins as zero) is less than the cross size of its flex line,
+                // distribute the difference in those sizes equally to the auto margins.
+                // NB: Auto cross-axis margins are stored as 0, so including them here treats them as zero while keeping
+                //     non-auto cross-axis margins in the outer cross size.
+                if outer < line_size {
+                    let remainder = line_size - outer;
+                    if item.margins.cross_before_is_auto && item.margins.cross_after_is_auto {
+                        self.flex_items[index].margins.cross_before = remainder / 2;
+                        self.flex_items[index].margins.cross_after = remainder / 2;
+                    } else if item.margins.cross_before_is_auto {
+                        self.flex_items[index].margins.cross_before = remainder;
+                    } else {
+                        self.flex_items[index].margins.cross_after = remainder;
+                    }
+                }
+                // FIXME: Otherwise, if the block-start or inline-start margin (whichever is in the cross axis) is auto, set it to zero.
+                //        Set the opposite margin so that the outer cross size of the item equals the cross size of its flex line.
+            }
+        }
+    }
+
+    fn align_all_flex_items_along_the_cross_axis(&mut self) {
+        // FIXME: Take better care of margins
+        for line_index in 0..self.flex_lines.len() {
+            let half_line = self.flex_lines[line_index].cross_size / 2;
+            for item_position in 0..self.flex_lines[line_index].items.len() {
+                let index = self.flex_lines[line_index].items.at(item_position);
+                let alignment = self.flex_items[index].alignment_facts.alignment;
+                let item = &self.flex_items[index];
+                // The offsets are from the center of the line, toward the physical right or bottom.
+                let at_physical_start = -half_line + item.margins.cross_before + item.borders_and_padding.cross_before;
+                let at_physical_end = half_line
+                    - item.cross_size.unwrap()
+                    - item.margins.cross_after
+                    - item.borders_and_padding.cross_after;
+                let free_space = self.flex_lines[line_index].cross_size
+                    - item.cross_size.unwrap()
+                    - item.margins.cross_before
+                    - item.borders_and_padding.cross_before
+                    - item.margins.cross_after
+                    - item.borders_and_padding.cross_after;
+                let offset = match alignment.position_for(free_space, OverflowSafety::Unsafe) {
+                    SelfPosition::Baseline => {
+                        // https://drafts.csswg.org/css-flexbox-1/#valdef-align-items-baseline
+                        // NB: Baseline-aligned items are initially placed at the cross-start edge (like flex-start). Their
+                        //     positions are adjusted after layout in resolve_baseline_aligned_items().
+                        // FIXME: Baseline alignment takes the top as the cross-start edge, also when the cross axis is
+                        //        reversed.
+                        self.flex_lines[line_index].has_baseline_aligned_items = true;
+                        at_physical_start
+                    }
+                    SelfPosition::Edge(AxisEdge::Center) => {
+                        // https://drafts.csswg.org/css-flexbox/#align-items-property
+                        // The flex item’s margin box is centered in the cross axis within the line
+                        (-item.cross_size.unwrap() + item.margins.cross_before + item.borders_and_padding.cross_before
+                            - item.margins.cross_after
+                            - item.borders_and_padding.cross_after)
+                            / 2
+                    }
+                    SelfPosition::Edge(AxisEdge::Start) => at_physical_start,
+                    SelfPosition::Edge(AxisEdge::End) => at_physical_end,
+                    SelfPosition::Normal | SelfPosition::Stretch => match self.cross_start_edge() {
+                        AxisEdge::End => at_physical_end,
+                        _ => at_physical_start,
+                    },
+                };
+                self.flex_items[index].cross_offset = offset;
+            }
+        }
+    }
+
+    // https://drafts.csswg.org/css-flexbox-1/#algo-line-align
+    fn align_all_flex_lines(&mut self) {
+        // Align all flex lines per align-content.
+
+        if self.flex_lines.is_empty() {
+            return;
+        }
+        let reverse_cross_axis = self.cross_axis_is_reverse();
+        let container_cross_size = self.inner_cross_size_used(&self.container_cells);
+        if self.is_single_line() {
+            // https://drafts.csswg.org/css-flexbox-1/#flex-lines
+            // 'align-content' does not apply to single-line flex containers, so place the line at cross-start.
+            let center = self.flex_lines[0].cross_size / 2;
+            for item_position in 0..self.flex_lines[0].items.len() {
+                let index = self.flex_lines[0].items.at(item_position);
+                self.flex_items[index].cross_offset += center;
+            }
+            return;
+        }
+
+        let mut sum = self
+            .flex_lines
+            .iter()
+            .fold(CssPixels::default(), |sum, line| sum + line.cross_size);
+        // CSS-FLEXBOX-2: Account for gap between flex lines.
+        sum += self.cross_gap() * self.flex_lines.len().wrapping_sub(1);
+        // NB: The leftover free space that align-content distributes around the lines.
+        let leftover = container_cross_size - sum;
+        let align = self
+            .container
+            .align_content
+            .for_free_space(leftover, OverflowSafety::Unsafe);
+        let space_distribution = align.distributed_space(leftover, self.flex_lines.len());
+        // NB: Centered lines, and lines that space-around or space-evenly cannot distribute negative leftover free
+        //     space around, are placed from the left or top.
+        // https://drafts.csswg.org/css-flexbox-1/#align-content-property
+        // space-around: If the leftover free-space is negative this value is identical to center.
+        let start =
+            if align.edge == AxisEdge::Center && (align.distribution.is_none() || leftover < CssPixels::default()) {
+                container_cross_size / 2 - sum / 2
+            } else {
+                space_distribution.space_before(0)
+            };
+        let place_backwards = align.edge == AxisEdge::End;
+        let iterate_backwards = place_backwards != reverse_cross_axis;
+        let mut start = if place_backwards {
+            container_cross_size - start
+        } else {
+            start
+        };
+
+        let cross_gap = self.cross_gap();
+        for iteration_index in 0..self.flex_lines.len() {
+            let line_index = if iterate_backwards {
+                self.flex_lines.len() - 1 - iteration_index
+            } else {
+                iteration_index
+            };
+            let center = if place_backwards {
+                start - self.flex_lines[line_index].cross_size / 2
+            } else {
+                start + self.flex_lines[line_index].cross_size / 2
+            };
+            for item_position in 0..self.flex_lines[line_index].items.len() {
+                let index = self.flex_lines[line_index].items.at(item_position);
+                self.flex_items[index].cross_offset += center;
+            }
+            // CSS-FLEXBOX-2: Account for gap between flex lines.
+            let amount =
+                self.flex_lines[line_index].cross_size + space_distribution.space_after(iteration_index) + cross_gap;
+            if place_backwards {
+                start -= amount;
+            } else {
+                start += amount;
+            }
+        }
+    }
+
+    // https://drafts.csswg.org/css-align-3/#synthesize-baseline
+    // NB: An item in another writing mode has no baseline in this container's axis, so it synthesizes one.
+    fn item_baseline_is_synthesized(&self, index: usize) -> bool {
+        if self.run.pass.frame.is_transposed() {
+            // NB: An item has a baseline across its block axis, so only in the cross axis that its block axis runs
+            //     along.
+            return self.item_establishes_orthogonal_flow(index) != self.cross_axis_is_horizontal();
+        }
+        self.flex_item_details[index].inputs.style.writing_mode() != writing_mode::HORIZONTAL_TB
+    }
+
+    fn item_establishes_orthogonal_flow(&self, index: usize) -> bool {
+        self.flex_item_details[index].inputs.establishes_orthogonal_flow
+    }
+
+    // https://drafts.csswg.org/css-flexbox-1/#algo-cross-line
+    // Collect all the flex items whose [...] align-self is baseline, and whose cross-axis margins are both non-auto.
+    fn item_participates_in_baseline_alignment(&self, index: usize) -> bool {
+        let item = &self.flex_items[index];
+        item.alignment_facts.alignment.position == SelfPosition::Baseline
+            && !item.margins.cross_before_is_auto
+            && !item.margins.cross_after_is_auto
+            && (!self.item_baseline_is_synthesized(index) || !self.run.pass.frame.is_transposed())
+    }
+
+    /// Whether the item is placed flush against the right edge of the line, aligned with the other items there by the
+    /// distance from their right margin edges to their baselines, rather than against the left or top edge.
+    /// https://drafts.csswg.org/css-align-3/#baseline-sharing-group
+    /// Boxes share a baseline-sharing group if they have the same block flow direction, so across the horizontal axis
+    /// of a horizontal-tb container, an item whose block axis runs leftward aligns at the right edge, and one whose
+    /// block axis runs rightward at the left edge. An item with no baselines across that axis aligns at the cross-start
+    /// edge.
+    fn item_baseline_aligns_at_right_edge(&self, index: usize) -> bool {
+        if self.run.pass.frame.is_transposed() || !self.cross_axis_is_horizontal() {
+            return false;
+        }
+        if self.item_establishes_orthogonal_flow(index) {
+            self.flex_item_details[index].inputs.style.block_axis_is_reverse()
+        } else {
+            self.cross_axis_is_reverse()
+        }
+    }
+
+    /// The distance from the item's margin edge at the side of the line it's aligned at to its baseline.
+    fn item_baseline_from_aligned_edge(&self, index: usize, aligns_at_right_edge: bool) -> CssPixels {
+        let baseline = self.item_box_baseline(index);
+        if aligns_at_right_edge {
+            self.flex_items[index].outer_cross_size() - baseline
+        } else {
+            baseline
+        }
+    }
+
+    fn item_box_baseline(&self, index: usize) -> CssPixels {
+        let extras = &self.flex_item_details[index];
+        let metrics = &self.flex_item_details[index].cells;
+        if self.cross_axis_is_horizontal() {
+            // The cross axis is the horizontal axis of the frame, along which only an item in an orthogonal flow has
+            // its baselines.
+            let collapsed = metrics.uses_collapsing_borders_model();
+            let margin_box_left = metrics.margin_left() + metrics.border_box_left(collapsed);
+            return match extras.orthogonal_flow_baselines.and_then(|baselines| baselines.first) {
+                Some(baseline) => margin_box_left + baseline,
+                // https://drafts.csswg.org/css-align-3/#synthesize-baseline
+                // The alphabetic baseline is synthesized from the line-under edge of the border box: its left edge
+                // across the physical horizontal axis, and its bottom edge across the physical vertical one.
+                None if self.run.pass.frame.is_transposed() => {
+                    margin_box_left + metrics.content_inline_size() + metrics.border_box_right(collapsed)
+                }
+                None => metrics.margin_left(),
+            };
+        }
+        if self.item_baseline_is_synthesized(index) {
+            let collapsed = metrics.uses_collapsing_borders_model();
+            return metrics.margin_box_top(collapsed)
+                + metrics.content_block_size()
+                + metrics.border_box_bottom(collapsed);
+        }
+        formatting_context::box_baseline_with_content_baselines(
+            &self.run.pass,
+            self.flex_items[index].box_,
+            metrics,
+            formatting_context::BaselineSet::First,
+            extras.content_baselines,
+        )
+    }
+
+    // https://drafts.csswg.org/css-flexbox-1/#valdef-align-items-baseline
+    fn resolve_baseline_aligned_items(&mut self) {
+        // all participating flex items on the line are aligned such that their baselines align, and the item with the
+        // largest distance between its baseline and its cross-start margin edge is placed flush against the cross-start
+        // edge of the line.
+
+        // NB: This runs after layout_inside() so that line boxes are available for baseline computation.
+        for line_index in 0..self.flex_lines.len() {
+            if !self.flex_lines[line_index].has_baseline_aligned_items {
+                continue;
+            }
+            // Each participating item, whether it aligns at the right edge, and its baseline from that edge.
+            let participants: Vec<(usize, bool, CssPixels)> = self.flex_lines[line_index]
+                .items
+                .iter()
+                .filter(|&index| self.item_participates_in_baseline_alignment(index))
+                .map(|index| {
+                    let at_right_edge = self.item_baseline_aligns_at_right_edge(index);
+                    (
+                        index,
+                        at_right_edge,
+                        self.item_baseline_from_aligned_edge(index, at_right_edge),
+                    )
+                })
+                .collect();
+            let largest_baseline = |at_right_edge: bool| {
+                participants
+                    .iter()
+                    .filter(|participant| participant.1 == at_right_edge)
+                    .fold(CssPixels::default(), |largest, participant| largest.max(participant.2))
+            };
+            let max_baseline = largest_baseline(false);
+            let max_baseline_at_right_edge = largest_baseline(true);
+            let line_cross_size = self.flex_lines[line_index].cross_size;
+            for (index, at_right_edge, baseline) in participants {
+                if at_right_edge {
+                    // The item was placed at the left edge of the line.
+                    let free_space = line_cross_size - self.flex_items[index].outer_cross_size();
+                    self.flex_items[index].cross_offset += free_space - (max_baseline_at_right_edge - baseline);
+                } else {
+                    self.flex_items[index].cross_offset += max_baseline - baseline;
+                }
+            }
+        }
+    }
+
+    fn copy_dimensions_from_flex_item_to_box(
+        &mut self,
+        index: usize,
+        main_axis_is_horizontal: bool,
+        container_content_inline_size: CssPixels,
+    ) {
+        {
+            let item = &self.flex_items[index];
+            // NB: An item whose transferred cross size grows to fit its content lays out that content against the
+            //     transferred size, and grows to the used cross size in its own layout.
+            let cross_size = if item.cross_size_was_resolved_from_aspect_ratio && main_axis_is_horizontal {
+                self.flex_item_details[index]
+                    .cross_size_transferred_through_aspect_ratio
+                    .unwrap_or(item.cross_size.unwrap())
+            } else {
+                item.cross_size.unwrap()
+            };
+            let details = &mut self.flex_item_details[index];
+            Self::size_item_cells_for_its_run(
+                &details.inputs,
+                main_axis_is_horizontal,
+                container_content_inline_size,
+                &mut details.cells,
+                item.main_size,
+                Some(cross_size),
+            );
+        }
+    }
+
+    /// Gives `cells`, the cells of the item at `index`, the margins and borders its run takes and the main and cross
+    /// sizes it is laid out at.
+    fn size_item_cells_for_its_run(
+        inputs: &FlexItemInputs<'_>,
+        main_axis_is_horizontal: bool,
+        container_content_inline_size: CssPixels,
+        cells: &mut used_values::RootInputCells,
+        main_size: Option<CssPixels>,
+        cross_size: Option<CssPixels>,
+    ) {
+        let reference = container_content_inline_size;
+        let style = inputs.style;
+        cells.margin_left = style.margin_left().to_px(reference);
+        cells.margin_right = style.margin_right().to_px(reference);
+        cells.margin_top = style.margin_top().to_px(reference);
+        cells.margin_bottom = style.margin_bottom().to_px(reference);
+        cells.border_left = style.border_left_width();
+        cells.border_right = style.border_right_width();
+        cells.border_top = style.border_top_width();
+        cells.border_bottom = style.border_bottom_width();
+        if let Some(main_size) = main_size {
+            Self::set_size_of_item_cells(cells, main_axis_is_horizontal, main_size);
+        }
+        if let Some(cross_size) = cross_size {
+            Self::set_size_of_item_cells(cells, !main_axis_is_horizontal, cross_size);
+        }
+    }
+
+    fn item_layout_input(
+        &self,
+        index: usize,
+        cells: &used_values::RootInputCells,
+        space_for_items: AvailableSpace,
+    ) -> LayoutInput {
+        let mut input = LayoutInput {
+            available_space: cells.available_inner_space_or_constraints_from(space_for_items),
+            containing_block_constraints: self.item_containing_block_constraints(),
+            sizing: RootSizingDirectives::default(),
+            participation: ParticipationInParentFormattingContext::Item,
+        };
+        // https://drafts.csswg.org/css-flexbox-1/#flex-items
+        // In the case of flex items with display: table, the table wrapper box becomes the flex item,
+        // so the align-self property applies to it.
+        // The contents of any caption boxes contribute to the calculation of
+        // the table wrapper box's min-content and max-content sizes.
+        // However, like width and height, the flex longhands apply to the table box as follows:
+        // the flex item’s final size is calculated
+        // by performing layout as if the distance between
+        // the table wrapper box's edges and the table box's content edges
+        // were all part of the table box's border+padding area,
+        // and the table box were the flex item.
+        // NB: The main and cross axes map onto the inline and block axes of the table, whatever its writing mode.
+        if self.flex_item_details[index].inputs.is_table_wrapper
+            && self.main_axis_is_parallel_to_inline_axis_of_item(index)
+            && self.flex_item_is_stretched(index)
+        {
+            let sizes = self.flex_item_details[index]
+                .stretched_table_wrapper_block_sizes
+                .unwrap_or_else(|| self.measure_table_wrapper_block_sizes(index));
+            // NB: The hypothetical cross size of an item stretched in a single-line container with a definite cross
+            //     size is already the stretched size, so measure the captions against the wrapper's own content.
+            let captions_block_size = sizes.wrapper_content_block_size - sizes.table_box_border_box_block_size;
+            let stretched_table_box_block_size = self.flex_items[index].cross_size.unwrap() - captions_block_size;
+            input.sizing.forced_min_border_box_block_size = geometry::PackedOptionalCssPixels::from(Some(
+                stretched_table_box_block_size.max(sizes.table_box_border_box_block_size),
+            ));
+        }
+        // NB: The cells of the item run along the axes of this container, which are not those of an orthogonal table.
+        let (main_size, cross_size) = if self.main_axis_is_horizontal() {
+            (
+                cells.has_definite_inline_size.then(|| cells.content_inline_size()),
+                cells.has_definite_block_size.then(|| cells.content_block_size()),
+            )
+        } else {
+            (
+                cells.has_definite_block_size.then(|| cells.content_block_size()),
+                cells.has_definite_inline_size.then(|| cells.content_inline_size()),
+            )
+        };
+        if self.flex_item_details[index].inputs.is_table_wrapper
+            && self.main_axis_is_parallel_to_inline_axis_of_item(index)
+            && let Some(main_size) = main_size
+        {
+            // NB: The table box takes the main size the wrapper is flexed to, whatever its own inline size.
+            input.sizing.forced_table_box_border_box_inline_size =
+                geometry::PackedOptionalCssPixels::from(Some(main_size));
+        }
+        if self.flex_item_details[index].inputs.is_table_wrapper
+            && !self.main_axis_is_parallel_to_inline_axis_of_item(index)
+            && self.flex_item_details[index].inputs.establishes_orthogonal_flow
+            && self.flex_item_is_stretched(index)
+            && let Some(cross_size) = cross_size
+        {
+            // NB: The cross axis of an orthogonal table is its inline axis, which a stretched wrapper fills.
+            input.sizing.forced_table_box_border_box_inline_size =
+                geometry::PackedOptionalCssPixels::from(Some(cross_size));
+        }
+        if self.flex_item_details[index].inputs.is_table_wrapper
+            && !self.main_axis_is_parallel_to_inline_axis_of_item(index)
+            && let Some(main_size) = main_size
+            && (main_size > self.flex_items[index].hypothetical_main_size
+                || self.flex_item_details[index].inputs.flex_basis.is_length_percentage())
+        {
+            // NB: Likewise, the table box fills the main size the wrapper is flexed to, less its captions.
+            let sizes = self.measure_table_wrapper_block_sizes(index);
+            let captions_block_size = sizes.wrapper_content_block_size - sizes.table_box_border_box_block_size;
+            let flexed_table_box_block_size = main_size - captions_block_size;
+            if flexed_table_box_block_size > sizes.table_box_border_box_block_size {
+                input.sizing.forced_min_border_box_block_size =
+                    geometry::PackedOptionalCssPixels::from(Some(flexed_table_box_block_size));
+            }
+        }
+
+        if self.flex_items[index].cross_size_was_resolved_from_aspect_ratio
+            && !self.cross_axis_is_horizontal()
+            && self.flex_item_details[index]
+                .cross_size_transferred_through_aspect_ratio
+                .is_some()
+            && let Some(cross_size) = self.flex_items[index].cross_size
+        {
+            input.sizing.content_block_size_after_run = geometry::ContentBlockSizeAfterRun::Given(cross_size);
+        }
+        input
+    }
+
+    fn offers_item_runs_to_block_size_measurements(&self) -> bool {
+        let space = self.available_space_for_items.unwrap().space;
+        !self.run.collects_devtools_layout_data()
+            && !space.inline_size.is_intrinsic_sizing_constraint()
+            && self.container.inline_axis_is_horizontal
+    }
+
+    fn offer_item_runs_to_block_size_measurements(&mut self, measured_at: ItemBlockSizeMeasuredAt) {
+        if self.offers_item_runs_to_block_size_measurements() {
+            self.item_runs_offered_to_block_size_measurements = Some(ItemRunsOfferedToBlockSizeMeasurements {
+                measured_at,
+                space_for_items: self.available_space_for_items.unwrap().space,
+            });
+        }
+    }
+
+    fn offer_runs_of_items_measured_at_their_main_size(&mut self) {
+        if self.main_axis_is_horizontal() {
+            self.offer_item_runs_to_block_size_measurements(ItemBlockSizeMeasuredAt::UsedMainSize);
+        }
+    }
+
+    fn offer_runs_of_items_measured_in_their_main_axis(&mut self) {
+        if !self.main_axis_is_horizontal() {
+            self.offer_item_runs_to_block_size_measurements(ItemBlockSizeMeasuredAt::IntrinsicBlockInlineSize);
+        }
+    }
+
+    fn index_of_flex_item(&self, node: Node) -> Option<usize> {
+        self.flex_item_index_by_node
+            .get_or_init(|| {
+                self.flex_items
+                    .iter()
+                    .enumerate()
+                    .map(|(index, item)| (item.box_, index))
+                    .collect()
+            })
+            .get(&node)
+            .copied()
+    }
+
+    fn item_run_shape(
+        &self,
+        index: usize,
+        measured_inline_size: CssPixels,
+        space_for_items: AvailableSpace,
+    ) -> Option<formatting_context::ChildRunShape> {
+        let node = self.flex_items[index].box_;
+        if !formatting_context::item_is_block_container_whose_committing_run_can_adopt_its_measurement(
+            &self.sizing(),
+            node,
+        ) {
+            return None;
+        }
+        let (main_size, cross_size) = if self.main_axis_is_horizontal() {
+            (Some(measured_inline_size), None)
+        } else {
+            (None, Some(measured_inline_size))
+        };
+        let mut cells = self.flex_item_details[index].cells;
+        Self::size_item_cells_for_its_run(
+            &self.flex_item_details[index].inputs,
+            self.main_axis_is_horizontal(),
+            self.container_cells.content_inline_size(),
+            &mut cells,
+            main_size,
+            cross_size,
+        );
+        let mut input = self.item_layout_input(index, &cells, space_for_items);
+        // NB: The measured item ends its run at its automatic block size, the one a content-sized item is handed, so
+        //     the absolutely positioned boxes it contains are laid out as a committing run at that size lays them out.
+        input.sizing.content_block_size_after_run = geometry::ContentBlockSizeAfterRun::Automatic;
+        let plan = formatting_context::child_run_plan(
+            &self.run,
+            node,
+            formatting_context::formatting_context_type_created_by_box(NodeFacts::new(&self.run.pass, node)),
+            input,
+            false,
+            self.run
+                .percentage_block_insets_of_root_children_have_definite_basis(&self.container_cells),
+        );
+        debug_assert_eq!(plan.fc_type, formatting_context::FormattingContextType::Block);
+        Some(formatting_context::ChildRunShape {
+            node,
+            key: fc_run_cache::LayoutRequest::new(&self.run.pass, plan.fc_type, plan.input, cells),
+            root_containing_block: plan.root_containing_block,
+        })
+    }
+
+    fn measure_table_wrapper_block_sizes(&self, index: usize) -> sizing_context::TableWrapperBlockSizes {
+        let mut intrinsic_space = self.flex_item_details[index]
+            .cells
+            .available_inner_space_or_constraints_from(self.available_space_for_items.unwrap().space);
+        intrinsic_space.block_size = AvailableSize::Indefinite;
+        self.sizing().measure_table_box_block_size_inside_wrapper(
+            sizing_context::SizedBox::new(self.flex_items[index].box_, &self.flex_item_details[index].cells),
+            intrinsic_space,
+            self.item_containing_block_constraints(),
+        )
+    }
+
+    fn item_run_request(&self, index: usize) -> (used_values::RootInputCells, LayoutInput) {
+        let mut cells = self.flex_item_details[index].cells;
+        // A button centers its content within its final main size even when that size can't resolve percentages.
+        if self.flex_items[index].alignment_facts.uses_button_layout
+            && !self.main_axis_is_horizontal()
+            && !cells.has_definite_block_size
+        {
+            cells.has_definite_block_size = true;
+            cells.has_definite_block_size_only_for_button_content_alignment = true;
+        }
+        let input = self.item_layout_input(index, &cells, self.available_space_for_items.unwrap().space);
+        (cells, input)
+    }
+
+    /// Takes in the layout of the contents of the item at `index`, and returns the fragments and what placing the item
+    /// takes.
+    fn take_in_item_layout(
+        &mut self,
+        run: &FormattingContextRun<'pass>,
+        index: usize,
+        laid_out: formatting_context::ChildLayout,
+    ) -> (Option<fragment_tree::RunRootFragment>, formatting_context::PlacedChild) {
+        let node = self.flex_items[index].box_;
+        self.flex_item_details[index].cells = laid_out.cells();
+        self.flex_item_details[index].orthogonal_flow_baselines = laid_out.orthogonal_flow_baselines();
+        laid_out.report_percentage_block_size_dependency_of(run, node);
+        self.flex_item_details[index].content_baselines = laid_out.baselines();
+        let placed_item = laid_out.placed_child();
+        let fragment_arrival = laid_out.into_fragment_arrival(run);
+
+        let container = &self.container_cells;
+        let insets = abspos_engine::compute_inset_native(
+            run,
+            node,
+            container,
+            geometry::LogicalSize {
+                inline_size: container.content_inline_size(),
+                block_size: container.content_block_size(),
+            },
+            run.percentage_block_insets_of_root_children_have_definite_basis(container),
+        );
+        (fragment_arrival, placed_item.with_in_flow_box_insets(insets))
+    }
+
+    // https://drafts.csswg.org/css-flexbox-1/#abspos-items
+    fn calculate_static_position_rect(&self, node: Node) -> abspos_inputs::StaticPositionRect {
+        // The cross-axis edges of the static-position rectangle of an absolutely-positioned child
+        // of a flex container are the content edges of the flex container.
+
+        let style = self.style(node);
+        // NB: The items of a legacy webkit box align as its -webkit-box-align says, which has no last baseline.
+        let is_last_baseline = if self.is_legacy_webkit_box() {
+            false
+        } else if style.align_self() == align_self::AUTO {
+            self.container.style.align_items_is_last_baseline()
+        } else {
+            style.align_self_is_last_baseline()
+        };
+        let alignment = self.cross_alignment_of(style);
+        // INTEROP: Chrome and Firefox use the container's start/end edges for baseline fallbacks of abspos flex
+        //          children, rather than the self-start/self-end edges specified by CSS Align.
+        let cross_alignment = match alignment.position {
+            _ if is_last_baseline => alignment.container_start.reversed(),
+            SelfPosition::Baseline => alignment.container_start,
+            SelfPosition::Edge(edge) => edge,
+            SelfPosition::Normal | SelfPosition::Stretch => self.cross_start_edge(),
+        };
+        // The main-axis edges of the static-position rectangle are where the margin edges of the child
+        // would be positioned if it were the sole flex item in the flex container,
+        // assuming both the child and the flex container were fixed-size boxes of their used size.
+        // (For this purpose, auto margins are treated as zero.
+        // FIXME: Honor safe overflow alignment, which depends on the size of the child.
+        let main_alignment = self.container.justify_content.edge;
+        let main_size = self.inner_main_size_used(&self.container_cells);
+        let cross_size = self.inner_cross_size_used(&self.container_cells);
+        let (inline_size, block_size) = if self.is_row_layout() {
+            (main_size, cross_size)
+        } else {
+            (cross_size, main_size)
+        };
+        let (inline_alignment, block_alignment) = if self.is_row_layout() {
+            (main_alignment, cross_alignment)
+        } else {
+            (cross_alignment, main_alignment)
+        };
+        abspos_inputs::StaticPositionRect {
+            rect: geometry::LogicalRect {
+                offset: Default::default(),
+                size: geometry::LogicalSize {
+                    inline_size,
+                    block_size,
+                },
+            },
+            inline_alignment,
+            block_alignment,
+            // cross_alignment_of() consulted the box's own align-self.
+            alignment_derives_from_own_computed_values: true,
+        }
+    }
+
+    fn axis_direction(is_horizontal: bool, is_reverse: bool) -> AxisDirection {
+        match (is_horizontal, is_reverse) {
+            (true, false) => AxisDirection::HorizontalLr,
+            (true, true) => AxisDirection::HorizontalRl,
+            (false, false) => AxisDirection::VerticalTb,
+            (false, true) => AxisDirection::VerticalBt,
+        }
+    }
+
+    fn layout_data_for_devtools(&self) -> formatting_context::FlexLayoutData {
+        let mut lines = Vec::with_capacity(self.flex_lines.len());
+        for line in &self.flex_lines {
+            let mut items = Vec::with_capacity(line.items.len());
+            for index in line.items.iter() {
+                let item = &self.flex_items[index];
+                let main_size = item.main_size.unwrap_or(item.target_main_size);
+                let cross_size = item.cross_size.unwrap_or(item.hypothetical_cross_size);
+                let (x, y, width, height) = if self.is_row_layout() {
+                    (item.main_offset, item.cross_offset, main_size, cross_size)
+                } else {
+                    (item.cross_offset, item.main_offset, cross_size, main_size)
+                };
+                let rect = CssPixelRect { x, y, width, height };
+                let node = item.box_;
+                let style = self.style(node);
+                let main_size_property = self.select_main(style.width(), style.height());
+                let main_min_size_property = self.select_main(style.min_width(), style.min_height());
+                let main_max_size_property = self.select_main(style.max_width(), style.max_height());
+                items.push(formatting_context::FlexLayoutItem {
+                    style_node: self.run.pass.arena().dom_node_style_node(node),
+                    rect,
+                    main_base_size: item.flex_base_size,
+                    main_delta_size: item.target_main_size - item.flex_base_size,
+                    main_min_size: if self.has_main_min_size(index) {
+                        self.specified_main_min_size(index)
+                    } else {
+                        self.automatic_minimum_size(index)
+                    },
+                    main_max_size: if self.has_main_max_size(index) {
+                        self.specified_main_max_size(index)
+                    } else {
+                        item.target_main_size
+                    },
+                    cross_min_size: if self.has_cross_min_size(index) {
+                        self.specified_cross_min_size(index)
+                    } else {
+                        CssPixels::default()
+                    },
+                    cross_max_size: if self.has_cross_max_size(index) {
+                        self.specified_cross_max_size(index)
+                    } else {
+                        item.cross_size.unwrap_or(item.hypothetical_cross_size)
+                    },
+                    clamp_state: if item.is_min_violation {
+                        formatting_context::FlexLayoutClampState::ClampedToMin
+                    } else if item.is_max_violation {
+                        formatting_context::FlexLayoutClampState::ClampedToMax
+                    } else {
+                        formatting_context::FlexLayoutClampState::Unclamped
+                    },
+                    flex_basis: if style.flex_basis_is_content() {
+                        "content".to_string()
+                    } else {
+                        crate::css::serialize::serialize_computed_size(style.flex_basis())
+                    },
+                    main_size_property: crate::css::serialize::serialize_computed_size(main_size_property),
+                    main_min_size_property: crate::css::serialize::serialize_computed_size(main_min_size_property),
+                    main_max_size_property: crate::css::serialize::serialize_computed_size(main_max_size_property),
+                    flex_grow: self.flex_item_details[index].inputs.flex_grow_factor,
+                    flex_shrink: self.flex_item_details[index].inputs.flex_shrink_factor,
+                });
+            }
+            let cross_start = line
+                .items
+                .iter()
+                .map(|index| self.flex_items[index].cross_offset)
+                .min()
+                .unwrap_or_default();
+            lines.push(formatting_context::FlexLayoutLine {
+                growth_state: line.growth_state,
+                cross_start,
+                cross_size: line.cross_size,
+                items,
+            });
+        }
+        let style = self.container.style;
+        formatting_context::FlexLayoutData {
+            align_content: style.align_content(),
+            align_items: style.align_items(),
+            flex_direction: style.effective_flex_direction(),
+            flex_wrap: style.flex_wrap(),
+            justify_content: style.justify_content(),
+            main_axis_direction: Self::axis_direction(self.main_axis_is_horizontal(), self.is_direction_reverse())
+                as u8,
+            cross_axis_direction: Self::axis_direction(self.cross_axis_is_horizontal(), self.cross_axis_is_reverse())
+                as u8,
+            lines,
+        }
+    }
+
+    // https://drafts.csswg.org/css-sizing-4/#aspect-ratio-automatic
+    fn cross_size_transferred_from_definite_main_size(&self, index: usize) -> Option<CssPixels> {
+        // When a box has a preferred aspect ratio, its automatic sizes are calculated the same as for a
+        // replaced element with a natural aspect ratio and no natural size in that axis [...] The axis in
+        // which the preferred size calculation depends on this aspect ratio is called the ratio-dependent
+        // axis [...] The opposite axis (on which the ratio-dependent axis size depends) is the
+        // ratio-determining axis.
+        // NB: Only a transfer to an automatic inline cross size is performed here. When the cross axis is the
+        //     block axis, the block layout performed by the content cross size calculations already applies
+        //     the aspect ratio.
+        if !self.cross_axis_is_horizontal() || !self.has_definite_main_size(index) {
+            return None;
+        }
+        // https://www.w3.org/TR/CSS2/visudet.html#inline-replaced-width
+        // If 'height' and 'width' both have computed values of 'auto' [...] then that intrinsic width
+        // is the used value of 'width'.
+        // NB: A replaced element with a natural inline size contributes that size. Its post-flexing
+        //     block size must not replace the natural inline size through the aspect ratio. Explicit
+        //     computed heights are handled by the intrinsic inline size calculation instead.
+        if self.flex_item_details[index].inputs.is_replaced_box
+            && self.flex_item_details[index].inputs.auto_content_size.width.is_some()
+        {
+            return None;
+        }
+        self.flex_item_details[index].inputs.preferred_aspect_ratio?;
+        let main_size = if self.has_definite_main_size_used(&self.container_cells) {
+            self.flex_items[index]
+                .main_size
+                .unwrap_or(self.flex_items[index].flex_base_size)
+        } else {
+            self.flex_items[index].flex_base_size
+        };
+        Some(self.cross_size_from_main_size_and_aspect_ratio(index, main_size))
+    }
+
+    // https://drafts.csswg.org/css-sizing-3/#cyclic-percentage-contribution
+    fn cross_size_is_cyclic_percentage_of_aspect_ratio_item(&self, index: usize) -> bool {
+        let node = self.flex_items[index].box_;
+        // If the box is non-replaced, then the entire value of any max size property or preferred size property
+        // ('width'/'max-width'/'height'/'max-height') specified as an expression containing a percentage (such as
+        // '10%' or 'calc(10px + 0%)') that is cyclic is treated for the purpose of calculating the box's intrinsic
+        // size contributions only as that property's initial value.
+        !self.cross_axis_is_horizontal()
+            && self.computed_cross_size(index).contains_percentage()
+            && self.sizing().block_size_transfers_through_aspect_ratio(
+                sizing_context::SizedBox::new(node, &self.flex_item_details[index].cells),
+                self.item_containing_block_constraints(),
+            )
+    }
+
+    fn calculate_cross_content_contribution(
+        &self,
+        index: usize,
+        resolve_percentage_min_max_sizes: bool,
+        max_content: bool,
+    ) -> CssPixels {
+        let cross_size_auto = self.should_treat_cross_size_as_auto(index)
+            || self.cross_size_is_cyclic_percentage_of_aspect_ratio_item(index);
+        let mut size = if cross_size_auto {
+            self.cross_size_transferred_from_definite_main_size(index)
+                .unwrap_or_else(|| {
+                    if max_content {
+                        self.calculate_max_content_cross_size(index)
+                    } else {
+                        self.calculate_min_content_cross_size(index)
+                    }
+                })
+        } else {
+            let value = self.computed_cross_size(index);
+            self.resolve_size_for_axis(index, self.cross_axis_is_horizontal(), value)
+        };
+        if cross_size_auto && self.flex_item_details[index].inputs.preferred_aspect_ratio.is_some() {
+            size = self.adjust_cross_size_through_aspect_ratio(
+                index,
+                size,
+                self.computed_main_min_size(index),
+                self.computed_main_max_size(index),
+            );
+        }
+        let min = self.computed_cross_min_size(index);
+        let max = self.computed_cross_max_size(index);
+        let clamp_min = if !min.is_auto() && (resolve_percentage_min_max_sizes || !min.contains_percentage()) {
+            self.specified_cross_min_size(index)
+        } else {
+            CssPixels::default()
+        };
+        let clamp_max = if !self.should_treat_max_size_as_none(index, true)
+            && (resolve_percentage_min_max_sizes || !max.contains_percentage())
+        {
+            self.specified_cross_max_size(index)
+        } else {
+            CssPixels::from_raw(i32::MAX)
+        };
+        self.flex_items[index].add_cross_margin_box_sizes(css_clamp(size, clamp_min, clamp_max))
+    }
+
+    fn specified_main_max_size_for_intrinsic_contribution(
+        &self,
+        index: usize,
+        available_size: AvailableSize,
+    ) -> CssPixels {
+        let max = self.computed_main_max_size(index);
+        if self.should_treat_max_size_as_none(index, false) {
+            return CssPixels::from_raw(i32::MAX);
+        }
+        if !max.contains_percentage() {
+            return self.specified_main_max_size(index);
+        }
+        if available_size == AvailableSize::MinContent {
+            if self.flex_item_details[index].inputs.is_replaced_box {
+                return CssPixels::default();
+            }
+            return CssPixels::from_raw(i32::MAX);
+        }
+        if available_size == AvailableSize::MaxContent {
+            return CssPixels::from_raw(i32::MAX);
+        }
+        self.specified_main_max_size(index)
+    }
+
+    // https://drafts.csswg.org/css-flexbox-1/#intrinsic-item-contributions
+    fn calculate_main_content_contribution(&self, index: usize, max_content: bool) -> CssPixels {
+        // The main-size max-content contribution of a flex item is
+        // the larger of its outer max-content size and outer preferred size if that is not auto,
+        // clamped by its min/max main size.
+
+        // The main-size min-content contribution of a flex item is the larger of its outer min-content size and outer
+        // preferred size if that is not auto, clamped by its min/max main size.
+        // INTEROP: Chrome and Firefox use only the preferred size if that is not auto, like any other box's
+        //          contribution. Taking the larger of the two would make a `width: 40px; flex: 1 1 0` item whose padding
+        //          and content add up to more than 40px stretch its container, e.g. YouTube's voice search button.
+        let size = if self.should_treat_main_size_as_auto(index) {
+            if max_content {
+                self.calculate_max_content_main_size(index)
+            } else {
+                self.calculate_min_content_main_size(index)
+            }
+        } else {
+            let value = self.computed_main_size(index);
+            self.resolve_size_for_axis(index, self.main_axis_is_horizontal(), value)
+        };
+        let clamp_min = if self.has_main_min_size(index) {
+            self.specified_main_min_size(index)
+        } else {
+            self.automatic_minimum_size(index)
+        };
+        let clamp_max = self.specified_main_max_size_for_intrinsic_contribution(
+            index,
+            if max_content {
+                AvailableSize::MaxContent
+            } else {
+                AvailableSize::MinContent
+            },
+        );
+        self.flex_items[index].add_main_margin_box_sizes(css_clamp(size, clamp_min, clamp_max))
+    }
+
+    fn resolve_own_auto_block_size_from_max_content_main_size(&mut self) {
+        let sizing = self.layout_input.as_ref().unwrap().sizing;
+        let resolution_space = self.own_automatic_block_size_resolution_space;
+        if resolution_space.is_none() && !sizing.root_is_measured_for_its_content_block_size {
+            return;
+        }
+        if self.main_axis_is_horizontal() {
+            return;
+        }
+        // https://drafts.csswg.org/css-flexbox-1/#algo-main-item
+        // If the used flex basis is content or depends on its available space, and the flex container
+        // is being sized under a min-content or max-content constraint (e.g. when performing automatic
+        // table layout [CSS2]), size the item under that constraint.
+        let real_space_for_items = self.available_space_for_items.unwrap().space;
+        self.determine_available_space_for_items(AvailableSpace {
+            inline_size: real_space_for_items.inline_size,
+            block_size: AvailableSize::MaxContent,
+        });
+        // https://drafts.csswg.org/css-align-3/#gap-percent
+        // In Flex Layout: Cyclic percentage sizes resolve against zero in all cases.
+        self.container_cells.set_content_block_size(CssPixels::default());
+        for index in 0..self.flex_items.len() {
+            self.determine_flex_base_size(index);
+        }
+        let max_content_main_size = self.calculate_intrinsic_main_size_of_flex_container();
+        self.determine_available_space_for_items(real_space_for_items);
+        match resolution_space {
+            Some(resolution_space) => self.resolve_own_auto_block_size(max_content_main_size, resolution_space),
+            None => self.set_container_main_size(max_content_main_size),
+        }
+    }
+
+    /// Grows the block size of a column container, where it was transferred through the container's preferred aspect
+    /// ratio, to the automatic minimum size that its content gives it, before its items flex within it. So, they flex
+    /// against the grown size.
+    /// https://drafts.csswg.org/css-sizing-4/#aspect-ratio-minimum
+    fn grow_block_size_transferred_through_aspect_ratio_to_content(&mut self) {
+        let facts = self.facts(self.run.box_);
+        // https://drafts.csswg.org/css-contain-2/#containment-size
+        // NB: A size-contained container is sized as if it had no content, so its content can't grow it.
+        if self.is_row_layout() || !facts.has_preferred_aspect_ratio() || facts.node_has_size_containment() {
+            return;
+        }
+        let layout_input = self.layout_input.as_ref().unwrap();
+        let constraints = layout_input.containing_block_constraints;
+        let sizing = self.sizing();
+        let available_space =
+            sizing.available_space_for_block_size_resolution(self.run.box_, layout_input.available_space, constraints);
+        sizing.apply_automatic_minimum_block_size_from_aspect_ratio(
+            sizing_context::SizedCells::new(self.run.box_, &self.container_cells, self.run.pass.frame),
+            available_space,
+            constraints,
+            Some(self.largest_outer_hypothetical_main_size_of_lines()),
+        );
+    }
+
+    fn resolve_own_auto_block_size_from_line_cross_sizes(&mut self) {
+        if self.cross_axis_is_horizontal() {
+            return;
+        }
+        let sizing = self.layout_input.as_ref().unwrap().sizing;
+        if let Some(resolution_space) = self.own_automatic_block_size_resolution_space {
+            self.resolve_own_auto_block_size(self.automatic_block_size_from_line_cross_sizes(), resolution_space);
+        } else if sizing.root_is_measured_for_its_content_block_size {
+            self.set_container_cross_size(self.automatic_block_size_from_line_cross_sizes());
+        }
+    }
+
+    fn automatic_block_size_from_line_cross_sizes(&self) -> CssPixels {
+        // https://drafts.csswg.org/css-align-3/#gap-percent
+        // In Flex Layout: Cyclic percentage sizes resolve against zero in all cases.
+        let cross_gap_resolved_against_zero = self.container.cross_gap.to_px(CssPixels::default());
+        let mut line_cross_size_sum = self
+            .flex_lines
+            .iter()
+            .fold(CssPixels::default(), |sum, line| sum + line.cross_size);
+        line_cross_size_sum += cross_gap_resolved_against_zero * self.flex_lines.len().saturating_sub(1);
+        line_cross_size_sum
+    }
+
+    fn resolve_own_auto_block_size(&self, automatic_block_size: CssPixels, resolution_space: AvailableSpace) {
+        self.sizing().resolve_used_block_size_if_treated_as_auto(
+            sizing_context::SizedCells::new(self.run.box_, &self.container_cells, self.run.pass.frame),
+            resolution_space,
+            self.layout_input.as_ref().unwrap().containing_block_constraints,
+            Some(automatic_block_size),
+            || automatic_block_size,
+        );
+    }
+
+    // https://drafts.csswg.org/css-flexbox-1/#intrinsic-main-sizes
+    fn calculate_intrinsic_main_size_of_flex_container(&mut self) -> CssPixels {
+        // INTEROP: Chrome, Firefox and WebKit size the main axis of a column flex container to the sum of its items'
+        //          outer hypothetical main sizes, which is what flex layout with an indefinite main size produces.
+        //          We get that by skipping the flex fraction steps below and flexing every item by zero. Following
+        //          the spec instead would make a column with a `flex: 1 1 0px` scroller as tall as the scroller's
+        //          content, so the scroller would never scroll.
+        let use_hypothetical_main_sizes = !self.is_row_layout();
+
+        // The min-content main size of a single-line flex container is calculated identically to the max-content main size,
+        // except that the flex items’ min-content contributions are used instead of their max-content contributions.
+        // However, for a multi-line container, it is simply the largest min-content contribution of all the non-collapsed flex items in the flex container.
+        if !use_hypothetical_main_sizes
+            && !self.is_single_line()
+            && self.available_space_for_items.unwrap().main == AvailableSize::MinContent
+        {
+            return (0..self.flex_items.len())
+                // FIXME: Skip collapsed flex items.
+                .map(|index| self.calculate_main_content_contribution(index, false))
+                .max()
+                .unwrap_or_default();
+        }
+
+        // https://drafts.csswg.org/css-flexbox-1/#intrinsic-main-sizes
+        // An implementation may follow either the ideal algorithm or the web-compatible one. A row container follows
+        // the web-compatible one: The ideal algorithm keeps an item that can't shrink at its flex base size, so an
+        // item whose base size is its content's max-content size can't contribute less, even where its content
+        // could shrink, like an image with `max-width: 100%`.
+        let max_content = self.available_space_for_items.unwrap().main != AvailableSize::MinContent;
+        let mut sum = CssPixels::default();
+        for index in 0..self.flex_items.len() {
+            if use_hypothetical_main_sizes {
+                sum += self.outer_hypothetical_main_size_for_intrinsic_main_size(index, true);
+                continue;
+            }
+            // For the max-content size of a flex container, take the sum of the max-content contributions of all the
+            // non-collapsed flex items in the flex container. For the min-content size of a single-line container,
+            // take the sum of the min-content contributions of all the non-collapsed flex items in the flex container.
+            // INTEROP: An item that can't grow or shrink toward its contribution, and whose flex basis is definite,
+            //          contributes its hypothetical main size instead, since it keeps that size in layout.
+            let contribution = self.calculate_main_content_contribution(index, max_content);
+            let outer_flex_base_size = self.flex_items[index].outer_flex_base_size();
+            let inputs = &self.flex_item_details[index].inputs;
+            let cannot_reach_contribution = (contribution > outer_flex_base_size && inputs.flex_grow_factor == 0.0)
+                || (contribution < outer_flex_base_size && inputs.flex_shrink_factor == 0.0);
+            sum += if self.flex_items[index].used_flex_basis_is_definite && cannot_reach_contribution {
+                self.outer_hypothetical_main_size_for_intrinsic_main_size(index, false)
+            } else {
+                contribution
+            };
+        }
+        // CSS-FLEXBOX-2: Account for gap between flex items.
+        if !self.flex_items.is_empty() {
+            sum += self.main_gap() * (self.flex_items.len() - 1);
+        }
+        let largest_sum = sum.max(CssPixels::default());
+        self.set_container_main_size(largest_sum);
+        largest_sum
+    }
+
+    /// An item's flex base size clamped by its max main size floored by its min main size, with its margin box added:
+    /// its outer hypothetical main size, as the container's intrinsic main size sees it.
+    fn outer_hypothetical_main_size_for_intrinsic_main_size(
+        &self,
+        index: usize,
+        use_hypothetical_main_sizes: bool,
+    ) -> CssPixels {
+        let min = self.computed_main_min_size(index);
+        // NB: A hypothetical main size is clamped by any specified min main size, where a percentage resolves
+        //     against the zero-sized container we are measuring.
+        let clamp_min = if !min.is_auto() && (use_hypothetical_main_sizes || !min.contains_percentage()) {
+            self.specified_main_min_size(index)
+        } else {
+            self.automatic_minimum_size(index)
+        };
+        let clamp_max = self
+            .specified_main_max_size_for_intrinsic_contribution(index, self.available_space_for_items.unwrap().main);
+        // NOTE: The spec doesn't mention anything about the *outer* size here, but if we don't add the margin box,
+        //       flex items with non-zero padding/border/margin in the main axis end up overflowing the container.
+        self.flex_items[index].add_main_margin_box_sizes(css_clamp(
+            self.flex_items[index].flex_base_size,
+            clamp_min,
+            clamp_max,
+        ))
+    }
+
+    // https://drafts.csswg.org/css-flexbox-1/#intrinsic-cross-sizes
+    fn calculate_intrinsic_cross_size_of_flex_container(&mut self) -> CssPixels {
+        let min_content = self.available_space_for_items.unwrap().cross == AvailableSize::MinContent;
+        // The min-content/max-content cross size of a single-line flex container
+        // is the largest min-content contribution/max-content contribution (respectively) of its flex items.
+        if self.is_single_line() {
+            let calculate_largest = |context: &Self, resolve_percentages: bool| {
+                (0..context.flex_items.len())
+                    .map(|index| context.calculate_cross_content_contribution(index, resolve_percentages, !min_content))
+                    .max()
+                    .unwrap_or_default()
+            };
+            let first = calculate_largest(self, false);
+            self.set_container_cross_size(first);
+            return calculate_largest(self, true);
+        }
+        // row multi-line flex container cross-size
+
+        // The min-content/max-content cross size is the sum of the flex line cross sizes resulting from
+        // sizing the flex container under a cross-axis min-content constraint/max-content constraint (respectively).
+
+        // NOTE: We fall through to the ad-hoc section below.
+        if !self.is_row_layout() && min_content {
+            // column multi-line flex container cross-size
+
+            // The min-content cross size is the largest min-content contribution among all of its flex items.
+            let calculate_largest = |context: &Self, resolve_percentages: bool| {
+                (0..context.flex_items.len())
+                    .map(|index| context.calculate_cross_content_contribution(index, resolve_percentages, false))
+                    .max()
+                    .unwrap_or_default()
+            };
+            let first = calculate_largest(self, false);
+            self.set_container_cross_size(first);
+            return calculate_largest(self, true);
+        }
+        // The max-content cross size is the sum of the flex line cross sizes resulting from
+        // sizing the flex container under a cross-axis max-content constraint,
+        // using the largest max-content cross-size contribution among the flex items
+        // as the available space in the cross axis for each of the flex items during layout.
+
+        // NOTE: We fall through to the ad-hoc section below.
+        let mut sum = self
+            .flex_lines
+            .iter()
+            .fold(CssPixels::default(), |sum, line| sum + line.cross_size);
+        // CSS-FLEXBOX-2: Account for gap between flex lines.
+        sum += self.cross_gap() * self.flex_lines.len().wrapping_sub(1);
+        sum
+    }
+
+    fn cross_content_contribution_depends_on_used_main_size(&self, index: usize) -> bool {
+        let node = self.flex_items[index].box_;
+        let inputs = &self.flex_item_details[index].inputs;
+        let has_natural_inline_size = inputs.is_replaced_box && inputs.auto_content_size.width.is_some();
+        if has_natural_inline_size && inputs.style.height().is_auto() {
+            return false;
+        }
+        let cross_size_may_transfer_from_main_size =
+            inputs.preferred_aspect_ratio.is_some() && !has_natural_inline_size;
+        cross_size_may_transfer_from_main_size || self.sizing().intrinsic_inline_size_may_depend_on_block_size(node)
+    }
+
+    fn cross_content_contribution_observes_used_main_size(&mut self, index: usize) -> bool {
+        if !self.cross_content_contribution_depends_on_used_main_size(index) {
+            return false;
+        }
+        if self.flex_item_details[index].inputs.preferred_aspect_ratio.is_some()
+            || self.has_definite_main_size(index)
+            || self.own_automatic_block_size_resolution_space.is_some()
+        {
+            return true;
+        }
+        self.determine_used_flex_basis(index);
+        self.post_flexing_main_size_is_definite(index)
+    }
+
+    pub(super) fn content_inline_sizes(
+        mut self,
+        available_block_size: AvailableSize,
+        constraints: ContainingBlockConstraints,
+    ) -> sizing_context::ContentSizes {
+        let layout_input_under = |inline_size| {
+            LayoutInput::new(
+                AvailableSpace {
+                    inline_size,
+                    block_size: available_block_size,
+                },
+                constraints,
+                ParticipationInParentFormattingContext::Root,
+            )
+        };
+        self.generate_items(constraints);
+        let mut context_under_max_content = self.clone();
+        let min = self.content_inline_size_of_generated_items(layout_input_under(AvailableSize::MinContent));
+        let max = context_under_max_content
+            .content_inline_size_of_generated_items(layout_input_under(AvailableSize::MaxContent));
+        sizing_context::ContentSizes { min, max }
+    }
+
+    fn content_inline_size_of_generated_items(&mut self, layout_input: LayoutInput) -> CssPixels {
+        self.take_layout_input(layout_input.clone());
+        if self.main_axis_is_horizontal() {
+            self.determine_flex_base_sizes_and_hypothetical_main_sizes();
+            self.collect_flex_items_into_flex_lines();
+            self.resolve_flexible_lengths();
+            return self.calculate_intrinsic_main_size_of_flex_container();
+        }
+        if !self.is_single_line() && layout_input.available_space.inline_size == AvailableSize::MaxContent {
+            // https://drafts.csswg.org/css-flexbox-1/#intrinsic-cross-sizes
+            // NB: An item with an aspect ratio has a main size that depends on its width. So size the items in the width of
+            //     the widest item's max-content contribution, rather than under a max-content constraint, which would leave
+            //     such an item without a width.
+            if (0..self.flex_items.len())
+                .any(|index| self.flex_item_details[index].inputs.preferred_aspect_ratio.is_some())
+            {
+                let widest = (0..self.flex_items.len())
+                    .map(|index| self.calculate_cross_content_contribution(index, true, true))
+                    .max()
+                    .unwrap_or_default();
+                let mut space = layout_input.available_space;
+                space.inline_size = AvailableSize::Definite(widest);
+                self.determine_available_space_for_items(space);
+            }
+            self.determine_flex_base_sizes_and_hypothetical_main_sizes();
+            self.collect_flex_items_into_flex_lines();
+            self.resolve_flexible_lengths();
+            for index in 0..self.flex_items.len() {
+                self.determine_hypothetical_cross_size_of_item(index);
+            }
+            self.calculate_cross_size_of_each_flex_line();
+            self.handle_align_content_stretch();
+            return self.calculate_intrinsic_cross_size_of_flex_container();
+        }
+        if (0..self.flex_items.len()).any(|index| self.cross_content_contribution_observes_used_main_size(index)) {
+            self.determine_flex_base_sizes_and_hypothetical_main_sizes();
+            self.collect_flex_items_into_flex_lines();
+            self.resolve_flexible_lengths();
+        }
+        self.calculate_intrinsic_cross_size_of_flex_container()
+    }
+
+    fn prepare_items(&mut self, layout_input: LayoutInput) {
+        self.generate_items_and_determine_available_space(layout_input);
+        self.determine_flex_base_sizes_and_hypothetical_main_sizes();
+    }
+
+    fn generate_items_and_determine_available_space(&mut self, layout_input: LayoutInput) {
+        // This implements https://www.w3.org/TR/css-flexbox-1/#layout-algorithm
+
+        self.generate_items(layout_input.containing_block_constraints);
+        self.take_layout_input(layout_input);
+    }
+
+    fn generate_items(&mut self, constraints: ContainingBlockConstraints) {
+        let mut item_percentage_bases = self.constraints_for_children(constraints);
+        let block_axis_is_cross_axis = self.is_row_layout();
+        item_percentage_bases.quirks_mode_percentage_basis_block_size =
+            if self.facts(self.run.box_).document_in_quirks_mode() && block_axis_is_cross_axis {
+                item_percentage_bases.percentage_basis_block_size
+            } else {
+                None
+            };
+        self.item_percentage_bases = item_percentage_bases;
+        // 1. Generate anonymous flex items
+        self.generate_anonymous_flex_items();
+    }
+
+    fn take_layout_input(&mut self, layout_input: LayoutInput) {
+        self.available_space = Some(layout_input.available_space);
+        self.layout_input = Some(layout_input.clone());
+        self.item_runs_offered_to_block_size_measurements = None;
+        // 2. Determine the available main and cross space for the flex items
+        self.determine_available_space_for_items(layout_input.available_space);
+    }
+
+    fn determine_flex_base_sizes_and_hypothetical_main_sizes(&mut self) {
+        // https://drafts.csswg.org/css-flexbox-1/#definite-sizes
+        // 3. If a single-line flex container has a definite cross size,
+        //    the automatic preferred outer cross size of any stretched flex items is the flex container’s inner cross size
+        //    (clamped to the flex item’s min and max cross size) and is considered definite.
+        if self.is_single_line() && self.has_definite_cross_size_used(&self.container_cells) {
+            let container_cross_size = self.inner_cross_size_used(&self.container_cells);
+            for index in 0..self.flex_items.len() {
+                if !self.flex_item_is_stretched(index) {
+                    continue;
+                }
+                let (min_size, max_size) = self.cross_size_limits(index);
+                let item = &self.flex_items[index];
+                let stretched = container_cross_size
+                    - item.margins.cross_before
+                    - item.margins.cross_after
+                    - item.borders_and_padding.cross_before
+                    - item.borders_and_padding.cross_after;
+                // NB: The min and max cross sizes are inner sizes, so they clamp the inner size of the item.
+                let inner = css_clamp(stretched, min_size, max_size);
+                self.set_cross_size(index, inner);
+                self.set_has_definite_cross_size(index);
+            }
+        }
+
+        self.offer_runs_of_items_measured_in_their_main_axis();
+        self.measure_content_inline_sizes_of_items_ahead();
+
+        // 4. Determine the main size of the flex container
+        // Determine the main size of the flex container using the rules of the formatting context in which it participates.
+        // NOTE: The automatic block size of a block-level flex container is its max-content size.
+        self.resolve_own_auto_block_size_from_max_content_main_size();
+
+        // 3. Determine the flex base size and hypothetical main size of each item
+        // NB: An item's automatic minimum size is never more than its specified size suggestion, so it can't raise a
+        //     flex base size that's at least that suggestion. A flex-basis smaller than the item's width or height,
+        //     e.g., is raised to the smaller of that size and the item's content size.
+        let mut automatic_minimum_sizes_cannot_raise_base_sizes = true;
+        let mut sum_of_flex_base_sizes = CssPixels::default();
+        for index in 0..self.flex_items.len() {
+            self.determine_flex_base_size(index);
+            let flex_base_size = self.flex_items[index].flex_base_size;
+            automatic_minimum_sizes_cannot_raise_base_sizes &= self
+                .specified_size_suggestion(index)
+                .is_some_and(|suggestion| flex_base_size >= suggestion);
+            sum_of_flex_base_sizes += flex_base_size;
+        }
+
+        // OPTIMIZATION: We try to avoid calculating the "automatic minimum size" if possible,
+        //               since it may require expensive intrinsic sizing layout.
+        //               If this is a single-line flex container and the sum of flex bases sizes
+        //               won't exceed the available space in the main axis, we know the layout
+        //               algorithm won't have to shrink anything. And where no automatic minimum size can raise an
+        //               item's flex base size either, the minimum size isn't needed at all.
+        let should_skip_automatic_minimum_size_clamp = !self
+            .available_space
+            .unwrap()
+            .inline_size
+            .is_intrinsic_sizing_constraint()
+            && self.is_single_line()
+            && self.has_definite_main_size_used(&self.container_cells)
+            && automatic_minimum_sizes_cannot_raise_base_sizes
+            && sum_of_flex_base_sizes <= self.available_space_for_items.unwrap().main.to_px_or_zero();
+
+        for index in 0..self.flex_items.len() {
+            let clamp_max = if self.has_main_max_size(index) {
+                self.specified_main_max_size(index)
+            } else {
+                CssPixels::from_raw(i32::MAX)
+            };
+            // NB: A calc-size() minimum can resolve to more than the automatic minimum size.
+            let min_is_calc_size = self.flex_items[index].main_min_size_is_calc_size;
+            let flex_base_size = self.flex_items[index].flex_base_size;
+            let clamp_min = if self.has_main_min_size(index) {
+                self.specified_main_min_size(index)
+            } else if !min_is_calc_size && should_skip_automatic_minimum_size_clamp {
+                CssPixels::default()
+            } else {
+                self.automatic_minimum_size_for_clamping(index, flex_base_size.min(clamp_max))
+            };
+            // The hypothetical main size is the item’s flex base size clamped according to its used min and max main sizes (and flooring the content box size at zero).
+            self.flex_items[index].hypothetical_main_size =
+                css_clamp(flex_base_size, clamp_min, clamp_max).max(CssPixels::default());
+        }
+    }
+
+    fn run(
+        &mut self,
+        run: &FormattingContextRun<'pass>,
+        layout_input: LayoutInput,
+        own_automatic_block_size_resolution_space: Option<AvailableSpace>,
+    ) {
+        self.own_automatic_block_size_resolution_space = own_automatic_block_size_resolution_space;
+        self.prepare_items(layout_input);
+
+        // 5. Collect flex items into flex lines:
+        // After this step no additional items are to be added to flex_lines or any of its items!
+        self.collect_flex_items_into_flex_lines();
+        self.grow_block_size_transferred_through_aspect_ratio_to_content();
+        // 6. Resolve the flexible lengths
+        self.resolve_flexible_lengths();
+        // Cross Size Determination
+        self.offer_runs_of_items_measured_at_their_main_size();
+        // 7. Determine the hypothetical cross size of each item
+        self.lay_out_fit_content_cross_size_measurements_ahead();
+        for index in 0..self.flex_items.len() {
+            self.determine_hypothetical_cross_size_of_item(index);
+        }
+        // 8. Calculate the cross size of each flex line.
+        self.calculate_cross_size_of_each_flex_line();
+        // 9. Handle 'align-content: stretch'.
+        self.handle_align_content_stretch();
+        // 10. Collapse visibility:collapse items.
+        // FIXME: This
+
+        // 11. Determine the used cross size of each flex item.
+        self.determine_used_cross_size_of_each_flex_item();
+        // 12. Distribute any remaining free space.
+        self.distribute_any_remaining_free_space();
+        // 13. Resolve cross-axis auto margins.
+        self.resolve_cross_axis_auto_margins();
+        // 14. Align all flex items along the cross-axis
+        self.align_all_flex_items_along_the_cross_axis();
+
+        // 15. Determine the flex container’s used cross size
+        // Determine the flex container's used cross size using the rules of the formatting context
+        // in which it participates. If a content-based cross size is needed, use the sum of the
+        // flex lines' cross sizes.
+        self.resolve_own_auto_block_size_from_line_cross_sizes();
+
+        // https://drafts.csswg.org/css-flexbox-1/#definite-sizes
+        // 4. Once the cross size of a flex line has been determined,
+        //    the cross sizes of items in auto-sized flex containers are also considered definite for the purpose of layout.
+        // NB: This refers to step 11, which stretches items. Other engines leave the content-based cross size of an item
+        //     that is not stretched indefinite.
+        // NB: A button or a text input centers its content within its used block size, so it keeps it definite, even
+        //     in a flex container with a definite cross size.
+        let container_cells = self.container_cells.get();
+        let container_cross_size_is_auto = self.should_treat_size_as_auto(
+            sizing_context::SizedBox::new(self.run.box_, &container_cells),
+            self.cross_sizing_axis(),
+        );
+        // 16. Align all flex lines (per align-content)
+        self.align_all_flex_lines();
+
+        self.layout_items_and_derive_baselines(run, container_cross_size_is_auto);
+
+        if self.run.collects_devtools_layout_data() {
+            self.flex_layout_data = Some(std::sync::Arc::new(self.layout_data_for_devtools()));
+        }
+    }
+
+    fn treat_used_cross_size_of_item_as_definite(&mut self, index: usize, container_cross_size_is_auto: bool) {
+        let uses_button_layout = self.flex_items[index].alignment_facts.uses_button_layout;
+        let centers_its_content = self.flex_items[index].alignment_facts.centers_its_content;
+        if !centers_its_content && !container_cross_size_is_auto {
+            return;
+        }
+        let is_stretched = self.flex_item_is_stretched(index);
+        if !centers_its_content && !is_stretched {
+            return;
+        }
+        let size = self.flex_items[index].cross_size.unwrap();
+        self.set_cross_size(index, size);
+        self.set_has_definite_cross_size(index);
+        // NB: The content-based cross size of a button that is not stretched stays indefinite for percentages
+        //     inside it.
+        if uses_button_layout
+            && !is_stretched
+            && !self.cross_axis_is_horizontal()
+            && (self.should_treat_cross_size_as_auto(index)
+                || self.flex_item_details[index]
+                    .inputs
+                    .style
+                    .height()
+                    .is_intrinsic_sizing_constraint())
+        {
+            self.flex_item_details[index]
+                .cells
+                .has_definite_block_size_only_for_button_content_alignment = true;
+        }
+    }
+
+    // AD-HOC: Layout the inside of all flex items after resolving their dimensions.
+    fn layout_items_and_derive_baselines(
+        &mut self,
+        run: &FormattingContextRun<'pass>,
+        container_cross_size_is_auto: bool,
+    ) {
+        let main_axis_is_horizontal = self.main_axis_is_horizontal();
+        let container_content_inline_size = self.container_cells.content_inline_size();
+        let mut items_awaiting_baseline_alignment = Vec::new();
+        let percentage_block_insets_have_definite_basis =
+            run.percentage_block_insets_of_root_children_have_definite_basis(&self.container_cells);
+        let candidates = self.fork_candidates();
+        let mut next_candidate = 0;
+        let mut laid_out_ahead = formatting_context::ChildRunsLaidOutAhead::default();
+        let mut handed_over_to_runs_laid_out_ahead = false;
+        let mut items_prepared = 0;
+        for index in 0..self.flex_items.len() {
+            if index >= items_prepared {
+                self.treat_used_cross_size_of_item_as_definite(index, container_cross_size_is_auto);
+                self.copy_dimensions_from_flex_item_to_box(
+                    index,
+                    main_axis_is_horizontal,
+                    container_content_inline_size,
+                );
+                items_prepared = index + 1;
+            }
+            let is_candidate = candidates.get(next_candidate) == Some(&index);
+            next_candidate += usize::from(is_candidate);
+            let node = self.flex_items[index].box_;
+            let laid_out = if let Some(laid_out) = laid_out_ahead.take(run, index) {
+                laid_out
+            } else {
+                let (cells, input) = self.item_run_request(index);
+                let planned = if is_candidate && !handed_over_to_runs_laid_out_ahead {
+                    formatting_context::plan_child_run(
+                        run,
+                        node,
+                        input,
+                        cells,
+                        percentage_block_insets_have_definite_basis,
+                    )
+                } else {
+                    formatting_context::PlannedChildRun::Unplanned(cells, input)
+                };
+                match planned {
+                    formatting_context::PlannedChildRun::Job(job) if job.reuses_stored_run() => {
+                        formatting_context::lay_out_child_run_job(run.pass, job)
+                    }
+                    formatting_context::PlannedChildRun::Job(job) => {
+                        for later in index + 1..self.flex_items.len() {
+                            self.treat_used_cross_size_of_item_as_definite(later, container_cross_size_is_auto);
+                            self.copy_dimensions_from_flex_item_to_box(
+                                later,
+                                main_axis_is_horizontal,
+                                container_content_inline_size,
+                            );
+                        }
+                        items_prepared = self.flex_items.len();
+                        handed_over_to_runs_laid_out_ahead = true;
+                        laid_out_ahead = formatting_context::ChildRunsLaidOutAhead::lay_out_from_first_miss(
+                            run,
+                            (index, job),
+                            candidates[next_candidate..].iter().map(|&later| {
+                                let (cells, input) = self.item_run_request(later);
+                                (later, self.flex_items[later].box_, cells, input)
+                            }),
+                            percentage_block_insets_have_definite_basis,
+                        );
+                        laid_out_ahead.take(run, index).expect("the item was laid out ahead")
+                    }
+                    formatting_context::PlannedChildRun::Unplanned(cells, input) => {
+                        formatting_context::layout_inside_child_with_input_cells(
+                            run,
+                            None,
+                            None,
+                            node,
+                            input,
+                            cells,
+                            None,
+                            false,
+                            percentage_block_insets_have_definite_basis,
+                        )
+                    }
+                }
+            };
+            let (fragment_arrival, placed_item) = self.take_in_item_layout(run, index, laid_out);
+            if self.item_participates_in_baseline_alignment(index) {
+                items_awaiting_baseline_alignment.push((index, fragment_arrival, placed_item));
+                continue;
+            }
+            self.place_item(index, placed_item, fragment_arrival);
+        }
+        self.resolve_baseline_aligned_items();
+        for (index, fragment_arrival, placed_item) in items_awaiting_baseline_alignment {
+            self.place_item(index, placed_item, fragment_arrival);
+        }
+        if self.facts(self.run.box_).has_preferred_aspect_ratio() {
+            self.in_flow_items_margin_box_block_extent = if self.is_row_layout() {
+                self.margin_box_block_extent_of_placed_in_flow_items()
+            } else {
+                Some(self.largest_outer_hypothetical_main_size_of_lines())
+            };
+        }
+        // https://drafts.csswg.org/css-flexbox-1/#flex-baselines
+        // If any of the flex items on the flex container's startmost/endmost flex line participate in baseline
+        // alignment, the flex container's first/last main-axis baseline set is generated from the shared alignment
+        // baseline of those flex items.
+        // NB: The lines are in cross-start to cross-end order, and wrap-reverse puts cross-start at the container's
+        //     block-end. So the startmost line is then the last one.
+        let (startmost_line, endmost_line) = match self.flex_lines.len().checked_sub(1) {
+            Some(last_line) if self.used_flex_wrap() == flex_wrap::WRAP_REVERSE => (Some(last_line), Some(0)),
+            Some(last_line) => (Some(0), Some(last_line)),
+            None => (None, None),
+        };
+        self.derived_baselines_of_root_box = DerivedBaselines {
+            inline_alignment: endmost_line.and_then(|line_index| {
+                self.baseline_of_line_for_purpose(
+                    line_index,
+                    formatting_context::BaselineSet::Last,
+                    formatting_context::BaselinePurpose::InlineAlignment,
+                )
+            }),
+            first: startmost_line
+                .and_then(|line_index| self.baseline_of_line(line_index, formatting_context::BaselineSet::First)),
+            last: endmost_line
+                .and_then(|line_index| self.baseline_of_line(line_index, formatting_context::BaselineSet::Last)),
+        };
+    }
+
+    fn place_item(
+        &self,
+        index: usize,
+        placed_item: formatting_context::PlacedChild,
+        fragment_arrival: Option<fragment_tree::RunRootFragment>,
+    ) {
+        formatting_context::place_child(
+            &self.run,
+            self.flex_items[index].box_,
+            placed_item,
+            self.item_content_offset(index),
+            None,
+            fragment_arrival,
+        );
+    }
+
+    /// The offset of the content box of the item at `index` in the container, where it is placed.
+    fn item_content_offset(&self, index: usize) -> FfiCssPixelPoint {
+        let item = &self.flex_items[index];
+        if self.main_axis_is_horizontal() {
+            FfiCssPixelPoint {
+                x: item.main_offset,
+                y: item.cross_offset,
+            }
+        } else {
+            FfiCssPixelPoint {
+                x: item.cross_offset,
+                y: item.main_offset,
+            }
+        }
+    }
+
+    /// The block size a column flex container's content would take up if its items didn't flex: the sum of the outer
+    /// hypothetical main sizes of the items on its longest line, and the gaps between them. That's the min-content
+    /// block size that the automatic minimum size of a box with a preferred aspect ratio grows to, whereas the extent
+    /// of the placed items is only what's left of it after they shrank to fit the block size transferred through the
+    /// ratio.
+    /// https://drafts.csswg.org/css-sizing-4/#aspect-ratio-minimum
+    fn largest_outer_hypothetical_main_size_of_lines(&self) -> CssPixels {
+        let main_gap = self.main_gap();
+        self.flex_lines
+            .iter()
+            .map(|line| {
+                line.items.iter().fold(CssPixels::default(), |sum, index| {
+                    sum + self.flex_items[index].outer_hypothetical_main_size()
+                }) + main_gap * line.items.len().saturating_sub(1)
+            })
+            .fold(CssPixels::default(), CssPixels::max)
+    }
+
+    /// The block size of the margin boxes of the container's in-flow children, once its items are placed, unless a box
+    /// among them is not an item. A run of collapsible white space is no item and renders nothing.
+    fn margin_box_block_extent_of_placed_in_flow_items(&self) -> Option<CssPixels> {
+        let mut block_start = CssPixels::default();
+        let mut block_end = CssPixels::default();
+        for child in self.run.pass.children(self.run.box_) {
+            let facts = self.facts(child);
+            if facts.is_box()
+                && !facts.is_absolutely_positioned()
+                && !self.run.pass.can_skip_is_anonymous_text_run(child)
+            {
+                let index = self.index_of_flex_item(child)?;
+                let metrics = &self.flex_item_details[index].cells;
+                let content_block_offset = self.item_content_offset(index).y;
+                let collapsed = metrics.uses_collapsing_borders_model();
+                block_start = block_start.min(content_block_offset - metrics.margin_box_top(collapsed));
+                block_end = block_end
+                    .max(content_block_offset + metrics.content_block_size() + metrics.margin_box_bottom(collapsed));
+            }
+        }
+        Some(block_end - block_start)
+    }
+
+    // https://drafts.csswg.org/css-flexbox-1/#flex-baselines
+    fn baseline_of_line(&self, line_index: usize, baseline_set: formatting_context::BaselineSet) -> Option<CssPixels> {
+        self.baseline_of_line_for_purpose(line_index, baseline_set, formatting_context::BaselinePurpose::Container)
+    }
+
+    fn baseline_of_line_for_purpose(
+        &self,
+        line_index: usize,
+        baseline_set: formatting_context::BaselineSet,
+        purpose: formatting_context::BaselinePurpose,
+    ) -> Option<CssPixels> {
+        let items = &self.flex_lines.get(line_index)?.items;
+        // 1. If any of the flex items on the flex container's first line participate in baseline alignment, the flex
+        //    container's main-axis baseline is the baseline of those flex items.
+        let participating = (baseline_set == formatting_context::BaselineSet::First)
+            .then(|| {
+                items
+                    .iter()
+                    .find(|&index| self.item_participates_in_baseline_alignment(index))
+            })
+            .flatten();
+        // 2. Otherwise, the flex container's first (last) main-axis baseline set is generated from the alignment
+        //    baseline of the startmost (endmost) flex item. If that item has no alignment baseline, then one is first
+        //    synthesized from its border edges.
+        // INTEROP: Chrome takes the startmost and endmost items in physical order, also for reversed directions.
+        let item = participating.or_else(|| match baseline_set {
+            formatting_context::BaselineSet::First => {
+                items.iter().min_by_key(|&index| self.flex_items[index].main_offset)
+            }
+            formatting_context::BaselineSet::Last => {
+                items.iter().max_by_key(|&index| self.flex_items[index].main_offset)
+            }
+        })?;
+        let source = self.baseline_source_for_item(item);
+        formatting_context::baseline_of_laid_out_child_for_purpose(
+            &self.run.pass,
+            formatting_context::LaidOutChild {
+                node: self.flex_items[item].box_,
+                metrics: &self.flex_item_details[item].cells,
+                content_baselines: self.flex_item_details[item].content_baselines,
+                content_offset: self.item_content_offset(item),
+            },
+            baseline_set,
+            source,
+            purpose,
+        )
+    }
+
+    fn baseline_source_for_item(&self, item: usize) -> formatting_context::ChildBaselineSource {
+        // If the button's inner box has no in-flow boxes, avoid synthesizing a baseline from it: it is vertically
+        // centered, so that would place adjacent text too high. Use its content-box bottom edge instead.
+        if self.facts(self.run.box_).is_anonymous_button_content_wrapper() {
+            let has_in_flow_boxes = self.run.pass.children(self.flex_items[item].box_).any(|child| {
+                let facts = self.facts(child);
+                facts.is_flow_layout_participant() && !facts.is_floating()
+            });
+
+            if !has_in_flow_boxes {
+                return formatting_context::ChildBaselineSource::Own;
+            }
+        }
+
+        if self.item_baseline_is_synthesized(item) {
+            formatting_context::ChildBaselineSource::Synthesized
+        } else {
+            formatting_context::ChildBaselineSource::OwnOrSynthesized
+        }
+    }
+
+    fn parent_did_dimension(&self, root_after_epilogue: used_values::RootInputCells) {
+        // NB: The static positions of the abspos children use the container as the run sized it.
+        self.container_cells.set(root_after_epilogue);
+        for child in self.run.pass.children(self.run.box_) {
+            let facts = self.facts(child);
+            if facts.is_box() && facts.is_absolutely_positioned() {
+                formatting_context::register_contained_abspos_child(
+                    &self.run.pass,
+                    self.run.fragments,
+                    self.run.box_,
+                    child,
+                    self.calculate_static_position_rect(child),
+                    None,
+                );
+            }
+        }
+    }
+}
+
+fn abs(value: CssPixels) -> CssPixels {
+    if value < CssPixels::default() { -value } else { value }
+}
+
+#[cfg(test)]
+mod stretch_cross_limit_tests {
+    use super::*;
+    use crate::css::style::layout_style::LayoutScratchStyle;
+    use crate::css::style_value::{RetainedStyleValueData, StyleValueData};
+    use crate::layout::node_data::NodeConstructionFacts;
+    use crate::layout::run_state::LayoutScratch;
+
+    fn length(value: i32) -> ComputedSize {
+        ComputedSize::from_data(&RetainedStyleValueData::from_owned(StyleValueData::Length {
+            value: f64::from(value),
+            unit: crate::css::style_compute::px_length_unit(),
+        }))
+    }
+
+    #[test]
+    fn wrapping_rows_recalculate_stretch_cross_limits_from_preferred_size() {
+        check_stretch_limit(false, false, 80, 80, 80);
+        check_stretch_limit(false, false, 150, 100, 150);
+        check_stretch_limit(false, false, 250, 100, 200);
+        check_stretch_limit(false, true, 50, 100, 200);
+    }
+
+    #[test]
+    fn wrapping_columns_recalculate_stretch_cross_limits_from_preferred_size() {
+        check_stretch_limit(true, false, 80, 80, 80);
+        check_stretch_limit(true, false, 150, 100, 150);
+        check_stretch_limit(true, false, 250, 100, 200);
+        check_stretch_limit(true, true, 50, 100, 200);
+    }
+
+    #[test]
+    fn auto_stretched_rows_and_columns_use_the_final_line_cross_size() {
+        check_stretch_limit_impl(false, false, 0, 0, 200, true, CrossSpace::Definite);
+        check_stretch_limit_impl(true, false, 0, 0, 200, true, CrossSpace::Definite);
+    }
+
+    #[test]
+    fn auto_height_wrapping_rows_resolve_stretch_minimum_against_the_final_line() {
+        check_stretch_limit_impl(false, true, 50, 50, 200, false, CrossSpace::Auto);
+    }
+
+    #[test]
+    fn auto_height_wrapping_rows_keep_preferred_size_below_the_final_stretch_maximum() {
+        check_stretch_limit_impl(false, false, 150, 150, 150, false, CrossSpace::Auto);
+    }
+
+    #[test]
+    fn auto_height_nowrap_rows_resolve_stretch_minimum_after_container_maximum_clamps_the_line() {
+        check_stretch_limit_impl(false, true, 0, 0, 80, false, CrossSpace::MaxConstrained);
+    }
+
+    #[test]
+    fn auto_height_nowrap_rows_resolve_stretch_maximum_after_container_maximum_clamps_the_line() {
+        check_stretch_limit_impl(false, false, 500, 500, 80, false, CrossSpace::MaxConstrained);
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum CrossSpace {
+        Definite,
+        Auto,
+        MaxConstrained,
+    }
+
+    fn check_stretch_limit(column: bool, minimum: bool, preferred: i32, provisional: i32, final_size: i32) {
+        check_stretch_limit_impl(
+            column,
+            minimum,
+            preferred,
+            provisional,
+            final_size,
+            false,
+            CrossSpace::Definite,
+        );
+    }
+
+    fn check_stretch_limit_impl(
+        column: bool,
+        minimum: bool,
+        preferred: i32,
+        provisional: i32,
+        final_size: i32,
+        auto: bool,
+        cross_space: CrossSpace,
+    ) {
+        let definite_cross_basis = cross_space == CrossSpace::Definite;
+        let max_constrained = cross_space == CrossSpace::MaxConstrained;
+        let mut arena = LayoutNodeArena::new();
+        let scratch = LayoutScratch::default();
+        let styles: [LayoutScratchStyle; 3] = std::array::from_fn(|index| {
+            LayoutScratchStyle::over_defaults(|style| {
+                style.box_mut().display = if index == 0 {
+                    FfiDisplay::from_single_keyword(keyword::FLEX).unwrap()
+                } else {
+                    FfiDisplay::block()
+                };
+                if index == 0 {
+                    let alignment = style.alignment_mut();
+                    alignment.flex_direction = if column {
+                        flex_direction::COLUMN
+                    } else {
+                        flex_direction::ROW
+                    };
+                    alignment.flex_wrap = if max_constrained {
+                        flex_wrap::NOWRAP
+                    } else {
+                        flex_wrap::WRAP
+                    };
+                    alignment.align_items = if auto {
+                        align_items::STRETCH
+                    } else if max_constrained {
+                        align_items::NORMAL
+                    } else {
+                        align_items::FLEX_START
+                    };
+                }
+                if index == 1 && max_constrained {
+                    let surround = style.surround_mut();
+                    for side in [&mut surround.margin.top, &mut surround.margin.bottom] {
+                        *side = ComputedLengthPercentageOrAuto::new(
+                            false,
+                            crate::css::computed_values::ComputedStyleValueHandle::length(5.0),
+                        );
+                    }
+                    for side in [&mut surround.padding.top, &mut surround.padding.bottom] {
+                        *side = ComputedLengthPercentageOrAuto::new(
+                            false,
+                            crate::css::computed_values::ComputedStyleValueHandle::length(2.0),
+                        );
+                    }
+                    let border = style.border_mut();
+                    for side in [&mut border.border_top, &mut border.border_bottom] {
+                        side.line_style = line_style::SOLID;
+                        side.width = CssPixels::from_integer(3);
+                    }
+                    border.border_top_computed_width = CssPixels::from_integer(3);
+                    border.border_bottom_computed_width = CssPixels::from_integer(3);
+                }
+                let sizing = style.sizing_mut();
+                let cross = if index == 0 {
+                    100
+                } else if index == 1 {
+                    preferred
+                } else {
+                    200
+                };
+                let main = if index == 0 { 100 } else { 50 };
+                sizing.width = length(if column { cross } else { main });
+                sizing.height = length(if column { main } else { cross });
+                if index == 0 && !definite_cross_basis {
+                    let cross_size = if column { &mut sizing.width } else { &mut sizing.height };
+                    *cross_size = ComputedSize::keyword(ComputedSizeKind::Auto);
+                    if max_constrained {
+                        assert!(!column);
+                        sizing.max_height = length(100);
+                    }
+                }
+                if index == 1 {
+                    if auto {
+                        let preferred_size = if column { &mut sizing.width } else { &mut sizing.height };
+                        *preferred_size = ComputedSize::keyword(ComputedSizeKind::Auto);
+                    }
+                    let limit = if column {
+                        if minimum {
+                            &mut sizing.min_width
+                        } else {
+                            &mut sizing.max_width
+                        }
+                    } else if minimum {
+                        &mut sizing.min_height
+                    } else {
+                        &mut sizing.max_height
+                    };
+                    *limit = ComputedSize::keyword(ComputedSizeKind::Stretch);
+                }
+            })
+        });
+        let facts = NodeConstructionFacts {
+            kind: NodeKind::BlockContainer,
+            is_anonymous: false,
+            is_html_input_element: false,
+            is_html_html_element: false,
+            is_document_element: false,
+            is_in_user_agent_shadow_tree: false,
+            uses_button_layout: false,
+            is_editing_host: false,
+            is_body: false,
+            dom_paint_facts: 0,
+            style_node: 0,
+        };
+        let container = arena.allocate(facts);
+        let target = arena.allocate(facts);
+        let peer = arena.allocate(facts);
+        for (node, style) in [container, target, peer].into_iter().zip(&styles) {
+            arena.set_node_style(node, 0, Some(style.style()));
+        }
+        for child in [target, peer] {
+            arena.set_node_flag(child, NodeFlag::IsFlexItem, true);
+            arena.insert_child(container, child, Node::INVALID);
+        }
+        let host_findings_outside_runs = crate::layout::run_state::HostFindingsSink::default();
+        let pass = LayoutPass::for_test(&arena, &scratch, &host_findings_outside_runs);
+        let px = |value: i32| CssPixels::from_integer(i64::from(value));
+        let constraints = ContainingBlockConstraints {
+            percentage_basis_inline_size: (!column || definite_cross_basis).then_some(px(100)),
+            percentage_basis_block_size: (column || definite_cross_basis).then_some(px(100)),
+            ..ContainingBlockConstraints::default()
+        };
+        let container_cells = used_values::cells_before_sizing(&pass, container, constraints);
+        RunState::with_root(pass, container, Node::INVALID, None, |state, pass| {
+            let run = FormattingContextRun::new(
+                state,
+                container,
+                pass,
+                formatting_context::RunMode::Measure,
+                false,
+                None,
+            );
+            let mut flex = FlexFormattingContext::new(&run, container_cells);
+            let available = AvailableSpace {
+                inline_size: if column && !definite_cross_basis {
+                    AvailableSize::Indefinite
+                } else {
+                    AvailableSize::definite(px(100))
+                },
+                block_size: if column || definite_cross_basis {
+                    AvailableSize::definite(px(100))
+                } else {
+                    AvailableSize::Indefinite
+                },
+            };
+            flex.generate_items_and_determine_available_space(LayoutInput::new(
+                available,
+                constraints,
+                ParticipationInParentFormattingContext::Root,
+            ));
+            assert_eq!(flex.flex_items.len(), 2);
+            assert_eq!(flex.cross_axis_stretch_basis().is_some(), definite_cross_basis);
+            if !definite_cross_basis {
+                assert_eq!(flex.cross_axis_stretch_basis(), None);
+                assert_eq!(flex.cross_size_limits(0), (px(0), CssPixels::from_raw(i32::MAX)));
+            }
+            // Initial cells have already applied the container-sized stretch limit. The preferred size must
+            // survive this clamp so the final, larger line maximum can restore it.
+            assert_eq!(flex.inner_cross_size(0), px(provisional));
+            for index in 0..2 {
+                flex.flex_items[index].main_size = Some(px(50));
+                flex.determine_hypothetical_cross_size_of_item(index);
+            }
+            assert_eq!(flex.flex_items[0].hypothetical_cross_size, px(provisional));
+            flex.flex_lines.push(FlexLine {
+                items: FlexLineItems {
+                    first: 0,
+                    count: 2,
+                    reversed: false,
+                },
+                ..FlexLine::default()
+            });
+            flex.calculate_cross_size_of_each_flex_line();
+            assert_eq!(
+                flex.flex_lines[0].cross_size,
+                px(if max_constrained { 100 } else { 200 })
+            );
+            // The initial containing-block basis stays indefinite. Step 11 still resolves stretch limits
+            // against the completed line below.
+            assert_eq!(flex.cross_axis_stretch_basis().is_some(), definite_cross_basis);
+            if !definite_cross_basis {
+                assert_eq!(flex.cross_axis_stretch_basis(), None);
+                assert_eq!(flex.cross_size_limits(0), (px(0), CssPixels::from_raw(i32::MAX)));
+            }
+            flex.determine_used_cross_size_of_each_flex_item();
+            assert_eq!(flex.flex_items[0].cross_size, Some(px(final_size)));
+            assert_eq!(flex.inner_cross_size(0), px(final_size));
+            if max_constrained {
+                // Match the immutable keyword-sizes-on-flex-item-001.html cases60–65 oracle.
+                let item = &flex.flex_items[0];
+                let border_box = item.cross_size.unwrap()
+                    + item.borders_and_padding.cross_before
+                    + item.borders_and_padding.cross_after;
+                assert_eq!(border_box, px(90));
+            }
+            if auto {
+                assert!(flex.has_definite_cross_size(0));
+            }
+            assert_eq!(flex.flex_items[1].cross_size, Some(px(200)));
+        });
+        arena
+            .free_subtree(container)
+            .destroy_shells_and_invoke_callbacks(&crate::stage::MainThread::for_test());
+    }
+}

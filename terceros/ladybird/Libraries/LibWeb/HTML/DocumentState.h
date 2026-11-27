@@ -1,0 +1,140 @@
+/*
+ * Copyright (c) 2022, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2023, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Optional.h>
+#include <AK/RefCounted.h>
+#include <AK/Utf16String.h>
+#include <LibURL/Origin.h>
+#include <LibURL/URL.h>
+#include <LibWeb/Export.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/Requests.h>
+#include <LibWeb/Forward.h>
+#include <LibWebCommon/HTML/CrossProcessId.h>
+#include <LibWebCommon/HTML/DocumentStateClient.h>
+#include <LibWebCommon/HTML/POSTResource.h>
+#include <LibWebCommon/HTML/SerializedPolicyContainer.h>
+#include <LibWebCommon/HTML/UserAgentInitiated.h>
+#include <LibWebCommon/ReferrerPolicy/ReferrerPolicy.h>
+
+namespace Web::HTML {
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#document-state-2
+class WEB_API DocumentState final : public RefCounted<DocumentState> {
+public:
+    static NonnullRefPtr<DocumentState> create(CrossProcessId cross_process_id)
+    {
+        auto document_state = adopt_ref(*new DocumentState());
+        document_state->m_cross_process_id = cross_process_id;
+        return document_state;
+    }
+    ~DocumentState();
+
+    using Client = DocumentStateClient;
+
+    [[nodiscard]] Optional<UniqueNodeID> document_id() const { return m_document_id; }
+    void set_document_id(Optional<UniqueNodeID> document_id) { m_document_id = document_id; }
+
+    [[nodiscard]] CrossProcessId cross_process_id() const { return m_cross_process_id; }
+
+    [[nodiscard]] Variant<SerializedPolicyContainer, Client> const& history_policy_container() const { return m_history_policy_container; }
+    void set_history_policy_container(Variant<SerializedPolicyContainer, Client> history_policy_container) { m_history_policy_container = move(history_policy_container); }
+
+    [[nodiscard]] Fetch::Infrastructure::Request::ReferrerType request_referrer() const { return m_request_referrer; }
+    void set_request_referrer(Fetch::Infrastructure::Request::ReferrerType request_referrer) { m_request_referrer = move(request_referrer); }
+
+    [[nodiscard]] ReferrerPolicy::ReferrerPolicy request_referrer_policy() const { return m_request_referrer_policy; }
+    void set_request_referrer_policy(ReferrerPolicy::ReferrerPolicy request_referrer_policy) { m_request_referrer_policy = move(request_referrer_policy); }
+
+    [[nodiscard]] Optional<URL::Origin> initiator_origin() const { return m_initiator_origin; }
+    void set_initiator_origin(Optional<URL::Origin> initiator_origin) { m_initiator_origin = move(initiator_origin); }
+
+    [[nodiscard]] Optional<URL::Origin> origin() const { return m_origin; }
+    void set_origin(Optional<URL::Origin> origin) { m_origin = move(origin); }
+
+    [[nodiscard]] Optional<URL::URL> const& about_base_url() const { return m_about_base_url; }
+    void set_about_base_url(Optional<URL::URL> url) { m_about_base_url = move(url); }
+
+    [[nodiscard]] DocumentResource resource() const { return m_resource; }
+    void set_resource(DocumentResource resource) { m_resource = move(resource); }
+
+    [[nodiscard]] HTTP::Cookie::SameSiteStatus navigation_same_site_status() const { return m_navigation_same_site_status; }
+    void set_navigation_same_site_status(HTTP::Cookie::SameSiteStatus status) { m_navigation_same_site_status = status; }
+
+    [[nodiscard]] bool reload_pending() const { return m_reload_pending; }
+    void set_reload_pending(bool reload_pending) { m_reload_pending = reload_pending; }
+
+    [[nodiscard]] bool reload_bypasses_cache() const { return m_reload_bypasses_cache; }
+    void set_reload_bypasses_cache(bool reload_bypasses_cache) { m_reload_bypasses_cache = reload_bypasses_cache; }
+
+    [[nodiscard]] bool ever_populated() const { return m_ever_populated; }
+    void set_ever_populated(bool ever_populated) { m_ever_populated = ever_populated; }
+
+    [[nodiscard]] UserAgentInitiated user_agent_initiated() const { return m_user_agent_initiated; }
+    void set_user_agent_initiated(UserAgentInitiated user_agent_initiated) { m_user_agent_initiated = user_agent_initiated; }
+
+    [[nodiscard]] Utf16String const& navigable_target_name() const { return m_navigable_target_name; }
+    void set_navigable_target_name(Utf16String navigable_target_name) { m_navigable_target_name = move(navigable_target_name); }
+
+private:
+    DocumentState();
+
+    // https://html.spec.whatwg.org/multipage/browsing-the-web.html#document-state-document
+    // NOTE: We store the document's unique ID rather than a pointer to the document, because DocumentState is
+    //       decoupled from the document's lifetime (LocalNavigable owns the document directly).
+    Optional<UniqueNodeID> m_document_id;
+
+    // AD-HOC: Stable identity used to preserve shared document states across canonical UI history and WebContent process swaps.
+    CrossProcessId m_cross_process_id;
+
+    // https://html.spec.whatwg.org/multipage/browsing-the-web.html#document-state-history-policy-container
+    Variant<SerializedPolicyContainer, Client> m_history_policy_container { Client::Tag };
+
+    // https://html.spec.whatwg.org/multipage/browsing-the-web.html#document-state-request-referrer
+    Fetch::Infrastructure::Request::ReferrerType m_request_referrer { Fetch::Infrastructure::Request::Referrer::Client };
+
+    // https://html.spec.whatwg.org/multipage/browsing-the-web.html#document-state-request-referrer-policy
+    ReferrerPolicy::ReferrerPolicy m_request_referrer_policy { ReferrerPolicy::DEFAULT_REFERRER_POLICY };
+
+    // https://html.spec.whatwg.org/multipage/browsing-the-web.html#document-state-initiator-origin
+    Optional<URL::Origin> m_initiator_origin;
+
+    // https://html.spec.whatwg.org/multipage/browsing-the-web.html#document-state-origin
+    Optional<URL::Origin> m_origin;
+
+    // https://html.spec.whatwg.org/multipage/browsing-the-web.html#document-state-about-base-url
+    Optional<URL::URL> m_about_base_url = {};
+
+    // https://html.spec.whatwg.org/multipage/browsing-the-web.html#document-state-resource
+    DocumentResource m_resource {};
+
+    HTTP::Cookie::SameSiteStatus m_navigation_same_site_status { HTTP::Cookie::SameSiteStatus::CrossSite };
+
+    // https://html.spec.whatwg.org/multipage/browsing-the-web.html#document-state-reload-pending
+    bool m_reload_pending { false };
+
+    // AD-HOC: Whether the pending reload bypasses the HTTP cache, as the user can ask one to. HTML leaves that to the
+    //         user agent: "When a user requests a reload of a navigable, user agents may provide a mechanism for
+    //         ignoring any caches when reloading."
+    //         https://html.spec.whatwg.org/multipage/speculative-loading.html#nav-traversal-ui
+    bool m_reload_bypasses_cache { false };
+
+    // https://html.spec.whatwg.org/multipage/browsing-the-web.html#document-state-ever-populated
+    bool m_ever_populated { false };
+
+    // AD-HOC: Not one of the spec's document state fields. It's whether the navigation that created the entry had no
+    //         source document, recorded so a traversal back to the entry can replay it. Blink and Gecko keep the same
+    //         on their entries: Blink an absent FrameNavigationEntry::initiator_origin(), Gecko a system principal as
+    //         SessionHistoryInfo::GetTriggeringPrincipal().
+    UserAgentInitiated m_user_agent_initiated { UserAgentInitiated::No };
+
+    // https://html.spec.whatwg.org/multipage/browsing-the-web.html#document-state-nav-target-name
+    Utf16String m_navigable_target_name;
+};
+
+}

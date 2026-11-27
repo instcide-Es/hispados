@@ -1,0 +1,314 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+use core::cell::{Cell, OnceCell};
+use core::ops::Deref;
+
+use ak::Utf16String;
+use libjs_runtime_macros::Trace;
+
+use crate::gc::class::{GcCell, cast_ref, define_cell};
+use crate::gc::visitor::{Trace, Visitor};
+use crate::interpreter::vm::Vm;
+use crate::layout::cell::Gc;
+use crate::layout::execution_context::ExecutionContext;
+use crate::layout::function_object::FUNCTION_LENGTH_AND_NAME_SLOTS;
+use crate::layout::member::Member;
+use crate::layout::object::Object;
+use crate::layout::value::Value;
+use crate::runtime::completion::ThrowCompletionOr;
+use crate::runtime::function_object::{FUNCTION_OBJECT_METHODS, FunctionObject};
+use crate::runtime::object::{MayInterfereWithIndexedPropertyAccess, ObjectMethods, StackFrameInfo, allocate_object};
+use crate::runtime::realm::Realm;
+
+#[repr(C)]
+#[derive(Trace)]
+pub struct BoundFunction {
+    base: FunctionObject,
+    /// OPTIMIZATION: The named properties of bound functions are "length" and "name".
+    #[gc(untraced = "the object traces its inline named storage")]
+    inline_named_storage: [Cell<Value>; FUNCTION_LENGTH_AND_NAME_SLOTS],
+    bound_target_function: Member<FunctionObject>, // [[BoundTargetFunction]]
+    bound_this: Cell<Value>,                       // [[BoundThis]]
+    bound_arguments: BoundArguments,               // [[BoundArguments]]
+}
+
+/// The bound arguments of a bound function, which never change once they are set.
+struct BoundArguments(OnceCell<Box<[Value]>>);
+
+// SAFETY: Visits every bound argument.
+unsafe impl Trace for BoundArguments {
+    fn trace(&self, visitor: &mut Visitor) {
+        if let Some(arguments) = self.0.get() {
+            // SAFETY: The arguments are the function's own, which nothing changes once they are set, and only its
+            //         destructor frees.
+            unsafe { visitor.visit_owned_values(arguments) };
+        }
+    }
+}
+
+pub static BOUND_FUNCTION_METHODS: ObjectMethods = ObjectMethods {
+    internal_call: Some(BoundFunction::internal_call),
+    internal_construct: Some(BoundFunction::internal_construct),
+    is_strict_mode: |object| as_bound_function(object).innermost_target().is_strict_mode(),
+    has_constructor: |object| as_bound_function(object).innermost_target().has_constructor(),
+    get_stack_frame_info: BoundFunction::get_stack_frame_info,
+    name_for_call_stack: |object| as_bound_function(object).name_for_call_stack(),
+    ..FUNCTION_OBJECT_METHODS
+};
+
+define_cell!(BoundFunction, Object, extends: [FunctionObject, Object], methods: BOUND_FUNCTION_METHODS);
+
+impl Deref for BoundFunction {
+    type Target = FunctionObject;
+
+    fn deref(&self) -> &FunctionObject {
+        &self.base
+    }
+}
+
+/// The bound function an internal method of a bound function was called on.
+fn as_bound_function(object: &Object) -> &BoundFunction {
+    cast_ref(object)
+}
+
+impl Object {
+    pub fn is_bound_function(&self) -> bool {
+        self.is::<BoundFunction>()
+    }
+}
+
+/// Whether a bound function was created with the premade shape of Intrinsics::bound_function_shape(), whose "length"
+/// and "name" properties Function.prototype.bind fills in.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum LengthAndNameSlots {
+    Premade,
+    Absent,
+}
+
+/// The offset of "length" in the shape of Intrinsics::bound_function_shape().
+pub const BOUND_FUNCTION_LENGTH_OFFSET: u32 = 0;
+
+/// The offset of "name" in the shape of Intrinsics::bound_function_shape().
+pub const BOUND_FUNCTION_NAME_OFFSET: u32 = 1;
+
+impl BoundFunction {
+    // 10.4.1.3 BoundFunctionCreate ( targetFunction, boundThis, boundArgs ), https://tc39.es/ecma262/#sec-boundfunctioncreate
+    // OPTIMIZATION: Function.prototype.bind, the only caller, goes on to define "length" and "name" on the new function.
+    //               When its prototype is %Function.prototype%, it is created with a premade shape that has both
+    //               properties already, holding undefined until the caller writes them, which nothing can observe
+    //               before then.
+    pub fn create(
+        vm: &Vm,
+        realm: Gc<Realm>,
+        target_function: Gc<FunctionObject>,
+        bound_this: Value,
+        bound_arguments: &[Value],
+    ) -> ThrowCompletionOr<(Gc<BoundFunction>, LengthAndNameSlots)> {
+        // 1. Let proto be ? targetFunction.[[GetPrototypeOf]]().
+        let prototype = target_function.internal_get_prototype_of(vm)?;
+
+        let length_and_name_slots = if prototype == Some(realm.function_prototype()) {
+            LengthAndNameSlots::Premade
+        } else {
+            LengthAndNameSlots::Absent
+        };
+        let base = match length_and_name_slots {
+            LengthAndNameSlots::Premade => FunctionObject::new_with_shape(
+                Self::CLASS,
+                realm.intrinsics().bound_function_shape(vm),
+                MayInterfereWithIndexedPropertyAccess::No,
+            ),
+            LengthAndNameSlots::Absent => FunctionObject::new_with_prototype(
+                vm,
+                Self::CLASS,
+                realm,
+                prototype,
+                MayInterfereWithIndexedPropertyAccess::No,
+            ),
+        };
+
+        // 2. Let internalSlotsList be the list-concatenation of « [[Prototype]], [[Extensible]] » and the internal slots listed in Table 34.
+        // 3. Let obj be MakeBasicObject(internalSlotsList).
+        // 4. Set obj.[[Prototype]] to proto.
+        // 5. Set obj.[[Call]] as described in 10.4.1.1.
+        // 6. If IsConstructor(targetFunction) is true, then
+        //    a. Set obj.[[Construct]] as described in 10.4.1.2.
+        // 7. Set obj.[[BoundTargetFunction]] to targetFunction.
+        // 8. Set obj.[[BoundThis]] to boundThis.
+        // 9. Set obj.[[BoundArguments]] to boundArgs.
+        base.inline_named_capacity.set(FUNCTION_LENGTH_AND_NAME_SLOTS as u8);
+        let object = allocate_object(vm, |_| BoundFunction {
+            base,
+            inline_named_storage: [const { Cell::new(Value::UNDEFINED) }; FUNCTION_LENGTH_AND_NAME_SLOTS],
+            bound_target_function: Member::new(target_function),
+            bound_this: Cell::new(bound_this),
+            bound_arguments: BoundArguments(OnceCell::new()),
+        });
+        // The caller keeps the bound arguments alive until the function that does holds them, and nothing allocates
+        // from the heap in between.
+        if object
+            .bound_arguments
+            .0
+            .set(bound_arguments.to_vec().into_boxed_slice())
+            .is_err()
+        {
+            unreachable!("the bound arguments are set once");
+        }
+
+        // 10. Return obj.
+        Ok((object, length_and_name_slots))
+    }
+
+    pub fn bound_target_function(&self) -> Gc<FunctionObject> {
+        self.bound_target_function.get()
+    }
+
+    /// The first target down the chain of bound functions that is not itself a bound function. A chain can be longer
+    /// than the native stack allows recursing through.
+    fn innermost_target(&self) -> Gc<FunctionObject> {
+        let mut target = self.bound_target_function();
+        while let Some(bound_target) = target.downcast::<BoundFunction>() {
+            target = bound_target.bound_target_function();
+        }
+        target
+    }
+
+    pub fn bound_this(&self) -> Value {
+        self.bound_this.get()
+    }
+
+    pub fn bound_arguments_count(&self) -> usize {
+        self.bound_arguments().len()
+    }
+
+    pub fn bound_argument(&self, index: usize) -> Value {
+        self.bound_arguments()[index]
+    }
+
+    pub fn bound_arguments(&self) -> &[Value] {
+        self.bound_arguments
+            .0
+            .get()
+            .expect("a bound function has its bound arguments")
+    }
+
+    /// args is the list-concatenation of boundArgs and argumentsList, made in place in the callee's frame, whose
+    /// argument slots have room for both.
+    fn prepend_bound_arguments(&self, callee_context: &ExecutionContext) {
+        let bound_arguments = self.bound_arguments();
+        let argument_values = callee_context.arguments();
+        let argument_count = argument_values.len();
+        let mut index = argument_count;
+        while index > bound_arguments.len() {
+            index -= 1;
+            argument_values[index].set(argument_values[index - bound_arguments.len()].get());
+        }
+        for (argument, bound_argument) in argument_values.iter().zip(bound_arguments) {
+            argument.set(*bound_argument);
+        }
+
+        callee_context.passed_argument_count.set(
+            callee_context.passed_argument_count.get()
+                + u32::try_from(bound_arguments.len()).expect("the bound argument count fits in u32"),
+        );
+    }
+
+    // 10.4.1.1 [[Call]] ( thisArgument, argumentsList ), https://tc39.es/ecma262/#sec-bound-function-exotic-objects-call-thisargument-argumentslist
+    fn internal_call(
+        object: &Object,
+        vm: &Vm,
+        callee_context: &ExecutionContext,
+        _this_argument: Value,
+    ) -> ThrowCompletionOr<Value> {
+        let function = as_bound_function(object);
+
+        // 1. Let target be F.[[BoundTargetFunction]].
+        let mut target = function.bound_target_function();
+
+        // 2. Let boundThis be F.[[BoundThis]].
+        let mut bound_this = function.bound_this();
+
+        // 3. Let boundArgs be F.[[BoundArguments]].
+        // 4. Let args be the list-concatenation of boundArgs and argumentsList.
+        function.prepend_bound_arguments(callee_context);
+
+        // OPTIMIZATION: [[Call]] of a bound target repeats steps 1-4 for it, so they are repeated here instead of
+        //               recursing, which would run a long chain of bound functions out of native stack.
+        while let Some(bound_target) = target.downcast::<BoundFunction>() {
+            target = bound_target.bound_target_function();
+            bound_this = bound_target.bound_this();
+            bound_target.prepend_bound_arguments(callee_context);
+        }
+
+        // 5. Return ? Call(target, boundThis, args).
+        let internal_call = target
+            .internal_call_method()
+            .expect("the target of a bound function is callable");
+        internal_call(&target, vm, callee_context, bound_this)
+    }
+
+    // 10.4.1.2 [[Construct]] ( argumentsList, newTarget ), https://tc39.es/ecma262/#sec-bound-function-exotic-objects-construct-argumentslist-newtarget
+    fn internal_construct(
+        object: &Object,
+        vm: &Vm,
+        callee_context: &ExecutionContext,
+        new_target: Gc<FunctionObject>,
+    ) -> ThrowCompletionOr<Gc<Object>> {
+        let function = as_bound_function(object);
+
+        // 1. Let target be F.[[BoundTargetFunction]].
+        let mut target = function.bound_target_function();
+
+        // 2. Assert: IsConstructor(target) is true.
+        assert!(Value::from_object(target).is_constructor());
+
+        // 3. Let boundArgs be F.[[BoundArguments]].
+        // 4. Let args be the list-concatenation of boundArgs and argumentsList.
+        function.prepend_bound_arguments(callee_context);
+
+        // 5. If SameValue(F, newTarget) is true, set newTarget to target.
+        let mut final_new_target = new_target;
+        if function.as_function_object_gc() == new_target {
+            final_new_target = target;
+        }
+
+        // OPTIMIZATION: [[Construct]] of a bound target repeats steps 1-5 for it, so they are repeated here instead of
+        //               recursing, which would run a long chain of bound functions out of native stack.
+        while let Some(bound_target) = target.downcast::<BoundFunction>() {
+            let next_target = bound_target.bound_target_function();
+            bound_target.prepend_bound_arguments(callee_context);
+            if final_new_target == target {
+                final_new_target = next_target;
+            }
+            target = next_target;
+        }
+
+        // 6. Return ? Construct(target, args, newTarget).
+        let internal_construct = target
+            .internal_construct_method()
+            .expect("the target of a bound constructor is a constructor");
+        internal_construct(&target, vm, callee_context, final_new_target)
+    }
+
+    fn get_stack_frame_info(object: &Object, vm: &Vm, stack_frame_info: &mut StackFrameInfo) -> ThrowCompletionOr<()> {
+        let function = as_bound_function(object);
+        let mut target = function.bound_target_function();
+        let mut bound_arguments_count = function.bound_arguments_count();
+        while let Some(bound_target) = target.downcast::<BoundFunction>() {
+            bound_arguments_count += bound_target.bound_arguments_count();
+            target = bound_target.bound_target_function();
+        }
+        target.get_stack_frame_info(vm, stack_frame_info)?;
+        stack_frame_info.argument_count +=
+            u32::try_from(bound_arguments_count).expect("the bound argument count fits in u32");
+        Ok(())
+    }
+
+    pub fn name_for_call_stack(&self) -> Utf16String {
+        self.innermost_target().name_for_call_stack()
+    }
+}

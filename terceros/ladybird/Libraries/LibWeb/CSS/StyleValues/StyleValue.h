@@ -1,0 +1,305 @@
+/*
+ * Copyright (c) 2018-2023, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2021, Tobias Christiansen <tobyase@serenityos.org>
+ * Copyright (c) 2021-2025, Sam Atkins <sam@ladybird.org>
+ * Copyright (c) 2022-2023, MacDue <macdue@dueutil.tech>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Atomic.h>
+#include <AK/GenericShorthands.h>
+#include <AK/NonnullOwnPtr.h>
+#include <AK/NumericLimits.h>
+#include <AK/RefCounted.h>
+#include <AK/RefPtr.h>
+#include <AK/String.h>
+#include <AK/StringBuilder.h>
+#include <AK/StringView.h>
+#include <AK/Utf16StringBuilder.h>
+#include <AK/ValueComparingRefPtr.h>
+#include <AK/Vector.h>
+#include <AK/WeakPtr.h>
+#include <AK/kmalloc.h>
+#include <LibGfx/Color.h>
+#include <LibJS/Heap/Cell.h>
+#include <LibURL/URL.h>
+#include <LibWeb/CSS/CalculationResolutionContext.h>
+#include <LibWeb/CSS/Keyword.h>
+#include <LibWeb/CSS/Length.h>
+#include <LibWeb/CSS/SerializationMode.h>
+#include <LibWeb/CSS/StyleValues/RustStyleValueHandle.h>
+#include <LibWeb/Export.h>
+#include <LibWeb/Forward.h>
+
+namespace Web::CSS {
+
+WEB_API Utf16FlyString css_string_from_rust(StyleValueFFI::CssString const*);
+
+#define ENUMERATE_CSS_STYLE_VALUE_TYPES                                                                        \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Anchor, anchor, StyleValue)                                               \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(AnchorSize, anchor_size, StyleValue)                                      \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Angle, angle, AngleStyleValue)                                            \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(BackgroundSize, background_size, BackgroundSizeStyleValue)                \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(BasicShape, basic_shape, StyleValue)                                      \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(BorderImageSlice, border_image_slice, StyleValue)                         \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(BorderRadius, border_radius, StyleValue)                                  \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(BorderRadiusRect, border_radius_rect, StyleValue)                         \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Calculated, calculated, CalculatedStyleValue)                             \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(ColorInterpolationMethod, color_interpolation_method, StyleValue)         \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(ColorScheme, color_scheme, ColorSchemeStyleValue)                         \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Color, color, ColorStyleValue)                                            \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(ConicGradient, conic_gradient, AbstractImageStyleValue)                   \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Content, content, ContentStyleValue)                                      \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Counter, counter, StyleValue)                                             \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(CounterStyle, counter_style, CounterStyleStyleValue)                      \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(CounterDefinitions, counter_definitions, CounterDefinitionsStyleValue)    \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(CounterStyleSystem, counter_style_system, StyleValue)                     \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Cursor, cursor, CursorStyleValue)                                         \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(CustomIdent, custom_ident, CustomIdentStyleValue)                         \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Display, display, DisplayStyleValue)                                      \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Easing, easing, StyleValue)                                               \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Edge, edge, StyleValue)                                                   \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(EmptyOptional, empty_optional, StyleValue)                                \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Filter, filter, FilterStyleValue)                                         \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Function, function, FunctionStyleValue)                                   \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Flex, flex, FlexStyleValue)                                               \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(FontSource, font_source, FontSourceStyleValue)                            \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(FontStyle, font_style, FontStyleStyleValue)                               \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Frequency, frequency, FrequencyStyleValue)                                \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(GridAutoFlow, grid_auto_flow, StyleValue)                                 \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(GridTemplateArea, grid_template_area, StyleValue)                         \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(GridTrackPlacement, grid_track_placement, StyleValue)                     \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(GridTrackSizeList, grid_track_size_list, StyleValue)                      \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(GuaranteedInvalid, guaranteed_invalid, StyleValue)                        \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Image, image, ImageStyleValue)                                            \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(ImageSet, image_set, ImageSetStyleValue)                                  \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Integer, integer, IntegerStyleValue)                                      \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Keyword, keyword, KeywordStyleValue)                                      \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Length, length, LengthStyleValue)                                         \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(LinearGradient, linear_gradient, AbstractImageStyleValue)                 \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Number, number, NumberStyleValue)                                         \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(OpacityValue, opacity_value, OpacityValueStyleValue)                      \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(OpenTypeTagged, open_type_tagged, StyleValue)                             \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(OverflowClipMargin, overflow_clip_margin, StyleValue)                     \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(PendingSubstitution, pending_substitution, PendingSubstitutionStyleValue) \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Percentage, percentage, PercentageStyleValue)                             \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Position, position, StyleValue)                                           \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(RadialGradient, radial_gradient, AbstractImageStyleValue)                 \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(RadialSize, radial_size, StyleValue)                                      \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(RandomValueSharing, random_value_sharing, StyleValue)                     \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Ratio, ratio, RatioStyleValue)                                            \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Ray, ray, StyleValue)                                                     \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Rect, rect, StyleValue)                                                   \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(RepeatStyle, repeat_style, StyleValue)                                    \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Resolution, resolution, ResolutionStyleValue)                             \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(ScrollbarColor, scrollbar_color, StyleValue)                              \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(ScrollbarGutter, scrollbar_gutter, StyleValue)                            \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Shadow, shadow, ShadowStyleValue)                                         \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Shorthand, shorthand, ShorthandStyleValue)                                \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(String, string, StringStyleValue)                                         \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Superellipse, superellipse, StyleValue)                                   \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(TextIndent, text_indent, StyleValue)                                      \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(TextUnderlinePosition, text_underline_position, StyleValue)               \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Time, time, TimeStyleValue)                                               \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Transformation, transformation, TransformationStyleValue)                 \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(TreeCountingFunction, tree_counting_function, StyleValue)                 \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Tuple, tuple, StyleValue)                                                 \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(UnicodeRange, unicode_range, UnicodeRangeStyleValue)                      \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(Unresolved, unresolved, UnresolvedStyleValue)                             \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(URL, url, URLStyleValue)                                                  \
+    __ENUMERATE_CSS_STYLE_VALUE_TYPE(ValueList, value_list, StyleValueList)
+
+// The facts of the element a value computes for, which Rust asks for only when a value needs them. The pointers in
+// the FFI form point at this, which must outlive their use.
+struct ElementFactsForRust {
+    Length::ResolutionContext const* length_resolution_context { nullptr };
+    Optional<DOM::AbstractElement> abstract_element;
+
+    StyleValueFFI::FfiElementFacts to_ffi() const;
+};
+
+// The computed style a <color> resolves against, named by its InheritedUIValues and InheritedTextValues group
+// payloads: Rust reads the used color-scheme and the color currentcolor names from them. Default-constructed, it
+// names no style.
+struct ColorResolutionStyle {
+    void const* inherited_ui_values { nullptr };
+    void const* inherited_text_values { nullptr };
+
+    [[nodiscard]] static ColorResolutionStyle for_element(DOM::AbstractElement const&);
+    [[nodiscard]] static ColorResolutionStyle for_layout_node(Layout::NodeWithStyle const&);
+    StyleValueFFI::FfiColorResolutionStyle to_ffi() const { return { inherited_ui_values, inherited_text_values }; }
+};
+
+class WEB_API StyleValue : public RefCounted<StyleValue> {
+public:
+    AK_ALLOC_WITH_KMALLOC;
+
+    virtual ~StyleValue() = default;
+
+    // An interned value belongs to every thread of the process and is never freed. These leave its count alone, which
+    // spares all other values an atomic one.
+    ALWAYS_INLINE void ref() const
+    {
+        VERIFY(m_ref_count > 0);
+        if (m_ref_count != IMMORTAL_REF_COUNT)
+            ++m_ref_count;
+    }
+    ALWAYS_INLINE bool unref() const
+    {
+        if (m_ref_count == IMMORTAL_REF_COUNT)
+            return false;
+        return RefCounted::unref();
+    }
+
+    // Puts value into slot, unless another value got there first, and returns the one that is there. This is how a table
+    // of values that fills on demand can be shared between threads.
+    static NonnullRefPtr<StyleValue const> intern(Atomic<StyleValue const*>& slot, NonnullRefPtr<StyleValue const> value);
+
+    enum class Type {
+#define __ENUMERATE_CSS_STYLE_VALUE_TYPE(title_case, snake_case, style_value_class_name) title_case,
+        ENUMERATE_CSS_STYLE_VALUE_TYPES
+#undef __ENUMERATE_CSS_STYLE_VALUE_TYPE
+    };
+
+    Type type() const { return m_type; }
+
+    bool is_abstract_image() const
+    {
+        return AK::first_is_one_of(type(), Type::Image, Type::ImageSet, Type::LinearGradient, Type::ConicGradient, Type::RadialGradient);
+    }
+    AbstractImageStyleValue const& as_abstract_image() const;
+    AbstractImageStyleValue& as_abstract_image() { return const_cast<AbstractImageStyleValue&>(const_cast<StyleValue const&>(*this).as_abstract_image()); }
+
+    bool is_dimension() const
+    {
+        return first_is_one_of(type(), Type::Angle, Type::Flex, Type::Frequency, Type::Length, Type::Percentage, Type::Resolution, Type::Time);
+    }
+    DimensionStyleValue const& as_dimension() const;
+    DimensionStyleValue& as_dimension() { return const_cast<DimensionStyleValue&>(const_cast<StyleValue const&>(*this).as_dimension()); }
+
+#define __ENUMERATE_CSS_STYLE_VALUE_TYPE(title_case, snake_case, style_value_class_name) \
+    bool is_##snake_case() const { return type() == Type::title_case; }                  \
+    style_value_class_name const& as_##snake_case() const;                               \
+    style_value_class_name& as_##snake_case() { return const_cast<style_value_class_name&>(const_cast<StyleValue const&>(*this).as_##snake_case()); }
+    ENUMERATE_CSS_STYLE_VALUE_TYPES
+#undef __ENUMERATE_CSS_STYLE_VALUE_TYPE
+
+    // https://www.w3.org/TR/css-values-4/#common-keywords
+    // https://drafts.csswg.org/css-cascade-4/#valdef-all-revert
+    bool is_css_wide_keyword() const { return is_inherit() || is_initial() || is_revert() || is_unset() || is_revert_layer(); }
+    bool is_inherit() const { return to_keyword() == Keyword::Inherit; }
+    bool is_initial() const { return to_keyword() == Keyword::Initial; }
+    bool is_revert() const { return to_keyword() == Keyword::Revert; }
+    bool is_revert_layer() const { return to_keyword() == Keyword::RevertLayer; }
+    bool is_unset() const { return to_keyword() == Keyword::Unset; }
+
+    bool has_auto() const;
+    bool has_color() const;
+
+    ValueComparingNonnullRefPtr<StyleValue const> absolutized(ComputationContext const&) const;
+
+    Optional<Color> to_color(ColorResolutionStyle) const;
+    Keyword to_keyword() const;
+
+    // The Rust-owned data of this value, for handing to the Rust style computation core.
+    StyleValueFFI::StyleValueData const* rust_style_value_data() const { return m_value.operator->(); }
+
+    // Wrap a transferred strong Rust reference in its corresponding typed C++ facade.
+    static ValueComparingNonnullRefPtr<StyleValue const> adopt_rust_style_value_data(StyleValueFFI::StyleValueData const*);
+    static ValueComparingNonnullRefPtr<StyleValue const> create_guaranteed_invalid();
+
+    // Mint a fresh typed facade for a Rust payload child, taking a new strong reference.
+    static ValueComparingNonnullRefPtr<StyleValue const> wrap_rust_child(StyleValueFFI::RetainedStyleValueData const& child)
+    {
+        return adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(static_cast<StyleValueFFI::StyleValueData const*>(child.pointer)));
+    }
+    static ValueComparingRefPtr<StyleValue const> wrap_rust_child_or_null(StyleValueFFI::RetainedStyleValueData const& child)
+    {
+        if (!child.pointer)
+            return nullptr;
+        return wrap_rust_child(child);
+    }
+
+    String to_string(SerializationMode) const;
+    Utf16String to_utf16_string(SerializationMode) const;
+    void serialize(StringBuilder&, SerializationMode) const;
+    void serialize(Utf16StringBuilder&, SerializationMode) const;
+    StyleValueVector subdivide_into_iterations(PropertyNameAndID const&) const;
+
+    void set_style_sheet(StyleSheetState*);
+
+    bool equals(StyleValue const& other) const;
+
+    bool operator==(StyleValue const& other) const
+    {
+        return this->equals(other);
+    }
+
+    // https://drafts.css-houdini.org/css-properties-values-api/#computationally-independent
+    // A property value is computationally independent if it can be converted into a computed value using only the value
+    // of the property on the element, and "global" information that cannot be changed by CSS.
+    bool is_computationally_independent() const;
+
+    bool contains_anchor_function() const;
+
+protected:
+    StyleValue(Type, StyleValueFFI::StyleValueData const*);
+
+    // For an interned value that nothing else has seen yet.
+    template<typename T>
+    static T const* make_immortal(T const* value)
+    {
+        value->m_ref_count = IMMORTAL_REF_COUNT;
+        return value;
+    }
+
+    // The shared Rust-owned allocation holding this value's data.
+    RustStyleValueHandle m_value;
+
+private:
+    static constexpr RefCountType IMMORTAL_REF_COUNT = NumericLimits<RefCountType>::max();
+
+    Type m_type;
+};
+
+template<typename T>
+struct StyleValueWithDefaultOperators : public StyleValue {
+    using StyleValue::StyleValue;
+    using Base = StyleValue;
+};
+
+double number_from_style_value(NonnullRefPtr<StyleValue const> const& style_value, Optional<double> percentage_basis);
+Utf16FlyString string_from_style_value(NonnullRefPtr<StyleValue const> const& style_value);
+
+}
+
+template<>
+struct AK::Formatter<Web::CSS::StyleValue> : Formatter<StringView> {
+    ErrorOr<void> format(FormatBuilder& builder, Web::CSS::StyleValue const& style_value)
+    {
+        return Formatter<StringView>::format(builder, style_value.to_string(Web::CSS::SerializationMode::Normal));
+    }
+};
+
+template<>
+struct AK::Formatter<Web::CSS::StyleValue::Type> : Formatter<StringView> {
+    ErrorOr<void> format(FormatBuilder& builder, Web::CSS::StyleValue::Type type)
+    {
+        StringView type_name;
+        switch (type) {
+#define __ENUMERATE_CSS_STYLE_VALUE_TYPE(title_case, snake_case, style_value_class_name) \
+    case Web::CSS::StyleValue::Type::title_case:                                         \
+        type_name = #title_case##sv;                                                     \
+        break;
+            ENUMERATE_CSS_STYLE_VALUE_TYPES
+#undef __ENUMERATE_CSS_STYLE_VALUE_TYPE
+        default:
+            VERIFY_NOT_REACHED();
+        }
+
+        return Formatter<StringView>::format(builder, type_name);
+    }
+};

@@ -1,0 +1,35 @@
+/*
+ * Copyright (c) 2022, Linus Groh <linusg@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Variant.h>
+#include <LibGC/Ptr.h>
+#include <LibJS/Forward.h>
+#include <LibWeb/Export.h>
+#include <LibWeb/Forward.h>
+#include <LibWeb/HTML/EventLoop/Task.h>
+
+namespace Web::Fetch::Infrastructure {
+
+struct WEB_API TaskDestination : public Variant<Empty, GC::Ref<JS::Object>, NonnullRefPtr<HTML::ParallelQueue>> {
+    TaskDestination() = default;
+    TaskDestination(Empty);
+    TaskDestination(GC::Ref<JS::Object>);
+    TaskDestination(NonnullRefPtr<HTML::ParallelQueue>);
+
+    void visit_edges(GC::Cell::Visitor&) const;
+
+    // Whether tasks queued on this destination go to document or to its relevant global object.
+    [[nodiscard]] bool is_for_document(DOM::Document const&) const;
+
+    GC::Ptr<DOM::Document> document_override;
+};
+
+HTML::TaskID queue_fetch_task(TaskDestination, GC::Ref<GC::Function<void()>>);
+WEB_API HTML::TaskID queue_fetch_task(GC::Ref<FetchController>, TaskDestination, GC::Ref<GC::Function<void()>>);
+
+}

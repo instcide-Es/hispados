@@ -1,0 +1,36 @@
+/*
+ * Copyright (c) 2025, Luke Wilde <luke@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Utf16View.h>
+#include <LibJS/Runtime/VM.h>
+#include <LibURL/Forward.h>
+#include <LibWeb/ContentSecurityPolicy/Directives/Directive.h>
+#include <LibWeb/ContentSecurityPolicy/FetchIntegration.h>
+#include <LibWebCommon/ContentSecurityPolicy/RemoteViolationDirective.h>
+
+namespace Web::ContentSecurityPolicy {
+
+[[nodiscard]] ViolationReporter violation_reporter_for_request(JS::Realm&, NonnullRefPtr<Fetch::Infrastructure::Request>);
+void report_a_violation_found_in_another_process(HTML::EnvironmentSettingsObject&, u64 policy_index, Utf16FlyString const& directive, URL::URL resource);
+WEB_API void report_a_violation_found_in_another_process(HTML::EnvironmentSettingsObject&, u64 policy_index, RemoteViolationDirective, URL::URL resource);
+
+Directives::Directive::Result should_navigation_request_of_type_be_blocked_by_content_security_policy(NonnullRefPtr<Fetch::Infrastructure::Request> navigation_request, Directives::Directive::NavigationType navigation_type, Page&);
+Directives::Directive::Result should_navigation_response_to_navigation_request_of_type_in_target_be_blocked_by_content_security_policy(
+    RefPtr<Fetch::Infrastructure::Request> navigation_request,
+    GC::Ref<Fetch::Infrastructure::ResponseView> navigation_response,
+    ContentSecurityPolicy::PolicyList const& response_csp_list,
+    Directives::Directive::NavigationType navigation_type,
+    GC::Ref<HTML::LocalNavigable> target);
+
+Directives::Directive::Result should_elements_inline_type_behavior_be_blocked_by_content_security_policy(GC::Ref<DOM::Element> element, Directives::Directive::InlineType type, Utf16View source);
+JS::ThrowCompletionOr<void> ensure_csp_does_not_block_string_compilation(JS::Realm& realm, ReadonlySpan<Utf16String> parameter_strings, Utf16View body_string, Utf16View code_string, JS::CompilationType compilation_type, ReadonlySpan<JS::Value> parameter_args, JS::Value body_arg);
+JS::ThrowCompletionOr<void> ensure_csp_does_not_block_wasm_byte_compilation(JS::Realm&);
+
+[[nodiscard]] Directives::Directive::Result is_base_allowed_for_document(URL::URL const& base, GC::Ref<DOM::Document const> document);
+
+}

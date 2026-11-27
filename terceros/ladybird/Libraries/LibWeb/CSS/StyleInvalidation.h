@@ -1,0 +1,156 @@
+/*
+ * Copyright (c) 2024, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/StdLibExtras.h>
+#include <LibWeb/Forward.h>
+
+namespace Web::CSS {
+
+// Ordered by increasing severity. A higher level always implies all lower levels.
+enum class InvalidationLevel : u8 {
+    None,
+    Repaint,
+    Relayout,
+    RebuildLayoutTree,
+};
+
+// Ordered by increasing severity: Rebuild subsumes UpdateValues.
+enum class AccumulatedVisualContextInvalidation : u8 {
+    None,
+    UpdateValues,
+    Rebuild,
+};
+
+enum class LayoutTreeRebuildRoot : u8 {
+    // Recreate ::before and ::after while retaining the principal box when its structure permits it.
+    PseudoElements,
+    Self,
+    SelfUnlessDocumentElementOrBody,
+    // The element's principal box appears or disappears while every sibling box keeps its kind.
+    // The parent absorbs that as a child-list change where it can, and rebuilds otherwise.
+    BoxPresenceChange,
+    Parent,
+};
+
+struct RequiredInvalidationAfterStyleChange {
+    void ensure_at_least(InvalidationLevel level)
+    {
+        m_level = max(m_level, level);
+        if (level >= InvalidationLevel::RebuildLayoutTree)
+            m_layout_tree_rebuild_root = LayoutTreeRebuildRoot::Parent;
+    }
+    void ensure_at_least(AccumulatedVisualContextInvalidation invalidation) { m_accumulated_visual_contexts = max(m_accumulated_visual_contexts, invalidation); }
+
+    void set_needs_stacking_context_tree_rebuild()
+    {
+        m_rebuild_stacking_context_tree = true;
+        ensure_at_least(InvalidationLevel::Repaint);
+    }
+
+    [[nodiscard]] bool needs_repaint() const { return m_level >= InvalidationLevel::Repaint; }
+    [[nodiscard]] bool needs_relayout() const { return m_level >= InvalidationLevel::Relayout; }
+    [[nodiscard]] bool needs_layout_tree_rebuild() const { return m_level >= InvalidationLevel::RebuildLayoutTree; }
+    [[nodiscard]] LayoutTreeRebuildRoot layout_tree_rebuild_root() const
+    {
+        VERIFY(needs_layout_tree_rebuild());
+        return m_layout_tree_rebuild_root;
+    }
+    void set_layout_tree_rebuild_root(LayoutTreeRebuildRoot rebuild_root)
+    {
+        VERIFY(needs_layout_tree_rebuild());
+        m_layout_tree_rebuild_root = rebuild_root;
+    }
+    [[nodiscard]] bool needs_stacking_context_tree_rebuild() const { return m_rebuild_stacking_context_tree; }
+    [[nodiscard]] AccumulatedVisualContextInvalidation accumulated_visual_contexts() const { return m_accumulated_visual_contexts; }
+    [[nodiscard]] bool invalidates_hit_test_display_list() const
+    {
+        return affects_hit_testing
+            || needs_relayout()
+            || needs_stacking_context_tree_rebuild()
+            || m_accumulated_visual_contexts == AccumulatedVisualContextInvalidation::Rebuild;
+    }
+
+    // A scroll snap property changed, so snap containers must re-evaluate their scroll position and re-snap.
+    bool needs_scroll_container_resnap : 1 { false };
+    // The element's change affects rule matching for descendants, without necessarily changing inherited style.
+    bool recompute_descendant_styles : 1 { false };
+    // Names the inherited ComputedValues groups whose identities changed. Descendants can use the
+    // exact set to avoid reading unrelated inherited groups.
+    static constexpr u8 all_inherited_style_groups = (1 << 7) - 1;
+    [[nodiscard]] bool inherited_style_changed() const { return m_inherited_style_groups_changed != 0; }
+    void mark_inherited_style_group_changed(size_t group) { m_inherited_style_groups_changed |= 1 << group; }
+    // A property controlling decorations originated by this box changed. Descendant boxes paint
+    // the propagated decorations from these values, so their cached paint commands are stale.
+    bool repaint_propagated_text_decorations : 1 { false };
+    // Highlight pseudo-elements are painted by text descendants, even when the element has no box.
+    bool repaint_highlights : 1 { false };
+    // The white space of the element's text children collapses where it did not, or the other way round, so the white
+    // space text among them may gain or lose its box.
+    bool white_space_collapse_changed : 1 { false };
+    bool affects_hit_testing : 1 { false };
+    bool cursor_changed : 1 { false };
+    // A non-inherited property changed without any other invalidation, which happens when a running
+    // animation covers the property. Descendants that explicitly inherit non-inherited properties
+    // still observe the change.
+    bool non_inherited_property_inheritance_sources_changed : 1 { false };
+
+    void operator|=(RequiredInvalidationAfterStyleChange const& other)
+    {
+        if (other.needs_layout_tree_rebuild()) {
+            if (needs_layout_tree_rebuild())
+                m_layout_tree_rebuild_root = max(m_layout_tree_rebuild_root, other.m_layout_tree_rebuild_root);
+            else
+                m_layout_tree_rebuild_root = other.m_layout_tree_rebuild_root;
+        }
+        m_level = max(m_level, other.m_level);
+        m_accumulated_visual_contexts = max(m_accumulated_visual_contexts, other.m_accumulated_visual_contexts);
+        m_rebuild_stacking_context_tree |= other.m_rebuild_stacking_context_tree;
+        needs_scroll_container_resnap |= other.needs_scroll_container_resnap;
+        recompute_descendant_styles |= other.recompute_descendant_styles;
+        m_inherited_style_groups_changed |= other.m_inherited_style_groups_changed;
+        repaint_propagated_text_decorations |= other.repaint_propagated_text_decorations;
+        repaint_highlights |= other.repaint_highlights;
+        white_space_collapse_changed |= other.white_space_collapse_changed;
+        affects_hit_testing |= other.affects_hit_testing;
+        cursor_changed |= other.cursor_changed;
+        non_inherited_property_inheritance_sources_changed |= other.non_inherited_property_inheritance_sources_changed;
+    }
+
+    [[nodiscard]] bool is_none() const
+    {
+        return m_level == InvalidationLevel::None
+            && m_accumulated_visual_contexts == AccumulatedVisualContextInvalidation::None
+            && !needs_scroll_container_resnap
+            && !recompute_descendant_styles
+            && !inherited_style_changed()
+            && !repaint_highlights
+            && !white_space_collapse_changed
+            && !affects_hit_testing
+            && !repaint_propagated_text_decorations
+            && !non_inherited_property_inheritance_sources_changed;
+    }
+
+    static RequiredInvalidationAfterStyleChange full()
+    {
+        RequiredInvalidationAfterStyleChange invalidation;
+        invalidation.ensure_at_least(InvalidationLevel::RebuildLayoutTree);
+        invalidation.set_needs_stacking_context_tree_rebuild();
+        return invalidation;
+    }
+
+private:
+    InvalidationLevel m_level { InvalidationLevel::None };
+    AccumulatedVisualContextInvalidation m_accumulated_visual_contexts { AccumulatedVisualContextInvalidation::None };
+    LayoutTreeRebuildRoot m_layout_tree_rebuild_root { LayoutTreeRebuildRoot::Parent };
+    bool m_rebuild_stacking_context_tree : 1 { false };
+    u8 m_inherited_style_groups_changed { 0 };
+};
+
+RequiredInvalidationAfterStyleChange decode_style_invalidation(u32 packed);
+
+}

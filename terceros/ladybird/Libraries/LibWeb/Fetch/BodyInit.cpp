@@ -1,0 +1,222 @@
+/*
+ * Copyright (c) 2022-2023, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2022-2024, Kenneth Myhra <kennethmyhra@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibGC/Heap.h>
+#include <LibJS/Runtime/Completion.h>
+#include <LibJS/Runtime/TypedArray.h>
+#include <LibWeb/DOMURL/URLSearchParams.h>
+#include <LibWeb/Fetch/BodyInit.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/Bodies.h>
+#include <LibWeb/FileAPI/Blob.h>
+#include <LibWeb/HTML/FormControlInfrastructure.h>
+#include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
+#include <LibWeb/Platform/EventLoopPlugin.h>
+#include <LibWeb/Streams/ReadableStream.h>
+#include <LibWeb/WebIDL/AbstractOperations.h>
+#include <LibWeb/WebIDL/Buffers.h>
+#include <LibWeb/WebIDL/ExceptionOr.h>
+#include <LibWeb/XHR/FormData.h>
+
+namespace Web::Fetch {
+
+struct BodyInitABI {
+    enum class Kind : u8 {
+        Blob,
+        Bytes,
+        FormData,
+        URLSearchParams,
+        String,
+    };
+
+    Kind kind;
+    void* cell;
+    ReadonlyBytes bytes;
+    FlatPtr string;
+};
+
+extern "C" {
+
+// Called by Bindings/Rust/src/fetch/body_init.rs.
+Infrastructure::Body* web_fetch_safely_extract_body(void* realm, BodyInitABI const*, FlatPtr* out_type);
+}
+
+// https://fetch.spec.whatwg.org/#bodyinit-safely-extract
+Infrastructure::BodyWithType safely_extract_body(JS::Realm& realm, BodyInitOrReadableBytes const& object)
+{
+    // 1. If object is a ReadableStream object, then:
+    if (auto const* stream = object.get_pointer<GC::Ref<Streams::ReadableStream>>()) {
+        // 1. Assert: object is neither disturbed nor locked.
+        VERIFY(!((*stream)->is_disturbed() || (*stream)->is_locked()));
+    }
+
+    // 2. Return the result of extracting object.
+    return MUST(extract_body(realm, object));
+}
+
+// https://fetch.spec.whatwg.org/#concept-bodyinit-extract
+WebIDL::ExceptionOr<Infrastructure::BodyWithType> extract_body(JS::Realm& realm, BodyInitOrReadableBytes const& object, bool keepalive)
+{
+    HTML::TemporaryExecutionContext execution_context { realm, HTML::TemporaryExecutionContext::CallbacksEnabled::Yes };
+
+    // 1. Let stream be null.
+    GC::Ptr<Streams::ReadableStream> stream;
+
+    // 2. If object is a ReadableStream object, then set stream to object.
+    if (auto const* maybe_stream = object.get_pointer<GC::Ref<Streams::ReadableStream>>()) {
+        stream = *maybe_stream;
+    }
+    // 3. Otherwise, if object is a Blob object, set stream to the result of running object’s get stream.
+    else if (auto* blob = object.get_pointer<GC::Ref<FileAPI::Blob>>()) {
+        stream = (*blob)->get_stream(realm);
+    }
+    // 4. Otherwise, set stream to a new ReadableStream object, and set up stream with byte reading support.
+    else {
+        stream = Streams::ReadableStream::create(realm);
+        stream->set_up_with_byte_reading_support(realm);
+    }
+
+    // 5. Assert: stream is a ReadableStream object.
+    VERIFY(stream);
+
+    // 6. Let action be null.
+    Function<ByteBuffer()> action;
+
+    // 7. Let source be null.
+    Optional<Core::ImmutableBytes> source;
+
+    // 8. Let length be null.
+    Optional<u64> length {};
+
+    // 9. Let type be null.
+    Optional<Utf16String> type {};
+
+    // 10. Switch on object.
+    TRY(object.visit(
+        [&](GC::Ref<FileAPI::Blob> blob) -> WebIDL::ExceptionOr<void> {
+            // Set source to object.
+            source = TRY_OR_THROW_OOM(realm.vm(), blob->immutable_bytes());
+            // Set length to object’s size.
+            length = blob->size();
+            // If object’s type attribute is not the empty byte sequence, set type to its value.
+            if (!blob->type().is_empty())
+                type = blob->type();
+            return {};
+        },
+        [&](ReadonlyBytes bytes) -> WebIDL::ExceptionOr<void> {
+            // Set source to object.
+            source = MUST(Core::ImmutableBytes::copy(bytes));
+            return {};
+        },
+        [&](Core::ImmutableBytes const& bytes) -> WebIDL::ExceptionOr<void> {
+            // Set source to object.
+            source = bytes;
+            return {};
+        },
+        [&](WebIDL::BufferSourceVariant buffer_source) -> WebIDL::ExceptionOr<void> {
+            // Set source to a copy of the bytes held by object.
+            source = Core::ImmutableBytes::adopt(MUST(WebIDL::get_buffer_source_copy(buffer_source)));
+            return {};
+        },
+        [&](GC::Ref<XHR::FormData> form_data) -> WebIDL::ExceptionOr<void> {
+            // Set action to this step: run the multipart/form-data encoding algorithm, with object’s entry list and UTF-8.
+            auto serialized_form_data = MUST(HTML::serialize_to_multipart_form_data(form_data->entry_list()));
+            // Set source to object.
+            source = Core::ImmutableBytes::adopt(move(serialized_form_data.serialized_data));
+            // FIXME: Set length to unclear, see html/6424 for improving this.
+            // Set type to `multipart/form-data; boundary=`, followed by the multipart/form-data boundary string generated by the multipart/form-data encoding algorithm.
+            type = Utf16String::formatted("multipart/form-data; boundary={}", serialized_form_data.boundary);
+            return {};
+        },
+        [&](GC::Ref<DOMURL::URLSearchParams> url_search_params) -> WebIDL::ExceptionOr<void> {
+            // Set source to the result of running the application/x-www-form-urlencoded serializer with object’s list.
+            auto search_params_string = url_search_params->serialize_to_byte_string();
+            source = MUST(Core::ImmutableBytes::copy(search_params_string.bytes()));
+            // Set type to `application/x-www-form-urlencoded;charset=UTF-8`.
+            type = "application/x-www-form-urlencoded;charset=UTF-8"_utf16;
+            return {};
+        },
+        [&](Utf16String const& scalar_value_string) -> WebIDL::ExceptionOr<void> {
+            // Set source to the UTF-8 encoding of object.
+            auto utf8_scalar_value_string = scalar_value_string.to_utf8();
+            source = MUST(Core::ImmutableBytes::copy(utf8_scalar_value_string.bytes()));
+            // Set type to `text/plain;charset=UTF-8`.
+            type = "text/plain;charset=UTF-8"_utf16;
+            return {};
+        },
+        [&](GC::Ref<Streams::ReadableStream> stream) -> WebIDL::ExceptionOr<void> {
+            // If keepalive is true, then throw a TypeError.
+            if (keepalive)
+                return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Cannot extract body from stream when keepalive is set"_utf16 };
+
+            // If object is disturbed or locked, then throw a TypeError.
+            if (stream->is_disturbed() || stream->is_locked())
+                return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Cannot extract body from disturbed or locked stream"_utf16 };
+
+            return {};
+        }));
+
+    // 11. If source is a byte sequence, then set action to a step that returns source and length to source’s length.
+    // NB: A Blob source is held as its bytes too, and is not a byte sequence here.
+    if (source.has_value() && !object.has<GC::Ref<FileAPI::Blob>>()) {
+        action = [bytes = *source] {
+            return bytes.copy_to_byte_buffer().release_value_but_fixme_should_propagate_errors();
+        };
+        length = source->size();
+    }
+
+    // 12. If action is non-null, then run these steps in parallel:
+    if (action) {
+        // AD-HOC: There is a race condition between document population(Ex: load_html_document->fully_read->read_all_bytes->readable_stream_default_reader_read)
+        // and stream population. So currently we run stream population synchronously.
+        HTML::TemporaryExecutionContext execution_context { realm, HTML::TemporaryExecutionContext::CallbacksEnabled::Yes };
+
+        // 1. Run action.
+        auto bytes = action();
+
+        // Whenever one or more bytes are available and stream is not errored, enqueue the result of creating a
+        // Uint8Array from the available bytes into stream.
+        if (!bytes.is_empty() && !stream->is_errored()) {
+            auto array_buffer = JS::ArrayBuffer::create(realm, move(bytes));
+            auto chunk = JS::Uint8Array::create(realm, array_buffer->byte_length(), *array_buffer);
+
+            stream->enqueue(chunk).release_value_but_fixme_should_propagate_errors();
+        }
+
+        // When running action is done, close stream.
+        stream->close();
+    }
+
+    // 13. Let body be a body whose stream is stream, source is source, and length is length.
+    auto body = Infrastructure::Body::create(*stream, { move(source), length });
+
+    // 14. Return (body, type).
+    return Infrastructure::BodyWithType { .body = body, .type = move(type) };
+}
+
+Infrastructure::Body* web_fetch_safely_extract_body(void* realm, BodyInitABI const* object, FlatPtr* out_type)
+{
+    auto body_init = [&]() -> BodyInitOrReadableBytes {
+        switch (object->kind) {
+        case BodyInitABI::Kind::Blob:
+            return GC::Ref { *static_cast<FileAPI::Blob*>(object->cell) };
+        case BodyInitABI::Kind::Bytes:
+            return object->bytes;
+        case BodyInitABI::Kind::FormData:
+            return GC::Ref { *static_cast<XHR::FormData*>(object->cell) };
+        case BodyInitABI::Kind::URLSearchParams:
+            return GC::Ref { *static_cast<DOMURL::URLSearchParams*>(object->cell) };
+        case BodyInitABI::Kind::String:
+            return Utf16String::from_raw(object->string);
+        }
+        VERIFY_NOT_REACHED();
+    }();
+    auto body_with_type = safely_extract_body(*static_cast<JS::Realm*>(realm), body_init);
+    *out_type = body_with_type.type.has_value() ? move(*body_with_type.type).into_raw() : 0;
+    return body_with_type.body.ptr();
+}
+
+}

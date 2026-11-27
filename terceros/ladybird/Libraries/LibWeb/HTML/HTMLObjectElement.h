@@ -1,0 +1,124 @@
+/*
+ * Copyright (c) 2020, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/HashTable.h>
+#include <AK/Utf16View.h>
+#include <LibCore/Forward.h>
+#include <LibGfx/Forward.h>
+#include <LibWeb/CSS/Sizing.h>
+#include <LibWeb/HTML/NavigableContainer.h>
+#include <LibWeb/Layout/ImageProvider.h>
+
+namespace Web::HTML {
+
+class HTMLObjectElement final
+    : public NavigableContainer
+    , public Layout::ImageProvider {
+    WEB_WRAPPABLE(HTMLObjectElement, NavigableContainer)
+    GC_DECLARE_ALLOCATOR(HTMLObjectElement);
+
+    enum class Representation {
+        Unknown,
+        Image,
+        ContentNavigable,
+        Children,
+    };
+
+public:
+    virtual ~HTMLObjectElement() override;
+
+    virtual void form_associated_element_attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_) override;
+    virtual void form_associated_element_was_removed(DOM::Node*) override;
+
+    Utf16String type() const { return get_attribute_value(HTML::AttributeNames::type); }
+
+    bool shows_fallback_content() const { return m_representation == Representation::Children; }
+
+    bool represents_its_content_navigable() const { return m_representation == Representation::ContentNavigable; }
+
+    // The natural size of the <svg> document element of the document the element shows as its content navigable's,
+    // which that document's layout works out and hands over here. Nothing if that document element is no <svg>.
+    CSS::SizeWithAspectRatio const& natural_size_of_content_document() const { return m_natural_size_of_content_document; }
+    void set_natural_size_of_content_document(CSS::SizeWithAspectRatio const&);
+
+    // ^FormAssociatedElement
+    virtual bool is_form_associated_element() const override { return true; }
+
+    // ^FormAssociatedElement
+    // https://html.spec.whatwg.org/multipage/forms.html#category-listed
+    virtual bool is_listed() const override { return true; }
+
+    // ^EventTarget
+    virtual bool is_focusable() const override
+    {
+        return meets_focusable_area_rendering_requirements();
+    }
+
+    virtual void visit_edges(Cell::Visitor&) override;
+    virtual void adopted_from(DOM::Document&) override;
+
+private:
+    HTMLObjectElement(DOM::Document&, DOM::QualifiedName);
+
+    virtual bool is_html_object_element() const override { return true; }
+
+    virtual void initialize_element() override;
+
+    virtual bool is_presentational_hint(Utf16FlyString const&) const override;
+    virtual void apply_presentational_hints(Vector<CSS::StyleProperty>&) const override;
+
+    virtual CSS::ElementBoxKind box_kind() const override;
+
+    bool has_ancestor_media_element_or_object_element_not_showing_fallback_content() const;
+
+    void queue_element_task_to_run_object_representation_steps();
+    void run_object_representation_handler_steps(Fetch::Infrastructure::ResponseView const&, MimeSniff::MimeType const&, ReadonlyBytes);
+    void run_object_representation_completed_steps(Representation);
+    void run_object_representation_fallback_steps();
+
+    void load_image();
+    void update_layout_and_child_objects(Representation);
+
+    void resource_did_load(u64 fetch_id, Fetch::Infrastructure::ResponseView const&, ReadonlyBytes);
+    void resource_did_fail(u64 fetch_id);
+
+    // ^DOM::Element
+    virtual i32 default_tab_index_value() const override;
+
+    // ^Layout::ImageProvider
+    virtual GC::Ptr<DecodedImageData> decoded_image_data() const override { return image_data(); }
+
+    GC::Ptr<DecodedImageData> image_data() const;
+
+    Representation m_representation { Representation::Unknown };
+    CSS::SizeWithAspectRatio m_natural_size_of_content_document;
+
+    GC::Ptr<SharedResourceRequest> m_resource_request;
+
+    GC::Ptr<DOM::DocumentObserver> m_document_observer;
+
+    // The document of the last object representation task queued, while that task has not started yet.
+    GC::Ptr<DOM::Document> m_document_of_queued_object_representation_task;
+    u64 m_object_representation_task_count { 0 };
+
+    Vector<DOM::DocumentLoadEventDelayer> m_document_load_event_delayer_for_object_representation_task;
+    Vector<DOM::DocumentLoadEventDelayer> m_document_load_event_delayer_for_resource_load;
+
+    // The resource fetches that still delay the load event, until their response is handled or they're stopped.
+    HashTable<u64> m_pending_resource_fetches;
+    u64 m_last_resource_fetch_id { 0 };
+};
+
+}
+
+namespace Web::DOM {
+
+template<>
+inline bool Node::fast_is<HTML::HTMLObjectElement>() const { return is_html_object_element(); }
+
+}

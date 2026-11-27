@@ -1,0 +1,204 @@
+/*
+ * Copyright (c) 2024, Shannon Booth <shannon@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Utf16FlyString.h>
+#include <AK/Utf16String.h>
+#include <LibWeb/UIEvents/MouseEvent.h>
+#include <LibWebCommon/HighResolutionTime/DOMHighResTimeStamp.h>
+#include <LibWebCommon/WebIDL/Types.h>
+
+namespace Web::HTML {
+
+class Window;
+
+}
+
+namespace Web::Bindings {
+
+struct PointerEventInit;
+
+}
+
+namespace Web::UIEvents {
+
+class PointerEvent;
+
+// https://w3c.github.io/pointerevents/#dom-pointerevent-pointerid
+// The mouse is the one pointer there is, and this is its id in every pointer event of it.
+constexpr WebIDL::Long mouse_pointer_id = 0;
+
+struct PointerEventOptions : public MouseEventOptions {
+    WebIDL::Long pointer_id { mouse_pointer_id };
+    double width { 1 };
+    double height { 1 };
+    float pressure { 0 };
+    float tangential_pressure { 0 };
+    WebIDL::Long tilt_x { 0 };
+    WebIDL::Long tilt_y { 0 };
+    WebIDL::Long twist { 0 };
+    double altitude_angle { AK::Pi<double> / 2 };
+    double azimuth_angle { 0 };
+    Utf16FlyString pointer_type {};
+    bool is_primary { false };
+    WebIDL::Long persistent_device_id { 0 };
+    GC::RootVector<GC::Ref<PointerEvent>> coalesced_events;
+    GC::RootVector<GC::Ref<PointerEvent>> predicted_events;
+};
+
+// https://w3c.github.io/pointerevents/#pointerevent-interface
+class PointerEvent : public MouseEvent {
+    WEB_WRAPPABLE(PointerEvent, MouseEvent);
+    GC_DECLARE_ALLOCATOR(PointerEvent);
+
+public:
+    [[nodiscard]] static GC::Ref<PointerEvent> create(
+        FlyString const& type, PointerEventOptions&&,
+        double page_x, double page_y, double offset_x, double offset_y,
+        HighResolutionTime::DOMHighResTimeStamp);
+    [[nodiscard]] static GC::Ref<PointerEvent> create(
+        Utf16FlyString const& type, PointerEventOptions&&,
+        double page_x, double page_y, double offset_x, double offset_y,
+        HighResolutionTime::DOMHighResTimeStamp);
+    [[nodiscard]] static GC::Ref<PointerEvent> create_with_coalesced_events(
+        Utf16FlyString const& type, PointerEventOptions&&,
+        double page_x, double page_y, double offset_x, double offset_y,
+        HighResolutionTime::DOMHighResTimeStamp);
+    [[nodiscard]] static WebIDL::ExceptionOr<GC::Ref<PointerEvent>> create_for_constructor(FlyString const&, Bindings::PointerEventInit const&, HighResolutionTime::DOMHighResTimeStamp);
+    [[nodiscard]] static WebIDL::ExceptionOr<GC::Ref<PointerEvent>> create_for_constructor(Utf16String const&, Bindings::PointerEventInit const&, HighResolutionTime::DOMHighResTimeStamp);
+    [[nodiscard]] static WebIDL::ExceptionOr<GC::Ref<PointerEvent>> create_from_platform_event(JS::Object const& relevant_global_object, GC::Ptr<HTML::WindowProxy>, FlyString const& event_name, CSSPixelPoint screen, CSSPixelPoint page, CSSPixelPoint client, CSSPixelPoint offset, Optional<CSSPixelPoint> movement, unsigned button, unsigned buttons, unsigned modifiers, int detail = 0);
+    [[nodiscard]] static WebIDL::ExceptionOr<GC::Ref<PointerEvent>> create_from_platform_event(JS::Object const& relevant_global_object, GC::Ptr<HTML::WindowProxy>, Utf16FlyString const& event_name, CSSPixelPoint screen, CSSPixelPoint page, CSSPixelPoint client, CSSPixelPoint offset, Optional<CSSPixelPoint> movement, unsigned button, unsigned buttons, unsigned modifiers, int detail = 0);
+
+    virtual ~PointerEvent() override;
+
+    // https://w3c.github.io/pointerevents/#dom-pointerevent-screenx
+    // PointerEvent preserves fractional coordinates for all types except click, auxclick, and contextmenu.
+    double screen_x() const override;
+    double screen_y() const override;
+    double page_x() const override;
+    double page_y() const override;
+    double client_x() const override;
+    double client_y() const override;
+    double offset_x() const override;
+    double offset_y() const override;
+
+    // https://w3c.github.io/pointerevents/#attributes-and-default-actions
+    // Many user agents expose non-standard attributes fromElement and toElement in MouseEvents to support legacy content.
+    // We encourage those user agents to set the values of those (inherited) attributes in PointerEvents to null to
+    // transition authors to the use of standardized alternates (target and relatedTarget).
+    virtual GC::Ptr<DOM::Node> from_element() const override { return nullptr; }
+    virtual GC::Ptr<DOM::Node> to_element() const override { return nullptr; }
+
+    WebIDL::Long pointer_id() const { return m_pointer_id; }
+    double width() const { return m_width; }
+    double height() const { return m_height; }
+    float pressure() const { return m_pressure; }
+    float tangential_pressure() const { return m_tangential_pressure; }
+    WebIDL::Long tilt_x() const { return m_tilt_x; }
+    WebIDL::Long tilt_y() const { return m_tilt_y; }
+    WebIDL::Long twist() const { return m_twist; }
+    double altitude_angle() const { return m_altitude_angle; }
+    double azimuth_angle() const { return m_azimuth_angle; }
+    Utf16FlyString const& pointer_type() const { return m_pointer_type; }
+    bool is_primary() const { return m_is_primary; }
+    WebIDL::Long persistent_device_id() const { return m_persistent_device_id; }
+    AK::ReadonlySpan<GC::Ref<PointerEvent>> get_coalesced_events() const { return m_coalesced_events; }
+    void set_target_of_coalesced_events(GC::Ptr<DOM::EventTarget>);
+    AK::ReadonlySpan<GC::Ref<PointerEvent>> get_predicted_events() const { return m_predicted_events; }
+
+    // https://w3c.github.io/pointerevents/#dom-pointerevent-pressure
+    // For hardware and platforms that do not support pressure, the value MUST be 0.5 when in the active buttons state and 0 otherwise.
+    static constexpr float ACTIVE_PRESSURE_DEFAULT_IN_ACTIVE_BUTTON_STATE { 0.5 };
+
+protected:
+    PointerEvent(FlyString const& type, PointerEventOptions&&, double page_x, double page_y, double offset_x, double offset_y, HighResolutionTime::DOMHighResTimeStamp);
+    PointerEvent(Utf16FlyString const& type, PointerEventOptions&&, double page_x, double page_y, double offset_x, double offset_y, HighResolutionTime::DOMHighResTimeStamp);
+
+    virtual void visit_edges(GC::Cell::Visitor&) override;
+
+private:
+    bool should_have_fractional_coordinates() const;
+
+    virtual bool is_pointer_event() const final { return true; }
+
+    // A unique identifier for the pointer causing the event.
+    // https://w3c.github.io/pointerevents/#dom-pointerevent-pointerid
+    WebIDL::Long m_pointer_id { 0 };
+
+    // The width (magnitude on the X axis), in CSS pixels (see [CSS21]), of the contact geometry of the pointer
+    // https://w3c.github.io/pointerevents/#dom-pointerevent-width
+    double m_width { 1 };
+
+    // The height (magnitude on the Y axis), in CSS pixels (see [CSS21]), of the contact geometry of the pointer.
+    // https://w3c.github.io/pointerevents/#dom-pointerevent-width
+    double m_height { 1 };
+
+    // The normalized pressure of the pointer input in the range of [0,1], where 0 and 1 represent the minimum and
+    // maximum pressure the hardware is capable of detecting, respectively
+    // https://w3c.github.io/pointerevents/#dom-pointerevent-pressure
+    float m_pressure { 0 };
+
+    // The normalized tangential pressure (also known as barrel pressure), typically set by an additional control
+    // (e.g. a finger wheel on an airbrush stylus), of the pointer input in the range of [-1,1], where 0 is the
+    // neutral position of the control
+    // https://w3c.github.io/pointerevents/#dom-pointerevent-tangentialpressure
+    float m_tangential_pressure { 0 };
+
+    // The plane angle (in degrees, in the range of [-90,90]) between the Y-Z plane and the plane containing both the
+    // transducer (e.g. pen/stylus) axis and the Y axis
+    // https://w3c.github.io/pointerevents/#dom-pointerevent-tiltx
+    WebIDL::Long m_tilt_x { 0 };
+
+    // The plane angle (in degrees, in the range of [-90,90]) between the X-Z plane and the plane containing both the
+    // transducer (e.g. pen/stylus) axis and the X axis
+    // https://w3c.github.io/pointerevents/#dom-pointerevent-tilty
+    WebIDL::Long m_tilt_y { 0 };
+
+    // The clockwise rotation (in degrees, in the range of [0,359]) of a transducer (e.g. pen/stylus) around its own major axis
+    // https://w3c.github.io/pointerevents/#dom-pointerevent-twist
+    WebIDL::Long m_twist { 0 };
+
+    // The altitude (in radians) of the transducer (e.g. pen/stylus), in the range [0,π/2] — where 0 is parallel to the surface
+    // (X-Y plane), and π/2 is perpendicular to the surface
+    // For hardware and platforms that do not report tilt or angle, the value MUST be π/2.
+    // https://w3c.github.io/pointerevents/#dom-pointerevent-altitudeangle
+    static constexpr double DEFAULT_ALTITUDE_ANGLE { AK::Pi<double> / 2 };
+    double m_altitude_angle { DEFAULT_ALTITUDE_ANGLE };
+
+    // The azimuth angle (in radians) of the transducer (e.g. pen/stylus), in the range [0, 2π] — where 0 represents a transducer
+    // whose cap is pointing in the direction of increasing X values (point to "3 o'clock" if looking straight down) on the X-Y
+    // plane, and the values progressively increase when going clockwise (π/2 at "6 o'clock", π at "9 o'clock", 3π/2 at "12 o'clock").
+    // https://w3c.github.io/pointerevents/#dom-pointerevent-azimuthangle
+    double m_azimuth_angle { 0 };
+
+    // Indicates the device type that caused the event (mouse, pen, touch, etc.)
+    // https://w3c.github.io/pointerevents/#dom-pointerevent-pointertype
+    Utf16FlyString m_pointer_type;
+
+    // Indicates if the pointer represents the primary pointer of this pointer type
+    // https://w3c.github.io/pointerevents/#dom-pointerevent-isprimary
+    bool m_is_primary { false };
+
+    // A unique identifier for the pointing device.
+    // https://w3c.github.io/pointerevents/#dom-pointerevent-persistentdeviceid
+    WebIDL::Long m_persistent_device_id { 0 };
+
+    // https://w3c.github.io/pointerevents/#dom-pointerevent-getcoalescedevents
+    AK::Vector<GC::Ref<PointerEvent>> m_coalesced_events;
+
+    // https://w3c.github.io/pointerevents/#dom-pointerevent-getpredictedevents
+    AK::Vector<GC::Ref<PointerEvent>> m_predicted_events;
+};
+
+}
+
+namespace Web::DOM {
+
+template<>
+inline bool Event::fast_is<UIEvents::PointerEvent>() const { return is_pointer_event(); }
+
+}

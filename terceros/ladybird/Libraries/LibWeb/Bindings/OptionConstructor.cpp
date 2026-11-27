@@ -1,0 +1,74 @@
+/*
+ * Copyright (c) 2022, the SerenityOS developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibJS/Runtime/ValueInlines.h>
+#include <LibWeb/Bindings/HTMLOptionElement.h>
+#include <LibWeb/Bindings/Intrinsics.h>
+#include <LibWeb/Bindings/OptionConstructor.h>
+#include <LibWeb/Bindings/WrapperWorld.h>
+#include <LibWeb/DOM/ElementFactory.h>
+#include <LibWeb/DOM/Text.h>
+#include <LibWeb/HTML/HTMLOptionElement.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HTML/Window.h>
+#include <LibWeb/Namespace.h>
+#include <LibWeb/WebIDL/ExceptionOrUtils.h>
+
+namespace Web::Bindings {
+
+// https://html.spec.whatwg.org/multipage/form-elements.html#dom-option
+// https://webidl.spec.whatwg.org/#legacy-factory-functions
+JS::ThrowCompletionOr<GC::Ref<JS::Object>> OptionConstructor::construct(JS::HostFunction& constructor, JS::FunctionObject& new_target)
+{
+    auto& vm = constructor.vm();
+    auto& realm = *constructor.realm();
+
+    // NOTE: This implements the default value for the `text` parameter (the empty string "").
+    auto text_value = vm.argument(0);
+    if (text_value.is_undefined())
+        text_value = &vm.empty_string();
+
+    // 1. Let document be the current global object's associated Document.
+    auto& window = HTML::current_window();
+    auto& document = window.associated_document();
+
+    // 2. Let option be the result of creating an element given document, "option", and the HTML namespace.
+    auto element = TRY(WebIDL::throw_dom_exception_if_needed(vm, realm, [&]() { return DOM::create_element(document, HTML::TagNames::option, Namespace::HTML); }));
+    GC::Ref<HTML::HTMLOptionElement> option_element = as<HTML::HTMLOptionElement>(*element);
+    auto wrapped_option_element = Bindings::wrap(host_defined_wrapper_world(realm), realm, option_element);
+
+    // https://webidl.spec.whatwg.org/#internally-create-a-new-object-implementing-the-interface
+    TRY(set_prototype_from_new_target<HTMLOptionElementPrototype>(vm, new_target, "HTMLOptionElement"_utf16_fly_string, *wrapped_option_element));
+
+    // 3. If text is not the empty string, then append to option a new Text node whose data is text.
+    auto text = TRY(text_value.to_utf16_string(vm));
+    if (!text.is_empty()) {
+        auto new_text_node = DOM::Text::create(document, move(text));
+        MUST(option_element->append_child(*new_text_node));
+    }
+
+    // 4. If value is given, then set an attribute value for option using "value" and value.
+    if (!vm.argument(1).is_undefined()) {
+        auto value = TRY(vm.argument(1).to_utf16_string(vm));
+        option_element->set_attribute_value(HTML::AttributeNames::value, value);
+    }
+
+    // 5. If defaultSelected is true, then set an attribute value for option using "selected" and the empty string.
+    if (vm.argument_count() > 2) {
+        auto default_selected = vm.argument(2).to_boolean();
+        if (default_selected) {
+            option_element->set_attribute_value(HTML::AttributeNames::selected, Utf16String {});
+        }
+    }
+
+    // 6. If selected is true, then set option's selectedness to true; otherwise set its selectedness to false (even if defaultSelected is true).
+    option_element->set_selected_internal(vm.argument(3).to_boolean());
+
+    // 7. Return option.
+    return GC::Ref<JS::Object> { *wrapped_option_element };
+}
+
+}

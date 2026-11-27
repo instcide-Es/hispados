@@ -1,0 +1,175 @@
+/*
+ * Copyright (c) 2021, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2023, Sam Atkins <atkinssj@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Assertions.h>
+#include <AK/GenericShorthands.h>
+#include <AK/String.h>
+#include <LibWeb/CSS/Enums.h>
+#include <LibWeb/Forward.h>
+
+namespace Web::CSS {
+
+class Display {
+public:
+    Display() = default;
+    ~Display() = default;
+
+    String to_string() const;
+
+    bool operator==(Display const& other) const
+    {
+        if (m_type != other.m_type)
+            return false;
+        switch (m_type) {
+        case Type::Box:
+            return m_value.box == other.m_value.box;
+        case Type::Internal:
+            return m_value.internal == other.m_value.internal;
+        case Type::OutsideAndInside:
+            return m_value.outside_inside.outside == other.m_value.outside_inside.outside
+                && m_value.outside_inside.inside == other.m_value.outside_inside.inside
+                && m_value.outside_inside.list_item == other.m_value.outside_inside.list_item;
+        }
+        VERIFY_NOT_REACHED();
+    }
+
+    enum class ListItem : u8 {
+        No,
+        Yes,
+    };
+
+    enum class Type : u8 {
+        OutsideAndInside,
+        Internal,
+        Box,
+    };
+
+    bool is_internal() const { return m_type == Type::Internal; }
+    DisplayInternal internal() const
+    {
+        VERIFY(is_internal());
+        return m_value.internal;
+    }
+
+    // https://drafts.csswg.org/css-ruby-1/#ruby-display
+    bool is_internal_ruby() const { return is_internal() && first_is_one_of(internal(), DisplayInternal::RubyBase, DisplayInternal::RubyText, DisplayInternal::RubyBaseContainer, DisplayInternal::RubyTextContainer); }
+    bool is_table_row() const { return is_internal() && internal() == DisplayInternal::TableRow; }
+    bool is_table_cell() const { return is_internal() && internal() == DisplayInternal::TableCell; }
+    bool is_table_caption() const { return is_internal() && internal() == DisplayInternal::TableCaption; }
+
+    bool is_none() const { return m_type == Type::Box && m_value.box == DisplayBox::None; }
+    bool is_contents() const { return m_type == Type::Box && m_value.box == DisplayBox::Contents; }
+
+    Type type() const { return m_type; }
+
+    bool is_outside_and_inside() const { return m_type == Type::OutsideAndInside; }
+
+    DisplayOutside outside() const
+    {
+        VERIFY(is_outside_and_inside());
+        return m_value.outside_inside.outside;
+    }
+
+    bool is_block_outside() const { return is_outside_and_inside() && outside() == DisplayOutside::Block; }
+    bool is_inline_outside() const { return (is_outside_and_inside() && outside() == DisplayOutside::Inline) || is_internal_ruby(); }
+
+    ListItem list_item() const
+    {
+        VERIFY(is_outside_and_inside());
+        return m_value.outside_inside.list_item;
+    }
+
+    bool is_list_item() const { return is_outside_and_inside() && list_item() == ListItem::Yes; }
+
+    DisplayInside inside() const
+    {
+        VERIFY(is_outside_and_inside());
+        return m_value.outside_inside.inside;
+    }
+
+    // FIXME: Implement ruby layout. Until then a ruby container and the boxes inside it hold their contents as inline
+    //        boxes do, so bases and annotations stay in the line, one after the other.
+    bool is_flow_inside() const { return (is_outside_and_inside() && first_is_one_of(inside(), DisplayInside::Flow, DisplayInside::Ruby)) || is_internal_ruby(); }
+    bool is_flow_root_inside() const { return is_outside_and_inside() && inside() == DisplayInside::FlowRoot; }
+    bool is_table_inside() const { return is_outside_and_inside() && inside() == DisplayInside::Table; }
+    bool is_flex_inside() const { return is_outside_and_inside() && first_is_one_of(inside(), DisplayInside::Flex, DisplayInside::WebkitBox); }
+    bool is_grid_inside() const { return is_outside_and_inside() && first_is_one_of(inside(), DisplayInside::Grid, DisplayInside::GridLanes); }
+
+    enum class Short {
+        None,
+        Contents,
+        Block,
+        Flow,
+        FlowRoot,
+        Inline,
+        InlineBlock,
+        RunIn,
+        ListItem,
+        InlineListItem,
+        Flex,
+        InlineFlex,
+        Grid,
+        InlineGrid,
+        GridLanes,
+        InlineGridLanes,
+        Ruby,
+        Table,
+        InlineTable,
+        Math,
+    };
+
+    static Display from_short(Short short_);
+    Optional<Keyword> to_keyword() const;
+
+    Display(DisplayOutside outside, DisplayInside inside)
+        : m_type(Type::OutsideAndInside)
+    {
+        m_value.outside_inside = {
+            .outside = outside,
+            .inside = inside,
+            .list_item = ListItem::No,
+        };
+    }
+
+    Display(DisplayOutside outside, DisplayInside inside, ListItem list_item)
+        : m_type(Type::OutsideAndInside)
+    {
+        m_value.outside_inside = {
+            .outside = outside,
+            .inside = inside,
+            .list_item = list_item,
+        };
+    }
+
+    explicit Display(DisplayInternal internal)
+        : m_type(Type::Internal)
+    {
+        m_value.internal = internal;
+    }
+
+    explicit Display(DisplayBox box)
+        : m_type(Type::Box)
+    {
+        m_value.box = box;
+    }
+
+private:
+    Type m_type {};
+    union {
+        struct {
+            DisplayOutside outside;
+            DisplayInside inside;
+            ListItem list_item;
+        } outside_inside;
+        DisplayInternal internal;
+        DisplayBox box;
+    } m_value {};
+};
+
+}

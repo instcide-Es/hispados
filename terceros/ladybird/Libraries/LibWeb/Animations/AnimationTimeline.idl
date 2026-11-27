@@ -1,0 +1,7 @@
+// https://drafts.csswg.org/web-animations-2/#the-animationtimeline-interface
+[Exposed=Window, ImplementedIn=Rust]
+interface AnimationTimeline {
+    readonly attribute CSSNumberish? currentTime;
+    readonly attribute CSSNumberish? duration;
+    [FIXME] Animation play (optional AnimationEffect? effect = null);
+};

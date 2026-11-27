@@ -1,0 +1,11 @@
+// https://streams.spec.whatwg.org/#writablestream
+    [Exposed=*, Transferable, ImplementedIn=Rust]
+interface WritableStream {
+    constructor(optional object underlyingSink, optional QueuingStrategy strategy = {});
+
+    readonly attribute boolean locked;
+
+    Promise<undefined> abort(optional any reason);
+    Promise<undefined> close();
+    WritableStreamDefaultWriter getWriter();
+};

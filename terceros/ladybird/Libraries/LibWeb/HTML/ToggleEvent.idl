@@ -1,0 +1,14 @@
+// https://html.spec.whatwg.org/multipage/interaction.html#toggleevent
+[Exposed=Window, ImplementedIn=Rust]
+interface ToggleEvent : Event {
+    constructor(DOMString type, optional ToggleEventInit eventInitDict = {});
+    readonly attribute DOMString oldState;
+    readonly attribute DOMString newState;
+    readonly attribute Element? source;
+};
+
+dictionary ToggleEventInit : EventInit {
+    [FlyString] DOMString oldState = "";
+    [FlyString] DOMString newState = "";
+    Element? source = null;
+};

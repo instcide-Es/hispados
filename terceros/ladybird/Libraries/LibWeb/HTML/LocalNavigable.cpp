@@ -1,0 +1,8395 @@
+/*
+ * Copyright (c) 2022-2024, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2023-2025, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
+ * Copyright (c) 2025, Luke Wilde <luke@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/AllOf.h>
+#include <AK/AnyOf.h>
+#include <AK/InsertionSort.h>
+#include <AK/NeverDestroyed.h>
+#include <AK/TemporaryChange.h>
+#include <AK/Utf16String.h>
+#include <AK/Utf16StringBuilder.h>
+#include <AK/Variant.h>
+#include <LibCore/Timer.h>
+#include <LibGC/RootVector.h>
+#include <LibWeb/CSS/ComputedValues.h>
+#include <LibWeb/CSS/FontComputer.h>
+#include <LibWeb/CSS/PropertyID.h>
+#include <LibWeb/CSS/PseudoElement.h>
+#include <LibWeb/CSS/SerializationMode.h>
+#include <LibWeb/CSS/VisualViewport.h>
+#include <LibWeb/Compositor/CompositorHost.h>
+#include <LibWeb/Compositor/RenderClock.h>
+#include <LibWeb/ContentSecurityPolicy/BlockingAlgorithms.h>
+#include <LibWeb/ContentSecurityPolicy/Directives/DirectiveOperations.h>
+#include <LibWeb/ContentSecurityPolicy/PolicyList.h>
+#include <LibWeb/ContentSecurityPolicy/Violation.h>
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOM/DocumentFragment.h>
+#include <LibWeb/DOM/DocumentLoading.h>
+#include <LibWeb/DOM/Element.h>
+#include <LibWeb/DOM/ElementFactory.h>
+#include <LibWeb/DOM/Event.h>
+#include <LibWeb/DOM/Position.h>
+#include <LibWeb/DOM/Range.h>
+#include <LibWeb/DOM/Text.h>
+#include <LibWeb/Editing/ClipboardSerializer.h>
+#include <LibWeb/Editing/EditingHistory.h>
+#include <LibWeb/Editing/Internal/Algorithms.h>
+#include <LibWeb/Editing/SpellCheckController.h>
+#include <LibWeb/Editing/WritingSuggestionController.h>
+#include <LibWeb/Fetch/Fetching/Checks.h>
+#include <LibWeb/Fetch/Fetching/ClientContextSnapshots.h>
+#include <LibWeb/Fetch/Fetching/Fetching.h>
+#include <LibWeb/Fetch/Infrastructure/FetchAlgorithms.h>
+#include <LibWeb/Fetch/Infrastructure/FetchController.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/Bodies.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/Requests.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/ResponseView.h>
+#include <LibWeb/HTML/BrowsingContext.h>
+#include <LibWeb/HTML/CheckUnloadingCanceledState.h>
+#include <LibWeb/HTML/DocumentState.h>
+#include <LibWeb/HTML/DragDataStore.h>
+#include <LibWeb/HTML/EventLoop/EventLoop.h>
+#include <LibWeb/HTML/HTMLBRElement.h>
+#include <LibWeb/HTML/HTMLHtmlElement.h>
+#include <LibWeb/HTML/HTMLIFrameElement.h>
+#include <LibWeb/HTML/HTMLInputElement.h>
+#include <LibWeb/HTML/HTMLParagraphElement.h>
+#include <LibWeb/HTML/History.h>
+#include <LibWeb/HTML/HistoryExecutor.h>
+#include <LibWeb/HTML/LocalNavigable.h>
+#include <LibWeb/HTML/LocalTraversableNavigable.h>
+#include <LibWeb/HTML/NavigableContainer.h>
+#include <LibWeb/HTML/Navigation.h>
+#include <LibWeb/HTML/NavigationHistoryEntry.h>
+#include <LibWeb/HTML/NavigationObserver.h>
+#include <LibWeb/HTML/NavigationParams.h>
+#include <LibWeb/HTML/NavigationParamsDescriptor.h>
+#include <LibWeb/HTML/Parser/HTMLParser.h>
+#include <LibWeb/HTML/PolicyContainers.h>
+#include <LibWeb/HTML/RemoteNavigable.h>
+#include <LibWeb/HTML/Scripting/Agent.h>
+#include <LibWeb/HTML/Scripting/ClassicScript.h>
+#include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
+#include <LibWeb/HTML/Scripting/WindowEnvironmentSettingsObject.h>
+#include <LibWeb/HTML/SessionHistoryEntry.h>
+#include <LibWeb/HTML/SourceSnapshotParams.h>
+#include <LibWeb/HTML/StructuredSerialize.h>
+#include <LibWeb/HTML/Window.h>
+#include <LibWeb/HTML/WindowProxy.h>
+#include <LibWeb/HTML/XMLSerializer.h>
+#include <LibWeb/Layout/Node.h>
+#include <LibWeb/Layout/NodeArena.h>
+#include <LibWeb/Layout/Viewport.h>
+#include <LibWeb/Loader/GeneratedPagesLoader.h>
+#include <LibWeb/Loader/ResourceLoader.h>
+#include <LibWeb/Page/EventHandler.h>
+#include <LibWeb/Page/Page.h>
+#include <LibWeb/Page/RenderingStats.h>
+#include <LibWeb/Painting/BoxViews.h>
+#include <LibWeb/Painting/ChromeWidget.h>
+#include <LibWeb/Painting/DocumentPaintState.h>
+#include <LibWeb/Painting/PaintFacts.h>
+#include <LibWeb/Painting/PaintableTypes.h>
+#include <LibWeb/Painting/PaintingRustBridge.h>
+#include <LibWeb/Painting/ScrollSnap.h>
+#include <LibWeb/Platform/Timer.h>
+#include <LibWeb/Selection/Selection.h>
+#include <LibWeb/UIEvents/CompositionEvent.h>
+#include <LibWeb/UIEvents/EventNames.h>
+#include <LibWeb/UIEvents/InputEvent.h>
+#include <LibWeb/UIEvents/InputTypes.h>
+#include <LibWeb/WebDriver/BiDi/BiDi.h>
+#include <LibWeb/WebDriver/BiDi/Network.h>
+#include <LibWeb/WebIDL/Promise.h>
+#include <LibWeb/XHR/FormData.h>
+#include <LibWebCommon/CSS/SystemColor.h>
+#include <LibWebCommon/Fetch/Infrastructure/URL.h>
+#include <LibWebCommon/HTML/CrossOrigin/OpenerPolicyEnforcement.h>
+#include <LibWebCommon/HTML/HistoryHandlingBehavior.h>
+#include <LibWebCommon/HTML/NavigationPopulationRequest.h>
+#include <LibWebCommon/HTML/POSTResource.h>
+#include <LibWebCommon/HTML/SandboxingFlagSet.h>
+#include <LibWebCommon/Infra/Strings.h>
+#include <LibWebCommon/Loader/DownloadFilename.h>
+#include <LibWebCommon/WebView/Utilities.h>
+
+#include <AK/Debug.h>
+#include <AK/LexicalPath.h>
+#include <AK/StdLibExtras.h>
+#include <AK/StringBuilder.h>
+#include <LibHTTP/HTTP.h>
+
+namespace Web::HTML {
+
+GC_DEFINE_ALLOCATOR(LocalNavigable);
+
+struct NavigationParamsFetchStateHolder : public JS::Cell {
+    GC_CELL(NavigationParamsFetchStateHolder, JS::Cell);
+    GC_DECLARE_ALLOCATOR(NavigationParamsFetchStateHolder);
+
+    NavigationParamsFetchStateHolder(OpenerPolicyEnforcementResult&& coop_enforcement_result, URL::URL current_url, NonnullRefPtr<Fetch::Infrastructure::Request> request,
+        Optional<URL::Origin> initiator_origin,
+        Variant<SerializedPolicyContainer, DocumentState::Client> history_policy_container,
+        Optional<URL::URL> about_base_url,
+        GC::Ref<SourceSnapshotParams> source_snapshot_params,
+        Fetch::Infrastructure::Request::ReferrerType request_referrer,
+        ReferrerPolicy::ReferrerPolicy request_referrer_policy,
+        Optional<URL::Origin> origin,
+        DocumentResource resource,
+        bool ever_populated,
+        UserAgentInitiated user_agent_initiated,
+        Utf16String navigable_target_name)
+        : coop_enforcement_result(move(coop_enforcement_result))
+        , current_url(move(current_url))
+        , request(request)
+        , initiator_origin(move(initiator_origin))
+        , history_policy_container(move(history_policy_container))
+        , about_base_url(move(about_base_url))
+        , source_snapshot_params(source_snapshot_params)
+        , request_referrer(move(request_referrer))
+        , request_referrer_policy(request_referrer_policy)
+        , origin(move(origin))
+        , resource(move(resource))
+        , ever_populated(ever_populated)
+        , user_agent_initiated(user_agent_initiated)
+        , navigable_target_name(move(navigable_target_name))
+    {
+    }
+
+    GC::Ptr<Fetch::Infrastructure::ResponseView> response;
+    Optional<URL::Origin> response_origin;
+    GC::Ptr<Fetch::Infrastructure::FetchController> fetch_controller;
+    OpenerPolicyEnforcementResult coop_enforcement_result;
+    SandboxingFlagSet final_sandbox_flags {};
+    RefPtr<PolicyContainer> response_policy_container;
+    OpenerPolicy response_coop {};
+    ErrorOr<Optional<URL::URL>> location_url { OptionalNone {} };
+    URL::URL current_url;
+    GC::Ptr<GC::Function<void(DOM::Document&)>> commit_early_hints;
+
+    NonnullRefPtr<Fetch::Infrastructure::Request> request;
+
+    // The reserved client of request, whose snapshot request holds.
+    GC::Ptr<Environment> reserved_client;
+
+    GC::Ptr<LocalNavigable> navigable;
+    ContentSecurityPolicy::Directives::Directive::NavigationType csp_navigation_type;
+    Bindings::NavigationTimingType navigation_timing_type { Bindings::NavigationTimingType::Navigate };
+    TargetSnapshotParams target_snapshot_params;
+    Optional<Utf16String> navigation_id;
+
+    // Fields extracted from entry's document_state
+    Optional<URL::Origin> initiator_origin;
+    Variant<SerializedPolicyContainer, DocumentState::Client> history_policy_container;
+    Optional<URL::URL> about_base_url;
+    GC::Ref<SourceSnapshotParams> source_snapshot_params;
+
+    // Document state fields for redirect DocumentState rebuild
+    Fetch::Infrastructure::Request::ReferrerType request_referrer { Fetch::Infrastructure::Request::Referrer::Client };
+    ReferrerPolicy::ReferrerPolicy request_referrer_policy { ReferrerPolicy::DEFAULT_REFERRER_POLICY };
+    Optional<URL::Origin> origin;
+    DocumentResource resource;
+    bool ever_populated = false;
+    UserAgentInitiated user_agent_initiated { UserAgentInitiated::No };
+    Utf16String navigable_target_name;
+
+    // Accumulated redirect output
+    Optional<URL::URL> redirected_url;
+    bool redirect_replaced_fragment { false };
+    Optional<StorageSerializationRecord> redirect_classic_history_api_state;
+    RefPtr<DocumentState> replacement_document_state;
+    bool resource_cleared = false;
+
+    enum class ContinuationReason {
+        GotResponse,
+        OngoingNavigationChanged,
+    };
+
+    GC::Ptr<GC::Function<void(ContinuationReason)>> continuation_steps;
+
+    virtual void visit_edges(Cell::Visitor& visitor) override
+    {
+        Base::visit_edges(visitor);
+        visitor.visit(response);
+        visitor.visit(fetch_controller);
+        visitor.visit(commit_early_hints);
+        visitor.visit(reserved_client);
+        visitor.visit(navigable);
+        visitor.visit(source_snapshot_params);
+        visitor.visit(continuation_steps);
+    }
+};
+
+GC_DEFINE_ALLOCATOR(NavigationParamsFetchStateHolder);
+
+// Carries the redirect metadata alongside navigation params from the fetch path back to
+// populate_session_history_entry_document's received_navigation_params callback.
+struct InternalNavigationResult final : public JS::Cell {
+    GC_CELL(InternalNavigationResult, JS::Cell);
+    GC_DECLARE_ALLOCATOR(InternalNavigationResult);
+
+public:
+    LocalNavigable::NavigationParamsVariant navigation_params { LocalNavigable::NullOrError {} };
+
+    // Redirect mutations (only set by fetch path)
+    Optional<URL::URL> redirected_url;
+    bool redirect_replaced_fragment { false };
+    Optional<StorageSerializationRecord> classic_history_api_state;
+    RefPtr<DocumentState> replacement_document_state;
+    bool resource_cleared = false;
+    Optional<HTTP::Cookie::SameSiteStatus> navigation_same_site_status;
+
+private:
+    virtual void visit_edges(Cell::Visitor& visitor) override
+    {
+        Base::visit_edges(visitor);
+        visitor.visit(navigation_params);
+    }
+};
+
+GC_DEFINE_ALLOCATOR(InternalNavigationResult);
+
+GC_DEFINE_ALLOCATOR(PopulateSessionHistoryEntryDocumentOutput);
+
+static Vector<StringView> split_content_disposition_parameters(StringView value)
+{
+    Vector<StringView> parameters;
+    bool in_quoted_string = false;
+    bool escaped = false;
+    size_t parameter_start = 0;
+
+    for (size_t i = 0; i < value.length(); ++i) {
+        auto ch = value[i];
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+
+        if (in_quoted_string && ch == '\\') {
+            escaped = true;
+            continue;
+        }
+
+        if (ch == '"') {
+            in_quoted_string = !in_quoted_string;
+            continue;
+        }
+
+        if (ch != ';' || in_quoted_string)
+            continue;
+
+        parameters.append(value.substring_view(parameter_start, i - parameter_start).trim(HTTP::HTTP_TAB_OR_SPACE, TrimMode::Both));
+        parameter_start = i + 1;
+    }
+
+    parameters.append(value.substring_view(parameter_start).trim(HTTP::HTTP_TAB_OR_SPACE, TrimMode::Both));
+    return parameters;
+}
+
+static ByteString parse_content_disposition_parameter_value(StringView value)
+{
+    value = value.trim(HTTP::HTTP_TAB_OR_SPACE, TrimMode::Both);
+    if (!value.starts_with('"'))
+        return value;
+
+    StringBuilder builder;
+    bool escaped = false;
+    for (size_t i = 1; i < value.length(); ++i) {
+        auto ch = value[i];
+        if (escaped) {
+            builder.append(ch);
+            escaped = false;
+            continue;
+        }
+
+        if (ch == '\\') {
+            escaped = true;
+            continue;
+        }
+
+        if (ch == '"')
+            break;
+
+        builder.append(ch);
+    }
+    return builder.to_byte_string();
+}
+
+static Optional<ByteString> parse_content_disposition_extended_filename(StringView value)
+{
+    auto decoded_value = parse_content_disposition_parameter_value(value);
+    auto decoded_view = decoded_value.view();
+    auto first_separator = decoded_view.find('\'');
+    if (!first_separator.has_value())
+        return URL::percent_decode(decoded_view);
+
+    auto second_separator = decoded_view.find('\'', *first_separator + 1);
+    if (!second_separator.has_value())
+        return {};
+
+    return URL::percent_decode(decoded_view.substring_view(*second_separator + 1));
+}
+
+struct ContentDispositionInfo {
+    bool is_attachment { false };
+    Optional<ByteString> filename;
+};
+
+static ContentDispositionInfo parse_content_disposition(HTTP::HeaderList const& headers)
+{
+    auto header = headers.get("Content-Disposition"sv);
+    if (!header.has_value())
+        return {};
+
+    auto parameters = split_content_disposition_parameters(header->view());
+    if (parameters.is_empty())
+        return {};
+
+    ContentDispositionInfo info;
+    info.is_attachment = parameters.first().equals_ignoring_ascii_case("attachment"sv);
+
+    Optional<ByteString> filename;
+    Optional<ByteString> extended_filename;
+    for (size_t i = 1; i < parameters.size(); ++i) {
+        auto parameter = parameters[i];
+        auto equals_index = parameter.find('=');
+        if (!equals_index.has_value())
+            continue;
+
+        auto name = parameter.substring_view(0, *equals_index).trim(HTTP::HTTP_TAB_OR_SPACE, TrimMode::Both);
+        auto value = parameter.substring_view(*equals_index + 1);
+        if (name.equals_ignoring_ascii_case("filename*"sv))
+            extended_filename = parse_content_disposition_extended_filename(value);
+        else if (name.equals_ignoring_ascii_case("filename"sv))
+            filename = parse_content_disposition_parameter_value(value);
+    }
+
+    info.filename = extended_filename.has_value() ? move(extended_filename) : move(filename);
+    return info;
+}
+
+// https://html.spec.whatwg.org/multipage/links.html#getting-the-suggested-filename
+static ByteString suggested_download_filename(URL::URL const& url, HTTP::HeaderList const& headers, Optional<ByteString> const& proposed_filename, Optional<URL::Origin> const& interface_origin)
+{
+    // 1. Let filename be the undefined value.
+    Optional<ByteString> filename;
+
+    // 2. If response has a `Content-Disposition` header, that header specifies the attachment disposition type,
+    //    and the header includes filename information, then let filename have the value specified by the header,
+    //    and jump to the step labeled sanitize below.
+    auto content_disposition = parse_content_disposition(headers);
+    if (content_disposition.is_attachment && content_disposition.filename.has_value()) {
+        filename = content_disposition.filename.value();
+        goto sanitize;
+    }
+
+    // NB: Steps 3 to 10 are enclosed in a scope, so the jumps below may bypass the variables declared here.
+    {
+        // 3. Let interface origin be the origin of the Document in which the download or navigate action resulting
+        //    in the download was initiated, if any.
+        // NB: The interface origin is provided by the caller.
+
+        // 4. Let response origin be the origin of the URL of response, unless that URL's scheme component is data,
+        //    in which case let response origin be the same as the interface origin, if any.
+        Optional<URL::Origin> response_origin = url.scheme() == "data"sv ? interface_origin : url.origin();
+
+        // 5. If there is no interface origin, then let trusted operation be true. Otherwise, let trusted operation
+        //    be true if response origin is the same origin as interface origin, and false otherwise.
+        auto trusted_operation = !interface_origin.has_value() || response_origin->is_same_origin(*interface_origin);
+
+        // 6. If trusted operation is true and response has a `Content-Disposition` header and that header includes
+        //    filename information, then let filename have the value specified by the header, and jump to the step
+        //    labeled sanitize below.
+        if (trusted_operation && content_disposition.filename.has_value()) {
+            filename = content_disposition.filename.value();
+            goto sanitize;
+        }
+
+        // 7. If the download was not initiated from a hyperlink created by an a or area element, or if the element
+        //    of the hyperlink from which it was initiated did not have a download attribute when the download was
+        //    initiated, or if there was such an attribute but its value when the download was initiated was the
+        //    empty string, then jump to the step labeled no proposed filename.
+        if (!proposed_filename.has_value() || proposed_filename->is_empty())
+            goto no_proposed_filename;
+
+        // 8. Let proposed filename have the value of the download attribute of the element of the hyperlink that
+        //    initiated the download at the time the download was initiated.
+        // NB: The proposed filename is provided by the caller.
+
+        // 9. If trusted operation is true, let filename have the value of proposed filename, and jump to the step
+        //    labeled sanitize below.
+        if (trusted_operation) {
+            filename = proposed_filename.value();
+            goto sanitize;
+        }
+
+        // 10. If response has a `Content-Disposition` header and that header specifies the attachment disposition
+        //     type, let filename have the value of proposed filename, and jump to the step labeled sanitize below.
+        if (content_disposition.is_attachment) {
+            filename = proposed_filename.value();
+            goto sanitize;
+        }
+    }
+
+    // 11. No proposed filename: If trusted operation is true, or if the user indicated a preference for having the
+    //     response in question downloaded, let filename have a value derived from the URL of response in an
+    //     implementation-defined manner, and jump to the step labeled sanitize below.
+no_proposed_filename:
+    // 12. Let filename be set to the user's preferred filename or to a filename selected by the user agent, and
+    //     jump to the step labeled sanitize below.
+    // NB: In both cases the filename is derived from the URL of the response. URLs with an opaque path, such as
+    //     data: URLs, do not contain a usable filename, so the default filename is used instead.
+    if (!url.has_an_opaque_path())
+        filename = url.basename();
+
+    // 13. Sanitize: Optionally, allow the user to influence filename. For example, a user agent could prompt the
+    //     user for a filename, potentially providing the value of filename as determined above as a default value.
+sanitize:
+
+    // 14. Adjust filename to be suitable for the local file system.
+    filename = sanitize_suggested_download_filename(filename.value_or({}));
+
+    // FIXME: 15. If the platform conventions do not in any way use extensions to determine the types of file on
+    //        the file system, then return filename as the filename.
+
+    // FIXME: 16. Let claimed type be the type given by response's Content-Type metadata, if any is known. Let
+    //        named type be the type given by filename's extension, if any is known. For the purposes of this step, a
+    //        type is a mapping of a MIME type to an extension.
+
+    // FIXME: 17. If named type is consistent with the user's preferences (e.g., because the value of filename was
+    //        determined by prompting the user), then return filename as the filename.
+
+    // FIXME: 18. If claimed type and named type are the same type (i.e., the type given by response's Content-Type
+    //        metadata is consistent with the type given by filename's extension), then return filename as the filename.
+
+    // FIXME: 19. If the claimed type is known, then alter filename to add an extension corresponding to claimed
+    //        type. Otherwise, if named type is known to be potentially dangerous (e.g. it will be treated by the
+    //        platform conventions as a native executable, shell script, HTML application, or
+    //        executable-macro-capable document), then optionally alter filename to add a known-safe extension
+    //        (e.g. ".txt").
+
+    // 20. Return filename as the filename.
+    return filename.release_value();
+}
+
+static Optional<u64> response_content_length(HTTP::HeaderList const& headers)
+{
+    auto extracted_length = headers.extract_length();
+    if (extracted_length.has<u64>())
+        return extracted_length.get<u64>();
+    return {};
+}
+
+void LocalNavigable::start_download_for_response(GC::Ref<Fetch::Infrastructure::ResponseView> response, URL::URL const& download_url, ByteString suggested_filename, GC::Ptr<Fetch::Infrastructure::FetchController> fetch_controller)
+{
+    auto active_window = this->active_window();
+    if (!active_window) {
+        response->release_request_transfer_lease();
+        return;
+    }
+    auto& realm = active_window->principal_realm();
+
+    auto download_id = page().client().page_did_start_download(download_url, suggested_filename, response_content_length(*response->header_list()));
+    if (!download_id.has_value()) {
+        if (fetch_controller)
+            fetch_controller->stop_fetch();
+        return;
+    }
+
+    if (fetch_controller)
+        page().client().page_did_register_download_controller(*download_id, *fetch_controller);
+
+    auto process_body_chunk = GC::create_function(realm.heap(), GC::captures(GC::Ref { *this }, *download_id), [](auto& navigable, auto& download_id, ByteBuffer data) {
+        if (navigable->page().client().page_is_download_canceled(download_id))
+            return;
+
+        navigable->page().client().page_did_receive_download_data(download_id, move(data));
+    });
+
+    auto process_end_of_body = GC::create_function(realm.heap(), GC::captures(GC::Ref { *this }, *download_id), [](auto& navigable, auto& download_id) {
+        if (navigable->page().client().page_is_download_canceled(download_id))
+            return;
+
+        navigable->page().client().page_did_finish_download(download_id);
+    });
+
+    auto process_body_error = GC::create_function(realm.heap(), GC::captures(GC::Ref { *this }, *download_id), [](auto& navigable, auto& download_id, JS::Value) {
+        if (navigable->page().client().page_is_download_canceled(download_id))
+            return;
+
+        navigable->page().client().page_did_fail_download(download_id, "Unable to read downloaded file"_string);
+    });
+
+    // https://fetch.spec.whatwg.org/#body-incrementally-read
+    auto reader = response->body()->incrementally_read(process_body_chunk, process_end_of_body, process_body_error, GC::Ref { realm.global_object() });
+    page().client().page_did_register_download_reader(*download_id, reader);
+    if (response->network_transport().has_value())
+        response->resume_body_delivery(*surrounding_agent().fetch_executor);
+}
+
+// https://html.spec.whatwg.org/multipage/links.html#handle-as-a-download
+void LocalNavigable::handle_as_a_download(GC::Ref<Fetch::Infrastructure::ResponseView> response, URL::URL const& fallback_url, GC::Ptr<Fetch::Infrastructure::FetchController> fetch_controller, Optional<ByteString> proposed_filename, Optional<URL::Origin> interface_origin)
+{
+    if (!response->body())
+        return;
+
+    auto download_url = response->url().value_or(fallback_url);
+    auto suggested_filename = suggested_download_filename(download_url, *response->header_list(), proposed_filename, interface_origin);
+
+    start_download_for_response(response, download_url, move(suggested_filename), fetch_controller);
+}
+
+// AD-HOC: Stopping the fetch controller, or the network transport of a body adopted without one, is an implementation
+//         hook for tearing down a network body when no spec consumer remains.
+static void stop_response_body_delivery(NavigationParams const& navigation_params)
+{
+    stop_body_delivery(navigation_params.body_delivery());
+}
+
+static void stop_response_body_delivery(LocalNavigable::NavigationParamsVariant const& navigation_params)
+{
+    if (auto const* nav_params = navigation_params.get_pointer<GC::Ref<NavigationParams>>())
+        stop_response_body_delivery(**nav_params);
+}
+
+static bool handle_navigation_response_as_download(GC::Ref<NavigationParams> navigation_params, bool source_allows_downloading, Optional<URL::Origin> interface_origin)
+{
+    auto response = navigation_params->response;
+    if (!response || !response->body())
+        return true;
+
+    JsonValue network_response = navigation_params->webdriver_bidi_network_response;
+    if (WebDriver::BiDi::network_events_enabled() && response->network_transport().has_value() && !network_response.is_object() && navigation_params->request) {
+        RefPtr<Fetch::Infrastructure::FetchTimingInfo> timing_info = navigation_params->fetch_timing_info;
+        if (navigation_params->fetch_controller)
+            timing_info = navigation_params->fetch_controller->full_timing_info();
+        if (timing_info) {
+            auto metadata = WebDriver::BiDi::network_response_for_navigation(
+                *navigation_params->request, *timing_info, *response->record());
+            if (metadata.has_value())
+                network_response = metadata.release_value();
+        }
+    }
+    if (auto& state = navigation_params->webdriver_bidi_network_response_state; state) {
+        if (state->owner != NavigationResponseNetworkEventState::Owner::Renderer)
+            network_response = JsonValue {};
+        else
+            state->owner = NavigationResponseNetworkEventState::Owner::Download;
+    }
+    auto report_download_rejected = [&] {
+        if (network_response.is_object() && navigation_params->navigable)
+            WebDriver::BiDi::network_navigation_response_finished(
+                *navigation_params->navigable, network_response.as_object(),
+                *response->record(), nullptr, "Navigation download was rejected"sv);
+    };
+
+    // FIXME: Implement the WebDriver BiDi download will begin/end hooks.
+    //        uaAllowsDownloading is currently always true.
+    auto target_allows_downloading = !has_flag(navigation_params->final_sandboxing_flag_set, SandboxingFlagSet::SandboxedDownloads);
+    if (!source_allows_downloading || !target_allows_downloading) {
+        report_download_rejected();
+        stop_response_body_delivery(*navigation_params);
+        return true;
+    }
+
+    VERIFY(navigation_params->navigable);
+    auto active_window = navigation_params->navigable->active_window();
+    if (!active_window) {
+        report_download_rejected();
+        stop_response_body_delivery(*navigation_params);
+        return true;
+    }
+
+    auto download_url = response->url().value_or(navigation_params->request ? navigation_params->request->current_url() : URL::about_blank());
+    if (auto const& network_transport = response->network_transport(); network_transport.has_value()) {
+        auto const& lease = network_transport->handle->transfer_lease();
+        // A request that another client adopted has no lease to hand over.
+        if (!lease.has_value()) {
+            report_download_rejected();
+            stop_response_body_delivery(*navigation_params);
+            return true;
+        }
+        auto suggested_filename = suggested_download_filename(download_url, *response->header_list(), {}, interface_origin);
+
+        // A download the UI process starts reads the bytes released here before the rest of the request.
+        ByteBuffer initial_data;
+        for (auto const& received : response->release_body_for_transfer())
+            initial_data.append(received.bytes());
+
+        auto same_site_context = navigation_params->request ? navigation_params->request->same_site_context() : HTTP::Cookie::SameSiteContext {};
+        auto download_id = navigation_params->navigable->page().client().page_did_start_download(navigation_params->navigable->id(), navigation_params->id, download_url, suggested_filename, response_content_length(*response->header_list()), same_site_context, lease->source_client_id, lease->source_request_id, move(initial_data),
+            move(network_response));
+        if (!download_id.has_value()) {
+            stop_response_body_delivery(*navigation_params);
+            return true;
+        }
+
+        if (navigation_params->fetch_controller)
+            navigation_params->fetch_controller->terminate();
+
+        return true;
+    }
+
+    navigation_params->navigable->handle_as_a_download(*response, download_url, navigation_params->fetch_controller, {}, interface_origin);
+    return true;
+}
+
+void PopulateSessionHistoryEntryDocumentOutput::apply_to(NonnullRefPtr<SessionHistoryEntry> entry)
+{
+    if (replacement_document_state)
+        entry->set_document_state(replacement_document_state);
+    if (navigation_same_site_status.has_value())
+        entry->document_state()->set_navigation_same_site_status(*navigation_same_site_status);
+    if (redirected_url.has_value()) {
+        // https://wicg.github.io/scroll-to-text-fragment/#extracting-the-fragment-directive
+        // https://html.spec.whatwg.org/multipage/browsing-the-web.html#create-navigation-params-by-fetching
+        // Let fragment directive be the result of running remove the fragment directive on locationURL.
+        auto fragment_directive = remove_the_fragment_directive(*redirected_url);
+
+        // Set entry's URL to locationURL.
+        entry->set_url(redirected_url.release_value());
+
+        // Set entry's directive state's value to fragment directive.
+        // NOTE: A redirect location without a fragment inherits the request URL's fragment. The
+        //       fragment directive was already removed from that URL and stored in the directive state,
+        //       so leaving the state unchanged performs that inheritance.
+        if (fragment_directive.has_value() || redirect_replaced_fragment)
+            entry->directive_state()->set_value(move(fragment_directive));
+    }
+    if (classic_history_api_state.has_value())
+        entry->set_classic_history_api_state(classic_history_api_state.release_value());
+    if (resource_cleared)
+        entry->document_state()->set_resource(Empty {});
+
+    // Step from populate_session_history_entry_document()
+    // 7. If entry's document state's document is not null, then:
+    // AD-HOC: The document is created once the document it replaces is unloaded, which records it in entry's document
+    //         state. What these steps read of it is read from what it is created from.
+    if (document_to_create) {
+        // 1. Set entry's document state's ever populated to true.
+        entry->document_state()->set_ever_populated(true);
+
+        // 2. If saveExtraDocumentState is true:
+        if (save_extra_document_state) {
+            // 1. Set entry's document state's origin to document's origin.
+            entry->document_state()->set_origin(document_to_create->origin());
+
+            // 2. If document's URL requires storing the policy container in history, then:
+            if (url_requires_storing_the_policy_container_in_history(document_to_create->url())) {
+                // 1. Assert: navigationParams is a navigation params (i.e., neither null nor a non-fetch scheme navigation params).
+                VERIFY(navigation_params.has<GC::Ref<NavigationParams>>());
+
+                // 2. Set entry's document state's history policy container to navigationParams's policy container.
+                entry->document_state()->set_history_policy_container(
+                    navigation_params.get<GC::Ref<NavigationParams>>()->policy_container->serialize());
+            }
+        }
+
+        // 3. If entry's document state's request referrer is "client", and navigationParams is a navigation params (i.e., neither null nor a non-fetch scheme navigation params), then:
+        if (entry->document_state()->request_referrer() == Fetch::Infrastructure::Request::Referrer::Client
+            && navigation_params.has<GC::Ref<NavigationParams>>()
+            && navigation_params.get<GC::Ref<NavigationParams>>()->request) {
+            // NB: We don't assert navigationParams's request is not null because srcdoc navigations create NavigationParams with a null request.
+
+            // 1. Set entry's document state's request referrer to navigationParams's request's referrer.
+            entry->document_state()->set_request_referrer(
+                navigation_params.get<GC::Ref<NavigationParams>>()->request->referrer());
+        }
+    }
+}
+
+void PopulateSessionHistoryEntryDocumentOutput::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(document_to_create);
+    visitor.visit(navigation_params);
+}
+
+GC::WeakHashSet<LocalNavigable>& all_local_navigables()
+{
+    // NB: Worker agents have no navigables, and these are cells of the window agent's heap.
+    static thread_local NeverDestroyed<GC::WeakHashSet<LocalNavigable>> set;
+    return *set;
+}
+
+GC::Ptr<LocalNavigable> local_navigable_with_id(CrossProcessId id)
+{
+    for (auto& navigable : all_local_navigables()) {
+        if (navigable.id() == id)
+            return navigable;
+    }
+    return nullptr;
+}
+
+// https://html.spec.whatwg.org/multipage/document-sequences.html#child-navigable
+Vector<GC::Root<LocalNavigable>> LocalNavigable::child_navigables() const
+{
+    Vector<GC::Root<LocalNavigable>> results;
+    for (auto& entry : all_local_navigables()) {
+        if (entry.current_session_history_entry()->step() == SessionHistoryEntry::Pending::Tag)
+            continue;
+        if (entry.parent().ptr() == this)
+            results.append(entry);
+    }
+
+    return results;
+}
+
+struct LocalNavigable::RecordingInFlight {
+    AK_ALLOC_WITH_KMALLOC;
+
+    GC::Ref<DOM::Document> document;
+    // What the frame records, unless it keeps the display list the compositor has.
+    Optional<Painting::DisplayListRecording> recording;
+    // Whether the frame sends the compositor the document's visual context tree, and the scrolls it hands it, which the
+    // navigable takes back where the frame presents nothing.
+    bool sends_visual_context_tree { false };
+    Vector<Compositing::ScrollRequest> scroll_requests;
+};
+
+LocalNavigable::LocalNavigable(
+    GC::Ref<Page> page,
+    bool is_svg_page,
+    Web::PagePresentationRegistration page_presentation_registration)
+    : Navigable(page)
+    , m_event_handler({}, *this)
+    , m_is_svg_page(is_svg_page)
+{
+    all_local_navigables().set(*this);
+
+    if (!m_is_svg_page && page->has_compositor_host()) {
+        if (page_presentation_registration == Web::PagePresentationRegistration::Yes)
+            m_compositor_context = page->take_retired_page_compositor_context();
+        if (!m_compositor_context) {
+            auto context_id = page->client().allocate_compositor_context_id(page_presentation_registration);
+            m_compositor_context = page->compositor_host().create_context(context_id);
+        }
+    }
+}
+
+LocalNavigable::~LocalNavigable() = default;
+
+void LocalNavigable::set_has_been_destroyed()
+{
+    cancel_hover_update_after_async_scroll();
+    destroy_compositor_context();
+    m_has_been_destroyed = true;
+    DOM::Document::invalidate_full_activity();
+    resolve_all_pending_async_scroll_operations();
+    cancel_scroll_sequences();
+}
+
+Vector<GC::Root<LocalNavigable>> LocalNavigable::hosted_inclusive_descendant_navigables()
+{
+    Vector<GC::Root<LocalNavigable>> navigables;
+    navigables.append(*this);
+    auto document = active_document();
+    if (!document)
+        return navigables;
+    document->for_each_shadow_including_descendant([&](DOM::Node& node) {
+        if (auto* container = as_if<NavigableContainer>(node)) {
+            if (auto content_navigable = container->content_navigable()) {
+                // AD-HOC: If the descendant navigable doesn't have an active document, just skip over it.
+                if (auto* local_content_navigable = as_if<LocalNavigable>(*content_navigable); local_content_navigable && local_content_navigable->active_document())
+                    navigables.extend(local_content_navigable->hosted_inclusive_descendant_navigables());
+            }
+        }
+        return TraversalDecision::Continue;
+    });
+    return navigables;
+}
+
+void LocalNavigable::update_layout_of_hosted_inclusive_descendant_documents(DOM::UpdateLayoutReason reason)
+{
+    // Laying out a document can resize the navigable containers in it, which resizes the viewports of the documents
+    // they show and leaves those out of date. Tree order lays out each document after the one hosting it. Laying out
+    // an SVG document an <object> shows can resize the <object> in turn, which leaves the document hosting it out of
+    // date, so later rounds lay out what is out of date again. Each round brings at least one more level of nesting
+    // to rest, which bounds the rounds by the number of documents.
+    auto navigables = hosted_inclusive_descendant_navigables();
+    for (size_t round = 0; round <= navigables.size(); ++round) {
+        bool laid_out_any = false;
+        for (auto const& navigable : navigables) {
+            auto document = navigable->active_document();
+            if (!document || (round > 0 && document->layout_is_up_to_date()))
+                continue;
+            document->update_layout(reason);
+            laid_out_any = true;
+        }
+        if (!laid_out_any)
+            return;
+    }
+}
+
+void LocalNavigable::remove_from_all_local_navigables()
+{
+    cancel_hover_update_after_async_scroll();
+    destroy_compositor_context();
+    resolve_all_pending_async_scroll_operations();
+    cancel_scroll_sequences();
+
+    if (m_active_document)
+        m_active_document->set_navigable(nullptr);
+    all_local_navigables().remove(*this);
+}
+
+void LocalNavigable::finalize()
+{
+    cancel_hover_update_after_async_scroll();
+    cancel_scroll_sequences();
+    destroy_compositor_context();
+    Base::finalize();
+}
+
+void LocalNavigable::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_active_document);
+    visitor.visit(m_window_proxy_after_unload);
+    visitor.visit(m_provisional_for);
+    visitor.visit(m_input_method_composition_node);
+    m_event_handler.visit_edges(visitor);
+
+    for (auto& parked : m_navigations_parked_for_population) {
+        if (parked.navigation.has_value())
+            parked.navigation->visit_edges(visitor);
+    }
+
+    for (auto& async_scroll_operation : m_pending_async_scroll_operations)
+        visitor.visit(async_scroll_operation.promises);
+    for (auto& instant_scroll : m_instant_scrolls_awaiting_answers)
+        visitor.visit(instant_scroll.promise);
+    for (auto& smooth_scroll : m_main_thread_smooth_scrolls)
+        visitor.visit(smooth_scroll.promises);
+    for (auto& sequence : m_scroll_sequences)
+        visitor.visit(sequence.target);
+    if (m_recording_in_flight)
+        visitor.visit(m_recording_in_flight->document);
+}
+
+Compositor::NavigablePresenter& LocalNavigable::presenter()
+{
+    // The frame in flight reaches the compositor before anything the caller presents or reads of what was presented.
+    if (m_recording_in_flight)
+        take_recording_in_flight_in(TakeIn::Wait);
+    return *m_presenter;
+}
+
+// https://html.spec.whatwg.org/multipage/nav-history-apis.html#script-closable
+bool LocalNavigable::is_script_closable()
+{
+    // A navigable is script-closable if it is a top-level traversable, and any of the following are true:
+    // - its is created by web content is true; or
+    // - its session history entries's size is 1.
+    if (!is_top_level_traversable())
+        return false;
+
+    return as<LocalTraversableNavigable>(this)->is_created_by_web_content()
+        || as<LocalTraversableNavigable>(this)->session_history_entry_count() == 1;
+}
+
+// https://html.spec.whatwg.org/multipage/iframe-embed-object.html#potentially-delays-the-load-event
+bool LocalNavigable::delays_the_load_event_of_its_container() const
+{
+    // AD-HOC: A destroyed document leaves its navigable without an active document until the next one is activated
+    //         or the navigable itself goes away, which the specification has no state for. A document that does not
+    //         exist is not ready for post-load tasks.
+    auto document = active_document();
+    if (!document)
+        return true;
+
+    // - element's content navigable's active document is not ready for post-load tasks;
+    if (!document->ready_for_post_load_tasks())
+        return true;
+
+    // - element's content navigable's is delaying load events is true; or
+    if (is_delaying_load_events())
+        return true;
+
+    // - anything is delaying the load event of element's content navigable's active document.
+    if (document->anything_is_delaying_the_load_event())
+        return true;
+
+    return false;
+}
+
+void LocalNavigable::set_delaying_load_events(bool value)
+{
+    m_is_delaying_load_events = value;
+
+    // The container document's load event waits on this flag where that document lives: through a delayer when the
+    // document is here, and through the replicated state when it is in another process.
+    if (!value) {
+        m_container_document_load_event_delayer.clear();
+    } else if (auto document = container_document()) {
+        m_container_document_load_event_delayer.emplace(*document);
+    } else {
+        VERIFY(parent() && !is<LocalNavigable>(*parent()));
+    }
+    report_state_to_remote_container();
+}
+
+// AD-HOC: The spec leaves "is delaying load events" alone when a superseded navigation is dropped; we clear it there so
+//         a dropped navigation does not delay the load event forever. The flag is the navigable's, though, so only
+//         clear it when no newer navigation is ongoing: that one set it as it started and clears it as it ends.
+void LocalNavigable::stop_delaying_load_events_for_navigation(Utf16String const& navigation_id)
+{
+    if (auto const* ongoing_navigation_id = m_ongoing_navigation.get_pointer<Utf16String>(); ongoing_navigation_id && *ongoing_navigation_id != navigation_id)
+        return;
+    set_delaying_load_events(false);
+}
+
+RefPtr<SessionHistoryEntry> LocalNavigable::active_session_history_entry() const
+{
+    return m_active_session_history_entry;
+}
+
+void LocalNavigable::set_active_session_history_entry(RefPtr<SessionHistoryEntry> entry)
+{
+    m_active_session_history_entry = move(entry);
+}
+
+RefPtr<SessionHistoryEntry> LocalNavigable::current_session_history_entry() const
+{
+    return m_current_session_history_entry;
+}
+
+void LocalNavigable::set_current_session_history_entry(RefPtr<SessionHistoryEntry> entry)
+{
+    m_current_session_history_entry = move(entry);
+}
+
+// AD-HOC: The UI process ran steps 1-4 of attempting to populate the history entry's document. Continue at the
+//         algorithm's queued-global-task boundary instead of restarting the algorithm in this process.
+void LocalNavigable::continue_navigation_at_population(NavigationPopulationRequest request, NavigationPopulationResult result)
+{
+    if (!active_document() || !active_window()) {
+        page().client().navigation_population_failed(request.navigable_id, request.navigation_id);
+        return;
+    }
+    auto navigable = GC::Ref { *this };
+
+    SessionHistoryEntryReconstructionState reconstruction_state;
+    auto history_entry = create_session_history_entry_from_ui_process(create_session_history_entry_descriptor(move(request.history_entry), 0), reconstruction_state);
+    history_entry->set_step(SessionHistoryEntry::Pending::Tag);
+
+    // AD-HOC: A navigation this process started after the UI process sent this request supersedes it, and the UI
+    //         process ends this one once it hears of that one. Until then the newer navigation stays parked here, or
+    //         queued if it is to a javascript: URL, and must stay the ongoing navigation: otherwise its unload check
+    //         would find itself superseded, leaving no navigation to go on. The task below finds this navigation
+    //         superseded, as it does one superseded after this point.
+    auto ongoing_navigation = navigable->ongoing_navigation();
+    auto const* ongoing_navigation_id = ongoing_navigation.get_pointer<Utf16String>();
+    auto is_superseded_by_newer_navigation = ongoing_navigation_id && *ongoing_navigation_id != request.navigation_id
+        && (navigable->has_navigation_parked_for_population(*ongoing_navigation_id) || navigable->m_queued_javascript_url_navigations.contains_slow(*ongoing_navigation_id));
+    if (!is_superseded_by_newer_navigation)
+        navigable->set_ongoing_navigation(request.navigation_id);
+
+    // https://html.spec.whatwg.org/multipage/browsing-the-web.html#navigate
+    // 15. If navigable's parent is non-null, then set navigable's is delaying load events to true.
+    // NB: A navigable whose document was hosted by another page when navigate started ran the earlier steps there. A
+    //     local root's container waits on the flag through the replicated state, and a provisional navigable's takes
+    //     it over with the navigable, so set it where the population happens.
+    if (navigable->parent() && (navigable->is_local_root() || navigable->is_provisional()))
+        navigable->set_delaying_load_events(true);
+
+    auto& realm = navigable->active_window()->principal_realm();
+    TemporaryExecutionContext execution_context { realm, TemporaryExecutionContext::CallbacksEnabled::Yes };
+    auto navigation_params_or_error = create_navigation_params_from_descriptor(realm, *navigable, move(result.navigation_params));
+    if (navigation_params_or_error.is_error()) {
+        if (!is_superseded_by_newer_navigation) {
+            navigable->set_ongoing_navigation({});
+            navigable->set_delaying_load_events(false);
+        }
+        page().client().navigation_population_failed(request.navigable_id, request.navigation_id);
+        return;
+    }
+    auto navigation_params = navigation_params_or_error.release_value();
+
+    auto output = navigable->heap().allocate<PopulateSessionHistoryEntryDocumentOutput>();
+    output->redirected_url = move(result.redirected_url);
+    output->redirect_replaced_fragment = result.redirect_replaced_fragment;
+    output->classic_history_api_state = move(result.classic_history_api_state);
+    output->resource_cleared = result.resource_cleared;
+    output->navigation_same_site_status = result.navigation_same_site_status;
+    output->inline_content_origin = move(result.inline_content_origin);
+    output->document_id = result.document_id;
+
+    // https://html.spec.whatwg.org/multipage/browsing-the-web.html#attempt-to-populate-the-history-entry's-document
+    // 5. Queue a global task on the navigation and traversal task source, given navigable's active window, to run
+    //    these steps:
+    auto fetch_client_origin = request.source_snapshot_params.fetch_client.has_value()
+        ? Optional<URL::Origin> { request.source_snapshot_params.fetch_client->origin }
+        : Optional<URL::Origin> {};
+
+    navigable->queue_navigation_and_traversal_task_for_session_history_entry_population(
+        history_entry->url(),
+        request.source_snapshot_params.allows_downloading,
+        move(fetch_client_origin),
+        request.user_involvement,
+        request.navigation_id,
+        move(navigation_params),
+        request.csp_navigation_type,
+        Bindings::NavigationTimingType::Navigate,
+        output,
+        GC::create_function(navigable->heap(), GC::captures(navigable, history_entry, request.history_handling, request.navigation_id, request.user_involvement), [](auto& navigable, auto& history_entry, auto& history_handling, auto& navigation_id, auto& user_involvement, GC::Ptr<PopulateSessionHistoryEntryDocumentOutput> output) {
+            // AD-HOC: This check is not in the spec but we should not continue navigation if ongoing navigation id has changed.
+            if (navigable->ongoing_navigation() != navigation_id) {
+                if (output && output->document_to_create)
+                    output->document_to_create->discard();
+                navigable->stop_delaying_load_events_for_navigation(navigation_id);
+                navigable->page().client().navigation_population_failed(navigable->id(), navigation_id);
+                return;
+            }
+
+            if (output && output->download_handled) {
+                // NB: The UI process ended the recorded load and its transaction when the download adopted this
+                //     population's response body.
+                navigable->set_ongoing_navigation({});
+                navigable->set_delaying_load_events(false);
+                return;
+            }
+
+            if (output)
+                output->apply_to(*history_entry);
+            auto pending_document = output ? output->document_to_create : GC::Ptr<DocumentToCreate> {};
+
+            // AD-HOC: Clear the ongoing navigation, like the "navigation must be a replace" and download cases do.
+            //         No history step will be applied for this navigation, so nothing else clears it, and WebDriver
+            //         would wait for it to mature until the page load timeout.
+            if (!pending_document)
+                navigable->set_ongoing_navigation({});
+
+            finalize_a_cross_document_navigation(navigable, to_history_handling_behavior(history_handling), user_involvement, history_entry, pending_document, navigation_id);
+        }));
+}
+
+// The local session history entries a navigable can still be asked to activate or update.
+static Vector<NonnullRefPtr<SessionHistoryEntry>> retained_session_history_entries(LocalNavigable& navigable)
+{
+    Vector<NonnullRefPtr<SessionHistoryEntry>> entries;
+    auto append = [&](RefPtr<SessionHistoryEntry> entry) {
+        if (!entry)
+            return;
+        if (entries.find_if([&](auto const& candidate) {
+                return candidate.ptr() == entry.ptr();
+            })
+            != entries.end()) {
+            return;
+        }
+        entries.append(entry.release_nonnull());
+    };
+
+    append(navigable.current_session_history_entry());
+    append(navigable.active_session_history_entry());
+
+    if (auto window = navigable.active_window()) {
+        for (auto const& navigation_entry : window->navigation()->entries())
+            append(navigation_entry->session_history_entry());
+    }
+
+    return entries;
+}
+
+NonnullRefPtr<SessionHistoryEntry> LocalNavigable::resolve_local_session_history_entry(SessionHistoryEntryDescriptor entry_descriptor)
+{
+    auto retained_entries = retained_session_history_entries(*this);
+    auto target_identity = session_history_entry_identity(entry_descriptor);
+    for (auto& retained_entry : retained_entries) {
+        if (session_history_entry_identity(*retained_entry) == target_identity) {
+            apply_session_history_entry_descriptor_from_ui_process(*retained_entry, entry_descriptor);
+            apply_session_history_document_state_descriptor_from_ui_process(*retained_entry->document_state(), entry_descriptor.document_state);
+            return retained_entry;
+        }
+    }
+
+    SessionHistoryEntryReconstructionState reconstruction_state;
+    for (auto const& retained_entry : retained_entries) {
+        auto document_state = retained_entry->document_state();
+        if (document_state)
+            reconstruction_state.document_states.set(document_state->cross_process_id(), document_state);
+    }
+
+    return create_session_history_entry_from_ui_process(move(entry_descriptor), reconstruction_state);
+}
+
+Vector<NonnullRefPtr<SessionHistoryEntry>> LocalNavigable::session_history_entries_for_navigation_api_from_ui_process(Vector<SessionHistoryEntryDescriptor> entry_descriptors, NonnullRefPtr<SessionHistoryEntry> target_entry)
+{
+    auto retained_entries = retained_session_history_entries(*this);
+
+    // The list is for a continuation that's about to activate target_entry, so that entry is retained as well. It's the
+    // navigable's current entry when its job claims the navigable. But a sync navigation that jumped the queue when the
+    // job was paused takes the current entry over (e.g. a replaceState call from the doc that a navigation is leaving).
+    if (retained_entries.find_if([&](auto const& entry) { return entry.ptr() == target_entry.ptr(); }) == retained_entries.end())
+        retained_entries.append(move(target_entry));
+
+    SessionHistoryEntryReconstructionState reconstruction_state;
+    for (auto const& retained_entry : retained_entries) {
+        auto document_state = retained_entry->document_state();
+        if (document_state)
+            reconstruction_state.document_states.set(document_state->cross_process_id(), document_state);
+    }
+
+    Vector<NonnullRefPtr<SessionHistoryEntry>> entries;
+    entries.ensure_capacity(entry_descriptors.size());
+
+    for (auto& entry_descriptor : entry_descriptors) {
+        RefPtr<SessionHistoryEntry> local_entry;
+        auto entry_identity = session_history_entry_identity(entry_descriptor);
+        for (auto const& retained_entry : retained_entries) {
+            if (session_history_entry_identity(*retained_entry) == entry_identity) {
+                local_entry = retained_entry;
+                break;
+            }
+        }
+
+        if (local_entry) {
+            apply_session_history_entry_descriptor_from_ui_process(*local_entry, entry_descriptor);
+            apply_session_history_document_state_descriptor_from_ui_process(*local_entry->document_state(), entry_descriptor.document_state);
+            entries.append(local_entry.release_nonnull());
+            continue;
+        }
+
+        auto entry = SessionHistoryEntry::create();
+        apply_session_history_entry_descriptor_from_ui_process(*entry, entry_descriptor);
+        entry->set_document_state(get_or_create_document_state_from_ui_process(entry_descriptor.document_state, reconstruction_state));
+        entries.append(move(entry));
+    }
+
+    return entries;
+}
+
+// https://html.spec.whatwg.org/multipage/document-sequences.html#initialize-the-navigable
+void LocalNavigable::initialize_navigable(NonnullRefPtr<DocumentState> document_state, GC::Ptr<Navigable> parent, GC::Ref<DOM::Document> document, VisibilityState system_visibility_state, bool is_stand_in)
+{
+    set_id(page().client().allocate_navigable_id());
+
+    // 1. Assert: documentState's document is non-null.
+    // NOTE: DocumentState no longer owns the document; it is passed separately and owned by the LocalNavigable.
+
+    // 2. Let entry be a new session history entry, with
+    auto entry = SessionHistoryEntry::create();
+    // URL: document's URL
+    entry->set_url(document->url());
+    // document state: documentState
+    entry->set_document_state(document_state);
+    document_state->set_document_id(document->unique_id());
+
+    // 3. Set navigable's current session history entry to entry.
+    m_current_session_history_entry = entry;
+
+    // 4. Set navigable's active session history entry to entry.
+    m_active_session_history_entry = entry;
+    m_active_document = document;
+    DOM::Document::invalidate_full_activity();
+    document->set_navigable(this);
+
+    // 5. Set navigable's parent to parent.
+    set_parent(parent);
+
+    // 6. Set the initial visibility state of documentState's document to navigable's traversable navigable's system visibility state.
+    document->set_initial_visibility_state(system_visibility_state);
+
+    // AD-HOC: A navigable's first document is active in it from the navigable's initialization, before scripts may run
+    //         for it, and WebDriver BiDi creates its realm and runs its preload scripts then. WebDriver BiDi names a
+    //         top-level traversable by the window handle it gets once it is created, so it does that once it has one.
+    if (WebDriver::BiDi::is_active() && !is_top_level_traversable() && !is_stand_in)
+        WebDriver::BiDi::document_is_ready_for_scripts(document);
+
+    // A child navigable's first document became active before it had a navigable, so the page client hears of it here,
+    // as it hears of each document that later becomes active in the navigable.
+    if (!is_top_level_traversable() && !is_stand_in)
+        page().client().page_did_change_active_document_in_child_navigable(document);
+}
+
+// AD-HOC: The debug settings and the compositor tree are per page, so a child navigable starts from its parent's. A
+//         navigable that roots a page receives both from the page host instead.
+void LocalNavigable::inherit_page_state_from(LocalNavigable const& parent)
+{
+    m_should_show_line_box_borders = parent.m_should_show_line_box_borders;
+    m_force_dark_enabled = parent.m_force_dark_enabled;
+    m_force_dark_foreground_threshold = parent.m_force_dark_foreground_threshold;
+    m_force_dark_background_threshold = parent.m_force_dark_background_threshold;
+    m_should_show_caret_hit_test_debug_overlay = parent.m_should_show_caret_hit_test_debug_overlay;
+
+    if (!m_is_svg_page && has_compositor_context() && parent.has_compositor_context())
+        compositor_context().set_parent_context(parent.compositor_context().id());
+}
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#activate-history-entry
+void LocalNavigable::activate_history_entry(NonnullRefPtr<SessionHistoryEntry> entry, GC::Ref<DOM::Document> document)
+{
+    // AD-HOC: The document a provisional navigable populated activates: the navigable takes its container over first,
+    //         so that the document is the content navigable's active document, and the WindowProxy's [[Window]], from
+    //         its activation.
+    if (is_provisional())
+        page().adopt_hosted(*this);
+
+    // 1. Save persisted state to the navigable's active session history entry.
+    save_persisted_state_to_active_session_history_entry();
+
+    // 2. Let newDocument be entry's document.
+    auto new_document = document;
+
+    // 3. Assert: newDocument's is initial about:blank is false, i.e., we never traverse
+    //    back to the initial about:blank Document because it always gets replaced when we
+    //    navigate away from it.
+    VERIFY(!new_document->is_initial_about_blank());
+
+    // 4. Set navigable's active session history entry to entry.
+    // NB: Which also makes newDocument the active document, and records it as entry's document state's document, which
+    //     a reconstructed entry only knows by ID.
+    m_active_session_history_entry = entry;
+    set_active_document(new_document);
+
+    // 5. Make active newDocument.
+    new_document->make_active();
+
+    // 6. Set the initial visibility state of newDocument to navigable's traversable navigable's system visibility state.
+    new_document->set_initial_visibility_state(page().system_visibility_state());
+
+    // AD-HOC: In the async state machine, documents created during populate may have completed
+    //         their loading lifecycle before being activated (when they had no navigable).
+    //         Re-trigger the post-load steps that were skipped:
+    //         - completely_finish_loading: fires the iframe load event on the container
+    //         - schedule_html_parser_end_check: allows the parent's parser end state to progress
+    if (new_document->ready_for_post_load_tasks()) {
+        if (auto nav_container = container())
+            nav_container->document().schedule_html_parser_end_check();
+    }
+    if (new_document->completely_loaded_deferred())
+        new_document->completely_finish_loading();
+
+    notify_navigation_observers_navigation_complete();
+}
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#apply-the-history-step
+// The steps queued for one navigable of nonchangingNavigablesThatStillNeedUpdates.
+void LocalNavigable::update_nonchanging_navigable_history_step_state(HistoryObjectLengthAndIndex history_object_length_and_index, GC::Ref<GC::Function<void()>> on_complete)
+{
+    // AD-HOC: Queue with null document instead of using queue_global_task. A document-associated task can become
+    //         unrunnable while the UI process waits for completion, so validate the document when the task runs.
+    queue_a_task(Task::Source::NavigationAndTraversal, nullptr, nullptr, GC::create_function(heap(), GC::captures(GC::Ref { *this }, history_object_length_and_index.script_history_index, history_object_length_and_index.script_history_length, on_complete), [](auto& navigable, auto& script_history_index, auto& script_history_length, auto& on_complete) {
+        // 1. Let document be navigable's active document.
+        auto document = navigable->active_document();
+        if (navigable->has_been_destroyed() || !document || !document->is_fully_active()) {
+            on_complete->function()();
+            return;
+        }
+
+        // 2. Set document's history object's index to scriptHistoryIndex.
+        document->history()->m_index = script_history_index;
+
+        // 3. Set document's history object's length to scriptHistoryLength.
+        document->history()->m_length = script_history_length;
+
+        // 4. Increment completedNonchangingJobs.
+        on_complete->function()();
+    }));
+}
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#apply-the-history-step
+// The steps queued for a navigable of changingNavigables whose targetEntry's document is not its active document.
+void LocalNavigable::queue_navigation_api_state_clear_task()
+{
+    // AD-HOC: The UI process can ask this while the navigable has no active document.
+    if (!active_window())
+        return;
+
+    queue_global_task(Task::Source::NavigationAndTraversal, relevant_global_object(*active_window()), GC::create_function(heap(), GC::captures(GC::Ref { *this }), [](auto& navigable) {
+        if (navigable->has_been_destroyed() || !navigable->active_window())
+            return;
+
+        // 1. Let navigation be navigable's active window's navigation API.
+        auto navigation = navigable->active_window()->navigation();
+
+        // 2. Set navigation's ongoing navigate event to null.
+        navigation->set_ongoing_navigate_event(nullptr);
+
+        // 3. Set navigation's ongoing API method tracker to null.
+        navigation->set_ongoing_api_method_tracker(nullptr);
+    }));
+}
+
+// https://html.spec.whatwg.org/multipage/document-lifecycle.html#unload-a-document-and-its-descendants
+void LocalNavigable::run_ui_descendant_unload_task(ChildNavigableDestruction child_navigable_destruction, StopHostingAfterUnload stop_hosting_after_unload, GC::Ref<GC::Function<void()>> on_complete)
+{
+    // 2. Unload a document and its descendants given childNavigable's active document, null, and incrementUnloaded.
+    if (has_been_destroyed()) {
+        on_complete->function()();
+        return;
+    }
+
+    // https://html.spec.whatwg.org/multipage/document-sequences.html#destroy-a-child-navigable
+    // 4. Inform the navigation API about child navigable destruction given navigable.
+    // NB: navigable's active window is here, while container is in the process destroying navigable.
+    if (child_navigable_destruction == ChildNavigableDestruction::Yes)
+        inform_the_navigation_api_about_child_navigable_destruction();
+
+    // The UI process has already unloaded this document's descendants.
+    queue_a_task(Task::Source::NavigationAndTraversal, nullptr, nullptr,
+        GC::create_function(heap(), GC::captures(GC::Ref { *this }, stop_hosting_after_unload, on_complete), [](auto& navigable, auto& stop_hosting_after_unload, auto& on_complete) {
+            if (auto active_document = navigable->active_document()) {
+                // The browsing context's WindowProxy outlives the document, since scripts hold it for the navigable.
+                if (auto browsing_context = active_document->browsing_context())
+                    navigable->m_window_proxy_after_unload = browsing_context->window_proxy();
+                // NB: The navigable can be destroyed after this task was queued, which can leave its parent without the
+                //     active document its replicated state reads. A destroyed navigable has nothing to stop hosting.
+                Optional<ReplicatedNavigableState> replicated_state;
+                if (stop_hosting_after_unload == StopHostingAfterUnload::Yes && !navigable->has_been_destroyed())
+                    replicated_state = navigable->replicated_state();
+                active_document->unload();
+
+                // Another page hosts the navigable's next document, or destroys the navigable. A RemoteNavigable takes
+                // the navigable's place in the same task, so no task here sees the navigable without an active
+                // document.
+                // NB: An unload handler can remove the navigable's container, which destroys the navigable. Nothing is
+                //     left to stop hosting then: the container's removal tells the UI process the navigable is gone, and
+                //     scripts holding the WindowProxy see the window of a removed iframe.
+                if (replicated_state.has_value() && !navigable->has_been_destroyed())
+                    navigable->page().stop_hosting(*navigable, replicated_state.release_value());
+            }
+            on_complete->function()();
+        }));
+}
+
+void LocalNavigable::notify_navigation_observers_navigation_complete()
+{
+    if (!m_ongoing_navigation.has<Empty>())
+        return;
+
+    for (auto& navigation_observer : m_navigation_observers) {
+        if (navigation_observer.navigation_complete())
+            navigation_observer.navigation_complete()->function()();
+    }
+}
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#save-persisted-state
+void LocalNavigable::save_persisted_state_to_active_session_history_entry()
+{
+    auto entry = active_session_history_entry();
+    if (!entry)
+        return;
+
+    // 1. Set the scroll position data of entry to contain the scroll positions for all of entry's document's
+    //    restorable scrollable regions.
+    auto scroll_position_data = entry->scroll_position_data();
+    scroll_position_data.viewport_scroll_position = viewport_scroll_offset();
+    entry->set_scroll_position_data(move(scroll_position_data));
+
+    // FIXME: 2. Optionally, update entry's persisted user state.
+}
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#restore-persisted-user-state
+// https://wicg.github.io/scroll-to-text-fragment/#restricting-scroll-on-load
+void LocalNavigable::restore_persisted_state_from_session_history_entry(SessionHistoryEntry const& entry, bool suppress_scrolling)
+{
+    m_pending_persisted_state_restoration.clear();
+
+    // 1. If entry's scroll restoration mode is "auto", suppressScrolling is false, and entry's
+    //    document's relevant global object's navigation API's suppress normal scroll restoration
+    //    during ongoing navigation is false, then restore scroll position data given entry.
+    if (entry.scroll_restoration_mode() == ScrollRestorationMode::Auto && !suppress_scrolling) {
+        if (auto window = active_window()) {
+            if (!window->navigation()->suppress_normal_scroll_restoration_during_ongoing_navigation()) {
+                restore_scroll_position_data(entry);
+            }
+        }
+    }
+
+    // FIXME: 2. Optionally, update other aspects of entry's document and its rendering, for instance values of form
+    //        fields, that the user agent had previously recorded in entry's persisted user state.
+}
+
+void LocalNavigable::schedule_persisted_state_restoration_retry(SessionHistoryEntry const& entry)
+{
+    auto document = active_document();
+    auto document_state = entry.document_state();
+    if (!document || !document_state || document->readiness() == DocumentReadyState::Complete)
+        return;
+    if (entry.scroll_restoration_mode() != ScrollRestorationMode::Auto
+        || !entry.scroll_position_data().viewport_scroll_position.has_value()) {
+        return;
+    }
+    m_pending_persisted_state_restoration = PendingPersistedStateRestoration {
+        .document = document,
+        .document_state_id = document_state->cross_process_id(),
+        .navigation_api_key = entry.navigation_api_key(),
+    };
+}
+
+void LocalNavigable::restore_pending_persisted_state_for_completed_document(GC::Ref<DOM::Document> document)
+{
+    if (!m_pending_persisted_state_restoration.has_value()
+        || m_pending_persisted_state_restoration->document != document) {
+        return;
+    }
+
+    auto restoration = m_pending_persisted_state_restoration.release_value();
+    auto entry = active_session_history_entry();
+    if (!entry || entry->navigation_api_key() != restoration.navigation_api_key)
+        return;
+    auto document_state = entry->document_state();
+    if (!document_state || document_state->cross_process_id() != restoration.document_state_id)
+        return;
+    restore_persisted_state_from_session_history_entry(*entry, false);
+}
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#restore-scroll-position-data
+static CSSPixelPoint viewport_scroll_offset_in_scroll_range(DOM::Document& document, CSSPixelPoint scroll_offset)
+{
+    if (!document.layout_is_up_to_date())
+        return scroll_offset;
+    Layout::ForcedReadScope read { document };
+    auto* layout_node = document.layout_node(read);
+    if (!layout_node)
+        return scroll_offset;
+    return Painting::clamp_scroll_offset(*layout_node, scroll_offset);
+}
+
+void LocalNavigable::restore_scroll_position_data(SessionHistoryEntry const& entry)
+{
+    auto const& scroll_position_data = entry.scroll_position_data();
+    if (!scroll_position_data.viewport_scroll_position.has_value())
+        return;
+    auto document = active_document();
+    if (!document)
+        return;
+
+    // FIXME: If the document has been scrolled by the user, return.
+    auto scroll_offset = viewport_scroll_offset_in_scroll_range(*document, *scroll_position_data.viewport_scroll_position);
+    Web::AsyncScrollNodeStableID viewport_stable_node_id { .node_id = document->unique_id(), .kind = Web::AsyncScrollNodeKind::Viewport };
+    if (!store_scroll_offset(viewport_stable_node_id, scroll_offset, Painting::CompositorScrollRequest::ProgrammaticJump) && has_compositor_context())
+        request_scroll_jump(viewport_stable_node_id, ScrollTrigger::Programmatic);
+}
+
+void LocalNavigable::clamp_viewport_scroll_offset()
+{
+    if (auto document = active_document())
+        store_scroll_offset({ .node_id = document->unique_id(), .kind = Web::AsyncScrollNodeKind::Viewport }, viewport_scroll_offset_in_scroll_range(*document, m_viewport_scroll_offset), Painting::CompositorScrollRequest::None);
+}
+
+// https://html.spec.whatwg.org/multipage/document-sequences.html#nav-document
+GC::Ptr<DOM::Document> LocalNavigable::active_document() const
+{
+    // A navigable's active document is its active session history entry's document.
+    return m_active_document;
+}
+
+Optional<URL::URL> LocalNavigable::active_document_url() const
+{
+    if (!m_active_document)
+        return {};
+    return m_active_document->url();
+}
+
+Optional<URL::Origin> LocalNavigable::active_document_origin() const
+{
+    if (!m_active_document)
+        return {};
+    return m_active_document->origin();
+}
+
+SandboxingFlagSet LocalNavigable::active_document_sandboxing_flag_set() const
+{
+    if (!m_active_document)
+        return {};
+    return m_active_document->active_sandboxing_flag_set();
+}
+
+Vector<GC::Root<Navigable>> LocalNavigable::active_document_inclusive_descendant_navigables()
+{
+    // AD-HOC: Skip a navigable that doesn't have an active document.
+    if (!m_active_document)
+        return {};
+    return m_active_document->inclusive_descendant_navigables();
+}
+
+bool LocalNavigable::active_document_is_fully_active() const
+{
+    return m_active_document && m_active_document->is_fully_active();
+}
+
+bool LocalNavigable::active_window_has_sticky_activation() const
+{
+    if (!m_active_document)
+        return false;
+    auto window = m_active_document->window();
+    return window && window->has_sticky_activation();
+}
+
+bool LocalNavigable::active_document_is_completely_loaded() const
+{
+    return m_active_document && m_active_document->is_completely_loaded();
+}
+
+bool LocalNavigable::active_document_is(DOM::Document const& document) const
+{
+    return m_active_document.ptr() == &document;
+}
+
+Optional<URL::URL> LocalNavigable::active_document_top_level_creation_url() const
+{
+    if (!m_active_document)
+        return {};
+    return relevant_settings_object(*m_active_document).top_level_creation_url;
+}
+
+Optional<URL::Origin> LocalNavigable::active_document_top_level_origin() const
+{
+    if (!m_active_document)
+        return {};
+    return relevant_settings_object(*m_active_document).top_level_origin;
+}
+
+// https://html.spec.whatwg.org/multipage/nav-history-apis.html#script-settings-for-window-objects:concept-settings-object-has-cross-site-ancestor
+// NB: Run with this navigable as window's navigable, which is null while a navigation that reuses the Window of an
+//     initial about:blank populates its next document, and once this navigable is destroyed.
+bool LocalNavigable::active_document_has_cross_site_ancestor() const
+{
+    // NB: A navigable whose document was destroyed has no active document, while the navigables of iframes removed as
+    //     that document unloaded still have theirs. Conservatively treat it as a third-party context.
+    if (!m_active_document)
+        return true;
+
+    // 1. If window's navigable's parent is null, then return false.
+    auto parent = this->parent();
+    if (!parent)
+        return false;
+
+    // 2. Let parentDocument be window's navigable's parent's active document.
+    // 3. If parentDocument's relevant settings object's has cross-site ancestor is true, then return true.
+    if (parent->active_document_has_cross_site_ancestor())
+        return true;
+
+    // 4. If parentDocument's origin is not same site with window's associated Document's origin, then return true.
+    if (!parent->active_document_origin()->is_same_site(m_active_document->origin()))
+        return true;
+
+    // 5. Return false.
+    return false;
+}
+
+OpenerPolicy const& LocalNavigable::active_document_opener_policy() const
+{
+    VERIFY(m_active_document);
+    return m_active_document->opener_policy();
+}
+
+ReplicatedNavigableState LocalNavigable::replicated_state() const
+{
+    VERIFY(m_active_document);
+    VERIFY(m_active_session_history_entry);
+    auto& settings = relevant_settings_object(*m_active_document);
+    auto const& browsing_context = *m_active_document->browsing_context();
+    return {
+        .target_name = target_name(),
+        .active_document_url = m_active_document->url(),
+        .active_document_origin = m_active_document->origin(),
+        .active_document_sandboxing_flag_set = m_active_document->active_sandboxing_flag_set(),
+        .active_document_is_fully_active = m_active_document->is_fully_active(),
+        .active_window_has_sticky_activation = active_window_has_sticky_activation(),
+        .top_level_creation_url = settings.top_level_creation_url.value(),
+        .top_level_origin = settings.top_level_origin.value(),
+        .has_cross_site_ancestor = active_document_has_cross_site_ancestor(),
+        .browsing_context_group_id = browsing_context_group_id(),
+        .opener_policy = m_active_document->opener_policy(),
+        .active_browsing_context_is_auxiliary = active_browsing_context_is_auxiliary(),
+        .opener_navigable_id = browsing_context.opener_navigable_id(),
+        .one_permitted_sandboxed_navigator_navigable_id = browsing_context.one_permitted_sandboxed_navigator_navigable_id(),
+        .active_document_is_completely_loaded = m_active_document->is_completely_loaded(),
+        .is_closing = m_closing,
+        .container = container_state(),
+        .delays_the_load_event_of_its_container = delays_the_load_event_of_its_container(),
+        .has_session_history_entry_and_ready_for_navigation = m_has_session_history_entry_and_ready_for_navigation,
+        .compositor_context_id = has_compositor_context() ? Optional<Web::CompositorContextId> { compositor_context().id() } : Optional<Web::CompositorContextId> {},
+    };
+}
+
+bool LocalNavigable::active_browsing_context_is_auxiliary() const
+{
+    return m_active_document && m_active_document->browsing_context() && m_active_document->browsing_context()->is_auxiliary();
+}
+
+GC::Ptr<Navigable> LocalNavigable::active_browsing_context_opener_navigable() const
+{
+    if (!m_active_document || !m_active_document->browsing_context())
+        return nullptr;
+    return m_active_document->browsing_context()->opener_navigable();
+}
+
+GC::Ptr<Navigable> LocalNavigable::active_browsing_context_one_permitted_sandboxed_navigator() const
+{
+    if (!m_active_document || !m_active_document->browsing_context())
+        return nullptr;
+    return m_active_document->browsing_context()->one_permitted_sandboxed_navigator_navigable();
+}
+
+ReplicatedContainerState LocalNavigable::container_state() const
+{
+    // A local root's container lives with its parent's document in another process, which reports it.
+    auto container = this->container();
+    if (!container)
+        return m_root_container_state;
+    return container->replicated_container_state();
+}
+
+bool LocalNavigable::container_suppresses_viewport_scrolling() const
+{
+    if (auto container = this->container())
+        return container->suppresses_viewport_scrolling();
+    return m_root_container_state.suppresses_viewport_scrolling;
+}
+
+void LocalNavigable::set_root_container_state(ReplicatedContainerState state)
+{
+    VERIFY(is_local_root() && parent());
+    auto used_color_scheme_changed = m_root_container_state.used_color_scheme != state.used_color_scheme;
+    bool scroll_mode_changed = m_root_container_state.suppresses_viewport_scrolling != state.suppresses_viewport_scrolling;
+    m_root_container_state = move(state);
+    if (scroll_mode_changed && m_active_document)
+        m_active_document->set_needs_layout_update(DOM::SetNeedsLayoutReason::FrameScrollingAttributeChange);
+
+    // The container's used color scheme decides whether the canvas is opaque.
+    if (used_color_scheme_changed && m_active_document) {
+        m_needs_to_record_display_list = true;
+        m_active_document->set_needs_repaint(Badge<HTML::LocalNavigable> {}, InvalidateDisplayList::No);
+    }
+}
+
+void LocalNavigable::set_closing(bool value)
+{
+    m_closing = value;
+
+    // The navigable's replicated state carries its closing flag.
+    report_hosted_state();
+}
+
+HostedNavigableState LocalNavigable::hosted_state() const
+{
+    VERIFY(m_active_document);
+    return {
+        .active_document_is_fully_active = m_active_document->is_fully_active(),
+        .is_closing = m_closing,
+        .container = container_state(),
+        .delays_the_load_event_of_its_container = delays_the_load_event_of_its_container(),
+        .compositor_context_id = has_compositor_context() ? Optional<Web::CompositorContextId> { compositor_context().id() } : Optional<Web::CompositorContextId> {},
+    };
+}
+
+void LocalNavigable::report_hosted_state()
+{
+    page().client().page_did_change_hosted_navigable_state(id(), hosted_state());
+}
+
+// The opener browsing context is reported as the navigable it is active in.
+void LocalNavigable::report_opener_browsing_context()
+{
+    page().client().page_did_set_opener_browsing_context(id(), active_browsing_context()->opener_navigable_id());
+}
+
+// A container in another process reads what it asks of its content navigable from the replicated state.
+void LocalNavigable::report_state_to_remote_container()
+{
+    // A navigable destroyed while its navigation was in flight has no document left to report the state of.
+    if (is_local_root() && parent() && m_active_document)
+        report_hosted_state();
+}
+
+Optional<UniqueNodeID> LocalNavigable::active_document_id() const
+{
+    if (!m_active_document)
+        return {};
+    return m_active_document->unique_id();
+}
+
+void LocalNavigable::set_active_document(GC::Ptr<DOM::Document> document)
+{
+    if (is_top_level_traversable() && m_active_document != document)
+        page().invalidate_compositor_keyboard_scroll_state();
+    if (m_active_document && m_active_document != document) {
+        // The outgoing document's frame in flight reaches the compositor before any of the new one's.
+        (void)presenter();
+        // The pending post-scroll hover refresh and scrollend settlement belong to the outgoing document; drop them.
+        // And so does the hover the page reported to its client; end it.
+        cancel_hover_update_after_async_scroll();
+        cancel_scroll_sequences();
+        m_event_handler.reset_hover_for_document_replacement({});
+        // NB: A composition belongs to the outgoing document, not the navigable that survives it.
+        forget_input_method_composition_session();
+        m_active_document->set_navigable(nullptr);
+    }
+    m_active_document = document;
+    DOM::Document::invalidate_full_activity();
+    if (document)
+        document->set_navigable(this);
+    update_force_dark_for_active_document();
+    set_needs_to_record_display_list();
+
+    VERIFY(m_active_session_history_entry);
+    Optional<UniqueNodeID> document_id;
+    if (document)
+        document_id = document->unique_id();
+    m_active_session_history_entry->document_state()->set_document_id(document_id);
+}
+
+static constexpr u32 max_navigation_or_history_updates_in_rate_limit_window = 200;
+static constexpr auto navigation_or_history_update_rate_limit_window_duration = AK::Duration::from_seconds(10);
+
+// https://html.spec.whatwg.org/multipage/document-sequences.html#allowed-to-perform-a-navigation-or-history-update
+LocalNavigable::NavigationOrHistoryUpdatePermission LocalNavigable::allowed_to_perform_a_navigation_or_history_update()
+{
+    // An allowed to perform a navigation or history update algorithm, which is implementation-defined and returns
+    // either allowed or blocked.
+    // NB: We block a navigable's navigations and history updates after it has done too many of them within a short
+    //     timespan, so a page cannot flood the session history or keep the event loop busy navigating.
+    auto now = MonotonicTime::now_coarse();
+    if (!m_navigation_or_history_update_rate_limit_held_for_testing
+        && now - m_navigation_or_history_update_rate_limit_window_start > navigation_or_history_update_rate_limit_window_duration) {
+        m_navigation_or_history_update_rate_limit_window_start = now;
+        m_navigation_or_history_updates_in_rate_limit_window = 0;
+    }
+
+    if (m_navigation_or_history_updates_in_rate_limit_window >= max_navigation_or_history_updates_in_rate_limit_window)
+        return NavigationOrHistoryUpdatePermission::Blocked;
+
+    ++m_navigation_or_history_updates_in_rate_limit_window;
+    return NavigationOrHistoryUpdatePermission::Allowed;
+}
+
+void LocalNavigable::exhaust_navigation_or_history_update_rate_limit_for_testing()
+{
+    // The hold keeps the window from expiring with time, so only the reset between tests lifts the limit again.
+    m_navigation_or_history_update_rate_limit_held_for_testing = true;
+    m_navigation_or_history_updates_in_rate_limit_window = max_navigation_or_history_updates_in_rate_limit_window;
+}
+
+void LocalNavigable::reset_navigation_or_history_update_rate_limit_for_testing()
+{
+    m_navigation_or_history_update_rate_limit_held_for_testing = false;
+    m_navigation_or_history_update_rate_limit_window_start = MonotonicTime::now_coarse();
+    m_navigation_or_history_updates_in_rate_limit_window = 0;
+}
+
+Optional<u64> LocalNavigable::browsing_context_group_id() const
+{
+    Navigable const* top_level_traversable = this;
+    while (top_level_traversable->parent())
+        top_level_traversable = top_level_traversable->parent().ptr();
+    if (top_level_traversable == this)
+        return {};
+    return top_level_traversable->browsing_context_group_id();
+}
+
+// https://html.spec.whatwg.org/multipage/document-sequences.html#nav-bc
+GC::Ptr<BrowsingContext> LocalNavigable::active_browsing_context()
+{
+    // A navigable's active browsing context is its active document's browsing context.
+    // If this navigable is a traversable navigable, then its active browsing context will be a top-level browsing context.
+    if (auto document = active_document())
+        return document->browsing_context();
+    return nullptr;
+}
+
+// https://html.spec.whatwg.org/multipage/document-sequences.html#nav-wp
+GC::Ptr<HTML::WindowProxy> LocalNavigable::active_window_proxy()
+{
+    // A navigable's active WindowProxy is its active browsing context's associated WindowProxy.
+    if (auto browsing_context = active_browsing_context())
+        return browsing_context->window_proxy();
+    return nullptr;
+}
+
+// https://html.spec.whatwg.org/multipage/document-sequences.html#nav-window
+GC::Ptr<HTML::Window> LocalNavigable::active_window()
+{
+    // A navigable's active window is its active WindowProxy's [[Window]].
+    if (auto window_proxy = active_window_proxy())
+        return window_proxy->window();
+    return nullptr;
+}
+
+// https://html.spec.whatwg.org/multipage/document-sequences.html#nav-target
+Utf16String const& LocalNavigable::target_name() const
+{
+    // A navigable's target name is its active session history entry's document state's navigable target name.
+    return active_session_history_entry()->document_state()->navigable_target_name();
+}
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#set-the-ongoing-navigation
+void LocalNavigable::set_ongoing_navigation(Variant<Empty, Traversal, Utf16String> ongoing_navigation)
+{
+    // 1. If navigable's ongoing navigation is equal to newValue, then return.
+    if (m_ongoing_navigation == ongoing_navigation)
+        return;
+
+    // 2. Inform the navigation API about aborting navigation given navigable.
+    inform_the_navigation_api_about_aborting_navigation();
+
+    // 3. Set navigable's ongoing navigation to newValue.
+    set_ongoing_navigation_without_informing_navigation_api(move(ongoing_navigation));
+}
+
+void LocalNavigable::set_ongoing_navigation_without_informing_navigation_api(Variant<Empty, Traversal, Utf16String> ongoing_navigation)
+{
+    if (m_ongoing_navigation == ongoing_navigation)
+        return;
+
+    m_ongoing_navigation = ongoing_navigation;
+
+    for (auto& navigation_observer : m_navigation_observers) {
+        if (navigation_observer.ongoing_navigation_changed())
+            navigation_observer.ongoing_navigation_changed()->function()();
+    }
+}
+
+void LocalNavigable::clear_ongoing_history_traversal()
+{
+    if (has_been_destroyed())
+        return;
+
+    // AD-HOC: Only clear the process-local traversal projection. A newer navigation can already own the navigable.
+    if (m_ongoing_navigation.has<Traversal>())
+        set_ongoing_navigation_without_informing_navigation_api({});
+}
+
+void LocalNavigable::clear_parked_navigations()
+{
+    if (m_navigations_parked_for_population.is_empty())
+        return;
+    m_navigations_parked_for_population.clear();
+    set_delaying_load_events(false);
+}
+
+void LocalNavigable::park_navigation_for_population(Utf16String navigation_id, Optional<PreparedNavigation> navigation)
+{
+    // An overlapping navigation supersedes the previous one, but the previous navigation's
+    // population dispatch can still be in flight. Keep it parked until its response or
+    // cancellation arrives so that it can release any load-event delay it owns.
+    m_navigations_parked_for_population.remove_all_matching([&](auto const& parked) { return parked.navigation_id == navigation_id; });
+    m_navigations_parked_for_population.append({
+        .navigation_id = move(navigation_id),
+        .navigation = move(navigation),
+    });
+}
+
+bool LocalNavigable::has_navigation_parked_for_population(Utf16String const& navigation_id) const
+{
+    return any_of(m_navigations_parked_for_population, [&](auto const& parked) { return parked.navigation_id == navigation_id; });
+}
+
+Optional<LocalNavigable::NavigationParkedForPopulation> LocalNavigable::take_navigation_parked_for_population(Utf16String const& navigation_id)
+{
+    auto index = m_navigations_parked_for_population.find_first_index_if([&](auto const& parked) {
+        return parked.navigation_id == navigation_id;
+    });
+    if (!index.has_value())
+        return {};
+    return m_navigations_parked_for_population.take(*index);
+}
+
+// https://html.spec.whatwg.org/multipage/document-sequences.html#the-rules-for-choosing-a-navigable
+LocalNavigable::ChosenNavigable LocalNavigable::choose_a_navigable(Utf16View name, TokenizedFeature::NoOpener no_opener, ActivateTab activate_tab, Optional<TokenizedFeature::Map const&> window_features)
+{
+    // 1. Let chosen be null.
+    GC::Ptr<Navigable> chosen;
+
+    // 2. Let windowType be "existing or none".
+    auto window_type = WindowType::ExistingOrNone;
+
+    // 3. Let sandboxingFlagSet be currentNavigable's active document's active sandboxing flag set.
+    auto sandboxing_flag_set = active_document()->active_sandboxing_flag_set();
+
+    // 4. If name is the empty string or an ASCII case-insensitive match for "_self", then set chosen to currentNavigable.
+    if (name.is_empty() || name.equals_ignoring_ascii_case(u"_self"sv)) {
+        chosen = this;
+    }
+
+    // 5. Otherwise, if name is an ASCII case-insensitive match for "_parent",
+    //    set chosen to currentNavigable's parent, if any, and currentNavigable otherwise.
+    else if (name.equals_ignoring_ascii_case(u"_parent"sv)) {
+        if (auto parent = this->parent())
+            chosen = parent;
+        else
+            chosen = this;
+    }
+
+    // 6. Otherwise, if name is an ASCII case-insensitive match for "_top",
+    //    set chosen to currentNavigable's traversable navigable.
+    else if (name.equals_ignoring_ascii_case(u"_top"sv)) {
+        chosen = traversable_navigable();
+    }
+
+    // 7. Otherwise, if name is not an ASCII case-insensitive match for "_blank", then set chosen to the result of
+    //    finding a navigable by target name given name and currentNavigable.
+    else if (!name.equals_ignoring_ascii_case(u"_blank"sv)) {
+        chosen = find_a_navigable_by_target_name(name);
+    }
+
+    // 8. If chosen is null, then a new top-level traversable is being requested, and what happens depends on the user
+    //    agent's configuration and abilities — it is determined by the rules given for the first applicable option
+    //    from the following list:
+    if (!chosen) {
+        // NB: The UI process runs the "create a new top-level traversable" branch below for the traversable it creates,
+        //     and returns windowType. The renderer runs it too, for its page of the traversable.
+        auto request_new_web_view = [&] {
+            TokenizedFeature::Map empty_window_features;
+            auto hints = web_view_hints_from_tokenised_features(window_features.has_value() ? *window_features : empty_window_features);
+            return page().client().page_did_request_new_web_view(activate_tab, hints, id(), Utf16String::from_utf16(name), no_opener, active_document()->base_url());
+        };
+
+        // --> If currentNavigable's active window does not have transient activation and the user agent has been configured to
+        //     not show popups (i.e., the user agent has a "popup blocker" enabled)
+        if (active_window() && !active_window()->has_transient_activation() && page().should_block_pop_ups()) {
+            // FIXME: The user agent may inform the user that a popup has been blocked.
+            dbgln("Pop-up blocked!");
+        }
+
+        // --> If sandboxingFlagSet has the sandboxed auxiliary navigation browsing context flag set
+        else if (has_flag(sandboxing_flag_set, SandboxingFlagSet::SandboxedAuxiliaryNavigation)) {
+            // FIXME: The user agent may report to a developer console that a popup has been blocked.
+            dbgln("Pop-up blocked!");
+        }
+
+        // --> If the user agent has been configured such that in this instance it will create a new top-level traversable
+        else if (auto new_web_view = request_new_web_view(); new_web_view.page) {
+            // 1. Consume user activation of currentNavigable's active window.
+            active_window()->consume_user_activation();
+
+            // 2. Set windowType to "new and unrestricted".
+            // NB: The UI process runs steps 2 to 4, as it creates the traversable with or without an opener, and returns
+            //     windowType.
+            window_type = new_web_view.window_type;
+
+            // 3. Let currentDocument be currentNavigable's active document.
+            // 4. If currentDocument's opener policy's value is "same-origin" or "same-origin-plus-COEP",
+            //    and currentDocument's origin is not same origin with currentDocument's relevant settings object's top-level origin, then:
+            if (window_type == WindowType::NewWithNoOpener) {
+                // 1. Set noopener to true.
+                no_opener = TokenizedFeature::NoOpener::Yes;
+
+                // 2. Set name to "_blank".
+                name = u"_blank"sv;
+
+                // 3. Set windowType to "new with no opener".
+            }
+            // NOTE: In the presence of an opener policy,
+            //       nested documents that are cross-origin with their top-level browsing context's active document always set noopener to true.
+
+            // 5. Let targetName be the empty string.
+            // 6. If name is not an ASCII case-insensitive match for "_blank", then set targetName to name.
+            // NB: The UI process gives chosen its target name.
+
+            auto create_new_traversable = [&](GC::Ptr<BrowsingContext> opener) {
+                return LocalTraversableNavigable::create_for_new_web_view(move(new_web_view), opener);
+            };
+
+            // 7. If noopener is true, then set chosen to the result of creating a new top-level traversable given null and targetName.
+            if (no_opener == TokenizedFeature::NoOpener::Yes) {
+                chosen = create_new_traversable(nullptr);
+            }
+
+            // 8. Otherwise:
+            else {
+                // 1. Set chosen to the result of creating a new top-level traversable given currentNavigable's active browsing context, targetName, and currentNavigable.
+                // FIXME: "and currentNavigable", which is the openerNavigableForWebDriver parameter.
+                chosen = create_new_traversable(active_browsing_context());
+            }
+
+            // 8.2. If sandboxingFlagSet's sandboxed navigation browsing context flag is set,
+            //      then set chosen's active browsing context's one permitted sandboxed navigator to currentNavigable's active browsing context.
+            // AD-HOC: For a noopener popup too, or a sandboxed document could not navigate the popup a target=_blank link
+            //         opens. See https://github.com/whatwg/html/issues/12297
+            if (has_flag(sandboxing_flag_set, SandboxingFlagSet::SandboxedNavigation))
+                as<LocalNavigable>(*chosen).active_browsing_context()->set_the_one_permitted_sandboxed_navigator(active_browsing_context().ptr());
+
+            // 9. If sandboxingFlagSet's sandbox propagates to auxiliary browsing contexts flag is set,
+            //     then all the flags that are set in sandboxingFlagSet must be set in chosen's active browsing context's popup sandboxing flag set.
+            if (has_flag(sandboxing_flag_set, SandboxingFlagSet::SandboxPropagatesToAuxiliaryBrowsingContexts))
+                as<LocalNavigable>(*chosen).active_browsing_context()->set_popup_sandboxing_flag_set(as<LocalNavigable>(*chosen).active_browsing_context()->popup_sandboxing_flag_set() | sandboxing_flag_set);
+
+            // 10. Set chosen's is created by web content to true.
+            as<LocalTraversableNavigable>(*chosen).set_is_created_by_web_content(true);
+        }
+
+        // --> If the user agent has been configured such that in this instance it will choose currentNavigable
+        else if (false) { // FIXME: When is this the case?
+            // Set chosen to current.
+            chosen = *this;
+        }
+
+        // --> If the user agent has been configured such that in this instance it will not find a navigable
+        else if (false) { // FIXME: When is this the case?
+            // Do nothing.
+        }
+    }
+
+    // 9. Return chosen and windowType
+    return { chosen, window_type };
+}
+
+// https://html.spec.whatwg.org/multipage/document-sequences.html#find-a-navigable-by-target-name
+GC::Ptr<Navigable> LocalNavigable::find_a_navigable_by_target_name(Utf16View name)
+{
+    // 1. Let currentDocument be currentNavigable's active document.
+    auto& current_document = *active_document();
+
+    // 2. Let sourceSnapshotParams be the result of snapshotting source snapshot params given currentDocument.
+    auto source_snapshot_params = snapshot_source_snapshot_params(current_document);
+
+    // 3. Let subtreesToSearch be an implementation-defined choice of one of the following:
+    //    - « currentNavigable's traversable navigable, currentNavigable »
+    //    - the inclusive ancestor navigables of currentDocument
+    // FIXME: Decide which to use, or wait until the spec picks one.
+    auto subtrees_to_search = current_document.inclusive_ancestor_navigables();
+
+    // 4. For each subtreeToSearch of subtreesToSearch, in reverse order:
+    for (auto const& subtree_to_search : subtrees_to_search.in_reverse()) {
+        // 1. Let documentToSearch be subtreeToSearch's active document.
+        // 2. For each navigable of the inclusive descendant navigables of documentToSearch:
+        // NB: An ancestor's document is in the process hosting it. Its inclusive descendant navigables are the
+        //     subtree the UI process replicates here, with this page's own navigables among them.
+        for (auto const& navigable : subtree_to_search->active_document_inclusive_descendant_navigables()) {
+            // 1. If currentNavigable is not allowed by sandboxing to navigate navigable given sourceSnapshotParams, then optionally continue.
+            if (!allowed_by_sandboxing_to_navigate(*navigable, source_snapshot_params))
+                continue;
+
+            // 2. If navigable's target name is name, then return navigable.
+            auto const& target_name = navigable->target_name();
+            if (target_name.utf16_view() == name)
+                return *navigable;
+        }
+    }
+
+    // 5. Let currentTopLevelBrowsingContext be currentNavigable's active browsing context's top-level browsing context.
+    auto current_top_level_traversable = top_level_traversable();
+
+    // 6. Let group be currentTopLevelBrowsingContext's group.
+    // NB: The UI process holds the group. It represents the group's top-level browsing contexts here by the
+    //     navigables they are active in: those this process hosts, and stand-ins for the rest.
+    auto group_id = current_top_level_traversable->browsing_context_group_id();
+
+    // 7. For each topLevelBrowsingContext of group's browsing context set, in an implementation-defined order (the user agent should pick a consistent ordering, such as the most recently opened, most recently focused, or more closely related):
+    for (auto const& top_level_traversable : top_level_navigables_in_browsing_context_group(group_id)) {
+        // 1. If currentTopLevelBrowsingContext is topLevelBrowsingContext, then continue.
+        if (top_level_traversable->id() == current_top_level_traversable->id())
+            continue;
+
+        // 2. Let documentToSearch be topLevelBrowsingContext's active document.
+        // 3. For each navigable of the inclusive descendant navigables of documentToSearch:
+        for (auto const& navigable : top_level_traversable->active_document_inclusive_descendant_navigables()) {
+            // 1. If currentNavigable's active browsing context is not familiar with navigable's active browsing context, then continue.
+            if (!is_familiar_with(*navigable))
+                continue;
+
+            // 2. If currentNavigable is not allowed by sandboxing to navigate navigable given sourceSnapshotParams, then optionally continue.
+            if (!allowed_by_sandboxing_to_navigate(*navigable, source_snapshot_params))
+                continue;
+
+            // 3. If navigable's target name is name, then return navigable.
+            if (navigable->target_name().utf16_view() == name)
+                return *navigable;
+        }
+    }
+
+    // 8. Return null.
+    return nullptr;
+}
+
+// https://html.spec.whatwg.org/multipage/document-sequences.html#familiar-with
+// AD-HOC: Stated on the navigables whose active browsing contexts are compared, since the browsing context of a
+//         navigable another process hosts is there, while what the algorithm needs is replicated here.
+bool LocalNavigable::is_familiar_with(Navigable& other)
+{
+    // A browsing context A is familiar with a second browsing context B if the following algorithm returns true:
+    auto& A = *this;
+    auto& B = other;
+
+    // 1. If A's active document's origin is same origin with B's active document's origin, then return true.
+    if (B.active_document_origin().has_value() && A.active_document()->origin().is_same_origin(*B.active_document_origin()))
+        return true;
+
+    // 2. If A's top-level browsing context is B, then return true.
+    if (A.traversable_navigable().ptr() == &B)
+        return true;
+
+    // 3. If B is an auxiliary browsing context and A is familiar with B's opener browsing context, then return true.
+    if (B.active_browsing_context_is_auxiliary()) {
+        if (auto opener_navigable = B.active_browsing_context_opener_navigable(); opener_navigable && A.is_familiar_with(*opener_navigable))
+            return true;
+    }
+
+    // 4. If there exists an ancestor browsing context of B whose active document has the same origin as the active document of A, then return true.
+    // NOTE: This includes the case where A is an ancestor browsing context of B.
+
+    // If B's active document is not fully active then it cannot have ancestor browsing context
+    if (!B.active_document_is_fully_active())
+        return false;
+
+    for (auto ancestor = B.parent(); ancestor; ancestor = ancestor->parent()) {
+        if (ancestor->active_document_origin()->is_same_origin(A.active_document()->origin()))
+            return true;
+    }
+
+    // 5. Return false.
+    return false;
+}
+
+// https://html.spec.whatwg.org/multipage/browsers.html#determining-navigation-params-policy-container
+static NonnullRefPtr<PolicyContainer> determine_navigation_params_policy_container(URL::URL const& response_url,
+    RefPtr<PolicyContainer> history_policy_container,
+    RefPtr<PolicyContainer> initiator_policy_container,
+    RefPtr<PolicyContainer> parent_policy_container,
+    RefPtr<PolicyContainer> response_policy_container)
+{
+    // 1. If historyPolicyContainer is not null, then:
+    if (history_policy_container) {
+        // FIXME: 1. Assert: responseURL requires storing the policy container in history.
+
+        // 2. Return a clone of historyPolicyContainer.
+        return history_policy_container->clone();
+    }
+
+    // 2. If responseURL is about:srcdoc, then:
+    if (response_url == URL::about_srcdoc()) {
+        // 1. Assert: parentPolicyContainer is not null.
+        VERIFY(parent_policy_container);
+
+        // 2. Return a clone of parentPolicyContainer.
+        return parent_policy_container->clone();
+    }
+
+    // 3. If responseURL is local and initiatorPolicyContainer is not null, then return a clone of initiatorPolicyContainer.
+    if (Fetch::Infrastructure::is_local_url(response_url) && initiator_policy_container)
+        return initiator_policy_container->clone();
+
+    // 4. If responsePolicyContainer is not null, then return responsePolicyContainer.
+    // FIXME: File a spec issue to say "a clone of" here for consistency
+    if (response_policy_container)
+        return response_policy_container->clone();
+
+    // 5. Return a new policy container.
+    return PolicyContainer::create();
+}
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#hand-off-to-external-software
+// FIXME: `resource` can also be a response: https://fetch.spec.whatwg.org/#concept-response
+static void hand_off_to_external_software(URL::URL const& resource, GC::Ref<LocalNavigable> navigable, SandboxingFlagSet sandboxing_flags, bool has_transient_activation, URL::Origin const& initiator_origin)
+{
+    // 1. If all of the following are true:
+    //    - navigable is not a top-level traversable;
+    //    - sandboxFlags has its sandboxed custom protocols navigation browsing context flag set; and
+    //    - sandboxFlags has its sandboxed top-level navigation with user activation browsing context flag set, or
+    //      hasTransientActivation is false,
+    //    then return without invoking the external software package.
+    if (!navigable->is_top_level_traversable()
+        && has_flag(sandboxing_flags, SandboxingFlagSet::SandboxedCustomProtocols)
+        && (has_flag(sandboxing_flags, SandboxingFlagSet::SandboxedTopLevelNavigationWithUserActivation) || !has_transient_activation)) {
+        return;
+    }
+
+    // 2. Perform the appropriate handoff of resource while attempting to mitigate the risk that this is an attempt to
+    //    exploit the target software. For example, user agents could prompt the user to confirm that initiatorOrigin is
+    //    to be allowed to invoke the external software in question. In particular, if hasTransientActivation is false,
+    //    then the user agent should not invoke the external software package without prior user confirmation.
+    navigable->page().client().page_did_request_external_url(resource, initiator_origin, has_transient_activation);
+}
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#attempt-to-create-a-non-fetch-scheme-document
+static GC::Ptr<DocumentToCreate> attempt_to_create_a_non_fetch_scheme_document(NonFetchSchemeNavigationParams const& params)
+{
+    // 1. Let url be navigationParams's URL.
+    auto const& url = params.url;
+
+    // 2. Let navigable be navigationParams's navigable.
+    auto navigable = params.navigable;
+
+    // 3. If url is to be handled using a mechanism that does not affect navigable, e.g., because url's scheme is
+    //    handled externally, then:
+    // AD-HOC: Checking if there is external software to hand-off to is done asynchronously, so we don't know here if it
+    //         will succeed or not. Only a few cases reject it early. We find out that a URL went unhandled in
+    //         ViewImplementation::handle_external_url(), so an equivalent of step 4 is implemented there.
+    {
+        // 1. Hand-off to external software given url, navigable, navigationParams's target snapshot sandboxing flags,
+        //    navigationParams's source snapshot has transient activation, and navigationParams's initiator origin.
+        hand_off_to_external_software(url, *navigable, params.target_snapshot_sandboxing_flags, params.source_snapshot_has_transient_activation, params.initiator_origin);
+
+        // 2. Return null.
+        return {};
+    }
+
+    // 4. Handle url by displaying some sort of inline content, e.g., an error message because the specified scheme is
+    //    not one of the supported protocols, or an inline prompt to allow the user to select a registered handler for
+    //    the given scheme. Return the result of displaying the inline content given navigable, navigationParams's id,
+    //    navigationParams's navigation timing type, and navigationParams's user involvement.
+    // AD-HOC: Not implemented here, see note on step 3 above.
+}
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#create-navigation-params-from-a-srcdoc-resource
+static GC::Ref<NavigationParams> create_navigation_params_from_a_srcdoc_resource(
+    DocumentResource const& document_resource,
+    Optional<URL::Origin> const& origin,
+    Variant<SerializedPolicyContainer, DocumentState::Client> const& history_policy_container_variant,
+    Optional<URL::URL> const& about_base_url,
+    GC::Ptr<LocalNavigable> navigable,
+    SourceSnapshotParams const& source_snapshot_params,
+    TargetSnapshotParams const& target_snapshot_params,
+    UserNavigationInvolvement user_involvement,
+    Optional<Utf16String> navigation_id,
+    Bindings::NavigationTimingType navigation_timing_type)
+{
+    auto& vm = navigable->vm();
+    VERIFY(navigable->active_window());
+    auto& realm = navigable->active_window()->principal_realm();
+
+    // 1. Let documentResource be entry's document state's resource.
+    VERIFY(document_resource.has<Utf16String>());
+
+    // 2. Let response be a new response with
+    //    URL: about:srcdoc
+    //    header list: (`Content-Type`, `text/html`)
+    //    body: the UTF-8 encoding of documentResource, as a body
+    auto response = Fetch::Infrastructure::Response::create();
+    response->url_list().append(URL::about_srcdoc());
+    // AD-HOC: Label the body as UTF-8, matching other engines. Otherwise the encoding sniffing algorithm may decode it
+    //         with another encoding.
+    response->header_list()->append({ "Content-Type"sv, "text/html;charset=utf-8"sv });
+    auto document_resource_utf8 = MUST(document_resource.get<Utf16String>().utf16_view().to_utf8());
+    response->set_body(Fetch::Infrastructure::byte_sequence_as_response_body(document_resource_utf8.bytes()));
+
+    // 3. Let responseOrigin be the result of determining the origin given response's URL, targetSnapshotParams's sandboxing flags, and entry's document state's origin.
+    auto response_origin = determine_the_origin(response->url(), target_snapshot_params.sandboxing_flags, origin);
+
+    // 4. Let coop be a new opener policy.
+    OpenerPolicy coop = {};
+
+    // 5. Let coopEnforcementResult be a new opener policy enforcement result with
+    //    url: response's URL
+    //    origin: responseOrigin
+    //    opener policy: coop
+    OpenerPolicyEnforcementResult coop_enforcement_result {
+        .url = *response->url(),
+        .origin = response_origin,
+        .opener_policy = coop
+    };
+
+    // 6. Let policyContainer be the result of determining navigation params policy container given response's URL,
+    //    entry's document state's history policy container, null, navigable's container document's policy container, and null.
+    RefPtr<PolicyContainer> history_policy_container = history_policy_container_variant.visit(
+        [&](SerializedPolicyContainer const& s) -> RefPtr<PolicyContainer> { return create_a_policy_container_from_serialized_policy_container(s); },
+        [](DocumentState::Client) -> RefPtr<PolicyContainer> { return {}; });
+    RefPtr<PolicyContainer> policy_container;
+    if (navigable->container()) {
+        // NOTE: Specification assumes that only navigables corresponding to iframes can be navigated to about:srcdoc.
+        //       We also use srcdoc to implement load_html() for top level navigables so we need to null check container
+        //       because it might be null.
+        policy_container = determine_navigation_params_policy_container(*response->url(), history_policy_container, {}, navigable->container_document()->policy_container(), {});
+    } else if (navigable->parent()) {
+        // NB: The container document is in another process. Only its iframe element's srcdoc attribute navigates the
+        //     navigable to about:srcdoc, so the container document is the source document, whose policy container the
+        //     source snapshot params hold.
+        policy_container = determine_navigation_params_policy_container(*response->url(), history_policy_container, {}, source_snapshot_params.source_policy_container, {});
+    } else {
+        policy_container = PolicyContainer::create();
+    }
+
+    // 7. Return a new navigation params, with
+    //    id: navigationId
+    //    navigable: navigable
+    //    request: null
+    //    response: response
+    //    fetch controller: null
+    //    commit early hints: null
+    //    COOP enforcement result: coopEnforcementResult
+    //    reserved environment: null
+    //    origin: responseOrigin
+    //    policy container: policyContainer
+    //    final sandboxing flag set: targetSnapshotParams's sandboxing flags
+    //    iframe element referrer policy: targetSnapshotParams's iframe element referrer policy
+    //    opener policy: coop
+    //    navigation timing type: navTimingType
+    //    about base URL: entry's document state's about base URL
+    //    user involvement: userInvolvement
+    return vm.heap().allocate<NavigationParams>(
+        move(navigation_id),
+        navigable,
+        nullptr,
+        Fetch::Infrastructure::ResponseView::create(realm, response),
+        nullptr,
+        nullptr,
+        move(coop_enforcement_result),
+        nullptr,
+        move(response_origin),
+        *policy_container,
+        target_snapshot_params.sandboxing_flags,
+        target_snapshot_params.iframe_element_referrer_policy,
+        move(coop),
+        navigation_timing_type,
+        about_base_url,
+        user_involvement);
+}
+
+static void perform_navigation_params_fetch(JS::Realm& realm, GC::Ref<NavigationParamsFetchStateHolder> state_holder, GC::Ref<GC::Function<void(GC::Ref<InternalNavigationResult>)>> top_level_completion_steps, GC::Ref<GC::Function<void()>> fetch_completion_steps)
+{
+    // 21. While true:
+    // NOTE: To make this async, a loop is performed by calling "perform_navigation_params_fetch" again from within "perform_navigation_params_fetch",
+    //       performs breaks by calling the passed in fetch completion steps and then returning and performs returns by
+    //       calling the top level completion steps and then returning.
+
+    // 1. If request's reserved client is not null and currentURL's origin is not the same as request's reserved client's creation URL's origin, then:
+    if (state_holder->reserved_client && !state_holder->current_url.origin().is_same_origin(state_holder->reserved_client->creation_url.origin())) {
+        // 1. Run the environment discarding steps for request's reserved client.
+        state_holder->reserved_client->discard_environment();
+
+        // 2. Set request's reserved client to null.
+        state_holder->reserved_client = nullptr;
+        state_holder->request->set_reserved_client_snapshot(nullptr);
+
+        // 3. Set commitEarlyHints to null.
+        state_holder->commit_early_hints = nullptr;
+    }
+
+    // 2. If request's reserved client is null, then:
+    if (!state_holder->reserved_client) {
+        // 1. Let topLevelCreationURL be currentURL.
+        Optional<URL::URL> top_level_creation_url = state_holder->current_url;
+
+        // 2. Let topLevelOrigin be null.
+        Optional<URL::Origin> top_level_origin;
+
+        // 3. If navigable is not a top-level traversable, then:
+        if (!state_holder->navigable->is_top_level_traversable()) {
+            // 1. Let parentEnvironment be navigable's parent's active document's relevant settings object.
+            auto parent = state_holder->navigable->parent();
+            auto parent_top_level_creation_url = parent && !parent->has_been_destroyed() ? parent->active_document_top_level_creation_url() : Optional<URL::URL> {};
+            if (!parent_top_level_creation_url.has_value()) {
+                // AD-HOC: A queued child navigation can resume after its parent document has been destroyed. The
+                //         specification assumes the parent environment is still available here, but browser engines
+                //         abandon this stale detached frame navigation instead of continuing it against a discarded
+                //         parent.
+                state_holder->response = Fetch::Infrastructure::ResponseView::network_error("Parent document is no longer active"_string);
+                fetch_completion_steps->function()();
+                return;
+            }
+
+            // 2. Set topLevelCreationURL to parentEnvironment's top-level creation URL.
+            top_level_creation_url = move(parent_top_level_creation_url);
+
+            // 3. Set topLevelOrigin to parentEnvironment's top-level origin.
+            top_level_origin = parent->active_document_top_level_origin();
+        }
+
+        // 4. Set request's reserved client to a new environment whose id is a unique opaque string,
+        //    target browsing context is navigable's active browsing context,
+        //    creation URL is currentURL,
+        //    top-level creation URL is topLevelCreationURL,
+        //    and top-level origin is topLevelOrigin.
+        state_holder->reserved_client = realm.create<Environment>(EnvironmentId::generate(), state_holder->current_url, top_level_creation_url, top_level_origin, state_holder->navigable->active_browsing_context());
+        state_holder->request->set_reserved_client_snapshot(Fetch::Fetching::snapshot_reserved_client_context(*state_holder->reserved_client));
+    }
+
+    // 3. If the result of should navigation request of type be blocked by Content Security Policy? given request and cspNavigationType is "Blocked", then set response to a network error and break. [CSP]
+    if (ContentSecurityPolicy::should_navigation_request_of_type_be_blocked_by_content_security_policy(state_holder->request, state_holder->csp_navigation_type, state_holder->navigable->page()) == ContentSecurityPolicy::Directives::Directive::Result::Blocked) {
+        state_holder->response = Fetch::Infrastructure::ResponseView::network_error("Blocked by Content Security Policy"_string);
+        fetch_completion_steps->function()();
+        return;
+    }
+
+    // 4. Set response to null.
+    state_holder->response = nullptr;
+
+    // 5. If fetchController is null, then set fetchController to the result of fetching request,
+    //    with processEarlyHintsResponse set to processEarlyHintsResponse as defined below, processResponse
+    //    set to processResponse as defined below, and useParallelQueue set to true.
+    if (!state_holder->fetch_controller) {
+        // FIXME: Let processEarlyHintsResponse be the following algorithm given a response earlyResponse:
+
+        // Let processResponse be the following algorithm given a response fetchedResponse:
+        auto process_response = GC::create_function(realm.heap(), GC::captures(state_holder), [](auto& state_holder, GC::Ref<Fetch::Infrastructure::ResponseView> fetch_response) {
+            // 1. Set response to fetchedResponse.
+            state_holder->response = fetch_response;
+            VERIFY(state_holder->continuation_steps);
+            state_holder->continuation_steps->function()(NavigationParamsFetchStateHolder::ContinuationReason::GotResponse);
+        });
+
+        Fetch::Infrastructure::FetchAlgorithms::Input fetch_algorithms_input { Fetch::Engine::BodyIntent::DeliverStreamToConsumerAgent };
+        fetch_algorithms_input.process_response = process_response;
+        state_holder->fetch_controller = Fetch::Fetching::fetch(
+            realm,
+            state_holder->request,
+            Fetch::Infrastructure::FetchAlgorithms::create(move(fetch_algorithms_input)),
+            Fetch::Fetching::UseParallelQueue::Yes,
+            Fetch::Fetching::CreateResponseBodyTransferLease::Yes);
+    }
+    // 6. Otherwise, process the next manual redirect for fetchController.
+    else {
+        state_holder->fetch_controller->process_next_manual_redirect();
+    }
+
+    // 7. Wait until either response is non-null, or navigable's ongoing navigation changes to no longer equal navigationId.
+    GC::Ptr<NavigationObserver> ongoing_navigation_changed_observer;
+    if (state_holder->navigation_id.has_value()) {
+        ongoing_navigation_changed_observer = NavigationObserver::create(*state_holder->navigable);
+        ongoing_navigation_changed_observer->set_ongoing_navigation_changed(GC::create_function(realm.heap(), GC::captures(state_holder), [](auto& state_holder) {
+            VERIFY(state_holder->continuation_steps);
+            state_holder->continuation_steps->function()(NavigationParamsFetchStateHolder::ContinuationReason::OngoingNavigationChanged);
+        }));
+    }
+
+    state_holder->continuation_steps = GC::create_function(realm.heap(), GC::captures(realm, state_holder, ongoing_navigation_changed_observer, top_level_completion_steps, fetch_completion_steps), [](auto& realm, auto& state_holder, auto& ongoing_navigation_changed_observer, auto& top_level_completion_steps, auto& fetch_completion_steps, NavigationParamsFetchStateHolder::ContinuationReason continuation_reason) {
+        // If the latter condition occurs, then abort fetchController, and return. Otherwise, proceed onward.
+        if (state_holder->navigation_id.has_value()) {
+            VERIFY(ongoing_navigation_changed_observer);
+            ongoing_navigation_changed_observer->set_ongoing_navigation_changed({});
+
+            if (continuation_reason == NavigationParamsFetchStateHolder::ContinuationReason::OngoingNavigationChanged) {
+                if (state_holder->navigable->ongoing_navigation() != *state_holder->navigation_id) {
+                    state_holder->fetch_controller->abort(realm, {});
+                    auto result = GC::Heap::the().allocate<InternalNavigationResult>();
+                    result->navigation_params = LocalNavigable::NullOrError {};
+                    top_level_completion_steps->function()(*result);
+                    return;
+                }
+            }
+        }
+
+        // AD-HOC: The navigable can be destroyed while the response is on its way, e.g. a popup closed right after it
+        //         was opened, with nothing to navigate left.
+        if (state_holder->navigable->has_been_destroyed() || !state_holder->navigable->active_document()) {
+            state_holder->fetch_controller->abort(realm, {});
+            auto result = GC::Heap::the().allocate<InternalNavigationResult>();
+            result->navigation_params = LocalNavigable::NullOrError {};
+            top_level_completion_steps->function()(*result);
+            return;
+        }
+
+        // AD-HOC: Main fetch can upgrade request's current URL to a potentially trustworthy URL without a redirect.
+        //         Treat that like a redirect, so currentURL and entry's URL name the URL that was actually fetched,
+        //         which is also response's URL and the document's URL.
+        if (state_holder->request->current_url() != state_holder->current_url) {
+            state_holder->current_url = state_holder->request->current_url();
+            state_holder->redirected_url = state_holder->current_url;
+        }
+
+        // 8. If request's body is null, then set entry's document state's resource to null.
+        if (state_holder->request->body().template has<Empty>()) {
+            state_holder->resource_cleared = true;
+            state_holder->resource = Empty {};
+        }
+
+        // 9. Set responsePolicyContainer to the result of creating a policy container from a fetch response given response and request's reserved client.
+        state_holder->response_policy_container = create_a_policy_container_from_a_fetch_response(*state_holder->response, state_holder->reserved_client);
+
+        // 10. Set finalSandboxFlags to the union of targetSnapshotParams's sandboxing flags and responsePolicyContainer's CSP list's CSP-derived sandboxing flags.
+        state_holder->final_sandbox_flags = state_holder->target_snapshot_params.sandboxing_flags | state_holder->response_policy_container->csp_list.csp_derived_sandboxing_flags();
+
+        // 11. Set responseOrigin to the result of determining the origin given response's URL, finalSandboxFlags, and entry's document state's initiator origin.
+        state_holder->response_origin = determine_the_origin(state_holder->response->url(), state_holder->final_sandbox_flags, state_holder->initiator_origin);
+
+        // 12. If navigable is a top-level traversable:
+        // AD-HOC: Skip a network error, which may have no URL to enforce an opener policy with. This algorithm returns
+        //         null for it, so the enforcement result would go unused.
+        if (!state_holder->response->is_network_error() && state_holder->navigable->is_top_level_traversable()) {
+            // 1. Set responseCOOP to the result of obtaining an opener policy given response and request's reserved client.
+            // AD-HOC: We don't yet set up environments in all cases. Without one, responseCOOP stays a new opener policy.
+            if (auto const& reserved_client = state_holder->reserved_client)
+                state_holder->response_coop = obtain_an_opener_policy(*state_holder->response->header_list(), is_non_secure_context(*reserved_client));
+
+            // 2. Set coopEnforcementResult to the result of enforcing the response's opener policy given navigable's active browsing context,
+            //    response's URL, responseOrigin, responseCOOP, coopEnforcementResult, and request's referrer.
+            auto const& active_document = *state_holder->navigable->active_document();
+            state_holder->coop_enforcement_result = enforce_a_responses_opener_policy(active_document.is_initial_about_blank(), state_holder->response->url().value(), *state_holder->response_origin, state_holder->response_coop, state_holder->coop_enforcement_result);
+
+            // 3. If finalSandboxFlags is not empty and responseCOOP's value is not "unsafe-none", then set response to an appropriate network error and break.
+            // NOTE: This results in a network error as one cannot simultaneously provide a clean slate to a response
+            //       using opener policy and sandbox the result of navigating to that response.
+            // AD-HOC: The spec checks finalSandboxFlags, which include the sandboxing flags of the response's own CSP.
+            //         But a response that sandboxes itself isn't one the navigation sandboxed, and its opener policy
+            //         still gives it a clean slate, so check only the sandboxing flags the navigation brings. A page
+            //         served with both a CSP sandbox and an opener policy then loads rather than failing.
+            // https://github.com/web-platform-tests/wpt/blob/master/html/cross-origin-opener-policy/coop-navigate-same-origin-csp-sandbox.html
+            if (state_holder->target_snapshot_params.sandboxing_flags != SandboxingFlagSet {} && state_holder->response_coop.value != OpenerPolicyValue::UnsafeNone) {
+                // AD-HOC: Stop the fetch, as nothing will consume the response this replaces.
+                state_holder->fetch_controller->stop_fetch();
+                state_holder->response = Fetch::Infrastructure::ResponseView::network_error("Opener policy on a sandboxed navigation response"_string);
+                fetch_completion_steps->function()();
+                return;
+            }
+        }
+
+        // 13. If all of the following are true:
+        //     - response is not a network error;
+        //     - navigable is a child navigable;
+        //     - response's URL's scheme is an HTTP(S) scheme; and
+        //     - the result of performing a cross-origin resource policy check with navigable's container document's origin, navigable's container
+        //       document's relevant settings object, request's destination, response, and true is blocked,
+        //     then set response to a network error and break.
+        // NOTE: Here we're running the cross-origin resource policy check against the parent navigable rather than navigable itself.
+        //       This is because we care about the same-originness of the embedded content against the parent context, not the navigation source.
+        //       We only run it for HTTP(S) scheme responses, as in Fetch; other responses are still subject to checking a navigation response's
+        //       adherence to its embedder policy.
+        // NB: The container document is the parent navigable's active document, which can be hosted in another process.
+        if (!state_holder->response->is_network_error() && Fetch::Infrastructure::is_http_or_https_scheme(state_holder->response->url()->scheme())) {
+            if (auto parent = state_holder->navigable->parent()) {
+                auto container_document_origin = parent->active_document_origin();
+                if (container_document_origin.has_value()
+                    && Fetch::Fetching::cross_origin_resource_policy_check(*container_document_origin, state_holder->navigable->container_document_embedder_policy(), *state_holder->response->record(), Fetch::Fetching::ForNavigation::Yes) == Fetch::Infrastructure::RequestOrResponseBlocking::Blocked) {
+                    // AD-HOC: Stop the fetch, as nothing will consume the response this replaces.
+                    state_holder->fetch_controller->stop_fetch();
+                    state_holder->response = Fetch::Infrastructure::ResponseView::network_error("Blocked by Cross-Origin-Resource-Policy"_string);
+                    fetch_completion_steps->function()();
+                    return;
+                }
+            }
+        }
+
+        // 14. Set locationURL to response's location URL given currentURL's fragment.
+        auto location_url_without_an_inherited_fragment = state_holder->response->location_url({});
+        if (!location_url_without_an_inherited_fragment.is_error()
+            && location_url_without_an_inherited_fragment.value().has_value()
+            && location_url_without_an_inherited_fragment.value()->fragment().has_value()) {
+            state_holder->redirect_replaced_fragment = true;
+        }
+        state_holder->location_url = state_holder->response->location_url(state_holder->current_url.fragment());
+
+        // 15. If locationURL is failure or null, then break.
+        if (state_holder->location_url.is_error() || !state_holder->location_url.value().has_value()) {
+            fetch_completion_steps->function()();
+            return;
+        }
+
+        // 16. Assert: locationURL is a URL.
+        // 17. Set entry's classic history API state to StructuredSerializeForStorage(null).
+        state_holder->redirect_classic_history_api_state = MUST(structured_serialize_for_storage(realm.vm(), JS::js_null()));
+
+        // 18. Let oldDocState be entry's document state.
+
+        // 19. Set entry's document state to a new document state, with
+        // history policy container: a clone of the oldDocState's history policy container if it is non-null; null otherwise
+        // request referrer: oldDocState's request referrer
+        // request referrer policy: oldDocState's request referrer policy
+        // origin: oldDocState's origin
+        // resource: oldDocState's resource
+        // ever populated: oldDocState's ever populated
+        // navigable target name: oldDocState's navigable target name
+        auto new_doc_state = DocumentState::create(state_holder->navigable->page().client().allocate_cross_process_id());
+        new_doc_state->set_history_policy_container(state_holder->history_policy_container);
+        new_doc_state->set_request_referrer(state_holder->request_referrer);
+        new_doc_state->set_request_referrer_policy(state_holder->request_referrer_policy);
+        new_doc_state->set_origin(state_holder->origin);
+        new_doc_state->set_resource(state_holder->resource);
+        new_doc_state->set_ever_populated(state_holder->ever_populated);
+        new_doc_state->set_navigable_target_name(state_holder->navigable_target_name);
+        // NB: Not one of the spec's document state fields. It's kept across the redirect so a traversal back to the
+        //     entry still sends Sec-Fetch-Site:none for a URL the user agent supplied.
+        new_doc_state->set_user_agent_initiated(state_holder->user_agent_initiated);
+        state_holder->replacement_document_state = new_doc_state;
+        state_holder->initiator_origin = {};
+        state_holder->about_base_url = {};
+
+        // 20. If locationURL's scheme is not an HTTP(S) scheme, then:
+        if (!Fetch::Infrastructure::is_http_or_https_scheme(state_holder->location_url.value()->scheme())) {
+            // 1. Set entry's document state's resource to null.
+            state_holder->replacement_document_state->set_resource(Empty {});
+
+            // 2. Break.
+            fetch_completion_steps->function()();
+            return;
+        }
+
+        // 21. Set currentURL to locationURL.
+        state_holder->current_url = state_holder->location_url.value().value();
+
+        // 22. Set entry's URL to currentURL.
+        state_holder->redirected_url = state_holder->current_url;
+
+        perform_navigation_params_fetch(realm, state_holder, top_level_completion_steps, fetch_completion_steps);
+    });
+}
+
+// https://wicg.github.io/scroll-to-text-fragment/#extracting-the-fragment-directive
+// https://wicg.github.io/scroll-to-text-fragment/#restricting-the-text-fragment
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#create-navigation-params-by-fetching
+static void create_navigation_params_by_fetching(
+    PendingSessionHistoryEntryDescriptor const& entry,
+    GC::Ptr<LocalNavigable> navigable,
+    GC::Ref<SourceSnapshotParams> source_snapshot_params,
+    TargetSnapshotParams const& target_snapshot_params,
+    ContentSecurityPolicy::Directives::Directive::NavigationType csp_navigation_type,
+    UserNavigationInvolvement user_involvement,
+    Optional<Utf16String> navigation_id,
+    Bindings::NavigationTimingType navigation_timing_type,
+    GC::Ref<GC::Function<void(GC::Ref<InternalNavigationResult>)>> completion_steps)
+{
+    VERIFY(navigable->active_window());
+    auto& realm = navigable->active_window()->principal_realm();
+    auto& active_document = *navigable->active_document();
+
+    // FIXME: 1. Assert: this is running in parallel.
+
+    // 2. Let documentResource be entry's document state's resource.
+    auto const& document_state = entry.document_state;
+    auto const& document_resource = document_state.resource;
+
+    // 3. Let request be a new request, with
+    //    url: entry's URL
+    //    client: sourceSnapshotParams's fetch client
+    //    destination: "document"
+    //    credentials mode: "include"
+    //    use-URL-credentials flag: set
+    //    redirect mode: "manual"
+    //    replaces client id: navigable's active document's relevant settings object's id
+    //    mode: "navigate"
+    //    referrer: entry's document state's request referrer
+    //    referrer policy: entry's document state's request referrer policy
+    //    policy container: sourceSnapshotParams's source policy container
+    //    traversable for user prompts: navigable's top-level traversable
+    auto request = Fetch::Infrastructure::Request::create();
+    request->set_url(entry.url);
+    if (source_snapshot_params->fetch_client.has_value()) {
+        auto const& fetch_client = *source_snapshot_params->fetch_client;
+        request->set_client(Fetch::Fetching::request_client(fetch_client));
+        if (fetch_client.has<NonnullRefPtr<RemoteEnvironmentSettings const>>() && navigation_id.has_value())
+            request->set_remote_client_navigation(RemoteClientNavigation { navigable->id(), *navigation_id });
+    }
+    request->set_destination(Fetch::Infrastructure::Request::Destination::Document);
+    request->set_credentials_mode(Fetch::Infrastructure::Request::CredentialsMode::Include);
+    request->set_use_url_credentials(true);
+    request->set_redirect_mode(Fetch::Infrastructure::Request::RedirectMode::Manual);
+    request->set_replaces_client_id(active_document.relevant_settings_object().id);
+    request->set_mode(Fetch::Infrastructure::Request::Mode::Navigate);
+    if (WebDriver::BiDi::network_events_enabled() || WebDriver::BiDi::network_configuration_enabled())
+        WebDriver::BiDi::initialize_network_request(*request, navigable, navigation_id);
+    request->set_referrer(document_state.request_referrer);
+    request->set_referrer_policy(document_state.request_referrer_policy);
+    request->set_policy_container(source_snapshot_params->source_policy_container);
+    request->set_traversable_for_user_prompts(navigable->top_level_traversable()->id());
+    request->set_text_directive_user_activation(source_snapshot_params->text_directive_user_activation);
+    request->set_browsing_context_group_has_multiple_contexts(source_snapshot_params->browsing_context_group_has_multiple_contexts);
+    active_document.set_text_directive_user_activation(false);
+
+    // 4. If navigable is a top-level traversable, then set request's top-level navigation initiator origin to entry's
+    //    document state's initiator origin.
+    if (navigable->is_top_level_traversable())
+        request->set_top_level_navigation_initiator_origin(document_state.initiator_origin);
+
+    // 5. If request's client is null:
+    if (!request->client().has_value()) {
+        // Note: This only occurs in the case of a browser UI-initiated navigation.
+
+        // 1. Set request's origin to a new opaque origin.
+        request->set_origin(URL::Origin::create_opaque());
+
+        // 2. Set request's service-workers mode to "all".
+        request->set_service_workers_mode(Fetch::Infrastructure::Request::ServiceWorkersMode::All);
+
+        // 3. Set request's referrer to "no-referrer".
+        request->set_referrer(Fetch::Infrastructure::Request::Referrer::NoReferrer);
+    }
+
+    // AD-HOC: A traversal or reload is fetched with the document that asked for it as the request's client — or, when
+    //         none did, navigable's active document (see "apply the history step") — so the request's origin would be
+    //         that document's, rather than that of the document whose navigation created the entry. We make the
+    //         entry's initiator origin the request's instead, so Sec-Fetch-Site, and a resubmitted POST's Origin, go
+    //         out as they did the first time.
+    //         See https://github.com/whatwg/html/issues/13003.
+    //
+    //         Blink and Gecko do the same — Blink ConstructCommonNavigationParams() passes the navigation entry's
+    //         frame_entry.initiator_origin(), and Gecko SessionHistoryInfo gives the load the entry's triggering
+    //         principal — while WebKit follows HTML here.
+    // NB: For any other navigation, the entry's initiator origin is its source document's — the fetch client's. An
+    //     opaque one is left to HTML's behavior: It's what a navigation from the browser's UI records — which sends
+    //     Sec-Fetch-Site:none anyway, and must still reach a file: URL — as well as what a sandboxed document does.
+    if (document_state.initiator_origin.has_value() && !document_state.initiator_origin->is_opaque())
+        request->set_origin(*document_state.initiator_origin);
+
+    // 6. If documentResource is a POST resource:
+    if (auto* post_resource = document_resource.get_pointer<POSTResource>()) {
+        // 1. Set request's method to `POST`.
+        request->set_method("POST"sv);
+
+        // 2. Set request's body to documentResource's request body.
+        request->set_body(document_resource.get<POSTResource>().request_body.value());
+
+        // 3. Set `Content-Type` to documentResource's request content-type in request's header list.
+        auto request_content_type = [&]() {
+            switch (post_resource->request_content_type) {
+            case POSTResource::RequestContentType::ApplicationXWWWFormUrlencoded:
+                return "application/x-www-form-urlencoded"sv;
+            case POSTResource::RequestContentType::MultipartFormData:
+                return "multipart/form-data"sv;
+            case POSTResource::RequestContentType::TextPlain:
+                return "text/plain"sv;
+            default:
+                VERIFY_NOT_REACHED();
+            }
+        }();
+
+        StringBuilder request_content_type_buffer;
+        if (!post_resource->request_content_type_directives.is_empty()) {
+            request_content_type_buffer.append(request_content_type);
+
+            for (auto const& directive : post_resource->request_content_type_directives)
+                request_content_type_buffer.appendff("; {}={}", directive.type, directive.value);
+
+            request_content_type = request_content_type_buffer.string_view();
+        }
+
+        auto header = HTTP::Header::isomorphic_encode("Content-Type"sv, request_content_type);
+        request->header_list()->append(move(header));
+    }
+
+    // 7. If entry's document state's reload pending is true, then set request's reload-navigation flag.
+    if (document_state.reload_pending) {
+        request->set_reload_navigation(true);
+        if (user_involvement == UserNavigationInvolvement::BrowserUI)
+            request->set_reloaded_document_same_site_status(document_state.navigation_same_site_status);
+
+        // AD-HOC: The specs don't define HTTP cache behavior for reloads. But every major engine forces at least re-
+        //         validation of the reloaded document rather than serving it straight from cache. Use the "no-cache"
+        //         cache mode, which per Fetch "creates a conditional request if there is a response in the HTTP cache
+        //         and a normal request otherwise. It then updates the HTTP cache with the response." This matches
+        //         Chromium (FetchCacheMode::kValidateCache) and Firefox (nsIRequest::VALIDATE_ALWAYS); WebKit goes
+        //         further, and bypasses the cache entirely (ReloadIgnoringCacheData).
+        request->set_cache_mode(HTTP::CacheMode::NoCache);
+
+        // AD-HOC: A reload that bypasses the HTTP cache uses the "reload" cache mode instead, with which "Fetch behaves
+        //         as if there is no HTTP cache on the way to the network. Ergo, it creates a normal request and updates
+        //         the HTTP cache with the response."
+        if (document_state.reload_bypasses_cache)
+            request->set_cache_mode(HTTP::CacheMode::Reload);
+    }
+
+    // 8. Otherwise, if entry's document state's ever populated is true, then set request's history-navigation flag.
+    else if (document_state.ever_populated) {
+        request->set_history_navigation(true);
+
+        // INTEROP: The specs don't define HTTP cache behavior for history traversals. But RFC 9111 says that a history
+        //          mechanism shows the representation as it was when it was retrieved, and that freshness doesn't apply
+        //          to it, and every major engine uses a stored response here without revalidating it. Use the
+        //          "force-cache" cache mode, with which Fetch "uses any response in the HTTP cache matching the
+        //          request, not paying attention to staleness. If there was no response, it creates a normal request
+        //          and updates the HTTP cache with the response."
+        //          https://httpwg.org/specs/rfc9111.html#history.lists
+        request->set_cache_mode(HTTP::CacheMode::ForceCache);
+    }
+
+    // AD-HOC: While a document loads bypassing the HTTP cache, or using it without revalidation, so do the documents
+    //         of its child navigables. Bypassing the cache wins over a history traversal of the child navigable too.
+    //         The container state carries the mode when the container document is in another process.
+    if (navigable->parent()) {
+        auto container_cache_mode = navigable->container_state().document_cache_mode_while_loading;
+        if (request->cache_mode() == HTTP::CacheMode::Default
+            || (request->cache_mode() == HTTP::CacheMode::ForceCache && container_cache_mode == HTTP::CacheMode::Reload))
+            request->set_cache_mode(container_cache_mode);
+    }
+
+    // 9. If sourceSnapshotParams's has transient activation is true, then set request's user-activation to true.
+    if (source_snapshot_params->has_transient_activation)
+        request->set_user_activation(true);
+
+    // NB: What step 4 of Fetch Metadata's "set site" asks about. Only a top-level navigation can be one the user
+    // caused through the user agent itself, so a subframe never qualifies however its parent was reached.
+    // https://w3c.github.io/webappsec-fetch-metadata/#abstract-opdef-set-site
+    //
+    // AD-HOC: A traversal or reload replays what its entry recorded, whoever started it. A page's own history.back() or
+    //         location.reload() isn't "explicitly caused by a user's interaction with the user agent", and replaying
+    //         none for it lets the page have a URL it steers (through a redirect, e.g.) sent as none. But Fetch
+    //         Metadata doesn't say what a traversal sends, and Blink and Gecko replay it whoever started the traversal.
+    //         See https://github.com/w3c/webappsec-fetch-metadata/issues/100 and
+    //         https://github.com/whatwg/html/issues/13003.
+    //
+    //         Blink GetInitiatorRelation() finds that the entry has no initiator, and Gecko
+    //         IsUserTriggeredForSecFetchSite() that its triggering principal is the system's.
+    if (document_state.user_agent_initiated == UserAgentInitiated::Yes && navigable && navigable->is_top_level_traversable())
+        request->set_user_agent_initiated(true);
+
+    // NB: What step 2.1 of Upgrade Insecure Requests' "upgrade request to a potentially trustworthy URL, if
+    //     appropriate" asks about.
+    // https://w3c.github.io/webappsec-upgrade-insecure-requests/#upgrade-request
+    if (csp_navigation_type == ContentSecurityPolicy::Directives::Directive::NavigationType::FormSubmission)
+        request->set_form_submission(true);
+
+    // 10. If navigable's container is non-null:
+    // NB: The container's local name is read through the navigable, which replicates it for a container in another
+    //     process.
+    if (auto container_local_name = navigable->container_local_name(); container_local_name.has_value()) {
+        // 1. If the navigable's container has a browsing context scope origin, then set request's origin to that browsing context scope origin.
+        // FIXME: From "browsing context scope origin": This definition is broken and needs investigation to see what it was intended to express: see issue #4703.
+        //        The referenced issue suggests that it is a no-op to retrieve the browsing context scope origin.
+
+        // 2. Set request's destination to navigable's container's local name.
+        auto container_is_embed = *container_local_name == HTML::TagNames::embed;
+        auto container_is_iframe = *container_local_name == HTML::TagNames::iframe;
+        request->set_destination(container_is_iframe ? Web::Fetch::Infrastructure::Request::Destination::IFrame
+                : container_is_embed                 ? Web::Fetch::Infrastructure::Request::Destination::Embed
+                                                     : Web::Fetch::Infrastructure::Request::Destination::Object);
+
+        // 3. If sourceSnapshotParams's fetch client is navigable's container document's relevant settings object,
+        //    then set request's initiator type to navigable's container's local name.
+        // NOTE: This ensure that only container-initiated navigations are reported to resource timing.
+        // FIXME: A container document in another process is not here, and the fetch client of a navigation it started
+        //        is that process's, so its resource timing is not told of the navigation.
+        auto fetch_client = settings_object_of_fetch_client(source_snapshot_params->fetch_client);
+        if (auto container_document = navigable->container_document(); container_document && fetch_client.ptr() == &container_document->relevant_settings_object()) {
+            request->set_initiator_type(container_is_iframe ? Web::Fetch::Infrastructure::Request::InitiatorType::IFrame
+                    : container_is_embed                    ? Web::Fetch::Infrastructure::Request::InitiatorType::Embed
+                                                            : Web::Fetch::Infrastructure::Request::InitiatorType::Object);
+        }
+
+        // AD-HOC: The navigable's container's node document's frame-src governs where the navigable can be navigated
+        //         to, rather than that of the source document, which isn't the container document when, e.g., the
+        //         navigable's own document navigates it. See https://github.com/w3c/webappsec-csp/issues/624.
+        // NB: A container document in another process is not here, so its CSP list is read from the container's state.
+        auto container_document = navigable->container_document();
+        request->set_child_navigable_navigation(Fetch::Infrastructure::Request::ChildNavigableNavigation {
+            .navigable_id = navigable->id(),
+            .navigation_id = navigation_id,
+            .container_document_csp_list = container_document
+                ? container_document->policy_container()->csp_list
+                : ContentSecurityPolicy::PolicyList { navigable->container_state().document_csp_list },
+        });
+    }
+
+    // NOTE: We use a heap-allocated cell to hold all the following state because the callbacks below will use them
+    //       after this stack is freed.
+    // 11. Let response be null.
+    // 12. Let responseOrigin be null.
+    // 13. Let fetchController be null.
+
+    // 14. Let coopEnforcementResult be a new opener policy enforcement result, with
+    // - url: navigable's active document's URL
+    // - origin: navigable's active document's origin
+    // - opener policy: navigable's active document's opener policy
+    // - current context is navigation source: true if navigable's active document's origin is same origin with
+    //                                         entry's document state's initiator origin otherwise false
+    OpenerPolicyEnforcementResult coop_enforcement_result = {
+        .url = active_document.url(),
+        .origin = active_document.origin(),
+        .opener_policy = active_document.opener_policy(),
+        .current_context_is_navigation_source = document_state.initiator_origin.has_value() && active_document.origin().is_same_origin(*document_state.initiator_origin)
+    };
+
+    // 15. Let finalSandboxFlags be an empty sandboxing flag set.
+    // 16. Let responsePolicyContainer be null.
+    // 17. Let responseCOOP be a new opener policy.
+    // 18. Let locationURL be null.
+    // 19. Let currentURL be request's current URL.
+    // 20. Let commitEarlyHints be null.
+    // AD-HOC: Store required variables on the state holder to keep them alive whilst waiting on the fetch to complete.
+    auto state_holder = realm.heap().allocate<NavigationParamsFetchStateHolder>(move(coop_enforcement_result), request->current_url(), request,
+        document_state.initiator_origin, document_state.history_policy_container, document_state.about_base_url, source_snapshot_params,
+        document_state.request_referrer, document_state.request_referrer_policy, document_state.origin, document_resource, document_state.ever_populated, document_state.user_agent_initiated,
+        document_state.navigable_target_name);
+    state_holder->navigable = navigable;
+    state_holder->csp_navigation_type = csp_navigation_type;
+    state_holder->navigation_timing_type = navigation_timing_type;
+    state_holder->target_snapshot_params = target_snapshot_params;
+    state_holder->navigation_id = move(navigation_id);
+
+    perform_navigation_params_fetch(realm, state_holder, completion_steps, GC::create_function(realm.heap(), GC::captures(state_holder, user_involvement, completion_steps), [](auto& state_holder, auto& user_involvement, auto& completion_steps) {
+        // AD-HOC: Tell the fetch whether a manual redirect it handed over is the navigation's response, which is the case
+        //         when neither step 22 nor step 23 returns.
+        if (auto fetch_controller = state_holder->fetch_controller) {
+            auto const& location_url = state_holder->location_url;
+            if (!state_holder->response->is_network_error() && !location_url.is_error() && !location_url.value().has_value())
+                fetch_controller->resolve_redirect(Fetch::Engine::Command::ResolveRedirect::AcceptAsFinal {});
+            else
+                fetch_controller->resolve_redirect(Fetch::Engine::Command::ResolveRedirect::Abandon {});
+        }
+
+        auto result = GC::Heap::the().allocate<InternalNavigationResult>();
+        result->redirected_url = move(state_holder->redirected_url);
+        result->redirect_replaced_fragment = state_holder->redirect_replaced_fragment;
+        result->classic_history_api_state = move(state_holder->redirect_classic_history_api_state);
+        result->replacement_document_state = state_holder->replacement_document_state;
+        result->resource_cleared = state_holder->resource_cleared;
+
+        // 22. If locationURL is a URL whose scheme is not a fetch scheme, then return a new non-fetch scheme navigation params, with
+        if (!state_holder->location_url.is_error() && state_holder->location_url.value().has_value() && !Fetch::Infrastructure::is_fetch_scheme(state_holder->location_url.value().value().scheme())) {
+            // - id: navigationId
+            // - navigable: navigable
+            // - URL: locationURL
+            // - target snapshot sandboxing flags: targetSnapshotParams's sandboxing flags
+            // - source snapshot has transient activation: sourceSnapshotParams's has transient activation
+            // - initiator origin: responseOrigin
+            // - navigation timing type: navTimingType
+            // - user involvement: userInvolvement
+            result->navigation_params = GC::Heap::the().allocate<NonFetchSchemeNavigationParams>(
+                state_holder->navigation_id,
+                state_holder->navigable,
+                state_holder->location_url.value().value(),
+                state_holder->target_snapshot_params.sandboxing_flags,
+                state_holder->source_snapshot_params->has_transient_activation,
+                *state_holder->response_origin,
+                state_holder->navigation_timing_type,
+                user_involvement);
+            completion_steps->function()(*result);
+            return;
+        }
+
+        // 23. If any of the following are true:
+        //       - response is a network error;
+        //       - locationURL is failure; or
+        //       - locationURL is a URL whose scheme is a fetch scheme
+        //     then return null.
+        if (state_holder->response->is_network_error()) {
+            // AD-HOC: We pass the error message if we have one in NullWithError
+            result->navigation_params = state_holder->response->network_error_message().map([](auto const& error_message) {
+                return Utf16String::from_utf8(error_message);
+            });
+            completion_steps->function()(*result);
+            return;
+        }
+
+        if (state_holder->location_url.is_error() || (state_holder->location_url.value().has_value() && Fetch::Infrastructure::is_fetch_scheme(state_holder->location_url.value().value().scheme()))) {
+            result->navigation_params = LocalNavigable::NullOrError {};
+            completion_steps->function()(*result);
+            return;
+        }
+
+        // 24. Assert: locationURL is null and response is not a network error.
+        VERIFY(!state_holder->location_url.value().has_value());
+        VERIFY(!state_holder->response->is_network_error());
+
+        if (Fetch::Infrastructure::is_http_or_https_scheme(state_holder->request->current_url().scheme()))
+            result->navigation_same_site_status = state_holder->request->same_site_status();
+
+        // 25. Let resultPolicyContainer be the result of determining navigation params policy container given response's URL,
+        //     entry's document state's history policy container, sourceSnapshotParams's source policy container, null, and responsePolicyContainer.
+        RefPtr<PolicyContainer> history_policy_container = state_holder->history_policy_container.visit(
+            [&](SerializedPolicyContainer const& s) -> RefPtr<PolicyContainer> { return create_a_policy_container_from_serialized_policy_container(s); },
+            [](DocumentState::Client) -> RefPtr<PolicyContainer> { return {}; });
+        auto result_policy_container = determine_navigation_params_policy_container(*state_holder->response->url(), history_policy_container, state_holder->source_snapshot_params->source_policy_container, {}, state_holder->response_policy_container);
+
+        // 26. If navigable's container is an iframe, and response's timing allow passed flag is set,
+        //     then set navigable's container's pending resource-timing start time to null.
+        if (state_holder->navigable->container() && state_holder->response->timing_allow_passed()) {
+            if (auto* iframe_element = as_if<HTML::HTMLIFrameElement>(*state_holder->navigable->container()))
+                iframe_element->set_pending_resource_start_time({});
+        }
+
+        // 27. Return a new navigation params, with
+        //     id: navigationId
+        //     navigable: navigable
+        //     request: request
+        //     response: response
+        //     fetch controller: fetchController
+        //     commit early hints: commitEarlyHints
+        //     opener policy: responseCOOP
+        //     reserved environment: request's reserved client
+        //     origin: responseOrigin
+        //     policy container: resultPolicyContainer
+        //     final sandboxing flag set: finalSandboxFlags
+        //     COOP enforcement result: coopEnforcementResult
+        //     navigation timing type: navTimingType
+        //     about base URL: entry's document state's about base URL
+        //     user involvement: userInvolvement
+        // FIXME: Value for iframe element referrer policy is missing in the spec. https://github.com/whatwg/html/issues/12567
+        //        So, we default to the empty string.
+        result->navigation_params = GC::Heap::the().allocate<NavigationParams>(
+            state_holder->navigation_id,
+            state_holder->navigable,
+            state_holder->request,
+            *state_holder->response,
+            state_holder->fetch_controller,
+            state_holder->commit_early_hints,
+            state_holder->coop_enforcement_result,
+            state_holder->reserved_client,
+            *state_holder->response_origin,
+            result_policy_container,
+            state_holder->final_sandbox_flags,
+            ReferrerPolicy::ReferrerPolicy::EmptyString,
+            state_holder->response_coop,
+            state_holder->navigation_timing_type,
+            state_holder->about_base_url,
+            user_involvement);
+        completion_steps->function()(*result);
+    }));
+}
+
+using NavigationParamsCreationCompletion = GC::Function<void(GC::Ref<InternalNavigationResult>)>;
+
+static void create_navigation_params_for_population(
+    LocalNavigable& navigable,
+    PendingSessionHistoryEntryDescriptor const& entry,
+    GC::Ref<SourceSnapshotParams> source_snapshot_params,
+    TargetSnapshotParams const& target_snapshot_params,
+    UserNavigationInvolvement user_involvement,
+    Optional<Utf16String> navigation_id,
+    LocalNavigable::NavigationParamsVariant navigation_params,
+    ContentSecurityPolicy::Directives::Directive::NavigationType csp_navigation_type,
+    Bindings::NavigationTimingType navigation_timing_type,
+    bool allow_POST,
+    GC::Ref<NavigationParamsCreationCompletion> completion_steps)
+{
+    // Helper to wrap a NavigationParamsVariant in an InternalNavigationResult with no redirect mutations.
+    auto wrap_navigation_params = [&](LocalNavigable::NavigationParamsVariant navigation_params) {
+        auto result = navigable.heap().allocate<InternalNavigationResult>();
+        result->navigation_params = move(navigation_params);
+        completion_steps->function()(*result);
+    };
+
+    // 4. If navigationParams is null, then:
+    if (navigation_params.has<LocalNavigable::NullOrError>()) {
+        // 1. If documentResource is a string, then set navigationParams to the result of creating navigation params
+        //    from a srcdoc resource given entry, navigable, targetSnapshotParams, userInvolvement, navigationId, and
+        //    navTimingType.
+        auto const& document_state = entry.document_state;
+        if (document_state.resource.has<Utf16String>()) {
+            wrap_navigation_params(create_navigation_params_from_a_srcdoc_resource(
+                document_state.resource,
+                document_state.origin,
+                document_state.history_policy_container,
+                document_state.about_base_url,
+                &navigable, source_snapshot_params, target_snapshot_params, user_involvement, navigation_id, navigation_timing_type));
+        }
+        // 2. Otherwise, if all of the following are true:
+        //    - entry's URL's scheme is a fetch scheme; and
+        //    - documentResource is null, or allowPOST is true and documentResource's request body is not failure,
+        //      (FIXME: check if request body is not failure)
+        //    then set navigationParams to the result of creating navigation params by fetching given entry, navigable,
+        //    sourceSnapshotParams, targetSnapshotParams, cspNavigationType, userInvolvement, navigationId, and
+        //    navTimingType.
+        else if (Fetch::Infrastructure::is_fetch_scheme(entry.url.scheme()) && (document_state.resource.has<Empty>() || allow_POST)) {
+            create_navigation_params_by_fetching(
+                entry,
+                &navigable,
+                source_snapshot_params,
+                target_snapshot_params,
+                csp_navigation_type,
+                user_involvement,
+                navigation_id,
+                navigation_timing_type,
+                completion_steps);
+        }
+        // 3. Otherwise, if entry's URL's scheme is not a fetch scheme, then set navigationParams to a new non-fetch
+        //    scheme navigation params, with:
+        else if (!Fetch::Infrastructure::is_fetch_scheme(entry.url.scheme())) {
+            // - id: navigationId
+            // - navigable: navigable
+            // - URL: entry's URL
+            // - target snapshot sandboxing flags: targetSnapshotParams's sandboxing flags
+            // - source snapshot has transient activation: sourceSnapshotParams's has transient activation
+            // - initiator origin: entry's document state's initiator origin
+            // - navigation timing type: navTimingType
+            // - user involvement: userInvolvement
+            wrap_navigation_params(navigable.vm().heap().allocate<NonFetchSchemeNavigationParams>(
+                navigation_id,
+                &navigable,
+                entry.url,
+                target_snapshot_params.sandboxing_flags,
+                source_snapshot_params->has_transient_activation,
+                *document_state.initiator_origin,
+                navigation_timing_type,
+                user_involvement));
+        }
+    } else {
+        wrap_navigation_params(move(navigation_params));
+    }
+}
+
+// The navigation params a navigation or a history step created, as the UI process receives them.
+static void create_navigation_population_result(Window& window, GC::Ref<InternalNavigationResult> result, GC::Ref<GC::Function<void(NavigationPopulationResult)>> on_complete)
+{
+    auto& realm = window.principal_realm();
+    create_navigation_params_descriptor(realm, result->navigation_params, GC::create_function(realm.heap(), GC::captures(result, on_complete), [](auto& result, auto& on_complete, NavigationParamsVariantDescriptor navigation_params) {
+        Optional<SessionHistoryDocumentStateDescriptor> replacement_document_state;
+        if (result->replacement_document_state)
+            replacement_document_state = create_session_history_document_state_descriptor(*result->replacement_document_state);
+        on_complete->function()({
+            .navigation_params = move(navigation_params),
+            .redirected_url = move(result->redirected_url),
+            .redirect_replaced_fragment = result->redirect_replaced_fragment,
+            .classic_history_api_state = move(result->classic_history_api_state),
+            .replacement_document_state = move(replacement_document_state),
+            .resource_cleared = result->resource_cleared,
+            .navigation_same_site_status = result->navigation_same_site_status,
+        });
+    }));
+}
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#populating-a-session-history-entry
+// NB: This creates the navigation params for request's entry, and the UI process chooses the process that creates the
+//     document from them.
+void LocalNavigable::populate_session_history_entry_document(NavigationPopulationRequest const& request, GC::Ref<SourceSnapshotParams> source_snapshot_params, bool allow_POST, GC::Ref<GC::Function<void(NavigationPopulationResult)>> response_steps)
+{
+    // AD-HOC: Not in the spec but subsequent steps will fail if the navigable doesn't have an active window.
+    auto respond_without_an_active_window = GC::create_function(heap(), GC::captures(response_steps), [](auto& response_steps) {
+        response_steps->function()({
+            .navigation_params = NavigationParamsNullOrError { "Navigable has no active window"_utf16 },
+            .redirected_url = {},
+            .classic_history_api_state = {},
+            .replacement_document_state = {},
+        });
+    });
+    if (!active_window()) {
+        respond_without_an_active_window->function()();
+        return;
+    }
+
+    auto received_navigation_params = GC::create_function(heap(), GC::captures(*this, response_steps, respond_without_an_active_window), [](auto& self, auto& response_steps, auto& respond_without_an_active_window, GC::Ref<InternalNavigationResult> result) {
+        if (!self.active_window()) {
+            stop_response_body_delivery(result->navigation_params);
+            respond_without_an_active_window->function()();
+            return;
+        }
+        create_navigation_population_result(*self.active_window(), result, response_steps);
+    });
+
+    auto navigation_timing_type = request.history_entry.document_state.reload_pending ? Bindings::NavigationTimingType::Reload : Bindings::NavigationTimingType::BackForward;
+    create_navigation_params_for_population(
+        *this,
+        request.history_entry,
+        source_snapshot_params,
+        request.target_snapshot_params,
+        request.user_involvement,
+        request.navigation_id.is_empty() ? Optional<Utf16String> {} : Optional<Utf16String> { request.navigation_id },
+        NullOrError {},
+        request.csp_navigation_type,
+        navigation_timing_type,
+        allow_POST,
+        received_navigation_params);
+}
+
+GC_DEFINE_ALLOCATOR(DocumentToCreate);
+
+DocumentToCreate::DocumentToCreate(GC::Ref<NavigationParams> navigation_params, GC::Ref<LoadSteps> load_steps, Optional<URL::Origin> origin)
+    : m_navigation_params(navigation_params)
+    , m_load_steps(load_steps)
+    , m_replaces_response_origin(origin.has_value())
+    , m_environment_id(navigation_params->reserved_environment ? navigation_params->reserved_environment->id : *navigation_params->environment_id)
+{
+    if (origin.has_value())
+        m_navigation_params->origin = origin.release_value();
+}
+
+void DocumentToCreate::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_navigation_params);
+    visitor.visit(m_load_steps);
+}
+
+URL::Origin DocumentToCreate::origin() const
+{
+    return m_navigation_params->origin;
+}
+
+// https://html.spec.whatwg.org/multipage/document-lifecycle.html#initialise-the-document-object
+URL::URL DocumentToCreate::url() const
+{
+    // 3. Let creationURL be navigationParams's response's URL.
+    // 4. If navigationParams's request is non-null, then set creationURL to navigationParams's request's
+    //    current URL.
+    return m_navigation_params->request ? m_navigation_params->request->current_url() : m_navigation_params->response->url().value();
+}
+
+CrossProcessId DocumentToCreate::id() const
+{
+    return *m_navigation_params->document_id;
+}
+
+// AD-HOC: The UI process learns the id before the document is created. A window reused from the initial about:blank
+//         keeps its environment settings object.
+EnvironmentId const& DocumentToCreate::environment_id() const
+{
+    if (auto const* document = m_navigation_params->browsing_context->active_document(); document && takes_over_window_of(*document))
+        return document->relevant_settings_object().id;
+    return m_environment_id;
+}
+
+// https://html.spec.whatwg.org/multipage/document-lifecycle.html#initialise-the-document-object
+bool DocumentToCreate::takes_over_window_of(DOM::Document const& document) const
+{
+    if (m_navigation_params->browsing_context != document.browsing_context())
+        return false;
+
+    // 6. If browsingContext's active document's is initial about:blank is true, and browsingContext's active document's
+    //    origin is same origin-domain with navigationParams's origin, then set window to browsingContext's active window.
+    return document.is_initial_about_blank() && document.origin().is_same_origin_domain(m_navigation_params->origin);
+}
+
+GC::Ref<DOM::Document> DocumentToCreate::create_document()
+{
+    auto document = m_load_steps->function()(*m_navigation_params);
+    if (m_navigation_params->response->network_transport().has_value())
+        m_navigation_params->response->resume_body_delivery(*surrounding_agent().fetch_executor);
+    m_navigation_params = nullptr;
+    m_load_steps = nullptr;
+    return document;
+}
+
+// A navigation whose document was never created releases the response body held for it.
+void DocumentToCreate::discard()
+{
+    if (m_navigation_params)
+        stop_response_body_delivery(*m_navigation_params);
+    m_navigation_params = nullptr;
+    m_load_steps = nullptr;
+}
+
+// NB: A document created in place of the response, or the PDF viewer, has an origin other than its response's. The
+//     process reports which of the two it created, and the UI process takes up that origin for the document it holds.
+static void report_a_document_with_an_origin_of_its_own(LocalNavigable& navigable, PopulateSessionHistoryEntryDocumentOutput const& output)
+{
+    auto const* navigation_params = output.navigation_params.get_pointer<GC::Ref<NavigationParams>>();
+    if (!output.document_to_create || !navigation_params)
+        return;
+    if (!output.document_to_create->replaces_response_origin() && output.document_to_create->origin().is_same_origin((*navigation_params)->origin))
+        return;
+    auto origin = output.inline_content_origin.has_value() && output.document_to_create->origin().is_same_origin(*output.inline_content_origin)
+        ? PopulatedDocumentOrigin::InlineContent
+        : PopulatedDocumentOrigin::PdfViewer;
+    navigable.page().client().page_did_create_populated_document_with_an_origin_of_its_own(navigable.id(), output.document_to_create->id(), origin, output.document_to_create->environment_id());
+}
+
+// https://html.spec.whatwg.org/multipage/browsers.html#obtain-browsing-context-navigation
+// NB: The UI process performed this algorithm and selected this process. It names the group of the new top-level
+//     browsing context when it switched browsing context groups.
+static GC::Ref<HTML::BrowsingContext> obtain_a_browsing_context_to_use_for_a_navigation_response(HTML::NavigationParams const& navigation_params)
+{
+    // 1. Let browsingContext be navigationParams's navigable's active browsing context.
+    auto& navigable = *navigation_params.navigable;
+    auto browsing_context = navigable.active_browsing_context();
+
+    // NB: Steps 2 to 9 decide whether to switch browsing context groups, and return browsingContext otherwise.
+    if (!navigation_params.new_browsing_context_group_id.has_value())
+        return *browsing_context;
+
+    // 10. Let newBrowsingContext be the first return value of creating a new top-level browsing context and document.
+    auto new_browsing_context = HTML::BrowsingContext::create_a_new_browsing_context_and_document(navigable.page(), nullptr, nullptr).browsing_context;
+    new_browsing_context->set_browsing_context_group_id(*navigation_params.new_browsing_context_group_id);
+
+    // 15. Return newBrowsingContext.
+    return new_browsing_context;
+}
+
+GC::Ref<DocumentToCreate> DocumentToCreate::create(GC::Ref<NavigationParams> navigation_params, GC::Ref<LoadSteps> load_steps, Optional<URL::Origin> origin)
+{
+    // https://html.spec.whatwg.org/multipage/document-lifecycle.html#initialise-the-document-object
+    // 1. Let browsingContext be the result of obtaining a browsing context to use for a navigation response given
+    //    navigationParams.
+    // AD-HOC: Obtained now, as navigable's active document is unloaded before the document is created.
+    navigation_params->browsing_context = obtain_a_browsing_context_to_use_for_a_navigation_response(*navigation_params);
+
+    // AD-HOC: The UI process learns the id of the new Window's environment before the document is created.
+    if (!navigation_params->reserved_environment && !navigation_params->environment_id.has_value())
+        navigation_params->environment_id = EnvironmentId::generate();
+    if (!navigation_params->document_id.has_value())
+        navigation_params->document_id = navigation_params->navigable->page().client().allocate_cross_process_id();
+    return GC::Heap::the().allocate<DocumentToCreate>(navigation_params, load_steps, move(origin));
+}
+
+enum class RejectedCertificateKind : u8 {
+    None,
+    SelfSigned,
+    Invalid,
+};
+
+static RejectedCertificateKind rejected_certificate_kind(LocalNavigable& navigable, Utf16String const& error_message)
+{
+    if (!navigable.is_top_level_traversable())
+        return RejectedCertificateKind::None;
+    // NB: Only the error message survives across processes; no server-controlled message matches it exactly.
+    //     A false match only requests a UI warning for an unrecorded certificate.
+    auto is_error = [&](Requests::NetworkError error) {
+        auto description = network_error_description(error);
+        return error_message == Fetch::Fetching::network_request_failed_error_message(description.bytes_as_string_view());
+    };
+    if (is_error(Requests::NetworkError::SSLSelfSignedCertificate))
+        return RejectedCertificateKind::SelfSigned;
+    for (auto error : { Requests::NetworkError::SSLCertificateUnknownIssuer, Requests::NetworkError::SSLCertificateExpired, Requests::NetworkError::SSLCertificateNotYetValid, Requests::NetworkError::SSLCertificateNameMismatch, Requests::NetworkError::SSLCertificateInvalid }) {
+        if (is_error(error))
+            return RejectedCertificateKind::Invalid;
+    }
+    return RejectedCertificateKind::None;
+}
+
+static GC::Ref<DOM::Document> create_navigation_error_document(NavigationParams const& navigation_params, URL::URL const& url, Utf16String const& error_message)
+{
+    auto const& page = navigation_params.navigable->page();
+    auto certificate_kind = rejected_certificate_kind(*navigation_params.navigable, error_message);
+    // The UI process replaces this page with a warning only if certificate trust prompts are enabled.
+    auto offer_to_trust_certificate = false;
+    auto mention_certificate_setting = MentionCertificateSetting::No;
+    if (certificate_kind == RejectedCertificateKind::SelfSigned) {
+        offer_to_trust_certificate = page.offers_to_trust_self_signed_certificates();
+        if (!offer_to_trust_certificate)
+            mention_certificate_setting = MentionCertificateSetting::SelfSigned;
+    } else if (certificate_kind == RejectedCertificateKind::Invalid) {
+        offer_to_trust_certificate = page.offers_to_trust_invalid_certificates();
+        // This setting requires the self-signed certificate setting to be enabled.
+        if (!offer_to_trust_certificate && page.offers_to_trust_self_signed_certificates())
+            mention_certificate_setting = MentionCertificateSetting::Invalid;
+    }
+    auto error_html = load_error_page(url, error_message.to_utf8(), mention_certificate_setting).release_value_but_fixme_should_propagate_errors();
+    auto document = create_document_for_inline_content(navigation_params, [&error_html, offer_to_trust_certificate, &url](auto& document) {
+        auto scripting_mode = document.is_scripting_enabled() ? HTML::ParserScriptingMode::Normal : HTML::ParserScriptingMode::Disabled;
+        auto parser = HTMLParser::create_from_byte_string(document, error_html, scripting_mode, "utf-8"sv);
+        document.set_url(URL::about_error());
+        parser->run();
+
+        // FIXME: This should go in create_document_for_inline_content() instead.
+        // FIXME: Directly calling parser->the_end results in a deadlock, because it waits for the warning image to load.
+        //        However the response is never processed when parser->the_end is called.
+        //        Queuing a global task is a workaround for now.
+        queue_a_task(Task::Source::Unspecified, HTML::main_thread_event_loop(), document, GC::create_function(document.heap(), GC::captures(document, parser, offer_to_trust_certificate, url), [](auto& document, auto& parser, auto const& offer_to_trust_certificate, auto const& url) {
+            HTMLParser::the_end(document, parser);
+
+            // The UI process owns certificate trust and only accepts requests from the displayed document.
+            if (!offer_to_trust_certificate)
+                return;
+            auto navigable = document.navigable();
+            if (!navigable || !navigable->active_document_is(document))
+                return;
+            auto entry = navigable->active_session_history_entry();
+            if (!entry || !entry->document_state())
+                return;
+            document.page().client().page_did_request_certificate_warning(url, entry->document_state()->cross_process_id());
+        }));
+    });
+
+    // https://html.spec.whatwg.org/multipage/browsing-the-web.html#attempt-to-populate-the-history-entry's-document
+    // 2. Make document unsalvageable given entry's document state's document and "navigation-failure".
+    // AD-HOC: Run once the document is created, for this step and for the HTTP error page alike.
+    document->make_unsalvageable("navigation-failure"_utf16);
+    return document;
+}
+
+static GC::Ref<DocumentToCreate> navigation_error_document(LocalNavigable& navigable, Optional<Utf16String> const& navigation_id, Bindings::NavigationTimingType navigation_timing_type, UserNavigationInvolvement user_involvement, URL::Origin const& origin, Optional<CrossProcessId> document_id, URL::URL const& url, Utf16String const& error_message)
+{
+    auto navigation_params = create_navigation_params_for_inline_content(&navigable, navigation_id, navigation_timing_type, user_involvement, origin, document_id);
+    return DocumentToCreate::create(navigation_params, GC::create_function(GC::Heap::the(), GC::captures(url, error_message), [](auto& url, auto& error_message, NavigationParams const& navigation_params) -> GC::Ref<DOM::Document> {
+        return create_navigation_error_document(navigation_params, url, error_message);
+    }));
+}
+
+static void load_document_or_handle_download(GC::Ref<NavigationParams> navigation_params, ReadonlyBytes sniff_bytes, URL::URL const& url, bool source_allows_downloading, Optional<URL::Origin> source_interface_origin, PopulateSessionHistoryEntryDocumentOutput& output)
+{
+    // AD-HOC: Match other browsers and show a UA error page for an empty HTTP error response to a top-level navigation.
+    if (navigation_params->navigable->is_top_level_traversable() && navigation_params->response->status() >= 400 && navigation_params->response->status() <= 599 && sniff_bytes.is_empty()) {
+        stop_response_body_delivery(*navigation_params);
+
+        if (navigation_params->reserved_environment)
+            navigation_params->reserved_environment->discard_environment();
+
+        output.save_extra_document_state = false;
+
+        auto error_message = Utf16String::formatted("HTTP error: {} {}", navigation_params->response->status(), navigation_params->response->status_message());
+
+        output.document_to_create = navigation_error_document(
+            *navigation_params->navigable,
+            navigation_params->id,
+            navigation_params->navigation_timing_type,
+            navigation_params->user_involvement,
+            output.inline_content_origin.value(),
+            navigation_params->document_id,
+            output.redirected_url.value_or(url),
+            error_message);
+
+        return;
+    }
+
+    output.document_to_create = load_document(navigation_params, sniff_bytes);
+
+    if (!output.document_to_create) {
+        output.download_handled = handle_navigation_response_as_download(navigation_params, source_allows_downloading, source_interface_origin);
+        output.save_extra_document_state = false;
+    }
+}
+
+void LocalNavigable::queue_navigation_and_traversal_task_for_session_history_entry_population(
+    URL::URL url,
+    bool source_allows_downloading,
+    Optional<URL::Origin> source_interface_origin,
+    UserNavigationInvolvement user_involvement,
+    Optional<Utf16String> navigation_id,
+    NavigationParamsVariant navigation_params,
+    ContentSecurityPolicy::Directives::Directive::NavigationType csp_navigation_type,
+    Bindings::NavigationTimingType navigation_timing_type,
+    GC::Ref<PopulateSessionHistoryEntryDocumentOutput> output,
+    GC::Ptr<GC::Function<void(GC::Ptr<PopulateSessionHistoryEntryDocumentOutput>)>> completion_steps)
+{
+    if (!active_window()) {
+        stop_response_body_delivery(navigation_params);
+        return;
+    }
+    if (auto* params = navigation_params.get_pointer<GC::Ref<NavigationParams>>())
+        (*params)->document_id = output->document_id;
+
+    // 5. Queue a global task on the navigation and traversal task source, given navigable's active window, to run these steps:
+    queue_global_task(Task::Source::NavigationAndTraversal, HTML::relevant_global_object(*active_window()), GC::create_function<void()>(heap(), GC::captures(*this, url, source_allows_downloading, source_interface_origin, user_involvement, navigation_id, navigation_params, csp_navigation_type, navigation_timing_type, output, completion_steps), [](LocalNavigable& self, auto& url, auto& source_allows_downloading, auto& source_interface_origin, auto& user_involvement, auto& navigation_id, NavigationParamsVariant& navigation_params, auto& csp_navigation_type, auto& navigation_timing_type, auto& output, auto& completion_steps) {
+        // 1. If navigable's ongoing navigation no longer equals navigationId, then run completionSteps and abort these steps.
+        // NB: A reload history job keeps the traversal marker while its document is populated.
+        auto is_reload_traversal = navigation_timing_type == Bindings::NavigationTimingType::Reload && self.ongoing_navigation().has<Traversal>();
+        if (navigation_id.has_value() && self.ongoing_navigation() != navigation_id && !is_reload_traversal) {
+            stop_response_body_delivery(navigation_params);
+            if (completion_steps)
+                completion_steps->function()(nullptr);
+            return;
+        }
+
+        // 2. Let saveExtraDocumentState be true.
+        output->save_extra_document_state = true;
+
+        // 3. If navigationParams is a non-fetch scheme navigation params, then:
+        if (navigation_params.has<GC::Ref<NonFetchSchemeNavigationParams>>()) {
+            // 1. Set entry's document state's document to the result of running attempt to create a non-fetch scheme
+            //    document given navigationParams.
+            //    NOTE: This can result in setting entry's document state's document to null, e.g., when handing-off to
+            //    external software.
+            output->document_to_create = attempt_to_create_a_non_fetch_scheme_document(navigation_params.get<GC::Ref<NonFetchSchemeNavigationParams>>());
+
+            // INTEROP: A navigation that loads no document is reported as failed to WebDriver BiDi, which is what other
+            //          implementations do, so that the navigation's waiters learn it ended.
+            if (!output->document_to_create && WebDriver::BiDi::is_active())
+                WebDriver::BiDi::navigation_event(self, "browsingContext.navigationFailed"sv, navigation_id, url);
+
+            // 2. Set saveExtraDocumentState to false.
+            output->save_extra_document_state = false;
+        }
+
+        // 4. Otherwise, if any of the following are true:
+        //  - navigationParams is null;
+        //  - the result of should navigation response to navigation request of type in target be blocked by Content Security Policy? given navigationParams's request, navigationParams's response, navigationParams's policy container's CSP list, cspNavigationType, and navigable is "Blocked";
+        //  - navigationParams's reserved environment is non-null and the result of checking a navigation response's adherence to its embedder policy given navigationParams's response, navigable, and navigationParams's policy container's embedder policy is false; or
+        //  - the result of checking a navigation response's adherence to `X-Frame-Options` given navigationParams's response, navigable, navigationParams's policy container's CSP list, and navigationParams's origin is false,
+        //    then:
+        // NB: The UI process checks the response's adherence to its embedder policy, as it holds navigable's container
+        //     document.
+        else if (navigation_params.visit(
+                     [](NullOrError) { return true; },
+                     [&self, csp_navigation_type](GC::Ref<NavigationParams> navigation_params) {
+                         auto csp_result = ContentSecurityPolicy::should_navigation_response_to_navigation_request_of_type_in_target_be_blocked_by_content_security_policy(navigation_params->request, *navigation_params->response, navigation_params->policy_container->csp_list, csp_navigation_type, self);
+                         if (csp_result == ContentSecurityPolicy::Directives::Directive::Result::Blocked)
+                             return true;
+
+                         // FIXME: Pass in navigationParams's policy container's CSP list
+                         return !check_a_navigation_responses_adherence_to_x_frame_options(navigation_params->response, &self, navigation_params->policy_container->csp_list, navigation_params->origin);
+                     },
+                     [](GC::Ref<NonFetchSchemeNavigationParams>) { return false; })) {
+            // 1. Set entry's document state's document to the result of creating a document for inline content that doesn't have a DOM, given navigable, null, navTimingType, and userInvolvement. The inline content should indicate to the user the sort of error that occurred.
+            auto error_message = navigation_params.has<NullOrError>() ? navigation_params.get<NullOrError>().value_or("Unknown error"_utf16) : "The request was denied."_utf16;
+            // AD-HOC: Name the URL that actually failed to load: The last URL the navigation was redirected to, if
+            //         any — rather than the URL it started at.
+            auto error_url = output->redirected_url.value_or(url);
+            output->document_to_create = navigation_error_document(self, navigation_id, navigation_timing_type, user_involvement, output->inline_content_origin.value(), output->document_id, error_url, error_message);
+
+            // 2. Make document unsalvageable given entry's document state's document and "navigation-failure".
+            // AD-HOC: That happens when the document is created.
+
+            // 3. Set saveExtraDocumentState to false.
+            output->save_extra_document_state = false;
+
+            // 4. If navigationParams is not null, then:
+            if (!navigation_params.has<NullOrError>()) {
+                // 1. Run the environment discarding steps for navigationParams's reserved environment.
+                navigation_params.visit(
+                    [](GC::Ref<NavigationParams> const& it) {
+                        stop_response_body_delivery(*it);
+                        it->reserved_environment->discard_environment();
+                    },
+                    [](auto const&) { });
+
+                // 2. Invoke WebDriver BiDi navigation failed with navigable and a new WebDriver BiDi navigation status whose id is navigationId, status is "canceled", and url is navigationParams's response's URL.
+                if (WebDriver::BiDi::is_active()) {
+                    auto response_url = navigation_params.visit(
+                        [&](GC::Ref<NavigationParams> const& it) { return it->response->url().value_or(url); },
+                        [&](auto const&) { return url; });
+                    WebDriver::BiDi::navigation_event(self, "browsingContext.navigationFailed"sv, navigation_id, response_url);
+                }
+            }
+            // INTEROP: A navigation whose fetch failed is reported as failed to WebDriver BiDi too, which is what other
+            //          implementations do.
+            else if (WebDriver::BiDi::is_active()) {
+                WebDriver::BiDi::navigation_event(self, "browsingContext.navigationFailed"sv, navigation_id, error_url);
+            }
+        }
+
+        // 5. Otherwise, if navigationParams's response has a `Content-Disposition` header specifying the attachment
+        //    disposition type, then:
+        else if (auto nav_params = navigation_params.get<GC::Ref<NavigationParams>>();
+            parse_content_disposition(*nav_params->response->header_list()).is_attachment) {
+            output->download_handled = handle_navigation_response_as_download(nav_params, source_allows_downloading, source_interface_origin);
+            output->save_extra_document_state = false;
+        }
+
+        // 6. Otherwise, if navigationParams's response's status is not 204 and is not 205, then set entry's document state's document to the result of
+        //    loading a document given navigationParams, sourceSnapshotParams, and entry's document state's initiator origin.
+        else if (auto const& response = navigation_params.get<GC::Ref<NavigationParams>>()->response; response->status() != 204 && response->status() != 205) {
+            auto nav_params = navigation_params.get<GC::Ref<NavigationParams>>();
+            auto body = nav_params->response->body();
+
+            // Get sniff bytes for MIME type detection. For streaming responses where bytes
+            // haven't arrived yet, we must wait asynchronously.
+            auto sniff_bytes = body ? body->sniff_bytes_if_available() : Optional<Fetch::Infrastructure::Body::SniffBytes> { Fetch::Infrastructure::Body::SniffBytes {} };
+            if (!sniff_bytes.has_value()) {
+                // Async path: bytes not yet available, wait for them
+                nav_params->response->release_navigation_hold_up_to(*surrounding_agent().fetch_executor, Fetch::Infrastructure::MAX_SNIFF_BYTES);
+                body->wait_for_sniff_bytes(GC::create_function(self.heap(), GC::captures(output, nav_params, navigation_params, completion_steps, source_allows_downloading, source_interface_origin, url, navigation_id, is_reload_traversal), [](auto& output, auto& nav_params, auto& navigation_params, auto& completion_steps, auto& source_allows_downloading, auto& source_interface_origin, auto& url, auto& navigation_id, auto& is_reload_traversal, Fetch::Infrastructure::Body::SniffBytes sniff_bytes) {
+                    // AD-HOC: The document may have been destroyed between when the fetch started and when the
+                    //         bytes arrived. A response that failed mid-sniff must not be loaded as a document
+                    //         off its partial bytes either.
+                    // AD-HOC: A navigation that a newer one superseded during the wait does not act on its
+                    //         response either, which would otherwise start a download the user replaced.
+                    auto is_superseded = navigation_id.has_value() && nav_params->navigable->ongoing_navigation() != navigation_id && !is_reload_traversal;
+                    if (!is_superseded && nav_params->navigable->active_browsing_context() && sniff_bytes.outcome == Fetch::Infrastructure::Body::SniffOutcome::Complete) {
+                        load_document_or_handle_download(nav_params, sniff_bytes.bytes, url, source_allows_downloading, source_interface_origin, *output);
+                    } else {
+                        stop_response_body_delivery(navigation_params);
+                        if (sniff_bytes.outcome == Fetch::Infrastructure::Body::SniffOutcome::Failed)
+                            output->save_extra_document_state = false;
+                    }
+                    output->navigation_params = navigation_params;
+                    report_a_document_with_an_origin_of_its_own(*nav_params->navigable, output);
+                    if (completion_steps)
+                        completion_steps->function()(output);
+                }));
+                return;
+            }
+
+            // Sync path: bytes available immediately
+            if (sniff_bytes->outcome == Fetch::Infrastructure::Body::SniffOutcome::Complete) {
+                load_document_or_handle_download(nav_params, sniff_bytes->bytes, url, source_allows_downloading, source_interface_origin, *output);
+            } else {
+                stop_response_body_delivery(navigation_params);
+                output->save_extra_document_state = false;
+            }
+        } else {
+            stop_response_body_delivery(navigation_params);
+        }
+
+        output->navigation_params = navigation_params;
+        report_a_document_with_an_origin_of_its_own(self, output);
+        if (completion_steps)
+            completion_steps->function()(output);
+    }),
+        Task::Priority::Normal,
+        // A task its document drops unrun stops the body it would have handed on.
+        GC::create_function(heap(), GC::captures(navigation_params), [](auto& navigation_params) {
+            stop_response_body_delivery(navigation_params);
+        }));
+}
+
+void LocalNavigable::create_navigation_params_for_navigation(NavigationPopulationRequest request, GC::Ref<SourceSnapshotParams> source_snapshot_params, NavigationParamsVariant navigation_params, Bindings::NavigationTimingType navigation_timing_type)
+{
+    auto navigation_id = request.navigation_id;
+
+    if (!active_window()) {
+        stop_response_body_delivery(navigation_params);
+        return;
+    }
+
+    // 3. Queue a global task on the navigation and traversal task source given navigable's active window to abort a document and its descendants given navigable's active document.
+    queue_global_task(Task::Source::NavigationAndTraversal, HTML::relevant_global_object(*active_window()), GC::create_function(heap(), GC::captures(*this), [](auto& self) {
+        self.active_document()->abort_a_document_and_its_descendants();
+    }));
+
+    auto received_navigation_params = GC::create_function(heap(), GC::captures(*this, request, navigation_id), [](auto& self, auto& request, auto& navigation_id, GC::Ref<InternalNavigationResult> result) {
+        if (!self.active_window() || self.ongoing_navigation() != navigation_id) {
+            stop_response_body_delivery(result->navigation_params);
+            return;
+        }
+
+        create_navigation_population_result(*self.active_window(), result, GC::create_function(self.heap(), GC::captures(self, move(request), navigation_id, result), [](auto& self, auto& request, auto& navigation_id, auto& result, NavigationPopulationResult population_result) {
+            if (!self.active_window() || self.ongoing_navigation() != navigation_id) {
+                stop_response_body_delivery(result->navigation_params);
+                return;
+            }
+            self.page().client().navigation_params_creation_finished(self, move(request), move(population_result));
+        }));
+    });
+
+    create_navigation_params_for_population(
+        *this,
+        request.history_entry,
+        source_snapshot_params,
+        request.target_snapshot_params,
+        request.user_involvement,
+        request.navigation_id,
+        move(navigation_params),
+        request.csp_navigation_type,
+        navigation_timing_type,
+        true,
+        received_navigation_params);
+}
+
+WebIDL::ExceptionOr<void> LocalNavigable::continue_navigation_in_active_document_agent(PreparedNavigation navigation)
+{
+    // NB: A WebContent process has one main-thread similar-origin window agent, so a local navigable's active
+    //     document always shares the surrounding agent and step 8 continues here. A navigation the UI process
+    //     requested was delivered by IPC to this agent.
+
+    // AD-HOC: Not in the spec but subsequent steps will fail if the navigable doesn't have an active window.
+    if (!active_window())
+        return {};
+
+    begin_navigation(move(navigation));
+    return {};
+}
+
+// To navigate a navigable navigable to a URL url using an optional Document-or-null sourceDocument (default null),
+// with an optional POST resource, string, or null documentResource (default null),
+// an optional response-or-null response (default null), an optional boolean exceptionsEnabled (default false),
+// an optional NavigationHistoryBehavior historyHandling (default "auto"),
+// an optional serialized state-or-null navigationAPIState (default null),
+// an optional entry list or null formDataEntryList (default null),
+// an optional referrer policy referrerPolicy (default the empty string),
+// an optional user navigation involvement userInvolvement (default "none"),
+// an optional Element sourceElement (default null),
+// and an optional boolean initialInsertion (default false):
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#navigate
+
+void LocalNavigable::continue_navigation_after_population_dispatch(PreparedNavigation navigation, NavigationPopulationRequest population_request)
+{
+    auto source_snapshot_params = navigation.source_snapshot_params;
+    auto navigation_id = population_request.navigation_id;
+
+    if (has_been_destroyed() || !active_window()) {
+        set_delaying_load_events(false);
+        return;
+    }
+    if (ongoing_navigation() != navigation_id) {
+        stop_delaying_load_events_for_navigation(navigation_id);
+        return;
+    }
+
+    if (!is_local_root()) {
+        if (auto parent = this->parent(); parent && has_compositor_context()) {
+            auto& local_parent = as<LocalNavigable>(*parent);
+            if (local_parent.has_compositor_context())
+                compositor_context().set_parent_context(local_parent.compositor_context().id());
+        }
+    }
+
+    // 7. Let navigationParams be null.
+    NavigationParamsVariant navigation_params = LocalNavigable::NullOrError {};
+
+    // 8. If response is non-null:
+    if (navigation.response) {
+        auto response_url = navigation.response->url();
+        VERIFY(response_url.has_value());
+
+        // 1. Let sourcePolicyContainer be a clone of the sourceDocument's policy container, if
+        //    sourceDocument is not null; otherwise null.
+        // NB: sourceDocument is null exactly for a "browser UI" user involvement, by steps 5 and 6.
+        RefPtr<PolicyContainer> source_policy_container;
+        if (navigation.user_involvement != UserNavigationInvolvement::BrowserUI)
+            source_policy_container = source_snapshot_params->source_policy_container;
+
+        // 2. Let policyContainer be the result of determining navigation params policy container given
+        //    response's URL, null, sourcePolicyContainer, navigable's container document's policy container,
+        //    and null.
+        RefPtr<PolicyContainer> parent_policy_container;
+        if (auto container_document = this->container_document())
+            parent_policy_container = container_document->policy_container();
+        else if (*response_url == URL::about_srcdoc() && parent() && source_policy_container) {
+            // NB: The container document is in another process. Only its iframe element's srcdoc attribute navigates
+            //     the navigable to about:srcdoc, so the container document is the source document.
+            parent_policy_container = source_policy_container;
+        } else if (*response_url == URL::about_srcdoc()) {
+            // NOTE: Specification assumes that only navigables corresponding to iframes can be navigated to about:srcdoc.
+            //       We also use srcdoc to implement load_html() for top level navigables so we need a policy container
+            //       because the navigable might not have a container.
+            parent_policy_container = PolicyContainer::create();
+        }
+        auto policy_container = determine_navigation_params_policy_container(*response_url, {}, source_policy_container, parent_policy_container, {});
+
+        // 3. Let finalSandboxFlags be the union of targetSnapshotParams's sandboxing flags and
+        //    policyContainer's CSP list's CSP-derived sandboxing flags.
+        auto final_sandbox_flags = population_request.target_snapshot_params.sandboxing_flags | policy_container->csp_list.csp_derived_sandboxing_flags();
+
+        // 4. Let responseOrigin be the result of determining the origin given response's URL,
+        //    finalSandboxFlags, and documentState's initiator origin.
+        auto response_origin = determine_the_origin(response_url, final_sandbox_flags, population_request.history_entry.document_state.initiator_origin);
+
+        // 5. Let coop be a new opener policy.
+        OpenerPolicy response_coop = {};
+
+        // 6. Let coopEnforcementResult be a new opener policy enforcement result with
+        //    url: response's URL
+        //    origin: responseOrigin
+        //    opener policy: coop
+        OpenerPolicyEnforcementResult coop_enforcement_result {
+            .url = *response_url,
+            .origin = response_origin,
+            .opener_policy = response_coop,
+        };
+
+        // 7. Set navigationParams to a new navigation params, with
+        //    id: navigationId
+        //    navigable: navigable
+        //    request: null
+        //    response: response
+        //    fetch controller: null
+        //    commit early hints: null
+        //    COOP enforcement result: coopEnforcementResult
+        //    reserved environment: null
+        //    origin: responseOrigin
+        //    policy container: policyContainer
+        //    final sandboxing flag set: finalSandboxFlags
+        //    iframe element referrer policy: targetSnapshotParams's iframe element referrer policy
+        //    opener policy: coop
+        //    navigation timing type: "navigate"
+        //    about base URL: documentState's about base URL
+        //    user involvement: userInvolvement
+        navigation_params = heap().allocate<NavigationParams>(
+            navigation_id,
+            this,
+            nullptr,
+            navigation.response,
+            nullptr,
+            nullptr,
+            move(coop_enforcement_result),
+            nullptr,
+            move(response_origin),
+            policy_container,
+            final_sandbox_flags,
+            population_request.target_snapshot_params.iframe_element_referrer_policy,
+            response_coop,
+            Bindings::NavigationTimingType::Navigate,
+            population_request.history_entry.document_state.about_base_url,
+            navigation.user_involvement);
+    }
+
+    // 9. Attempt to populate the history entry's document for historyEntry, given navigable, "navigate",
+    //    sourceSnapshotParams, targetSnapshotParams, userInvolvement, navigationId, navigationParams,
+    //    cspNavigationType, with allowPOST set to true and completionSteps set to the following step:
+    create_navigation_params_for_navigation(move(population_request), source_snapshot_params, move(navigation_params), Bindings::NavigationTimingType::Navigate);
+}
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#navigate
+// NB: The UI process runs navigate for a navigation from the browser's UI, from a sourceDocument in another process, or
+//     of a document that was lost, but for the steps that need navigable's container or active document. This process
+//     runs those, then the unload check and the first steps of population it is asked for.
+void LocalNavigable::adopt_navigation_started_in_ui_process(Utf16String navigation_id)
+{
+    if (has_been_destroyed() || !active_window())
+        return;
+
+    // 10. Let container be navigable's container.
+    auto container = this->container();
+
+    // 11. If container is an iframe element and will lazy load element steps given container returns true,
+    //     then stop intersection-observing a lazy loading element container and set container's lazy load resumption steps to null.
+    if (container && container->is_html_iframe_element()) {
+        auto& iframe_element = static_cast<HTMLIFrameElement&>(*container);
+        if (iframe_element.will_lazy_load_element())
+            iframe_element.stop_lazy_loading();
+    }
+
+    // 15. If navigable's parent is non-null, then set navigable's is delaying load events to true.
+    if (parent())
+        set_delaying_load_events(true);
+
+    // 19. Set the ongoing navigation for navigable to navigationId.
+    set_ongoing_navigation(navigation_id);
+
+    park_navigation_for_population(navigation_id, {});
+}
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#navigate
+// NB: The UI process ran the steps of a navigation from the browser's UI to a javascript: URL before step 19.
+void LocalNavigable::navigate_to_a_javascript_url_from_ui_process(URL::URL const& url, HistoryHandlingBehavior history_handling, URL::Origin const& initiator_origin, NavigationSourceSnapshot const& source_snapshot, UserNavigationInvolvement user_involvement, ContentSecurityPolicy::Directives::Directive::NavigationType csp_navigation_type, Utf16String navigation_id)
+{
+    auto window = active_window();
+    if (has_been_destroyed() || !window) {
+        page().client().navigation_population_failed(id(), navigation_id);
+        return;
+    }
+
+    // 19. Set the ongoing navigation for navigable to navigationId.
+    set_ongoing_navigation(navigation_id);
+
+    // 20. If url's scheme is "javascript", then:
+    //     1. Let request be a new request whose URL is url and whose policy container is sourceSnapshotParams's source
+    //        policy container.
+    auto source_snapshot_params = create_source_snapshot_params_from_navigation_source_snapshot(relevant_realm(*window), source_snapshot);
+    auto request = Fetch::Infrastructure::Request::create();
+    request->set_url(url);
+    request->set_policy_container(source_snapshot_params->source_policy_container);
+
+    // AD-HOC: See https://github.com/whatwg/html/issues/4651, requires some investigation to figure out what we should be setting here.
+    if (source_snapshot_params->fetch_client.has_value())
+        request->set_client(Fetch::Fetching::request_client(*source_snapshot_params->fetch_client));
+
+    //     2. Queue a global task on the navigation and traversal task source given navigable's active window to
+    //        navigate to a javascript: URL given navigable, request, historyHandling, initiatorOriginSnapshot,
+    //        userInvolvement, cspNavigationType, initialInsertion, and navigationId.
+    // NB: initialInsertion is false for a navigation the UI process runs: it never inserts a container.
+    // NB: The task holds request's client until it runs.
+    m_queued_javascript_url_navigations.append(navigation_id);
+    queue_global_task(Task::Source::NavigationAndTraversal, relevant_global_object(*window), GC::create_function(heap(), GC::captures(*this, request, source_snapshot_params->fetch_client, history_handling, initiator_origin, user_involvement, csp_navigation_type, move(navigation_id)), [](auto& self, auto& request, auto&, auto& history_handling, auto& initiator_origin, auto& user_involvement, auto& csp_navigation_type, auto& navigation_id) {
+        self.navigate_to_a_javascript_url(request, history_handling, initiator_origin, user_involvement, csp_navigation_type, InitialInsertion::No, navigation_id);
+    }));
+}
+
+// https://html.spec.whatwg.org/multipage/web-messaging.html#window-post-message-steps
+void LocalNavigable::deliver_posted_message_from_another_process(MessageDescriptor message)
+{
+    auto window = active_window();
+    if (!window)
+        return;
+
+    // NB: incumbentSettings's global object lives in the posting page. The WindowProxy of its navigable stands for it
+    //     here as source, taken now since that navigable can be gone from this page by the time the task runs. A popup
+    //     posting to its opener's tab, or the other way round, posts from a tab another page of this process holds.
+    GC::Ptr<WindowProxy> source;
+    if (message.source_navigable_id.has_value()) {
+        if (auto source_navigable = navigable_with_id_in_any_page(page(), *message.source_navigable_id))
+            source = source_navigable->active_window_proxy();
+    }
+
+    // 8. Queue a global task on the posted message task source given targetWindow to run the following steps:
+    window->queue_posted_message(move(message.serialize_with_transfer_result), message.target_origin, message.source_origin, source);
+}
+
+// Continue the navigate algorithm at step 9 with the values prepared by steps 1-7 in navigate().
+void LocalNavigable::begin_navigation(PreparedNavigation navigation)
+{
+    // AD-HOC: Not in the spec but we should not navigate a navigable that has been destroyed.
+    //         This can happen when a session history traversal step for creating a child navigable
+    //         runs after the navigable has been destroyed (e.g. an iframe is removed before its
+    //         post-connection steps finish processing). Without this check, we would call
+    //         set_delaying_load_events(true) below, creating a DocumentLoadEventDelayer on the
+    //         parent document that is never cleared.
+    if (has_been_destroyed())
+        return;
+
+    // AD-HOC: Not in the spec but subsequent steps will fail if the navigable doesn't have an active window.
+    if (!active_window())
+        return;
+
+    // AD-HOC: An SVG image's page has no UI process to navigate in, so its navigables keep their initial documents.
+    if (active_browsing_context()->page().client().is_svg_page_client())
+        return;
+
+    // NB: A provisional navigable's document stands in for one another page hosts, which the navigation navigates.
+    VERIFY(!is_provisional());
+
+    auto url = navigation.url;
+    auto document_resource = navigation.document_resource;
+    auto response = navigation.response;
+    auto history_handling = navigation.history_handling;
+    auto navigation_api_state = navigation.navigation_api_state;
+    auto form_data_entry_list = navigation.form_data_entry_list;
+    auto referrer_policy = navigation.referrer_policy;
+    auto user_involvement = navigation.user_involvement;
+    auto source_element = navigation.source_element;
+    auto initial_insertion = navigation.initial_insertion;
+    auto api_method_tracker = navigation.api_method_tracker;
+    auto& active_document = *this->active_document();
+    auto& vm = this->vm();
+    auto csp_navigation_type = navigation.csp_navigation_type;
+    auto source_snapshot_params = navigation.source_snapshot_params;
+    auto initiator_origin_snapshot = navigation.initiator_origin_snapshot;
+    auto initiator_base_url_snapshot = navigation.initiator_base_url_snapshot;
+
+    // Keep the ID in the prepared navigation in case step 18 defers it behind an ongoing traversal.
+    auto navigation_id = navigation.navigation_id;
+
+    // 9. If navigable's active document's unload counter is greater than 0,
+    //    then invoke WebDriver BiDi navigation failed with navigable and a WebDriver BiDi navigation status whose id
+    //    is navigationId, status is "canceled", and url is url, and return.
+    if (active_document.unload_counter() > 0) {
+        if (WebDriver::BiDi::is_active())
+            WebDriver::BiDi::navigation_event(*this, "browsingContext.navigationFailed"sv, navigation_id, url);
+        return;
+    }
+
+    // 10. Let container be navigable's container.
+    auto container = this->container();
+
+    // 11. If container is an iframe element and will lazy load element steps given container returns true,
+    //     then stop intersection-observing a lazy loading element container and set container's lazy load resumption steps to null.
+    if (container && container->is_html_iframe_element()) {
+        auto& iframe_element = static_cast<HTMLIFrameElement&>(*container);
+        if (iframe_element.will_lazy_load_element())
+            iframe_element.stop_lazy_loading();
+    }
+
+    // 12. If historyHandling is "auto", then:
+    if (history_handling == Bindings::NavigationHistoryBehavior::Auto) {
+        // 1. If url equals navigable's active document's URL, and either userInvolvement is "browser UI" or
+        //    initiatorOriginSnapshot is same origin with navigable's active document's origin, then set
+        //    historyHandling to "replace".
+        if (url == active_document.url()
+            && (user_involvement == UserNavigationInvolvement::BrowserUI || initiator_origin_snapshot.is_same_origin(active_document.origin()))) {
+            history_handling = Bindings::NavigationHistoryBehavior::Replace;
+        }
+
+        // 2. Otherwise, set historyHandling to "push".
+        else {
+            history_handling = Bindings::NavigationHistoryBehavior::Push;
+        }
+    }
+
+    // 13. If the navigation must be a replace given url and navigable's active document, then set historyHandling to
+    //     "replace".
+    if (navigation_must_be_a_replace(url, active_document))
+        history_handling = Bindings::NavigationHistoryBehavior::Replace;
+
+    // 14. If all of the following are true:
+    //     - documentResource is null;
+    //     - response is null;
+    //     - url equals navigable's active session history entry's URL with exclude fragments set to true; and
+    //     - url's fragment is non-null,
+    //     then:
+    if (document_resource.has<Empty>()
+        && !response
+        && url.equals(active_session_history_entry()->url(), URL::ExcludeFragment::Yes)
+        && url.fragment().has_value()) {
+        // 1. Navigate to a fragment given navigable, url, historyHandling, userInvolvement, sourceElement, navigationAPIState, and navigationId.
+        // AD-HOC: The spec does not pass apiMethodTracker along here, which would leave a navigation.navigate() to a
+        //         fragment without an ongoing API method tracker, so its promises would never settle.
+        navigate_to_a_fragment(url, to_history_handling_behavior(history_handling), user_involvement, source_element, navigation_api_state, navigation_id, api_method_tracker, initiator_origin_snapshot);
+
+        // 2. Return.
+        return;
+    }
+
+    // 15. If navigable's parent is non-null, then set navigable's is delaying load events to true.
+    if (parent() != nullptr)
+        set_delaying_load_events(true);
+
+    // 16. Let targetSnapshotParams be the result of snapshotting target snapshot params given navigable.
+    auto target_snapshot_params = snapshot_target_snapshot_params(*this);
+
+    // 17. Invoke WebDriver BiDi navigation started with navigable and a new WebDriver BiDi navigation status whose id is
+    //     navigationId, status is "pending", and url is url.
+    if (WebDriver::BiDi::is_active())
+        WebDriver::BiDi::navigation_event(*this, "browsingContext.navigationStarted"sv, navigation_id, url);
+
+    // 18. If navigable's ongoing navigation is "traversal", then:
+    if (ongoing_navigation().has<Traversal>()) {
+        // 1. Invoke WebDriver BiDi navigation failed with navigable and a new WebDriver BiDi navigation status whose id
+        //    is navigationId, status is "canceled", and url is url.
+        if (WebDriver::BiDi::is_active())
+            WebDriver::BiDi::navigation_event(*this, "browsingContext.navigationFailed"sv, navigation_id, url);
+
+        // 2. Return.
+        return;
+    }
+
+    // 19. Set the ongoing navigation for navigable to navigationId.
+    set_ongoing_navigation(navigation_id);
+
+    // 20. If url's scheme is "javascript", then:
+    if (url.scheme() == "javascript"sv) {
+        auto target = is_top_level_traversable() ? NavigationTarget::TopLevel : NavigationTarget::IFrame;
+        active_browsing_context()->page().client().request_navigation_start(*this, target, url, navigation_id, {});
+
+        // 1. Let request be a new request, with
+        //    URL: url
+        //    client: sourceSnapshotParams's fetch client
+        //    policy container: sourceSnapshotParams's source policy container
+        // NB: This is a synthetic request, needed because the Content Security Policy check in navigate to a javascript:
+        //     URL operates on a request. It will never hit the network.
+        auto request = Fetch::Infrastructure::Request::create();
+        request->set_url(url);
+        if (source_snapshot_params->fetch_client.has_value())
+            request->set_client(Fetch::Fetching::request_client(*source_snapshot_params->fetch_client));
+        request->set_policy_container(source_snapshot_params->source_policy_container);
+
+        // 2. Queue a global task on the navigation and traversal task source given navigable's active window to navigate to a javascript: URL given navigable, request, historyHandling, initiatorOriginSnapshot, userInvolvement, cspNavigationType, initialInsertion, and navigationId.
+        // NB: The task holds request's client until it runs.
+        VERIFY(active_window());
+        m_queued_javascript_url_navigations.append(navigation_id);
+        queue_global_task(Task::Source::NavigationAndTraversal, HTML::relevant_global_object(*active_window()), GC::create_function(heap(), GC::captures(*this, request, source_snapshot_params->fetch_client, history_handling, initiator_origin_snapshot, user_involvement, csp_navigation_type, initial_insertion, navigation_id), [](auto& self, auto& request, auto&, auto& history_handling, auto& initiator_origin_snapshot, auto& user_involvement, auto& csp_navigation_type, auto& initial_insertion, auto& navigation_id) {
+            self.navigate_to_a_javascript_url(request, to_history_handling_behavior(history_handling), initiator_origin_snapshot, user_involvement, csp_navigation_type, initial_insertion, navigation_id);
+        }));
+
+        // 3. Return.
+        return;
+    }
+
+    // 21. If all of the following are true:
+    //     - userInvolvement is not "browser UI";
+    //     - navigable's active document's origin is same origin-domain with sourceDocument's origin;
+    //     - navigable's active document's is initial about:blank is false; and
+    //     - url's scheme is a fetch scheme
+    //     then:
+    // NB: initiatorOriginSnapshot is sourceDocument's origin, which step 6 took in this same task.
+    if (user_involvement != UserNavigationInvolvement::BrowserUI && active_document.origin().is_same_origin_domain(initiator_origin_snapshot) && !active_document.is_initial_about_blank() && Fetch::Infrastructure::is_fetch_scheme(url.scheme())) {
+        // 1. Let navigation be navigable's active window's navigation API.
+        VERIFY(active_window());
+        auto navigation = active_window()->navigation();
+
+        // 2. Let entryListForFiring be formDataEntryList if documentResource is a POST resource; otherwise, null.
+        auto entry_list_for_firing = [&]() -> Optional<GC::RootVector<XHR::FormDataEntry>> {
+            if (document_resource.has<POSTResource>())
+                return GC::RootVector { form_data_entry_list.value() };
+            return {};
+        }();
+
+        // 3. Let navigationAPIStateForFiring be navigationAPIState if navigationAPIState is not null;
+        //    otherwise, StructuredSerializeForStorage(undefined).
+        auto navigation_api_state_for_firing = navigation_api_state.value_or(MUST(structured_serialize_for_storage(vm, JS::js_undefined())));
+
+        // 4. Let continue be the result of firing a push/replace/reload navigate event at navigation
+        //    with navigationType set to historyHandling, isSameDocument set to false, userInvolvement set to userInvolvement,
+        //    sourceElement set to sourceElement, formDataEntryList set to entryListForFiring, destinationURL set to url,
+        //    navigationAPIState set to navigationAPIStateForFiring, and apiMethodTracker set to apiMethodTracker.
+        auto navigation_type = [](Bindings::NavigationHistoryBehavior history_handling) {
+            switch (history_handling) {
+            case Bindings::NavigationHistoryBehavior::Push:
+                return Bindings::NavigationType::Push;
+            case Bindings::NavigationHistoryBehavior::Replace:
+                return Bindings::NavigationType::Replace;
+            case Bindings::NavigationHistoryBehavior::Auto:
+            default:
+                VERIFY_NOT_REACHED();
+            }
+        }(history_handling);
+        auto continue_ = navigation->fire_a_push_replace_reload_navigate_event(navigation_type, url, false, user_involvement, source_element, entry_list_for_firing, navigation_api_state_for_firing, {}, api_method_tracker);
+
+        // 5. If continue is false, then return.
+        if (!continue_) {
+            // AD-HOC: This navigation is over: the navigate event either canceled it, or intercepted it and already
+            //         committed it as a same-document navigation. In the spec, an intercepted navigation's queued
+            //         same-document finalize sets the navigable's ongoing navigation to null moments later; our
+            //         synchronous same-document commit replaces that queued step but deliberately preserves foreign
+            //         navigation IDs, so clear our own ID here. Leaving it stamped makes later same-document
+            //         traversals treat themselves as superseded and lets WebDriver wait forever for this navigation
+            //         to finish. Preserve the Navigation API state: an intercepted navigate event stays ongoing
+            //         until its handlers settle.
+            if (ongoing_navigation() == navigation_id)
+                set_ongoing_navigation_without_informing_navigation_api(Empty {});
+            return;
+        }
+    }
+
+    // FIXME: 22. If sourceDocument is navigable's container document, then reserve deferred fetch quota for navigable's container given url's origin.
+
+    // 23. In parallel, run these steps:
+    auto source_snapshot = create_navigation_source_snapshot(source_snapshot_params);
+    source_snapshot.text_directive_user_activation = active_document.text_directive_user_activation();
+    source_snapshot.browsing_context_group_has_multiple_contexts = active_document.browsing_context_group_has_multiple_contexts();
+    source_snapshot.browsing_context_group_has_remote_contexts = active_document.browsing_context_group_has_remote_contexts();
+    active_document.set_text_directive_user_activation(false);
+
+    // Session history entry state is structured-serialized in WebContent, where the JavaScript VM lives. The UI
+    // process owns the pending entry and document state created from these initial values.
+    auto entry_defaults = SessionHistoryEntry::create();
+    auto stripped_url = url;
+    auto directive_state_value = remove_the_fragment_directive(stripped_url);
+    auto start_request = NavigationStartRequest {
+        .navigable_id = id(),
+        .url = stripped_url,
+        .document_resource = document_resource,
+        .request_referrer = Fetch::Infrastructure::Request::Referrer::Client,
+        .request_referrer_policy = referrer_policy,
+        .initiator_origin = initiator_origin_snapshot,
+        .initiator_base_url = initiator_base_url_snapshot,
+        .navigable_target_name = target_name(),
+        .source_snapshot_params = move(source_snapshot),
+        .target_snapshot_params = target_snapshot_params,
+        .csp_navigation_type = csp_navigation_type,
+        .history_handling = history_handling,
+        .user_involvement = user_involvement,
+        .navigation_id = navigation_id,
+        .classic_history_api_state = entry_defaults->classic_history_api_state(),
+        .navigation_api_state = entry_defaults->navigation_api_state(),
+        .navigation_api_key = entry_defaults->navigation_api_key(),
+        .navigation_api_id = entry_defaults->navigation_api_id(),
+        .directive_state_id = entry_defaults->directive_state()->cross_process_id(),
+        .directive_state_value = move(directive_state_value),
+    };
+    park_navigation_for_population(navigation_id, move(navigation));
+
+    auto target = is_top_level_traversable() ? NavigationTarget::TopLevel : NavigationTarget::IFrame;
+    active_browsing_context()->page().client().request_navigation_start(*this, target, stripped_url, navigation_id, move(start_request));
+    return;
+}
+
+void LocalNavigable::run_navigation_unload_check(Utf16String const& navigation_id, UnloadPromptShown unload_prompt_shown, GC::Ref<GC::Function<void(bool)>> completion_steps)
+{
+    if (has_been_destroyed() || !active_window()) {
+        completion_steps->function()(false);
+        return;
+    }
+
+    if (!has_navigation_parked_for_population(navigation_id)) {
+        completion_steps->function()(false);
+        return;
+    }
+
+    // 1. Let unloadPromptCanceled be the result of checking if unloading is user-canceled for navigable's active document's inclusive descendant navigables.
+    // NB: This page checks the documents it hosts, last: the UI process, which requested the check, ran it in the
+    //     pages hosting the others first, and whether one of them showed the prompt comes with the request.
+    check_if_unloading_is_canceled(page(), hosted_inclusive_descendant_navigables(), as_if<LocalTraversableNavigable>(this), {}, {}, {}, unload_prompt_shown,
+        GC::create_function(heap(), GC::captures(*this, navigation_id, completion_steps), [](auto& self, auto& navigation_id, auto& completion_steps, CheckIfUnloadingIsCanceledResult unload_prompt_canceled, UnloadPromptShown) {
+            if (self.has_been_destroyed() || !self.active_window()) {
+                completion_steps->function()(false);
+                return;
+            }
+
+            // 2. If unloadPromptCanceled is not "continue", or navigable's ongoing navigation is no longer navigationId:
+            // NB: The UI process learns of the canceled check from the population-failure report and ends the
+            //     recorded load itself.
+            if (unload_prompt_canceled != CheckIfUnloadingIsCanceledResult::Continue) {
+                self.stop_delaying_load_events_for_navigation(navigation_id);
+                // AD-HOC: Step 2 ends with 'Abort these steps.', which leaves navigable's ongoing navigation as
+                //         navigationId: step 24 of navigate set it ('Set the ongoing navigation for navigable to
+                //         navigationId.'), and the canceled navigation runs nothing further that would reset it. 'Each
+                //         navigable has an ongoing navigation, which is a navigation ID, "traversal", or null,
+                //         initially null. It is used to track navigation aborting and to prevent any navigations from
+                //         taking place during traversal.' So, with the id left in place, WebDriver's 'wait for
+                //         navigation to complete' would wait on the canceled navigation until the page load timeout,
+                //         after an Element Click, or a Back, that the prompt canceled: 'If there is an ongoing attempt
+                //         to navigate session's current browsing context that has not yet matured, wait for navigation
+                //         to mature.'
+                //         https://html.spec.whatwg.org/multipage/browsing-the-web.html#ongoing-navigation
+                //         https://w3c.github.io/webdriver/#dfn-wait-for-navigation-to-complete
+                //         Chromium, WebKit and Gecko drop the navigation outright when their beforeunload check says no
+                //         (Navigator::BeforeUnloadCompleted() cancels the NavigationRequest, FrameLoader::
+                //         continueLoadAfterNavigationPolicy() stops on shouldClose(), and nsDocShell::InternalLoad()
+                //         returns on PermitUnload()), so no state of the canceled attempt outlives it there either, and
+                //         none does here once the ongoing navigation is reset.
+                if (self.ongoing_navigation() == navigation_id)
+                    self.set_ongoing_navigation({});
+                completion_steps->function()(false);
+                return;
+            }
+
+            if (self.ongoing_navigation() != navigation_id) {
+                self.stop_delaying_load_events_for_navigation(navigation_id);
+                completion_steps->function()(false);
+                return;
+            }
+
+            completion_steps->function()(true);
+        }));
+}
+
+bool LocalNavigable::resume_navigation_params_creation(Utf16String const& navigation_id, Optional<NavigationPopulationRequest> request)
+{
+    auto pending = take_navigation_parked_for_population(navigation_id);
+    if (!pending.has_value())
+        return false;
+
+    if (!request.has_value()) {
+        stop_delaying_load_events_for_navigation(navigation_id);
+        return true;
+    }
+
+    if (has_been_destroyed() || !active_window()) {
+        set_delaying_load_events(false);
+        return true;
+    }
+    if (ongoing_navigation() != navigation_id) {
+        stop_delaying_load_events_for_navigation(navigation_id);
+        return true;
+    }
+
+    if (pending->navigation.has_value()) {
+        continue_navigation_after_population_dispatch(pending->navigation.release_value(), request.release_value());
+        return true;
+    }
+
+    auto source_snapshot_params = create_source_snapshot_params_from_navigation_source_snapshot(relevant_realm(*active_window()), request->source_snapshot_params);
+    create_navigation_params_for_navigation(request.release_value(), source_snapshot_params, NullOrError {}, Bindings::NavigationTimingType::Navigate);
+    return true;
+}
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#navigate-fragid
+void LocalNavigable::navigate_to_a_fragment(URL::URL const& url, HistoryHandlingBehavior history_handling, UserNavigationInvolvement user_involvement, GC::Ptr<DOM::Element> source_element, Optional<StorageSerializationRecord> navigation_api_state, Utf16String navigation_id, GC::Ptr<NavigationAPIMethodTracker> api_method_tracker, Optional<URL::Origin> initiator_origin)
+{
+    // https://wicg.github.io/scroll-to-text-fragment/#extracting-the-fragment-directive
+    auto directive_state = active_session_history_entry()->directive_state();
+    auto stripped_url = url;
+    auto fragment_directive = remove_the_fragment_directive(stripped_url);
+    auto const has_fragment_directive = fragment_directive.has_value();
+    if (fragment_directive.has_value())
+        directive_state = DirectiveState::create(page().client().allocate_cross_process_id(), move(fragment_directive));
+
+    // 1. Let navigation be navigable's active window's navigation API.
+    VERIFY(active_window());
+    auto navigation = active_window()->navigation();
+
+    // 2. Let destinationNavigationAPIState be navigable's active session history entry's navigation API state.
+    // 3. If navigationAPIState is not null, then set destinationNavigationAPIState to navigationAPIState.
+    auto destination_navigation_api_state = navigation_api_state.has_value() ? *navigation_api_state : active_session_history_entry()->navigation_api_state();
+
+    // 4. Let continue be the result of firing a push/replace/reload navigate event at navigation with navigationType
+    //    set to historyHandling, isSameDocument set to true, userInvolvement set to userInvolvement, sourceElement set
+    //    to sourceElement, destinationURL set to url, and navigationAPIState set to destinationNavigationAPIState.
+    // AD-HOC: Also pass apiMethodTracker, see the caller.
+    auto navigation_type = history_handling == HistoryHandlingBehavior::Push ? Bindings::NavigationType::Push : Bindings::NavigationType::Replace;
+    bool const continue_ = navigation->fire_a_push_replace_reload_navigate_event(navigation_type, stripped_url, true, user_involvement, source_element, {}, destination_navigation_api_state, {}, api_method_tracker);
+
+    // 5. If continue is false, then return.
+    if (!continue_)
+        return;
+
+    if (!has_fragment_directive && source_element) {
+        // AD-HOC: A trusted in-page link dismisses the current indication without changing the
+        //         directive state's identity in session history.
+        active_document()->dismiss_text_fragment_indication();
+    }
+
+    save_persisted_state_to_active_session_history_entry();
+    auto active_entry = active_session_history_entry();
+    auto previous_entry_persisted_state = create_session_history_entry_persisted_state(*active_entry);
+
+    // 6. Let historyEntry be a new session history entry, with
+    //      URL: url
+    //      document state: navigable's active session history entry's document state
+    //      navigation API state: destinationNavigationAPIState
+    //      scroll restoration mode: navigable's active session history entry's scroll restoration mode
+    auto history_entry = SessionHistoryEntry::create(directive_state);
+    history_entry->set_url(stripped_url);
+    history_entry->set_document_state(active_entry->document_state());
+    history_entry->set_navigation_api_state(destination_navigation_api_state);
+    history_entry->set_scroll_restoration_mode(active_entry->scroll_restoration_mode());
+    history_entry->set_scroll_position_data(active_entry->scroll_position_data());
+
+    // 7. Let entryToReplace be navigable's active session history entry if historyHandling is "replace", otherwise null.
+    auto entry_to_replace = history_handling == HistoryHandlingBehavior::Replace ? active_entry : nullptr;
+
+    // 8. If entryToReplace is non-null, then set historyEntry's navigation API key to entryToReplace's navigation API key.
+    if (entry_to_replace)
+        history_entry->set_navigation_api_key(entry_to_replace->navigation_api_key());
+
+    // 9. Let history be navigable's active document's history object.
+    auto history = active_document()->history();
+
+    // 10. Let scriptHistoryIndex be history's index.
+    auto script_history_index = history->m_index;
+
+    // 11. Let scriptHistoryLength be history's length.
+    auto script_history_length = history->m_length;
+
+    // 12. If historyHandling is "push", then:
+    if (history_handling == HistoryHandlingBehavior::Push) {
+        // 1. Set history's state to null.
+        history->set_state(JS::js_null());
+
+        // 2. Increment scriptHistoryIndex.
+        script_history_index++;
+
+        // 3. Set scriptHistoryLength to scriptHistoryIndex + 1.
+        script_history_length = script_history_index + 1;
+    }
+
+    // 13. Set navigable's active document's URL to url.
+    active_document()->set_url(stripped_url);
+
+    // 14. Set navigable's active session history entry to historyEntry.
+    m_active_session_history_entry = history_entry;
+
+    // AD-HOC: The spec sets a document's latest entry only in "update document for history step application" and in the
+    //         URL and history update steps, and an initial about:blank gets one only once something runs the latter on
+    //         it — as the window open steps and the shared attribute processing steps for iframe and frame elements do
+    //         when they're given about:blank. Thus, the initial about:blank of a fresh top-level traversable, or of a
+    //         popup or iframe whose first navigation is still loading, reaches this step with no latest entry. The
+    //         update below would then take it for a new document ("Let documentIsNew be true if document's latest entry
+    //         is null"), and fail "Assert: entriesForNavigationAPI is given".
+    //         https://github.com/whatwg/html/issues/13041
+    //         So instead, we set its latest entry to the entry it's displayed by — as the URL and history update steps
+    //         would have. The update then runs as a same-document navigation — which fires popstate and hashchange.
+    if (!active_document()->latest_entry()) {
+        VERIFY(active_document()->is_initial_about_blank());
+        active_document()->set_latest_entry(active_entry);
+    }
+
+    // 15. Update document for history step application given navigable's active document, historyEntry, true,
+    //     scriptHistoryIndex, scriptHistoryLength, and historyHandling.
+    active_document()->update_for_history_step_application(*history_entry, true, script_history_length, script_history_index, navigation_type);
+
+    // https://wicg.github.io/scroll-to-text-fragment/#restricting-the-text-fragment
+    // 18. Let allow text directive scroll be the result of checking if a text directive can be scrolled, given
+    //     navigable's active document, initiator origin, and user involvement.
+    auto allow_text_directive_scroll = active_document()->check_if_a_text_directive_can_be_scrolled(initiator_origin, user_involvement);
+
+    // 19. Scroll to the fragment given navigable's active document, and allow text directive scroll.
+    if (active_document()->parser() && !active_document()->parser()->stopped()) {
+        // AD-HOC: A same-document navigation can run from a parser-inserted script before the
+        //         directive's target has been parsed. In that case, use the parser-aware retry lifecycle
+        //         also used for a newly-created Document.
+        active_document()->try_to_scroll_to_the_fragment(allow_text_directive_scroll);
+    } else {
+        active_document()->scroll_to_the_fragment(allow_text_directive_scroll);
+        // https://wicg.github.io/scroll-to-text-fragment/#invoking-text-directives
+        // 20. Set navigable's active document's pending text directives to null.
+        auto const text_fragment_was_found = !active_document()->text_fragment_ranges().is_empty();
+        active_document()->clear_pending_text_directives();
+
+        // https://wicg.github.io/scroll-to-text-fragment/#scroll-on-navigation
+        // If a UA chooses not to scroll automatically, it must scroll a fallback element-id into
+        // view, if provided, regardless of whether a text fragment was matched.
+        if (!text_fragment_was_found || !allow_text_directive_scroll)
+            active_document()->scroll_to_the_fragment();
+    }
+
+    // Append the following session history synchronous navigation steps involving navigable to its traversable:
+    // 1. Finalize a same-document navigation given traversable, navigable, historyEntry, entryToReplace,
+    //    historyHandling, and userInvolvement.
+    page().history_executor().finalize_same_document_navigation(*this, history_entry, entry_to_replace, history_handling, user_involvement, move(previous_entry_persisted_state));
+
+    // Invoke WebDriver BiDi fragment navigated with navigable and a new WebDriver BiDi navigation status whose id is
+    // navigationId, url is url, and status is "complete".
+    if (WebDriver::BiDi::is_active())
+        WebDriver::BiDi::navigation_event(*this, "browsingContext.fragmentNavigated"sv, navigation_id, url);
+}
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#evaluate-a-javascript:-url
+GC::Ptr<DocumentToCreate> LocalNavigable::evaluate_javascript_url(URL::URL const& url, URL::Origin const& new_document_origin, UserNavigationInvolvement user_involvement, Utf16String navigation_id)
+{
+    auto& vm = this->vm();
+    VERIFY(active_window());
+    auto& realm = active_window()->principal_realm();
+
+    // 1. Let urlString be the result of running the URL serializer on url.
+    auto url_string = url.serialize();
+
+    // 2. Let encodedScriptSource be the result of removing the leading "javascript:" from urlString.
+    auto encoded_script_source = url_string.bytes_as_string_view().substring_view(11);
+
+    // 3. Let scriptSource be the UTF-8 decoding of the percent-decoding of encodedScriptSource.
+    auto percent_decoded_script_source = URL::percent_decode(encoded_script_source);
+    auto script_source = Utf16String::from_utf8_with_replacement_character(percent_decoded_script_source.view());
+
+    // 4. Let settings be targetNavigable's active document's relevant settings object.
+    auto& settings = active_document()->relevant_settings_object();
+
+    // 5. Let baseURL be settings's API base URL.
+    auto base_url = settings.api_base_url();
+
+    // 6. Let script be the result of creating a classic script given scriptSource, settings, baseURL, and the default classic script fetch options.
+    auto script = HTML::ClassicScript::create("(javascript url)", script_source, settings, base_url);
+
+    // 7. Let evaluationStatus be the result of running the classic script script.
+    auto evaluation_status = script->run();
+
+    // 8. Let result be null.
+    Optional<Utf16View> result;
+
+    // 9. If evaluationStatus is a normal completion, and evaluationStatus.[[Value]] is a String, then set result to evaluationStatus.[[Value]].
+    if (evaluation_status.type() == JS::Completion::Type::Normal && evaluation_status.value().is_string()) {
+        result = evaluation_status.value().as_string().utf16_string_view();
+    } else {
+        // 10. Otherwise, return null.
+        return nullptr;
+    }
+
+    // AD-HOC: As navigate_to_a_javascript_url() goes on for a navigation that a later one superseded, that one can be the
+    //         ongoing navigation here, or one the script itself began. It is what the navigable ends on, so the script's
+    //         result makes no document.
+    if (!ongoing_navigation().has<Empty>())
+        return nullptr;
+
+    // 11. Let response be a new response with
+    //     URL: targetNavigable's active document's URL
+    //     header list: «(`Content-Type`, `text/html;charset=utf-8`)»
+    //     body: the UTF-8 encoding of result, as a body
+    auto result_utf8 = MUST(result->to_utf8());
+    auto response = Fetch::Infrastructure::Response::create();
+    response->url_list().append(active_document()->url());
+    response->header_list()->append({ "Content-Type"sv, "text/html;charset=utf-8"sv });
+    response->set_body(Fetch::Infrastructure::byte_sequence_as_response_body(result_utf8.bytes()));
+
+    // 12. Let policyContainer be targetNavigable's active document's policy container.
+    auto const& policy_container = active_document()->policy_container();
+
+    // AD-HOC: Get the target snapshot params. This is missing from the spec, see https://github.com/whatwg/html/issues/12563
+    auto target_snapshot_params = snapshot_target_snapshot_params(*this);
+
+    // 13. Let finalSandboxFlags be policyContainer's CSP list's CSP-derived sandboxing flags.
+    // AD-HOC: Include targetSnapshotParams's sandboxing flags, as every other navigation does.
+    auto final_sandbox_flags = target_snapshot_params.sandboxing_flags | policy_container->csp_list.csp_derived_sandboxing_flags();
+
+    // 14. Let coop be targetNavigable's active document's opener policy.
+    auto const& coop = active_document()->opener_policy();
+
+    // 15. Let coopEnforcementResult be a new opener policy enforcement result with
+    //     url: url
+    //     origin: newDocumentOrigin
+    //     opener policy: coop
+    OpenerPolicyEnforcementResult coop_enforcement_result {
+        .url = url,
+        .origin = new_document_origin,
+        .opener_policy = coop,
+    };
+
+    // 16. Let navigationParams be a new navigation params, with
+    //     id: navigationId
+    //     navigable: targetNavigable
+    //     request: null
+    //     response: response
+    //     fetch controller: null
+    //     commit early hints: null
+    //     COOP enforcement result: coopEnforcementResult
+    //     reserved environment: null
+    //     origin: newDocumentOrigin
+    //     policy container: policyContainer
+    //     final sandboxing flag set: finalSandboxFlags
+    //     iframe element referrer policy: targetSnapshotParams's iframe element referrer policy
+    //     opener policy: coop
+    //     navigation timing type: "navigate"
+    //     about base URL: targetNavigable's active document's about base URL
+    //     user involvement: userInvolvement
+    auto navigation_params = vm.heap().allocate<NavigationParams>(
+        navigation_id,
+        this,
+        nullptr,
+        Fetch::Infrastructure::ResponseView::create(realm, response),
+        nullptr,
+        nullptr,
+        move(coop_enforcement_result),
+        nullptr,
+        new_document_origin,
+        policy_container,
+        final_sandbox_flags,
+        target_snapshot_params.iframe_element_referrer_policy,
+        coop,
+        Bindings::NavigationTimingType::Navigate,
+        active_document()->about_base_url(),
+        user_involvement);
+
+    // NB: newDocumentOrigin is same origin-domain with the active document's origin, so the agent the UI process
+    //     obtains for it is the active document's: the origins are the same, or share the site that keys the agent
+    //     cluster, since an origin-keyed window cannot set document.domain.
+    navigation_params->agent_cluster_id = active_document()->relevant_settings_object().agent_cluster_id();
+    navigation_params->agent_cluster_is_origin_keyed = as<WindowEnvironmentSettingsObject>(active_document()->relevant_settings_object()).agent_cluster_is_origin_keyed();
+    navigation_params->agent_cluster_cross_origin_isolation_mode = active_document()->relevant_settings_object().agent_cluster_cross_origin_isolation_mode();
+
+    // 17. Return the result of loading an HTML document given navigationParams.
+    // NB: The response body is a known byte sequence, so we can pass it directly for sniffing.
+    return load_document(navigation_params, result_utf8.bytes());
+}
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#navigate-to-a-javascript:-url
+void LocalNavigable::navigate_to_a_javascript_url(NonnullRefPtr<Fetch::Infrastructure::Request> request, HistoryHandlingBehavior history_handling, URL::Origin const& initiator_origin, UserNavigationInvolvement user_involvement, ContentSecurityPolicy::Directives::Directive::NavigationType csp_navigation_type, InitialInsertion initial_insertion, Utf16String navigation_id)
+{
+    // AD-HOC: These return paths do not run finalize_a_cross_document_navigation(). Clear a child navigable's
+    //         load-event delay and tell the UI that the admitted navigation produced no document.
+    auto finish_loading_without_navigation = [&] {
+        stop_delaying_load_events_for_navigation(navigation_id);
+        active_browsing_context()->page().client().navigation_population_failed(id(), navigation_id);
+    };
+
+    // 1. Assert: historyHandling is "replace".
+    VERIFY(history_handling == HistoryHandlingBehavior::Replace);
+
+    // 2. If targetNavigable's ongoing navigation is no longer navigationId, then return.
+    // AD-HOC: Browsers return here only for a navigation that was stopped, not for one a later navigation superseded;
+    //         see https://github.com/whatwg/html/issues/12120. Stopping loading forgets the navigation's queued task.
+    if (!m_queued_javascript_url_navigations.remove_first_matching([&](auto const& id) { return id == navigation_id; })) {
+        finish_loading_without_navigation();
+        return;
+    }
+
+    // 3. Set the ongoing navigation for targetNavigable to null.
+    // AD-HOC: As step 2 goes on for a navigation a later one superseded, the ongoing navigation can be that later one.
+    bool const superseded = ongoing_navigation() != navigation_id;
+    if (!superseded)
+        set_ongoing_navigation({});
+
+    // 4. If initiatorOrigin is not same origin-domain with targetNavigable's active document's origin, then return.
+    if (!initiator_origin.is_same_origin_domain(active_document()->origin())) {
+        finish_loading_without_navigation();
+        return;
+    }
+
+    // 5. If the result of should navigation request of type be blocked by Content Security Policy? given request and cspNavigationType is "Blocked", then return.
+    // NB: This can change request's URL, as the require-trusted-types-for pre-navigation check passes the script source
+    //     through the default policy.
+    if (ContentSecurityPolicy::should_navigation_request_of_type_be_blocked_by_content_security_policy(request, csp_navigation_type, page()) == ContentSecurityPolicy::Directives::Directive::Result::Blocked) {
+        finish_loading_without_navigation();
+        return;
+    }
+
+    // 6. Let newDocument be the result of evaluating a javascript: URL given targetNavigable, request's URL, initiatorOrigin, userInvolvement, and navigationId.
+    auto new_document = evaluate_javascript_url(request->url(), initiator_origin, user_involvement, navigation_id);
+
+    // 7. If newDocument is null:
+    if (!new_document) {
+        // 1. Let container be targetNavigable's container.
+        auto container = this->container();
+
+        // 2. If initialInsertion is true, container is non-null, and targetNavigable's active document's is initial
+        //    about:blank is true:
+        // NOTE: container can be null if author code, such as the Trusted Types default policy or
+        //       javascript:frameElement.remove(), removed it.
+        // AD-HOC: A navigation a later one superseded would have returned at step 2, and that one is still to replace the
+        //         document, so nothing has loaded yet.
+        if (!superseded && initial_insertion == InitialInsertion::Yes && container && active_document()->is_initial_about_blank()) {
+            // 1. If container is an iframe element, then run the iframe load event steps given container.
+            if (auto* iframe = as_if<HTMLIFrameElement>(*container)) {
+                run_iframe_load_event_steps(*iframe);
+            }
+            // 2. Otherwise, fire an event named load at container.
+            else {
+                container->dispatch_event(DOM::Event::create(EventNames::load, HighResolutionTime::current_high_resolution_time(relevant_global_object(*container))));
+            }
+        }
+
+        finish_loading_without_navigation();
+
+        // 3. Return.
+        // NOTE: In this case, some JavaScript code was executed, but no new Document was created, so we will not perform a navigation.
+        return;
+    }
+
+    // 8. Assert: initiatorOrigin is newDocument's origin.
+    VERIFY(initiator_origin == new_document->origin());
+
+    // 9. Let entryToReplace be targetNavigable's active session history entry.
+    auto entry_to_replace = active_session_history_entry();
+
+    // 10. Let oldDocState be entryToReplace's document state.
+    auto old_doc_state = entry_to_replace->document_state();
+
+    // 11. Let documentState be a new document state with
+    //     document: newDocument
+    //     history policy container: a clone of the oldDocState's history policy container if it is non-null; null otherwise
+    //     request referrer: oldDocState's request referrer
+    //     request referrer policy: oldDocState's request referrer policy
+    //     initiator origin: initiatorOrigin
+    //     origin: initiatorOrigin
+    //     about base URL: oldDocState's about base URL
+    //     resource: null
+    //     ever populated: true
+    //     navigable target name: oldDocState's navigable target name
+    auto document_state = DocumentState::create(page().client().allocate_cross_process_id());
+    document_state->set_history_policy_container(old_doc_state->history_policy_container());
+    document_state->set_request_referrer(old_doc_state->request_referrer());
+    document_state->set_request_referrer_policy(old_doc_state->request_referrer_policy());
+    document_state->set_initiator_origin(initiator_origin);
+    document_state->set_origin(initiator_origin);
+    document_state->set_about_base_url(old_doc_state->about_base_url());
+    document_state->set_ever_populated(true);
+    document_state->set_navigable_target_name(old_doc_state->navigable_target_name());
+    // NB: Not one of the spec's document state fields. The entry keeps its URL, so it keeps what its fetch recorded.
+    document_state->set_user_agent_initiated(old_doc_state->user_agent_initiated());
+    document_state->set_navigation_same_site_status(old_doc_state->navigation_same_site_status());
+    // AD-HOC: newDocument is created once the active document is unloaded, and sets documentState's document when it
+    //         is made active.
+
+    // 12. Let historyEntry be a new session history entry, with
+    //     URL: entryToReplace's URL
+    //     document state: documentState
+    auto history_entry = SessionHistoryEntry::create();
+    history_entry->set_url(entry_to_replace->url());
+    history_entry->set_document_state(document_state);
+
+    // 13. Append session history traversal steps to targetNavigable's traversable to finalize a cross-document navigation with targetNavigable, historyHandling, userInvolvement, and historyEntry.
+    // NB: The navigation ID lets the UI process match this to the navigation it admitted. It is not compared with the
+    //     ongoing navigation, which step 3 set to null.
+    finalize_a_cross_document_navigation(*this, history_handling, user_involvement, history_entry, new_document, navigation_id);
+}
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#reload
+void LocalNavigable::reload(Optional<StorageSerializationRecord> navigation_api_state, UserNavigationInvolvement user_involvement, GC::Ptr<NavigationAPIMethodTracker> api_method_tracker)
+{
+    // NB: A provisional navigable's document stands in for one another page hosts, which the reload reloads.
+    VERIFY(!is_provisional());
+
+    // 1. If userInvolvement is not "browser UI", then:
+    if (user_involvement != UserNavigationInvolvement::BrowserUI) {
+        // 1. Let navigation be navigable's active window's navigation API.
+        auto active_window = this->active_window();
+        VERIFY(active_window);
+        auto navigation = active_window->navigation();
+
+        // 2. Let destinationNavigationAPIState be navigable's active session history entry's navigation API state.
+        auto destination_navigation_api_state = active_session_history_entry()->navigation_api_state();
+
+        // 3. If navigationAPIState is not null, then set destinationNavigationAPIState to navigationAPIState.
+        if (navigation_api_state.has_value())
+            destination_navigation_api_state = *navigation_api_state;
+
+        // 4. Let continue be the result of firing a push/replace/reload navigate event at navigation with
+        //    navigationType set to "reload", isSameDocument set to false, userInvolvement set to userInvolvement,
+        //    destinationURL set to navigable's active session history entry's URL, navigationAPIState set to
+        //    destinationNavigationAPIState, and apiMethodTracker set to apiMethodTracker.
+        auto continue_ = navigation->fire_a_push_replace_reload_navigate_event(Bindings::NavigationType::Reload, active_session_history_entry()->url(), false, user_involvement, nullptr, {}, destination_navigation_api_state, {}, api_method_tracker);
+
+        // 5. If continue is false, then return.
+        if (!continue_)
+            return;
+    }
+
+    // 1. If navigationAPIState is not null, then set navigable's active session history entry's navigation API state
+    //    to navigationAPIState.
+    if (navigation_api_state.has_value())
+        active_session_history_entry()->set_navigation_api_state(navigation_api_state.release_value());
+
+    // 2. Set navigable's active session history entry's document state's reload pending to true.
+    auto reloading_entry = active_session_history_entry();
+    reloading_entry->document_state()->set_reload_pending(true);
+
+    page().client().page_did_set_session_history_entry_document_state_reload_pending(
+        id(), reloading_entry->navigation_api_key(), true);
+
+    // 3. Let traversable be navigable's traversable navigable.
+    // 4. Append the following session history traversal steps to traversable:
+    // 1. Apply the reload history step to traversable given userInvolvement.
+    page().history_executor().request_history_operation(
+        ReloadHistoryOperationParameters {
+            .navigable_id = id(),
+            .user_involvement = user_involvement,
+        },
+        {
+            .on_apply_history_step_complete = GC::create_function(heap(), GC::captures(reloading_entry), [](auto& reloading_entry, HistoryStepResult result) {
+                if (result == HistoryStepResult::Applied)
+                    return;
+
+                // AD-HOC: The spec leaves reload pending set when the reload does not apply, so a later history step would
+                //         reload the document anyway. The UI process clears its own.
+                reloading_entry->document_state()->set_reload_pending(false);
+            }),
+        });
+}
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#the-navigation-must-be-a-replace
+bool navigation_must_be_a_replace(URL::URL const& url, DOM::Document const& document)
+{
+    return url.scheme() == "javascript"sv || document.is_initial_about_blank();
+}
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#checking-if-unloading-is-canceled
+void check_if_unloading_is_canceled(
+    Page& page,
+    Vector<GC::Root<LocalNavigable>> navigables_that_need_before_unload,
+    GC::Ptr<LocalTraversableNavigable> owner,
+    GC::Ptr<LocalTraversableNavigable> traversable,
+    RefPtr<SessionHistoryEntry> target_entry,
+    Optional<UserNavigationInvolvement> user_involvement_for_navigate_events,
+    UnloadPromptShown unload_prompt_shown,
+    GC::Ref<GC::Function<void(CheckIfUnloadingIsCanceledResult, UnloadPromptShown)>> callback)
+{
+    auto state = GC::Heap::the().allocate<CheckUnloadingCanceledState>(
+        page,
+        owner,
+        traversable,
+        user_involvement_for_navigate_events,
+        unload_prompt_shown,
+        callback);
+    state->start(navigables_that_need_before_unload, move(target_entry));
+}
+
+void LocalTraversableNavigable::request_close_preflight(GC::Ref<GC::Function<void(bool)>> callback)
+{
+    if (page().pending_dialog() != Page::PendingDialog::None) {
+        if (page().pending_dialog() == Page::PendingDialog::BeforeUnload && m_active_beforeunload_check) {
+            m_active_beforeunload_check->adopt_for_close(callback);
+            return;
+        }
+        callback->function()(false);
+        return;
+    }
+
+    auto document = active_document();
+    if (!document) {
+        callback->function()(true);
+        return;
+    }
+
+    auto state_callback = GC::create_function(heap(), GC::captures(callback), [](auto& callback, CheckIfUnloadingIsCanceledResult result, UnloadPromptShown) {
+        callback->function()(result == CheckIfUnloadingIsCanceledResult::Continue);
+    });
+    auto state = heap().allocate<CheckUnloadingCanceledState>(page(), GC::Ptr<LocalTraversableNavigable> { this }, GC::Ptr<LocalTraversableNavigable> {}, Optional<UserNavigationInvolvement> {}, UnloadPromptShown::No, state_callback);
+    Vector<GC::Root<LocalNavigable>> local_navigables;
+    for (auto& navigable : document->inclusive_descendant_navigables()) {
+        if (auto* local_navigable = as_if<LocalNavigable>(navigable.ptr()))
+            local_navigables.append(*local_navigable);
+    }
+    state->start(local_navigables, {});
+}
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#finalize-a-cross-document-navigation
+// NB: The UI process appends the steps finalizing the navigation, and runs them, once this process reports that
+//     populating historyEntry's document is over.
+void finalize_a_cross_document_navigation(GC::Ref<LocalNavigable> navigable, HistoryHandlingBehavior history_handling, UserNavigationInvolvement user_involvement, NonnullRefPtr<SessionHistoryEntry> history_entry, GC::Ptr<DocumentToCreate> pending_document, Utf16String navigation_id)
+{
+    // NOTE: This is not in the spec but we should not navigate destroyed navigable.
+    if (navigable->has_been_destroyed()) {
+        if (pending_document)
+            pending_document->discard();
+        navigable->set_delaying_load_events(false);
+        navigable->page().client().navigation_population_failed(navigable->id(), navigation_id);
+        return;
+    }
+
+    if (!pending_document) {
+        // 2. Set navigable's is delaying load events to false.
+        // 3. If historyEntry's document is null, then return.
+        navigable->set_delaying_load_events(false);
+    }
+
+    navigable->page().history_executor().request_history_operation(
+        FinalizeCrossDocumentNavigationHistoryOperationParameters {
+            .navigable_id = navigable->id(),
+            .history_entry = create_pending_session_history_entry_descriptor(*history_entry),
+            .navigation_id = navigation_id,
+            .history_handling = history_handling,
+            .user_involvement = user_involvement,
+            .environment_id = pending_document ? Optional<Web::HTML::EnvironmentId> { pending_document->environment_id() } : Optional<Web::HTML::EnvironmentId> {},
+            .document_id = pending_document ? Optional<CrossProcessId> { pending_document->id() } : Optional<CrossProcessId> {},
+        },
+        {
+            .pending_document = pending_document,
+            .local_target_navigable_id = navigable->id(),
+            .local_target_entry = history_entry,
+            .on_complete = GC::create_function(navigable->heap(), GC::captures(navigable, navigation_id, !!pending_document), [](auto& navigable, auto& navigation_id, auto& has_document) {
+                // AD-HOC: Step 2 runs as the navigation's document is activated. When the steps end without activating
+                //         it, the navigation is dropped, and stops delaying load events.
+                if (has_document && !navigable->has_been_destroyed() && navigable->is_delaying_load_events())
+                    navigable->stop_delaying_load_events_for_navigation(navigation_id);
+
+                // AD-HOC: Trigger a relayout in the container document for size negotiation with SVG documents.
+                if (auto container = navigable->container())
+                    container->set_needs_layout_update(DOM::SetNeedsLayoutReason::FinalizeACrossDocumentNavigation);
+            }),
+        });
+}
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#url-and-history-update-steps
+void perform_url_and_history_update_steps(DOM::Document& document, URL::URL new_url, Optional<StorageSerializationRecord> serialized_data, HistoryHandlingBehavior history_handling)
+{
+    // 1. Let navigable be document's node navigable.
+    auto navigable = document.navigable();
+
+    // 2. Let activeEntry be navigable's active session history entry.
+    auto active_entry = navigable->active_session_history_entry();
+    navigable->save_persisted_state_to_active_session_history_entry();
+    auto previous_entry_persisted_state = create_session_history_entry_persisted_state(*active_entry);
+
+    // https://wicg.github.io/scroll-to-text-fragment/#the-fragment-directive
+    // Keep the directive in session history state while exposing only the stripped URL to the document.
+    auto directive_state = active_entry->directive_state();
+    bool has_fragment_directive = false;
+    if (auto const& fragment = new_url.fragment(); fragment.has_value())
+        has_fragment_directive = fragment->find(":~:"sv).has_value();
+    auto directive_state_value = remove_the_fragment_directive(new_url);
+    if (has_fragment_directive)
+        directive_state = DirectiveState::create(navigable->page().client().allocate_cross_process_id(), move(directive_state_value));
+
+    // 3. Let newEntry be a new session history entry, with
+    //      URL: newURL
+    //      serialized state: if serializedData is not null, serializedData; otherwise activeEntry's classic history API state
+    //      document state: activeEntry's document state
+    //      scroll restoration mode: activeEntry's scroll restoration mode
+    // FIXME: persisted user state: activeEntry's persisted user state
+    auto new_entry = SessionHistoryEntry::create(directive_state);
+    new_entry->set_url(new_url);
+    new_entry->set_classic_history_api_state(serialized_data.value_or(active_entry->classic_history_api_state()));
+    new_entry->set_document_state(active_entry->document_state());
+    new_entry->set_scroll_restoration_mode(active_entry->scroll_restoration_mode());
+    new_entry->set_scroll_position_data(active_entry->scroll_position_data());
+
+    // 4. If document's is initial about:blank is true, then set historyHandling to "replace".
+    if (document.is_initial_about_blank()) {
+        history_handling = HistoryHandlingBehavior::Replace;
+    }
+
+    // 5. Let entryToReplace be activeEntry if historyHandling is "replace", otherwise null.
+    auto entry_to_replace = history_handling == HistoryHandlingBehavior::Replace ? active_entry : nullptr;
+
+    // 6. If entryToReplace is non-null, then set newEntry's navigation API key to entryToReplace's navigation API key.
+    if (entry_to_replace)
+        new_entry->set_navigation_api_key(entry_to_replace->navigation_api_key());
+
+    // 7. If historyHandling is "push", then:
+    if (history_handling == HistoryHandlingBehavior::Push) {
+        // 1. Increment document's history object's index.
+        document.history()->m_index++;
+
+        // 2. Set document's history object's length to its index + 1.
+        document.history()->m_length = document.history()->m_index + 1;
+    }
+
+    // 8. If serializedData is not null, then restore the history object state given document and newEntry.
+    if (serialized_data.has_value())
+        document.restore_the_history_object_state(new_entry);
+
+    // 9. Set the URL given document to newURL.
+    document.set_url(new_url);
+
+    // 10. Set document's latest entry to newEntry.
+    document.set_latest_entry(new_entry);
+
+    // 11. Set navigable's active session history entry to newEntry.
+    navigable->set_active_session_history_entry(new_entry);
+
+    // 12. Update the navigation API entries for a same-document navigation given document's relevant global object's navigation API, newEntry, and historyHandling.
+    // In the wrapper architecture the relevant global object is a JS wrapper,
+    // not the internal Window itself. Use the document's owning Window directly.
+    VERIFY(document.window());
+    auto& relevant_global_object = *document.window();
+    auto navigation_type = history_handling == HistoryHandlingBehavior::Push ? Bindings::NavigationType::Push : Bindings::NavigationType::Replace;
+    relevant_global_object.navigation()->update_the_navigation_api_entries_for_a_same_document_navigation(new_entry, navigation_type);
+
+    // 13. Let traversable be navigable's traversable navigable.
+    // 14. Append the following session history synchronous navigation steps involving navigable to traversable:
+    // 1. Finalize a same-document navigation given traversable, navigable, newEntry, entryToReplace,
+    //    historyHandling, and "none".
+    navigable->page().history_executor().finalize_same_document_navigation(*navigable, new_entry, entry_to_replace, history_handling, UserNavigationInvolvement::None, move(previous_entry_persisted_state));
+
+    // 2. Invoke WebDriver BiDi history updated with navigable.
+    // NB: The browser process names the navigable and its URL, which is its active document's URL.
+    if (WebDriver::BiDi::is_active())
+        WebDriver::BiDi::navigation_event(*navigable, "browsingContext.historyUpdated"sv, {}, document.url());
+}
+
+bool LocalNavigable::is_local_root() const
+{
+    auto parent = this->parent();
+    return !parent || !is<LocalNavigable>(*parent);
+}
+
+GC::Ref<LocalNavigable> LocalNavigable::local_root()
+{
+    GC::Ref<LocalNavigable> navigable = *this;
+    while (!navigable->is_local_root())
+        navigable = as<LocalNavigable>(*navigable->parent());
+    return navigable;
+}
+
+// AD-HOC: Steps 3 and 6 to 8 of creating a new child navigable, run by the process chosen to host a navigable's next
+//         document, for a navigable the UI process created long ago: a document to stand in until that document is
+//         populated, and a navigable initialized under the navigable's parent, sharing the WindowProxy scripts hold
+//         for the navigable. The parent's document is here
+//         when the parent is local, and in another process otherwise, in which case the browsing context is created
+//         without a creator or embedder.
+// FIXME: A remote parent's document is the creator document. The UI process holds the canonical browsing context.
+GC::Ref<LocalNavigable> LocalNavigable::create_stand_in(Badge<Page> badge, RemoteNavigable& remote_navigable, SessionHistoryEntryDescriptor const& current_history_entry)
+{
+    auto parent_navigable = remote_navigable.parent();
+    VERIFY(parent_navigable);
+    auto& page = remote_navigable.page();
+    auto container = remote_navigable.container();
+    auto* local_parent = as_if<LocalNavigable>(*parent_navigable);
+    VERIFY(!local_parent == !container);
+
+    // 3. Let browsingContext and document be the result of creating a new browsing context and document given element's node document, element, and group.
+    // NB: group is not resolved, as in NavigableContainer::create_new_child_navigable(). An element in another process
+    //     is covered above.
+    auto [browsing_context, document] = BrowsingContext::create_a_new_browsing_context_and_document(page, container ? GC::Ptr<DOM::Document> { container->document() } : nullptr, container, remote_navigable.window_proxy(), current_history_entry.document_state.origin);
+
+    if (!local_parent) {
+        // NB: Like a document created in a child navigable, the stand-in's document inherits the insecure requests
+        //     policy that the container's process reports for its node document.
+        auto const& container_state = remote_navigable.replicated_state().container;
+        document->policy_container()->inherit_insecure_requests_policy(container_state.document_insecure_requests_policy, container_state.document_upgrade_insecure_navigations_set);
+
+        page.ensure_compositor_host();
+    }
+
+    // 7. Let navigable be a new navigable.
+    GC::Ref<LocalNavigable> navigable = *GC::Heap::the().allocate<LocalNavigable>(page, page.client().is_svg_page_client());
+
+    // 8. Initialize the navigable navigable given documentState and parentNavigable.
+    navigable->initialize_stand_in(remote_navigable, current_history_entry, browsing_context, document, local_parent ? local_parent->active_document()->visibility_state() : page.system_visibility_state());
+    if (local_parent) {
+        navigable->inherit_page_state_from(*local_parent);
+        // The navigable's container is this element although it is not the content navigable yet: its document is
+        // fully active from its activation, and its navigations read the container's facts here.
+        navigable->set_container(badge, container);
+    } else {
+        navigable->m_root_container_state = remote_navigable.replicated_state().container;
+        navigable->set_parent_compositor_context(as<RemoteNavigable>(*parent_navigable).compositor_context_id());
+        navigable->m_force_dark_enabled = page.force_dark_for_local_roots();
+    }
+
+    // The UI process orders any history step for the navigable after the update for its creation.
+    navigable->set_has_session_history_entry_and_ready_for_navigation();
+    return navigable;
+}
+
+void LocalNavigable::initialize_stand_in(RemoteNavigable& remote_navigable, SessionHistoryEntryDescriptor const& current_history_entry, GC::Ref<BrowsingContext> browsing_context, GC::Ref<DOM::Document> document, VisibilityState visibility_state)
+{
+    // NB: A provisional navigable's document stands in for the active document another page hosts, which is not its
+    //     browsing context's initial about:blank.
+    document->set_is_initial_about_blank(false);
+
+    // 6. Let documentState be a new document state, with
+    //  - document: document
+    //  - initiator origin: document's origin
+    //  - origin: document's origin
+    //  - navigable target name: targetName
+    //  - about base URL: document's about base URL
+    // NB: targetName is the canonical current entry's navigable target name.
+    auto document_state = DocumentState::create(page().client().allocate_cross_process_id());
+    document_state->set_initiator_origin(document->origin());
+    document_state->set_origin(document->origin());
+    if (!current_history_entry.document_state.navigable_target_name.is_empty())
+        document_state->set_navigable_target_name(current_history_entry.document_state.navigable_target_name);
+    document_state->set_about_base_url(document->about_base_url());
+
+    // 8. Initialize the navigable navigable given documentState and parentNavigable.
+    initialize_navigable(document_state, remote_navigable.parent(), document, visibility_state, true);
+    set_id_for_session_history_reconstruction(remote_navigable.id());
+
+    // The WindowProxy scripts hold keeps standing for the document the navigable displays, which another page hosts,
+    // until the stand-in's document, or the one it populates, activates and makes itself the proxy's [[Window]].
+    // The stand-in's window stays the [[Window]] meanwhile, for the tasks the population queues on it.
+    remote_navigable.set_window_proxy(*browsing_context->window_proxy());
+    browsing_context->window_proxy()->set_remote_window_over_provisional_window(remote_navigable.active_window());
+    m_provisional_for = remote_navigable;
+    remote_navigable.set_provisional_navigable(*this);
+}
+
+void LocalNavigable::set_parent_compositor_context(Optional<Web::CompositorContextId> parent_context_id)
+{
+    if (has_compositor_context())
+        compositor_context().set_parent_context(parent_context_id);
+}
+
+CSSPixelRect LocalNavigable::to_page_rect(CSSPixelRect const& a_rect)
+{
+    auto rect = a_rect;
+    auto position = to_local_root_viewport_position(a_rect.location());
+    if (!position.has_value()) {
+        rect.set_location({});
+        return rect;
+    }
+    rect.set_location(*position);
+    if (auto document = local_root()->active_document())
+        return document->visual_viewport()->map_from_layout_viewport(rect);
+    return rect;
+}
+
+CSSPixelPoint LocalNavigable::to_page_position(CSSPixelPoint a_position)
+{
+    auto position = to_local_root_viewport_position(a_position);
+    if (!position.has_value())
+        return {};
+    if (auto document = local_root()->active_document())
+        return document->visual_viewport()->map_from_layout_viewport(*position);
+    return *position;
+}
+
+// Maps a position in this navigable's layout viewport to one in the layout viewport of its local root. The page sees
+// that through the local root's visual viewport, which the user may have pinch-zoomed.
+Optional<CSSPixelPoint> LocalNavigable::to_local_root_viewport_position(CSSPixelPoint a_position)
+{
+    auto position = a_position;
+    for (GC::Ptr<LocalNavigable> ancestor = this; ancestor;) {
+        if (ancestor->is_local_root())
+            break;
+        if (!ancestor->container())
+            return {};
+        // Each container's box is the caller's own read of its document's render state.
+        Layout::ForcedReadScope read { ancestor->container()->document() };
+        auto const* layout_node = ancestor->container()->layout_node(read);
+        if (!layout_node || !Painting::has_committed_box(*layout_node))
+            return {};
+
+        auto point = Painting::absolute_position(*layout_node);
+        point.translate_by(position);
+        position = Painting::rect_to_viewport(*layout_node, { point, { 0, 0 } }, Layout::RustFFI::ViewportSpace::VisualViewport).location();
+
+        auto parent = ancestor->parent();
+        ancestor = parent ? &as<LocalNavigable>(*parent) : nullptr;
+    }
+    return position;
+}
+
+void LocalNavigable::set_viewport_size_after_rendering_update_in_flight(CSSPixelSize size)
+{
+    if (!HTML::main_thread_event_loop().has_rendering_update_in_flight()) {
+        set_viewport_size(size);
+        return;
+    }
+    // NB: Only the newest size counts. The sizes between are never shown.
+    m_viewport_size_held_for_rendering_update_in_flight = size;
+}
+
+void LocalNavigable::take_viewport_size_held_for_rendering_update_in_flight()
+{
+    if (auto size = m_viewport_size_held_for_rendering_update_in_flight; size.has_value())
+        set_viewport_size(*size);
+}
+
+void LocalNavigable::set_viewport_size(CSSPixelSize size, InvalidateDisplayList invalidate_display_list)
+{
+    // NB: A size set now is newer than any held one.
+    m_viewport_size_held_for_rendering_update_in_flight.clear();
+
+    if (m_viewport_size == size && invalidate_display_list == InvalidateDisplayList::No)
+        return;
+
+    auto previous_viewport_size = m_viewport_size;
+    m_viewport_size = size;
+
+    if (has_compositor_context()) {
+        compositor_context().viewport_size_updated(
+            viewport_size_in_device_pixels(),
+            page().client().device_pixel_ratio(),
+            Compositing::WindowResizingInProgress::Yes);
+    }
+
+    if (auto document = active_document()) {
+        // NB: A display list invalidated with the viewport is for a device pixel ratio that moved, as a zoom moves it.
+        if (invalidate_display_list == InvalidateDisplayList::PaintCommandsAndHitTestList)
+            document->record_style_environment_change(DOM::StyleEnvironmentChange::DevicePixelRatio | DOM::StyleEnvironmentChange::MediaFeatures);
+        if (previous_viewport_size != size)
+            document->invalidate_style_for_viewport_change(previous_viewport_size);
+        document->set_needs_media_query_evaluation();
+        document->set_needs_layout_update(DOM::SetNeedsLayoutReason::NavigableSetViewportSize);
+    }
+
+    if (auto document = active_document()) {
+        document->set_needs_repaint(Badge<HTML::LocalNavigable> {}, invalidate_display_list);
+
+        document->inform_all_viewport_clients_about_the_current_viewport_rect();
+
+        // Schedule the HTML event loop to ensure that a `resize` event gets fired.
+        HTML::main_thread_event_loop().schedule();
+    }
+}
+
+Optional<CSSPixelRect> LocalNavigable::viewport_intersection() const
+{
+    if (!parent() || !is_local_root())
+        return {};
+    return m_viewport_intersection.value_or(CSSPixelRect {});
+}
+
+void LocalNavigable::set_viewport_intersection(CSSPixelRect intersection)
+{
+    if (m_viewport_intersection == intersection)
+        return;
+    m_viewport_intersection = intersection;
+    set_rendering_pending_displayed(*this, !intersection.is_empty());
+
+    // Intersection observations only run when the document renders, so ask for one.
+    if (auto document = active_document()) {
+        document->set_needs_repaint(Badge<HTML::LocalNavigable> {}, InvalidateDisplayList::No);
+        HTML::main_thread_event_loop().schedule();
+    }
+}
+
+static CSSPixelPoint async_scroll_offset_to_css_pixels(Gfx::FloatPoint async_scroll_offset, double device_pixels_per_css_pixel)
+{
+    return {
+        CSSPixels { async_scroll_offset.x() / device_pixels_per_css_pixel },
+        CSSPixels { async_scroll_offset.y() / device_pixels_per_css_pixel },
+    };
+}
+
+static Optional<CSS::PseudoElement> pseudo_element_from_async_scroll_node_stable_id(Web::AsyncScrollNodeStableID const& stable_id)
+{
+    if (stable_id.kind != Web::AsyncScrollNodeKind::PseudoElement)
+        return {};
+    if (stable_id.pseudo_element_type >= to_underlying(CSS::PseudoElement::KnownPseudoElementCount))
+        return {};
+    return static_cast<CSS::PseudoElement>(stable_id.pseudo_element_type);
+}
+
+static DOM::Element* element_for_async_scroll_node_stable_id(DOM::Document& document, Web::AsyncScrollNodeStableID const& stable_id)
+{
+    auto* node = DOM::Node::from_unique_id(stable_id.node_id);
+    auto* element = as_if<DOM::Element>(node);
+    if (!element || &element->document() != &document)
+        return nullptr;
+    return element;
+}
+
+bool LocalNavigable::store_scroll_offset(Web::AsyncScrollNodeStableID stable_node_id, CSSPixelPoint scroll_offset, Painting::CompositorScrollRequest compositor_scroll_request)
+{
+    auto document = active_document();
+    if (!document)
+        return false;
+
+    switch (stable_node_id.kind) {
+    case Web::AsyncScrollNodeKind::Viewport: {
+        if (stable_node_id.node_id != document->unique_id() || m_viewport_scroll_offset == scroll_offset)
+            return false;
+        m_viewport_scroll_offset = scroll_offset;
+        // The viewport's row holds the offset, which is published next to the store it mirrors rather than by each
+        // caller. A document without a layout tree is handed it when it builds one.
+        if (auto* arena = document->layout_node_arena_if_created())
+            Layout::RustFFI::render_state_set_viewport_scroll_offset(arena->host(), scroll_offset);
+
+        // https://w3c.github.io/csswg-drafts/cssom-view-1/#scrolling-events
+        // Whenever a viewport gets scrolled (whether in response to user interaction or by an API), the user agent must
+        // run these steps:
+
+        // 1. Let doc be the viewport’s associated Document.
+
+        // FIXME: 2. If doc is a snap container, run the steps to update scrollsnapchanging targets for doc with doc’s
+        //    eventual snap target in the block axis as newBlockTarget and doc’s eventual snap target in the inline axis
+        //    as newInlineTarget.
+
+        // 3. If (doc, "scroll") is already in doc’s pending scroll events, abort these steps.
+        // 4. Append (doc, "scroll") to doc’s pending scroll events.
+        document->append_pending_scroll_event({ *document, EventNames::scroll });
+
+        document->set_needs_repaint(Badge<HTML::LocalNavigable> {}, InvalidateDisplayList::No);
+        document->inform_all_viewport_clients_about_the_current_viewport_rect();
+        // Schedule the HTML event loop to ensure that a `resize` event gets fired.
+        HTML::main_thread_event_loop().schedule();
+        break;
+    }
+    case Web::AsyncScrollNodeKind::VisualViewport: {
+        if (stable_node_id.node_id != document->unique_id())
+            return false;
+        auto visual_viewport = document->visual_viewport();
+        auto delta = scroll_offset - visual_viewport->offset();
+        if (delta.is_zero())
+            return false;
+        // The visual viewport appends its "scroll" event and asks for the repaint itself.
+        visual_viewport->scroll_by(delta);
+        break;
+    }
+    case Web::AsyncScrollNodeKind::Element:
+    case Web::AsyncScrollNodeKind::PseudoElement: {
+        auto* element = element_for_async_scroll_node_stable_id(*document, stable_node_id);
+        if (!element)
+            return false;
+        auto pseudo_element = pseudo_element_from_async_scroll_node_stable_id(stable_node_id);
+        if (stable_node_id.kind == Web::AsyncScrollNodeKind::PseudoElement && (!pseudo_element.has_value() || !element->get_synthetic_pseudo_element(*pseudo_element).has_value()))
+            return false;
+        if (element->scroll_offset(pseudo_element) == scroll_offset)
+            return false;
+        element->store_scroll_offset({}, pseudo_element, scroll_offset);
+
+        // https://drafts.csswg.org/cssom-view-1/#scrolling-events
+        // Whenever an element gets scrolled (whether in response to user interaction or by an API), the user agent must
+        // run these steps:
+
+        // 1. Let doc be the element’s node document.
+
+        // FIXME: 2. If the element is a snap container, run the steps to update snapchanging targets for the element
+        //           with the element’s eventual snap target in the block axis as newBlockTarget and the element’s
+        //           eventual snap target in the inline axis as newInlineTarget.
+
+        // 3. If (element, "scroll") is already in doc’s pending scroll events, abort these steps.
+        // 4. Append (element, "scroll") to doc’s pending scroll events.
+        document->append_pending_scroll_event({ *element, EventNames::scroll });
+        document->set_needs_repaint(Badge<HTML::LocalNavigable> {}, InvalidateDisplayList::No);
+        break;
+    }
+    }
+
+    did_store_scroll_offset(stable_node_id, compositor_scroll_request);
+    return true;
+}
+
+static void queue_async_scroll_operation_promise_resolution(GC::Ref<WebIDL::Promise> promise)
+{
+    auto& realm = promise->promise()->shape().realm();
+    HTML::queue_a_microtask(nullptr, GC::create_function(realm.heap(), GC::captures(promise), [](auto& promise) {
+        auto& realm = promise->promise()->shape().realm();
+        HTML::TemporaryExecutionContext execution_context {
+            realm,
+            HTML::TemporaryExecutionContext::CallbacksEnabled::Yes
+        };
+        WebIDL::resolve_promise(promise);
+    }));
+}
+
+LocalNavigable::FinishedScroll LocalNavigable::finished_scroll(PendingAsyncScrollOperation const& operation)
+{
+    return { .promises = GC::RootVector<GC::Ref<WebIDL::Promise>> { operation.promises.span() } };
+}
+
+LocalNavigable::FinishedScroll LocalNavigable::finished_scroll(MainThreadSmoothScroll const& smooth_scroll)
+{
+    return { .promises = GC::RootVector<GC::Ref<WebIDL::Promise>> { smooth_scroll.promises.span() } };
+}
+
+void LocalNavigable::resolve_promises_of_finished_scroll(ReadonlySpan<GC::Ref<WebIDL::Promise>> promises)
+{
+    for (auto const& promise : promises)
+        queue_async_scroll_operation_promise_resolution(promise);
+}
+
+LocalNavigable::ScrollPromises* LocalNavigable::promises_of_smooth_scroll_in_flight_toward(Web::AsyncScrollNodeStableID stable_node_id, CSSPixelPoint position, ScrollTrigger trigger, Compositing::ScrollAnimationKind animation_kind)
+{
+    for (auto& pending : m_pending_async_scroll_operations) {
+        if (pending.stable_node_id == stable_node_id && pending.destination_scroll_offset == position && pending.trigger == trigger && pending.animation_kind == animation_kind)
+            return &pending.promises;
+    }
+    for (auto& smooth_scroll : m_main_thread_smooth_scrolls) {
+        if (smooth_scroll.stable_node_id == stable_node_id && smooth_scroll.destination_scroll_offset == position && smooth_scroll.trigger == trigger && smooth_scroll.animation.kind() == animation_kind)
+            return &smooth_scroll.promises;
+    }
+    return nullptr;
+}
+
+LocalNavigable::PendingAsyncScrollOperation& LocalNavigable::ensure_pending_async_scroll_operation(Compositing::AsyncScrollOperationID operation_id)
+{
+    auto index = m_pending_async_scroll_operations.find_first_index_if([&](auto const& pending) { return pending.operation_id == operation_id; });
+    if (!index.has_value()) {
+        m_pending_async_scroll_operations.append(PendingAsyncScrollOperation {
+            .operation_id = operation_id,
+            .promises = {},
+            .stable_node_id = {},
+            .destination_scroll_offset = {},
+        });
+        index = m_pending_async_scroll_operations.size() - 1;
+    }
+    return m_pending_async_scroll_operations[*index];
+}
+
+void LocalNavigable::wait_for_async_scroll_operation(Compositing::AsyncScrollOperationID operation_id, GC::Ref<WebIDL::Promise> promise)
+{
+    if (has_been_destroyed() || !all_local_navigables().contains(*this)) {
+        queue_async_scroll_operation_promise_resolution(promise);
+        return;
+    }
+
+    if (auto ended = m_async_scroll_operations_with_expected_wait.take(operation_id); ended.has_value() && *ended) {
+        queue_async_scroll_operation_promise_resolution(promise);
+        return;
+    }
+
+    // The compositor may have reported the scroll it started for this operation already, which registered it here.
+    ensure_pending_async_scroll_operation(operation_id).promises.append(promise);
+}
+
+void LocalNavigable::expect_wait_for_async_scroll_operation(Compositing::AsyncScrollOperationID operation_id)
+{
+    m_async_scroll_operations_with_expected_wait.set(operation_id, false);
+}
+
+void LocalNavigable::forget_expected_wait_for_async_scroll_operation(Compositing::AsyncScrollOperationID operation_id)
+{
+    m_async_scroll_operations_with_expected_wait.remove(operation_id);
+}
+
+void LocalNavigable::wait_for_wheel_scrolls(Vector<GC::Ref<WebIDL::Promise>>& promises)
+{
+    auto document = active_document();
+    if (!document)
+        return;
+
+    auto wait_for = [&](ScrollPromises& scroll_promises) {
+        auto promise = WebIDL::create_promise_for(*document);
+        scroll_promises.append(promise);
+        promises.append(promise);
+    };
+    for (auto& pending : m_pending_async_scroll_operations) {
+        if (pending.animation_kind == Compositing::ScrollAnimationKind::Wheel)
+            wait_for(pending.promises);
+    }
+    for (auto& smooth_scroll : m_main_thread_smooth_scrolls) {
+        if (smooth_scroll.animation.kind() == Compositing::ScrollAnimationKind::Wheel)
+            wait_for(smooth_scroll.promises);
+    }
+}
+
+void LocalNavigable::resolve_async_scroll_operation(Compositing::AsyncScrollOperationID operation_id)
+{
+    if (m_async_scroll_operations_with_expected_wait.contains(operation_id))
+        m_async_scroll_operations_with_expected_wait.set(operation_id, true);
+
+    // Notifying a scroll's completion can start the next scroll of the same scrolling box, so the finished scroll
+    // leaves the list of scrolls in progress before it is reported.
+    Optional<FinishedScroll> finished;
+    m_pending_async_scroll_operations.remove_first_matching([&](auto const& pending) {
+        if (pending.operation_id != operation_id)
+            return false;
+        finished = finished_scroll(pending);
+        return true;
+    });
+    if (!finished.has_value())
+        return;
+
+    resolve_promises_of_finished_scroll(finished->promises);
+    note_scroll_sequences_may_have_completed();
+}
+
+// https://drafts.csswg.org/cssom-view-1/#perform-a-scroll
+// 7. If scrollPromise is still in the pending state:
+//     1. If the scroll position changed as a result of this call, emit the scrollend event.
+//     2. Resolve scrollPromise.
+void LocalNavigable::finish_instant_scrolls_answered_by(Compositing::AppliedScrollRequest const& applied_scroll_request)
+{
+    // NB: The box's scroll sequence fires the scrollend event, if the compositor says the scroll moved the box, once
+    //     nothing else keeps it going. The main thread's own write of the box, if it changed anything, said when.
+    if (applied_scroll_request.moved_the_box) {
+        if (auto* sequence = scroll_sequence_for(applied_scroll_request.stable_node_id))
+            sequence->moved = true;
+    }
+    m_instant_scrolls_awaiting_answers.remove_all_matching([&](auto const& instant_scroll) {
+        if (instant_scroll.stable_node_id != applied_scroll_request.stable_node_id || instant_scroll.request_id > applied_scroll_request.request_id)
+            return false;
+        queue_async_scroll_operation_promise_resolution(instant_scroll.promise);
+        return true;
+    });
+}
+
+void LocalNavigable::resolve_all_pending_async_scroll_operations()
+{
+    for (auto const& instant_scroll : m_instant_scrolls_awaiting_answers)
+        queue_async_scroll_operation_promise_resolution(instant_scroll.promise);
+    m_instant_scrolls_awaiting_answers.clear();
+
+    while (!m_pending_async_scroll_operations.is_empty())
+        resolve_promises_of_finished_scroll(finished_scroll(m_pending_async_scroll_operations.take_last()).promises);
+
+    while (!m_main_thread_smooth_scrolls.is_empty())
+        resolve_promises_of_finished_scroll(finished_scroll(m_main_thread_smooth_scrolls.take_last()).promises);
+
+    note_scroll_sequences_may_have_completed();
+}
+
+Optional<CSSPixelPoint> LocalNavigable::scroll_offset_for(Web::AsyncScrollNodeStableID stable_node_id) const
+{
+    auto document = active_document();
+    if (!document)
+        return {};
+
+    if (stable_node_id.kind == Web::AsyncScrollNodeKind::Viewport) {
+        if (stable_node_id.node_id != document->unique_id())
+            return {};
+        return m_viewport_scroll_offset;
+    }
+
+    if (stable_node_id.kind == Web::AsyncScrollNodeKind::VisualViewport) {
+        if (stable_node_id.node_id != document->unique_id())
+            return {};
+        return document->visual_viewport()->offset();
+    }
+
+    auto* element = element_for_async_scroll_node_stable_id(*document, stable_node_id);
+    if (!element)
+        return {};
+    return element->scroll_offset(pseudo_element_from_async_scroll_node_stable_id(stable_node_id));
+}
+
+static Layout::Node* layout_node_for_async_scroll_node(Layout::BegunRead const& read, DOM::Document& document, Web::AsyncScrollNodeStableID stable_node_id)
+{
+    if (stable_node_id.kind == Web::AsyncScrollNodeKind::Viewport) {
+        if (stable_node_id.node_id != document.unique_id())
+            return nullptr;
+        return document.unsafe_layout_node(read);
+    }
+
+    auto* element = element_for_async_scroll_node_stable_id(document, stable_node_id);
+    if (!element)
+        return nullptr;
+    if (auto pseudo_element = pseudo_element_from_async_scroll_node_stable_id(stable_node_id); pseudo_element.has_value()) {
+        auto synthetic_pseudo_element = element->get_synthetic_pseudo_element(*pseudo_element);
+        if (!synthetic_pseudo_element.has_value())
+            return nullptr;
+        return synthetic_pseudo_element->layout_node(read);
+    }
+    return element->layout_node(read);
+}
+
+bool LocalNavigable::store_scroll_offset_in_scroll_range(Web::AsyncScrollNodeStableID stable_node_id, CSSPixelPoint scroll_offset, Painting::CompositorScrollRequest compositor_scroll_request)
+{
+    if (stable_node_id.kind == Web::AsyncScrollNodeKind::Viewport || stable_node_id.kind == Web::AsyncScrollNodeKind::VisualViewport)
+        return store_scroll_offset(stable_node_id, scroll_offset, compositor_scroll_request);
+
+    auto document = active_document();
+    if (!document)
+        return false;
+    if (!element_for_async_scroll_node_stable_id(*document, stable_node_id))
+        return false;
+    Layout::ForcedReadScope read { *document };
+    document->update_layout(DOM::UpdateLayoutReason::ElementScroll);
+    auto* layout_node = layout_node_for_async_scroll_node(read, *document, stable_node_id);
+    if (!layout_node)
+        return false;
+    return Painting::set_scroll_offset(*layout_node, scroll_offset, compositor_scroll_request) == Painting::ScrollHandled::Yes;
+}
+
+DOM::Element* LocalNavigable::element_whose_scrollbar_is_dragged_by_compositor(Layout::BegunRead const& read, Web::ScrollbarDraggedByCompositor const& scrollbar)
+{
+    auto document = active_document();
+    if (!document)
+        return nullptr;
+    auto* scrolling_box = layout_node_for_async_scroll_node(read, *document, scrollbar.scroller_stable_node_id);
+    if (!scrolling_box || !Painting::has_committed_box(*scrolling_box))
+        return nullptr;
+    return element_for_async_scroll_node_stable_id(*document, scrollbar.scroller_stable_node_id);
+}
+
+// NB: A scroll the compositor reports can arrive while layout is out of date, so this reads the committed layout.
+static Layout::Node* committed_scrolling_box_for_async_scroll_node(DOM::Document& document, Web::AsyncScrollNodeStableID stable_node_id)
+{
+    Layout::ForcedReadScope read { document };
+    Layout::Node* scrolling_box = nullptr;
+    if (stable_node_id.kind == Web::AsyncScrollNodeKind::Viewport) {
+        if (stable_node_id.node_id == document.unique_id())
+            scrolling_box = document.unsafe_layout_node(read);
+    } else if (stable_node_id.kind == Web::AsyncScrollNodeKind::Element) {
+        if (auto* element = element_for_async_scroll_node_stable_id(document, stable_node_id))
+            scrolling_box = element->unsafe_layout_node(read);
+    }
+    if (!scrolling_box || !Painting::has_committed_box(*scrolling_box))
+        return nullptr;
+    return scrolling_box;
+}
+
+// The compositor fades overlay scrollbars, and says which have faded out, so that hit testing passes them by.
+bool LocalNavigable::set_overlay_scrollbar_hidden(Web::AsyncScrollNodeStableID stable_node_id, bool vertical, bool hidden)
+{
+    auto document = active_document();
+    if (!document)
+        return false;
+    // NB: The compositor can report this while layout is out of date, so this reads the committed layout.
+    Layout::Node* scrolling_box = nullptr;
+    if (auto pseudo_element = pseudo_element_from_async_scroll_node_stable_id(stable_node_id); pseudo_element.has_value()) {
+        Layout::ForcedReadScope read { *document };
+        if (auto* element = element_for_async_scroll_node_stable_id(*document, stable_node_id))
+            scrolling_box = element->pseudo_element_unsafe_layout_node(read, *pseudo_element);
+        if (scrolling_box && !Painting::has_committed_box(*scrolling_box))
+            scrolling_box = nullptr;
+    } else {
+        scrolling_box = committed_scrolling_box_for_async_scroll_node(*document, stable_node_id);
+    }
+    if (!scrolling_box)
+        return false;
+    auto direction = vertical ? Layout::RustFFI::ScrollDirection::Vertical : Layout::RustFFI::ScrollDirection::Horizontal;
+    Layout::RustFFI::render_state_set_scrollbar_hidden(scrolling_box->document_host(), Painting::committed_row_slot(*scrolling_box), direction, hidden);
+    return true;
+}
+
+// https://drafts.csswg.org/css-conditional-5/#scrolled
+// A relative scroll, made by the user or by a relative scrolling API, sets the direction scroll-state(scrolled) reads.
+// An absolute one leaves it as it is.
+static void record_relative_scroll(DOM::Document& document, Web::AsyncScrollNodeStableID stable_node_id, CSSPixelPoint delta)
+{
+    if (delta.is_zero())
+        return;
+    if (auto* scrolling_box = committed_scrolling_box_for_async_scroll_node(document, stable_node_id))
+        document.scroll_state_query_containers().did_scroll_relatively(*scrolling_box, delta);
+}
+
+static void record_relative_scroll(DOM::Document& document, Web::AsyncScrollNodeStableID stable_node_id, Optional<CSSPixelPoint> old_offset, Optional<CSSPixelPoint> new_offset)
+{
+    if (old_offset.has_value() && new_offset.has_value())
+        record_relative_scroll(document, stable_node_id, *new_offset - *old_offset);
+}
+
+static void record_snapped_areas_of_scroll_container(DOM::Document& document, Web::AsyncScrollNodeStableID stable_node_id, Compositing::SnapDestination& snap_destination)
+{
+    // https://drafts.csswg.org/css-scroll-snap-1/#re-snap
+    // If the scroll container was snapped before the content change and those same snap areas still exist (e.g. their
+    // associated elements were not deleted), the scroll container must be re-snapped to those same snap areas after the
+    // content change.
+
+    // NB: An axis the selection did not evaluate keeps the snap areas it is already snapped to.
+    Compositing::SnappedAreas snapped_areas = document.snapped_areas_of_scroll_container(stable_node_id);
+    if (snap_destination.evaluated_x)
+        snapped_areas.x = move(snap_destination.snapped_areas.x);
+    if (snap_destination.evaluated_y)
+        snapped_areas.y = move(snap_destination.snapped_areas.y);
+    document.set_snapped_areas_of_scroll_container(stable_node_id, move(snapped_areas));
+}
+
+static GC::Ptr<DOM::EventTarget> scroll_event_target_for_async_scroll_node(DOM::Document& document, Web::AsyncScrollNodeStableID stable_node_id)
+{
+    if (stable_node_id.kind == Web::AsyncScrollNodeKind::Viewport) {
+        if (stable_node_id.node_id != document.unique_id())
+            return {};
+        return document;
+    }
+    if (stable_node_id.kind == Web::AsyncScrollNodeKind::VisualViewport) {
+        if (stable_node_id.node_id != document.unique_id())
+            return {};
+        return document.visual_viewport()->event_target();
+    }
+    return element_for_async_scroll_node_stable_id(document, stable_node_id);
+}
+
+LocalNavigable::ScrollSequence* LocalNavigable::scroll_sequence_for(Web::AsyncScrollNodeStableID stable_node_id)
+{
+    auto index = m_scroll_sequences.find_first_index_if([&](auto const& sequence) { return sequence.stable_node_id == stable_node_id; });
+    if (!index.has_value())
+        return nullptr;
+    return &m_scroll_sequences[index.value()];
+}
+
+LocalNavigable::ScrollSequence* LocalNavigable::begin_scroll_sequence(Web::AsyncScrollNodeStableID stable_node_id)
+{
+    if (auto* sequence = scroll_sequence_for(stable_node_id))
+        return sequence;
+    auto document = active_document();
+    if (!document)
+        return nullptr;
+    auto target = scroll_event_target_for_async_scroll_node(*document, stable_node_id);
+    if (!target)
+        return nullptr;
+    m_scroll_sequences.append({ .target = *target, .stable_node_id = stable_node_id, .moved = false, .user_gesture = {} });
+    return &m_scroll_sequences.last();
+}
+
+void LocalNavigable::note_scroll_sequence_moved(Web::AsyncScrollNodeStableID stable_node_id)
+{
+    if (auto* sequence = scroll_sequence_for(stable_node_id))
+        mark_scroll_sequence_moved(*sequence);
+}
+
+void LocalNavigable::mark_scroll_sequence_moved(ScrollSequence& sequence)
+{
+    sequence.moved = true;
+    sequence.last_moved_ordinal = ++m_last_scroll_move_ordinal;
+}
+
+bool LocalNavigable::has_user_scroll_gesture() const
+{
+    return any_of(m_scroll_sequences, [](auto const& sequence) { return sequence.user_gesture.has_value(); });
+}
+
+LocalNavigable::UserScrollGesture* LocalNavigable::user_scroll_gesture_for(Web::AsyncScrollNodeStableID stable_node_id)
+{
+    auto* sequence = scroll_sequence_for(stable_node_id);
+    if (!sequence || !sequence->user_gesture.has_value())
+        return nullptr;
+    return &sequence->user_gesture.value();
+}
+
+void LocalNavigable::note_user_scroll_gesture_of(Web::AsyncScrollNodeStableID stable_node_id, Optional<CSSPixelPoint> scroll_offset_at_gesture_start, UserScrollMovedBox moved_box, SnapPositionSelection snap_position_selection)
+{
+    auto* sequence = begin_scroll_sequence(stable_node_id);
+    if (!sequence)
+        return;
+    if (moved_box == UserScrollMovedBox::Yes)
+        mark_scroll_sequence_moved(*sequence);
+
+    if (!sequence->user_gesture.has_value())
+        sequence->user_gesture = UserScrollGesture {};
+    auto& gesture = sequence->user_gesture.value();
+    if (!gesture.scroll_offset_at_gesture_start.has_value())
+        gesture.scroll_offset_at_gesture_start = scroll_offset_at_gesture_start;
+    gesture.intent = m_user_scroll_input_intent;
+    gesture.travels_under_momentum = m_user_scroll_gesture_travels_under_momentum;
+    gesture.snap_position_selection = snap_position_selection;
+    gesture.snaps_at_its_end = true;
+    gesture.awaits_layout_for_snapping = false;
+    gesture.waited_for_layout_for_snapping = false;
+    gesture.input_deadline = MonotonicTime::now() + Compositing::user_scroll_settle_delay;
+
+    if (m_user_scroll_gesture_hold_of_current_input)
+        m_user_scroll_gesture_hold_of_current_input->hold(stable_node_id);
+    schedule_end_of_user_scroll_gesture_input();
+}
+
+void LocalNavigable::note_user_scroll_input_intent(Compositing::SnapSelectionStrategy::Type intent)
+{
+    m_user_scroll_input_intent = intent;
+}
+
+// User input activity postpones the end of a gesture that is going on, but never begins one, so scrolling boxes that do
+// not move still receive no scrollend event.
+void LocalNavigable::extend_user_scroll_gesture_of(Web::AsyncScrollNodeStableID stable_node_id)
+{
+    auto* gesture = user_scroll_gesture_for(stable_node_id);
+    if (!gesture)
+        return;
+    gesture->input_deadline = MonotonicTime::now() + Compositing::user_scroll_settle_delay;
+    schedule_end_of_user_scroll_gesture_input();
+}
+
+void LocalNavigable::extend_wheel_user_scroll_gesture()
+{
+    if (m_compositor_wheel_latched_scroller.has_value())
+        extend_user_scroll_gesture_of(m_compositor_wheel_latched_scroller.value());
+    if (m_wheel_user_scroll_gesture_hold) {
+        for (auto box : m_wheel_user_scroll_gesture_hold->held_boxes())
+            extend_user_scroll_gesture_of(box);
+    }
+}
+
+TemporaryChange<UserScrollGestureHold*> LocalNavigable::hold_boxes_user_input_scrolls_with(UserScrollGestureHold& hold)
+{
+    return TemporaryChange<UserScrollGestureHold*> { m_user_scroll_gesture_hold_of_current_input, &hold };
+}
+
+void LocalNavigable::note_user_scroll_gesture_phase(Web::ScrollGesturePhase phase)
+{
+    switch (phase) {
+    case Web::ScrollGesturePhase::None:
+        m_user_scroll_gesture_travels_under_momentum = false;
+        release_wheel_user_scroll_gesture_hold();
+        break;
+    case Web::ScrollGesturePhase::Ongoing:
+    case Web::ScrollGesturePhase::Momentum: {
+        bool travels_under_momentum = phase == Web::ScrollGesturePhase::Momentum;
+
+        // Fingers that touch down during momentum start another gesture, which settles the flicked one.
+        if (m_wheel_user_scroll_gesture_hold && m_user_scroll_gesture_travels_under_momentum && !travels_under_momentum)
+            release_wheel_user_scroll_gesture_hold();
+        m_user_scroll_gesture_travels_under_momentum = travels_under_momentum;
+
+        if (!m_wheel_user_scroll_gesture_hold)
+            m_wheel_user_scroll_gesture_hold = make<UserScrollGestureHold>(*this);
+        break;
+    }
+    case Web::ScrollGesturePhase::Ended:
+        m_user_scroll_gesture_travels_under_momentum = false;
+        if (m_wheel_user_scroll_gesture_hold) {
+            release_wheel_user_scroll_gesture_hold();
+            break;
+        }
+        note_scroll_sequences_may_have_completed();
+        break;
+    }
+}
+
+void LocalNavigable::did_handle_wheel_event(bool gesture_lasts_until_fingers_lift)
+{
+    if (!m_wheel_user_scroll_gesture_hold)
+        return;
+    // The compositor latched the gesture to the box it scrolls before it handed the event on.
+    if (m_compositor_wheel_latched_scroller.has_value())
+        m_wheel_user_scroll_gesture_hold->hold(m_compositor_wheel_latched_scroller.value());
+    if (gesture_lasts_until_fingers_lift) {
+        if (m_wheel_user_scroll_gesture_hold_expiry_timer)
+            m_wheel_user_scroll_gesture_hold_expiry_timer->stop();
+        return;
+    }
+    if (!m_wheel_user_scroll_gesture_hold_expiry_timer) {
+        m_wheel_user_scroll_gesture_hold_expiry_timer = Core::Timer::create_single_shot(Compositing::user_scroll_settle_delay, [this] {
+            m_wheel_user_scroll_gesture_hold = nullptr;
+        });
+    }
+    m_wheel_user_scroll_gesture_hold_expiry_timer->restart();
+}
+
+void LocalNavigable::release_wheel_user_scroll_gesture_hold()
+{
+    if (m_wheel_user_scroll_gesture_hold_expiry_timer)
+        m_wheel_user_scroll_gesture_hold_expiry_timer->stop();
+    m_wheel_user_scroll_gesture_hold = nullptr;
+}
+
+void LocalNavigable::snap_user_scroll_gestures_that_awaited_layout()
+{
+    bool any_gesture_awaited_layout = false;
+    for (auto& sequence : m_scroll_sequences) {
+        if (!sequence.user_gesture.has_value() || !sequence.user_gesture->awaits_layout_for_snapping)
+            continue;
+        sequence.user_gesture->awaits_layout_for_snapping = false;
+        sequence.user_gesture->waited_for_layout_for_snapping = true;
+        any_gesture_awaited_layout = true;
+    }
+    if (any_gesture_awaited_layout)
+        end_completed_scroll_sequences();
+}
+
+// https://drafts.csswg.org/css-scroll-snap-1/#re-snap
+void LocalNavigable::re_snap_scroll_containers_after_layout_change(Layout::BegunRead const& read)
+{
+    // If the content or layout of the document changes (e.g. content is added, moved, deleted, resized) such that the
+    // content of a snapport changes, the UA must re-evaluate the resulting scroll position, and re-snap if required.
+
+    if (m_is_re_snapping_scroll_containers)
+        return;
+
+    auto document = active_document();
+    if (!document || !document->needs_scroll_container_resnap())
+        return;
+
+    if (!document->may_have_scroll_snap_areas()) {
+        document->cancel_scheduled_scroll_container_resnap();
+        return;
+    }
+
+    // NB: Not every completed layout update leaves usable layout behind, such as one for a document created for
+    //     template contents; re-snapping then waits for an update that does.
+    if (!document->layout_is_up_to_date() || document->is_running_update_layout())
+        return;
+
+    auto const* viewport_layout_node = document->layout_node(read);
+    if (!viewport_layout_node || !Painting::has_committed_box(*viewport_layout_node))
+        return;
+
+    document->cancel_scheduled_scroll_container_resnap();
+    TemporaryChange re_snapping_in_progress { m_is_re_snapping_scroll_containers, true };
+
+    auto snap_containers = document->collect_scroll_snap_containers(read);
+
+    bool any_snap_container_deferred = false;
+    for (auto snap_container_slot : snap_containers) {
+        auto const* snap_container = document->layout_node_arena().node_if_live(read, snap_container_slot);
+        if (!snap_container)
+            continue;
+        auto stable_node_id = Painting::async_scroll_node_stable_id(*snap_container);
+        if (!stable_node_id.has_value())
+            continue;
+
+        // A scrolling box that is being scrolled re-snaps once that scroll settles from wherever it comes to rest,
+        // rather than having the position it is moving toward re-evaluated out from under it.
+        bool is_being_scrolled = user_scroll_gesture_for(*stable_node_id) || in_flight_scroll_for(*stable_node_id).has_value()
+            || m_user_scroll_gesture_hold_counts.contains(*stable_node_id);
+        if (is_being_scrolled) {
+            any_snap_container_deferred = true;
+            continue;
+        }
+
+        auto current_scroll_offset = scroll_offset_for(*stable_node_id);
+        if (!current_scroll_offset.has_value())
+            continue;
+
+        auto const& snapped_areas = document->snapped_areas_of_scroll_container(*stable_node_id);
+        Painting::ResnapSelection resnap_selection {
+            .snapped_areas = snapped_areas,
+            .focused_node = document->focused_area(),
+            .targeted_element = document->target_element(),
+        };
+        auto snap_destination = Painting::select_resnap_destination(*snap_container, *current_scroll_offset, resnap_selection);
+
+        // Scrolling behavior for re-snapping to the same box as before however, is UA-defined. The UA may, for
+        // example, when snapped to the start of a section, choose not to animate the scroll to the section's new
+        // position as content is dynamically added earlier in the document in order to create the illusion of not
+        // scrolling.
+        // NB: Re-snapping to snap areas the container was already snapped to is therefore instant.
+        auto is_subset_of = [](Vector<Compositing::SnapAreaIdentity> const& areas, Vector<Compositing::SnapAreaIdentity> const& other_areas) {
+            return all_of(areas, [&](auto const& area) { return other_areas.contains_slow(area); });
+        };
+        bool re_snapped_to_same_areas = !snap_destination.snapped_areas.is_empty()
+            && is_subset_of(snap_destination.snapped_areas.x, snapped_areas.x)
+            && is_subset_of(snap_destination.snapped_areas.y, snapped_areas.y);
+
+        document->set_snapped_areas_of_scroll_container(*stable_node_id, move(snap_destination.snapped_areas));
+
+        if (snap_destination.position == *current_scroll_offset)
+            continue;
+
+        // Scrolling required by a re-snap operation to a new or different box must behave and animate the same way as
+        // any other scroll-into-view operation, including honoring controls such as scroll-behavior.
+        auto behavior = re_snapped_to_same_areas ? Bindings::ScrollBehavior::Instant : Bindings::ScrollBehavior::Auto;
+        GC::Ptr<DOM::Element> associated_element = stable_node_id->kind == Web::AsyncScrollNodeKind::Viewport
+            ? document->document_element()
+            : element_for_async_scroll_node_stable_id(*document, *stable_node_id);
+
+        TemporaryExecutionContext temporary_execution_context { HTML::relevant_realm(*document) };
+        perform_a_scroll_of_a_scrolling_box(*stable_node_id, {
+                                                                 .position = snap_destination.position,
+                                                                 .behavior = behavior,
+                                                                 .trigger = ScrollTrigger::Programmatic,
+                                                                 .associated_element = associated_element,
+                                                                 .destination_snapping = DestinationSnapping::DestinationIsSnapPosition,
+                                                             });
+    }
+
+    // A deferred snap container re-snaps once the scroll that owns it completes and settlement runs this again.
+    if (any_snap_container_deferred)
+        document->schedule_scroll_container_resnap();
+}
+
+void LocalNavigable::cancel_scroll_sequences()
+{
+    if (m_user_scroll_gesture_input_timer)
+        m_user_scroll_gesture_input_timer->stop();
+    m_scroll_sequences.clear();
+    m_compositor_user_scroll_gesture_hold = nullptr;
+    release_wheel_user_scroll_gesture_hold();
+}
+
+void LocalNavigable::begin_user_scroll_gesture_hold(Badge<UserScrollGestureHold>, Web::AsyncScrollNodeStableID stable_node_id)
+{
+    m_user_scroll_gesture_hold_counts.ensure(stable_node_id, [] { return 0; })++;
+}
+
+void LocalNavigable::end_user_scroll_gesture_hold(Badge<UserScrollGestureHold>, Web::AsyncScrollNodeStableID stable_node_id)
+{
+    auto count = m_user_scroll_gesture_hold_counts.find(stable_node_id);
+    VERIFY(count != m_user_scroll_gesture_hold_counts.end());
+    if (--count->value > 0)
+        return;
+    m_user_scroll_gesture_hold_counts.remove(count);
+
+    // The release of the last input holding the box completes its gesture.
+    note_user_scroll_gesture_input_ended(stable_node_id);
+}
+
+void LocalNavigable::note_user_scroll_gesture_input_ended(Web::AsyncScrollNodeStableID stable_node_id)
+{
+    if (auto* gesture = user_scroll_gesture_for(stable_node_id))
+        gesture->input_deadline.clear();
+    note_scroll_sequences_may_have_completed();
+}
+
+Optional<LocalNavigable::InFlightScroll> LocalNavigable::in_flight_scroll_for(Optional<Web::AsyncScrollNodeStableID> const& stable_node_id) const
+{
+    if (!stable_node_id.has_value())
+        return {};
+
+    Optional<InFlightScroll> in_flight_scroll;
+    auto consider = [&](ScrollTrigger trigger, Optional<CSSPixelPoint> destination_scroll_offset, Compositing::ScrollAnimationKind animation_kind) {
+        if (in_flight_scroll.has_value() && in_flight_scroll->trigger == ScrollTrigger::UserInput)
+            return;
+        in_flight_scroll = InFlightScroll { trigger, destination_scroll_offset, animation_kind };
+    };
+    for (auto const& pending : m_pending_async_scroll_operations) {
+        if (pending.stable_node_id == stable_node_id)
+            consider(pending.trigger, pending.destination_scroll_offset, pending.animation_kind);
+    }
+    for (auto const& smooth_scroll : m_main_thread_smooth_scrolls) {
+        if (smooth_scroll.stable_node_id == *stable_node_id)
+            consider(smooth_scroll.trigger, smooth_scroll.destination_scroll_offset, smooth_scroll.animation.kind());
+    }
+    return in_flight_scroll;
+}
+
+void LocalNavigable::abandon_snapping_of_user_scroll_gesture(Web::AsyncScrollNodeStableID stable_node_id)
+{
+    auto* gesture = user_scroll_gesture_for(stable_node_id);
+    if (!gesture)
+        return;
+
+    gesture->scroll_offset_at_gesture_start = {};
+    gesture->unsnapped_scroll_destination = {};
+    gesture->intent = Compositing::SnapSelectionStrategy::Type::EndPosition;
+    gesture->snap_position_selection = SnapPositionSelection::AtGestureEnd;
+    gesture->snaps_at_its_end = false;
+}
+
+bool LocalNavigable::has_scroll_in_progress(ScrollSequence const& sequence, MonotonicTime now) const
+{
+    auto const& stable_node_id = sequence.stable_node_id;
+    if (m_user_scroll_gesture_hold_counts.contains(stable_node_id))
+        return true;
+    if (any_of(m_pending_async_scroll_operations, [&](auto const& pending) { return pending.stable_node_id == stable_node_id; }))
+        return true;
+    if (any_of(m_main_thread_smooth_scrolls, [&](auto const& smooth_scroll) { return smooth_scroll.stable_node_id == stable_node_id; }))
+        return true;
+    if (any_of(m_instant_scrolls_awaiting_answers, [&](auto const& instant_scroll) { return instant_scroll.stable_node_id == stable_node_id; }))
+        return true;
+    if (!sequence.user_gesture.has_value())
+        return false;
+    auto const& gesture = sequence.user_gesture.value();
+    return gesture.awaits_layout_for_snapping || (gesture.input_deadline.has_value() && now < gesture.input_deadline.value());
+}
+
+void LocalNavigable::schedule_end_of_user_scroll_gesture_input()
+{
+    Optional<MonotonicTime> earliest_deadline;
+    for (auto const& sequence : m_scroll_sequences) {
+        if (!sequence.user_gesture.has_value() || !sequence.user_gesture->input_deadline.has_value())
+            continue;
+        auto deadline = sequence.user_gesture->input_deadline.value();
+        if (!earliest_deadline.has_value() || deadline < earliest_deadline.value())
+            earliest_deadline = deadline;
+    }
+    if (!earliest_deadline.has_value()) {
+        if (m_user_scroll_gesture_input_timer)
+            m_user_scroll_gesture_input_timer->stop();
+        return;
+    }
+    if (!m_user_scroll_gesture_input_timer) {
+        m_user_scroll_gesture_input_timer = Core::Timer::create_single_shot(AK::Duration::zero(), [this] {
+            note_scroll_sequences_may_have_completed();
+        });
+    }
+    m_user_scroll_gesture_input_timer->restart(max(earliest_deadline.value() - MonotonicTime::now(), AK::Duration::zero()));
+}
+
+// Returns whether the sequence goes on, with the scroll to the snap position its gesture ends at or until layout is up
+// to date to select one.
+bool LocalNavigable::snap_at_end_of_user_scroll_gesture(ScrollSequence& sequence, Layout::BegunRead const& read, bool can_snap)
+{
+    // https://drafts.csswg.org/css-scroll-snap-1/#snap-strictness
+    // If a valid snap position exists then the scroll container must snap at the termination of a scroll (if none
+    // exist then no snapping occurs).
+    // NB: A gesture whose snap position cannot be selected yet snaps once layout is up to date. One that already waited
+    //     for layout once takes what it can get, so that a scrolling box cannot stay in its gesture.
+    if (!can_snap && !sequence.user_gesture->waited_for_layout_for_snapping) {
+        sequence.user_gesture->awaits_layout_for_snapping = true;
+        page().client().request_frame();
+        return true;
+    }
+
+    auto gesture = sequence.user_gesture.release_value();
+    if (!can_snap)
+        return false;
+
+    auto document = active_document();
+    auto stable_node_id = sequence.stable_node_id;
+    auto const* snap_container = layout_node_for_async_scroll_node(read, *document, stable_node_id);
+    auto current_scroll_offset = scroll_offset_for(stable_node_id);
+    if (!snap_container || !current_scroll_offset.has_value())
+        return false;
+
+    Compositing::SnapSelectionStrategy strategy;
+    if (gesture.scroll_offset_at_gesture_start.has_value() && gesture.snap_position_selection == SnapPositionSelection::AtGestureEnd) {
+        strategy.displacement = current_scroll_offset.value() - gesture.scroll_offset_at_gesture_start.value();
+        if (!strategy.displacement.is_zero()) {
+            strategy.type = gesture.intent;
+            if (gesture.intent != Compositing::SnapSelectionStrategy::Type::EndPosition || gesture.travels_under_momentum)
+                strategy.start_offset = gesture.scroll_offset_at_gesture_start.value();
+        }
+    }
+    auto snap_destination = Painting::adjust_scroll_destination_for_snapping(*snap_container, current_scroll_offset.value(), strategy);
+    record_snapped_areas_of_scroll_container(*document, stable_node_id, snap_destination);
+    if (snap_destination.position == current_scroll_offset.value())
+        return false;
+
+    TemporaryExecutionContext temporary_execution_context { HTML::relevant_realm(*document) };
+    perform_a_scroll_of_a_scrolling_box(stable_node_id, {
+                                                            .position = snap_destination.position,
+                                                            .behavior = Bindings::ScrollBehavior::Smooth,
+                                                            .trigger = ScrollTrigger::GestureEndSnap,
+                                                        });
+    return true;
+}
+
+// Sequences end as late as they can, just before the scroll steps of the next frame fire their events, so that a
+// scroll that starts before then joins the sequence of its box rather than following a scrollend event.
+void LocalNavigable::note_scroll_sequences_may_have_completed()
+{
+    m_scroll_sequences_may_have_completed = true;
+    page().client().request_frame();
+}
+
+void LocalNavigable::end_scroll_sequences_that_completed_since_the_last_frame()
+{
+    if (!exchange(m_scroll_sequences_may_have_completed, false))
+        return;
+    end_completed_scroll_sequences();
+}
+
+// https://drafts.csswg.org/cssom-view-1/#scroll-completed
+void LocalNavigable::end_completed_scroll_sequences()
+{
+    if (has_been_destroyed())
+        return;
+
+    auto document = active_document();
+    if (!document)
+        return;
+    Layout::ForcedReadScope read { *document };
+
+    // Snapping geometry is only consulted when layout is already up to date.
+    bool can_snap = document->layout_is_up_to_date() && !document->is_running_update_layout();
+
+    // The boxes end in the order they last moved. The ordinals compare as serial numbers, which survive a wrap.
+    AK::insertion_sort(m_scroll_sequences, [](ScrollSequence const& a, ScrollSequence const& b) {
+        return a.last_moved_ordinal != b.last_moved_ordinal && b.last_moved_ordinal - a.last_moved_ordinal < (1ull << 63);
+    });
+
+    bool queued_any_scrollend_event = false;
+    auto now = MonotonicTime::now();
+    for (size_t index = 0; index < m_scroll_sequences.size();) {
+        auto& sequence = m_scroll_sequences[index];
+        auto const& target = sequence.target;
+        bool target_is_in_document = false;
+        if (auto* element = as_if<DOM::Element>(*target))
+            target_is_in_document = &element->document() == document.ptr() && element->is_connected();
+        else
+            target_is_in_document = target.ptr() == document.ptr() || target.ptr() == document->visual_viewport()->event_target().ptr();
+        if (!target_is_in_document) {
+            m_scroll_sequences.remove(index);
+            continue;
+        }
+
+        // Input that went quiet no longer holds the gesture, and must not wake the deadline timer again.
+        if (sequence.user_gesture.has_value() && sequence.user_gesture->input_deadline.has_value() && now >= sequence.user_gesture->input_deadline.value())
+            sequence.user_gesture->input_deadline.clear();
+
+        if (has_scroll_in_progress(sequence, now)) {
+            index++;
+            continue;
+        }
+
+        // NB: The snap scroll joins this sequence rather than beginning another, so the index stays valid.
+        if (sequence.user_gesture.has_value() && sequence.user_gesture->snaps_at_its_end && snap_at_end_of_user_scroll_gesture(sequence, read, can_snap)) {
+            index++;
+            continue;
+        }
+
+        auto ended_sequence = m_scroll_sequences.take(index);
+        if (ended_sequence.moved && document->append_pending_scroll_event({ ended_sequence.target, EventNames::scrollend }))
+            queued_any_scrollend_event = true;
+    }
+
+    if (queued_any_scrollend_event)
+        page().client().request_frame();
+    schedule_end_of_user_scroll_gesture_input();
+}
+
+void LocalNavigable::resolve_pending_smooth_scrolls(Web::AsyncScrollNodeStableID stable_node_id)
+{
+    // NB: A script's instant scroll that another scroll of the box replaces before the compositor answered ends with
+    //     where this navigable has the box.
+    m_instant_scrolls_awaiting_answers.remove_all_matching([&](auto const& instant_scroll) {
+        if (instant_scroll.stable_node_id != stable_node_id)
+            return false;
+        queue_async_scroll_operation_promise_resolution(instant_scroll.promise);
+        return true;
+    });
+
+    Vector<FinishedScroll> finished_scrolls;
+    m_pending_async_scroll_operations.remove_all_matching([&](auto const& pending) {
+        if (pending.stable_node_id != stable_node_id)
+            return false;
+        finished_scrolls.append(finished_scroll(pending));
+        return true;
+    });
+    m_main_thread_smooth_scrolls.remove_all_matching([&](auto const& smooth_scroll) {
+        if (smooth_scroll.stable_node_id != stable_node_id)
+            return false;
+        finished_scrolls.append(finished_scroll(smooth_scroll));
+        return true;
+    });
+    for (auto const& finished : finished_scrolls)
+        resolve_promises_of_finished_scroll(finished.promises);
+
+    note_scroll_sequences_may_have_completed();
+}
+
+void LocalNavigable::process_main_thread_smooth_scrolls()
+{
+    auto now = MonotonicTime::now();
+    auto smooth_scroll_count = m_main_thread_smooth_scrolls.size();
+
+    Vector<FinishedScroll> finished_smooth_scrolls;
+    for (size_t index = 0; index < m_main_thread_smooth_scrolls.size();) {
+        auto& smooth_scroll = m_main_thread_smooth_scrolls[index];
+        if (!scroll_offset_for(smooth_scroll.stable_node_id).has_value()) {
+            for (auto const& promise : smooth_scroll.promises)
+                queue_async_scroll_operation_promise_resolution(promise);
+            m_main_thread_smooth_scrolls.remove(index);
+            continue;
+        }
+
+        smooth_scroll.elapsed += now - smooth_scroll.last_tick;
+        smooth_scroll.last_tick = now;
+        auto sample = smooth_scroll.animation.sample(smooth_scroll.elapsed);
+        store_scroll_offset_in_scroll_range(smooth_scroll.stable_node_id, sample.offset.to_type<CSSPixels>(), Painting::CompositorScrollRequest::ProgrammaticJump);
+        if (sample.complete) {
+            finished_smooth_scrolls.append(finished_scroll(m_main_thread_smooth_scrolls.take(index)));
+        } else {
+            ++index;
+        }
+    }
+
+    for (auto const& finished : finished_smooth_scrolls)
+        resolve_promises_of_finished_scroll(finished.promises);
+
+    // A scroll ends when it runs to its destination or when its scrolling box goes away.
+    if (m_main_thread_smooth_scrolls.size() != smooth_scroll_count)
+        note_scroll_sequences_may_have_completed();
+
+    if (!m_main_thread_smooth_scrolls.is_empty())
+        page().client().request_frame();
+}
+
+bool LocalNavigable::adopt_compositor_visual_viewport_scale(Optional<float> scale)
+{
+    auto document = active_document();
+    if (!document || !scale.has_value())
+        return false;
+    auto visual_viewport = document->visual_viewport();
+    auto scale_before_adoption = visual_viewport->scale();
+    visual_viewport->set_scale_zoomed_by_compositor(scale.value());
+    if (visual_viewport->scale() == scale_before_adoption)
+        return false;
+    did_store_scroll_offset({ .node_id = document->unique_id(), .kind = Web::AsyncScrollNodeKind::VisualViewport }, Painting::CompositorScrollRequest::None);
+    return true;
+}
+
+void LocalNavigable::adopt_pending_async_scroll_offsets(Compositing::AsyncScrollUpdateFreshness freshness)
+{
+    if (!has_compositor_context())
+        return;
+
+    // The compositor process may have already presented newer scroll offsets. Adopt the latest ones before running
+    // rendering-update observers so they see the same scroll positions as the user.
+    auto async_scroll_updates = compositor_context().take_pending_async_scroll_updates(freshness);
+    m_compositor_context_user_input_scroll_count = max(m_compositor_context_user_input_scroll_count, async_scroll_updates.context_user_input_scroll_count);
+
+    // A gesture the compositor reports for a document that is no longer active ended with that document; updates
+    // published before the active document's scroll tree was installed still describe the previous one.
+    auto document = active_document();
+    bool gesture_belongs_to_active_document = document && async_scroll_updates.document_id == document->unique_id();
+    if (gesture_belongs_to_active_document)
+        m_compositor_wheel_latched_scroller = async_scroll_updates.wheel_latched_scroller;
+
+    // The hold mirrors the boxes whose gesture the compositor's own input keeps going. A box is let go of, and a box
+    // whose gesture ended is told so, once the scrolls of this update are adopted, so that its gesture ends here rather
+    // than once its input deadline passes.
+    if (gesture_belongs_to_active_document) {
+        if (!m_compositor_user_scroll_gesture_hold)
+            m_compositor_user_scroll_gesture_hold = make<UserScrollGestureHold>(*this);
+        for (auto box : async_scroll_updates.boxes_in_user_scroll_gesture)
+            m_compositor_user_scroll_gesture_hold->hold(box);
+    }
+
+    ScopeGuard end_gestures_once_their_scrolls_are_adopted = [&] {
+        if (!gesture_belongs_to_active_document)
+            return;
+        Vector<Web::AsyncScrollNodeStableID> boxes_to_release;
+        for (auto box : m_compositor_user_scroll_gesture_hold->held_boxes()) {
+            if (!async_scroll_updates.boxes_in_user_scroll_gesture.contains_slow(box))
+                boxes_to_release.append(box);
+        }
+        for (auto box : boxes_to_release)
+            m_compositor_user_scroll_gesture_hold->release(box);
+        for (auto box : async_scroll_updates.boxes_whose_user_scroll_gesture_ended)
+            note_user_scroll_gesture_input_ended(box);
+    };
+
+    if (async_scroll_updates.scroll_offsets.is_empty() && async_scroll_updates.completed_operation_ids.is_empty() && async_scroll_updates.started_user_scrolls.is_empty() && async_scroll_updates.applied_scroll_requests.is_empty())
+        return;
+
+    if (!document) {
+        for (auto operation_id : async_scroll_updates.completed_operation_ids)
+            resolve_async_scroll_operation(operation_id);
+        for (auto const& applied_scroll_request : async_scroll_updates.applied_scroll_requests)
+            finish_instant_scrolls_answered_by(applied_scroll_request);
+        return;
+    }
+
+    // https://drafts.csswg.org/css-scroll-snap-1/#scroll-types
+    // AD-HOC: The scrolling the compositor process performs on its own is panning and scrollbar thumb dragging, both
+    //         of which report where the user's input came to rest, so their offsets settle as absolute scrolls even
+    //         though the specification lists a panning gesture among the relative scrolls with both an intended
+    //         direction and end position.
+    if (!async_scroll_updates.scroll_offsets.is_empty())
+        note_user_scroll_input_intent(Compositing::SnapSelectionStrategy::Type::EndPosition);
+
+    // The compositor process merges the progress of a scroll that user input took over and the delta of that input
+    // into one offset per scrolling box, so a box that such input scrolled is recognized from the scroll it ended.
+    auto user_input_took_over_the_scroll_of = [&](Web::AsyncScrollNodeStableID stable_node_id) {
+        return any_of(async_scroll_updates.operation_ids_taken_over_by_user_input, [&](auto operation_id) {
+            return any_of(m_pending_async_scroll_operations, [&](auto const& pending_operation) {
+                return pending_operation.operation_id == operation_id && pending_operation.stable_node_id == stable_node_id;
+            });
+        });
+    };
+
+    // A snap scroll the compositor started is registered before its offsets are adopted, so that they are adopted the
+    // way a smooth scroll's are, and before it completes, so that its completion finds it.
+    for (auto const& started_user_scroll : async_scroll_updates.started_user_scrolls)
+        adopt_started_user_scroll(*document, started_user_scroll);
+
+    auto device_pixels_per_css_pixel = page().client().device_pixels_per_css_pixel();
+    bool adopted_any_scroll_offset = false;
+    for (auto const& async_scroll_offset : async_scroll_updates.scroll_offsets) {
+        auto& user_input_scroll_count = m_compositor_user_input_scroll_counts.ensure(async_scroll_offset.stable_node_id);
+        bool user_input_scrolled_the_box = async_scroll_offset.user_input_scroll_count > user_input_scroll_count;
+        // User input the compositor scrolled the box for keeps the box's gesture going, even where the box stayed put.
+        if (user_input_scrolled_the_box)
+            extend_user_scroll_gesture_of(async_scroll_offset.stable_node_id);
+        user_input_scroll_count = max(user_input_scroll_count, async_scroll_offset.user_input_scroll_count);
+
+        // What the compositor reported of a box before it applied the last scroll this navigable asked of it describes
+        // what that scroll replaced. Once it applied it, the compositor has the box's offset.
+        if (async_scroll_offset.applied_scroll_request_id < last_scroll_request_id_for(async_scroll_offset.stable_node_id))
+            continue;
+
+        auto css_scroll_offset = async_scroll_offset_to_css_pixels(async_scroll_offset.compositor_scroll_offset, device_pixels_per_css_pixel);
+        bool has_in_flight_smooth_scroll = false;
+        for (auto const& pending_operation : m_pending_async_scroll_operations) {
+            if (pending_operation.stable_node_id == async_scroll_offset.stable_node_id) {
+                has_in_flight_smooth_scroll = true;
+                break;
+            }
+        }
+
+        if (async_scroll_offset.stable_node_id.kind == Web::AsyncScrollNodeKind::VisualViewport && async_scroll_offset.stable_node_id.node_id != document->unique_id())
+            continue;
+
+        // The compositor process reports which of its scrolling was relative, since dragging a scrollbar thumb is not.
+        if (!has_in_flight_smooth_scroll && async_scroll_offset.stable_node_id.kind != Web::AsyncScrollNodeKind::VisualViewport)
+            record_relative_scroll(*document, async_scroll_offset.stable_node_id, async_scroll_offset_to_css_pixels(async_scroll_offset.last_relative_scroll_delta, device_pixels_per_css_pixel));
+
+        auto scroll_offset_before_scroll = scroll_offset_for(async_scroll_offset.stable_node_id);
+        bool adopted_visual_viewport_scale = async_scroll_offset.stable_node_id.kind == Web::AsyncScrollNodeKind::VisualViewport && adopt_compositor_visual_viewport_scale(async_scroll_offset.visual_viewport_scale);
+        bool moved_the_box = store_scroll_offset(async_scroll_offset.stable_node_id, css_scroll_offset, Painting::CompositorScrollRequest::None);
+        if (moved_the_box || adopted_visual_viewport_scale) {
+            adopted_any_scroll_offset = true;
+            dbgln_if(COMPOSITOR_DEBUG, "[Compositor] Main thread adopting async scroll offset {},{}",
+                async_scroll_offset.compositor_scroll_offset.x(), async_scroll_offset.compositor_scroll_offset.y());
+        }
+
+        if (has_in_flight_smooth_scroll) {
+            // The input that took the scroll over goes on with the box's sequence as a gesture of its own. So does input
+            // the compositor applied once the scroll was done, which these updates report along with the scroll's
+            // completion when they were merged while this process was busy: The box is no longer where the scroll took
+            // it, and nothing else would snap it once that input ends.
+            auto user_input_moved_the_box_after_its_scroll = user_input_scrolled_the_box && any_of(m_pending_async_scroll_operations, [&](auto const& pending_operation) {
+                return pending_operation.stable_node_id == async_scroll_offset.stable_node_id
+                    && pending_operation.destination_scroll_offset.has_value()
+                    && pending_operation.destination_scroll_offset.value() != css_scroll_offset
+                    && async_scroll_updates.completed_operation_ids.contains_slow(pending_operation.operation_id);
+            });
+            if (user_input_moved_the_box_after_its_scroll || user_input_took_over_the_scroll_of(async_scroll_offset.stable_node_id))
+                note_user_scroll_gesture_of(async_scroll_offset.stable_node_id, scroll_offset_before_scroll, UserScrollMovedBox::No);
+            continue;
+        }
+
+        if (moved_the_box) {
+            auto gesture_start = async_scroll_offset.stable_node_id.kind == Web::AsyncScrollNodeKind::VisualViewport ? Optional<CSSPixelPoint> {} : scroll_offset_before_scroll;
+            note_user_scroll_gesture_of(async_scroll_offset.stable_node_id, gesture_start, UserScrollMovedBox::Yes);
+        }
+    }
+
+    bool moved_a_box_by_request = false;
+    for (auto const& applied_scroll_request : async_scroll_updates.applied_scroll_requests) {
+        moved_a_box_by_request |= applied_scroll_request.moved_the_box;
+        finish_instant_scrolls_answered_by(applied_scroll_request);
+    }
+    if (adopted_any_scroll_offset || moved_a_box_by_request)
+        schedule_hover_update_after_async_scroll();
+
+    for (auto operation_id : async_scroll_updates.completed_operation_ids)
+        resolve_async_scroll_operation(operation_id);
+    note_scroll_sequences_may_have_completed();
+}
+
+void LocalNavigable::adopt_started_user_scroll(DOM::Document& document, Compositing::StartedUserScroll const& started_user_scroll)
+{
+    auto const& stable_node_id = started_user_scroll.stable_node_id;
+
+    // A programmatic scroll started since replaced the snap scroll, and the gesture abandoned snapping along with it.
+    auto in_flight_scroll = in_flight_scroll_for(stable_node_id);
+    bool replaced_by_programmatic_scroll = in_flight_scroll.has_value() && in_flight_scroll->trigger == ScrollTrigger::Programmatic;
+
+    // The scroll is in flight under the operation a caller may already be waiting for.
+    (void)begin_scroll_sequence(stable_node_id);
+    auto& pending_operation = ensure_pending_async_scroll_operation(started_user_scroll.operation_id);
+    pending_operation.stable_node_id = stable_node_id;
+    pending_operation.destination_scroll_offset = started_user_scroll.selection.position;
+    pending_operation.trigger = ScrollTrigger::UserInput;
+    if (started_user_scroll.animation_kind.has_value())
+        pending_operation.animation_kind = *started_user_scroll.animation_kind;
+
+    if (replaced_by_programmatic_scroll)
+        return;
+
+    // A key step or a momentum snap scroll goes the way the user scrolled, while the snap a gesture settles with goes
+    // wherever the nearest snap position is.
+    if (!started_user_scroll.settles_gesture && !started_user_scroll.is_absolute_scroll)
+        record_relative_scroll(document, stable_node_id, started_user_scroll.relative_scroll_delta);
+
+    auto snap_destination = started_user_scroll.selection;
+    record_snapped_areas_of_scroll_container(document, stable_node_id, snap_destination);
+
+    // A snap scroll that settles the gesture ends it, and the box's sequence ends with the snap scroll.
+    if (started_user_scroll.settles_gesture) {
+        if (auto* sequence = scroll_sequence_for(stable_node_id))
+            sequence->user_gesture.clear();
+        return;
+    }
+
+    // The gesture's next step travels on from the offset its steps have asked for.
+    note_user_scroll_gesture_of(stable_node_id, started_user_scroll.initial_scroll_offset, UserScrollMovedBox::No, SnapPositionSelection::PerScroll);
+    if (auto* gesture = user_scroll_gesture_for(stable_node_id))
+        gesture->unsnapped_scroll_destination = started_user_scroll.unsnapped_scroll_destination;
+}
+
+void LocalNavigable::schedule_hover_update_after_async_scroll()
+{
+    static constexpr int hover_update_after_async_scroll_delay_ms = 100;
+
+    if (!m_async_scroll_hover_update_timer) {
+        m_async_scroll_hover_update_timer = Core::Timer::create_single_shot(AK::Duration::from_milliseconds(hover_update_after_async_scroll_delay_ms), [this] {
+            update_hover_after_async_scroll_stops();
+        });
+        m_async_scroll_hover_update_timer->start();
+        return;
+    }
+
+    m_async_scroll_hover_update_timer->restart(AK::Duration::from_milliseconds(hover_update_after_async_scroll_delay_ms));
+}
+
+static bool async_scroll_node_is_in_document(DOM::Document& document, Web::AsyncScrollNodeStableID const& stable_id)
+{
+    if (stable_id.kind == Web::AsyncScrollNodeKind::Viewport || stable_id.kind == Web::AsyncScrollNodeKind::VisualViewport)
+        return stable_id.node_id == document.unique_id();
+    return element_for_async_scroll_node_stable_id(document, stable_id) != nullptr;
+}
+
+bool LocalNavigable::leave_hover_update_to_end_of_user_scroll()
+{
+    // A user's scroll of a document this navigable no longer shows may never be reported as ended, since its scroll
+    // node is gone: It holds back no hover of the active document.
+    auto document = active_document();
+    if (!document)
+        return false;
+    if (!any_of(m_pending_async_scroll_operations, [&](auto const& pending) {
+            if (pending.trigger != ScrollTrigger::UserInput)
+                return false;
+            return !pending.stable_node_id.has_value() || async_scroll_node_is_in_document(*document, *pending.stable_node_id);
+        }))
+        return false;
+    schedule_hover_update_after_async_scroll();
+    return true;
+}
+
+void LocalNavigable::update_hover_after_async_scroll_stops()
+{
+    if (has_been_destroyed())
+        return;
+    event_handler().update_hover_at_last_known_mouse_position();
+}
+
+void LocalNavigable::cancel_hover_update_after_async_scroll()
+{
+    if (m_async_scroll_hover_update_timer)
+        m_async_scroll_hover_update_timer->stop();
+}
+
+// https://html.spec.whatwg.org/multipage/webappapis.html#rendering-opportunity
+bool LocalNavigable::has_a_rendering_opportunity() const
+{
+    // A navigable has a rendering opportunity if the user agent is currently able to present
+    // the contents of the navigable to the user,
+    // accounting for hardware refresh rate constraints and user agent throttling for performance reasons,
+    // but considering content presentable even if it's outside the viewport.
+
+    // A navigable's rendering opportunities are determined based on hardware constraints
+    // such as display refresh rates and other factors such as page performance
+    // or whether its active document's visibility state is "visible".
+    // Rendering opportunities typically occur at regular intervals.
+
+    if (main_thread_event_loop().running_synchronous_rendering_update())
+        return true;
+    return page().client().has_rendering_opportunity();
+}
+
+// https://html.spec.whatwg.org/multipage/nav-history-apis.html#inform-the-navigation-api-about-child-navigable-destruction
+void LocalNavigable::inform_the_navigation_api_about_child_navigable_destruction()
+{
+    // 1. Inform the navigation API about aborting navigation in navigable.
+    inform_the_navigation_api_about_aborting_navigation();
+
+    // FIXME: 2. Let navigation be navigable's active window's navigation API.
+
+    // FIXME: 3. Let traversalAPIMethodTrackers be a clone of navigation's upcoming traverse API method trackers.
+
+    // FIXME: 4. For each apiMethodTracker of traversalAPIMethodTrackers: reject the finished promise for apiMethodTracker with a new "AbortError" DOMException created in navigation's relevant realm.
+}
+
+// https://html.spec.whatwg.org/multipage/nav-history-apis.html#inform-the-navigation-api-about-aborting-navigation
+void LocalNavigable::inform_the_navigation_api_about_aborting_navigation()
+{
+    // 1. If this algorithm is running on navigable's active window's relevant agent's event loop, then continue on to the following steps.
+    //    Otherwise, queue a global task on the navigation and traversal task source given navigable's active window to run the following steps.
+    // NB: WebContent uses a single main-thread event loop, so the active window's relevant agent is always running on
+    //     the current event loop and we run the steps inline. Queuing here would defer the abort past the creation of
+    //     a new ongoing navigate event by a subsequent fire_a_push_replace_reload_navigate_event, causing the deferred
+    //     abort to cancel that newer event.
+
+    // AD-HOC: Not in the spec but subsequent steps will fail if the navigable doesn't have an active window.
+    if (!active_window())
+        return;
+
+    HTML::TemporaryExecutionContext execution_context { active_window()->principal_realm() };
+
+    // 2. Let navigation be navigable's active window's navigation API.
+    auto navigation = active_window()->navigation();
+
+    // 3. While navigation's ongoing navigate event is not null:
+    // NOTE: This is a loop, since abort the ongoing navigation can run JavaScript (e.g., via the navigateerror event),
+    //       which might start a new navigation. Since such a newly-started navigation will be superseded by the
+    //       completion of this navigation, it gets signaled to the navigation API as aborted.
+    while (navigation->ongoing_navigate_event()) {
+        // 1. Abort the ongoing navigation given navigation.
+        navigation->abort_the_ongoing_navigation();
+    }
+}
+
+// https://html.spec.whatwg.org/multipage/interaction.html#currently-focused-area-of-a-top-level-traversable
+// NB: This also runs on a navigable this page hosts below a top-level traversable another process hosts, for the part
+//     of the walk from its document down.
+GC::Ptr<DOM::Node> LocalNavigable::currently_focused_area()
+{
+    // 1. If traversable does not have system focus, then return null.
+    if (!page().client().has_focus())
+        return nullptr;
+    return focused_area_regardless_of_system_focus();
+}
+
+// The rest of the currently focused area's steps, which don't depend on system focus.
+GC::Ptr<DOM::Node> LocalNavigable::focused_area_regardless_of_system_focus()
+{
+    // NB: Below a top-level traversable, focus is here only while this is the tab's focused navigable.
+    if (!is_top_level_traversable() && page().focused_navigable().ptr() != this)
+        return nullptr;
+
+    // 2. Let candidate be traversable's active document.
+    auto candidate = active_document();
+    if (!candidate)
+        return nullptr;
+
+    // 3. While candidate's focused area is a navigable container with a non-null content navigable:
+    //    set candidate to the active document of that navigable container's content navigable.
+    while (candidate->focused_area()
+        && is<NavigableContainer>(candidate->focused_area().ptr())
+        && as<NavigableContainer>(*candidate->focused_area()).content_navigable()) {
+        auto& container = as<NavigableContainer>(*candidate->focused_area());
+        auto content_navigable = container.content_navigable();
+        // NB: The active document of a navigable another process hosts is there. The walk goes on from it as the tab's
+        //     focused navigable shows, and the container is as far as focus is seen here otherwise.
+        if (!is<LocalNavigable>(*content_navigable)) {
+            if (auto focused_area = content_navigable->focused_area_shown_by_focused_navigable_regardless_of_system_focus())
+                return focused_area;
+            return container;
+        }
+        auto& local_content_navigable = as<LocalNavigable>(*content_navigable);
+        if (!local_content_navigable.active_document())
+            break;
+        candidate = local_content_navigable.active_document();
+    }
+
+    // 4. If candidate's focused area is non-null, set candidate to candidate's focused area.
+    if (candidate->focused_area()) {
+        // NOTE: We return right away here instead of assigning to candidate,
+        //       since that would require compromising type safety.
+        return candidate->focused_area();
+    }
+
+    // 5. Return candidate.
+    return candidate;
+}
+
+bool LocalNavigable::is_focused() const
+{
+    if (!page().client().has_focus())
+        return false;
+
+    // The top-level traversable retains the page's system focus while the focus chain descends into a child navigable.
+    if (is_top_level_traversable())
+        return true;
+    return page().focused_navigable().ptr() == this;
+}
+
+Utf16String LocalNavigable::selected_text() const
+{
+    auto document = active_document();
+    if (!document)
+        return Utf16String {};
+
+    document->update_layout(DOM::UpdateLayoutReason::NavigableSelectedText);
+
+    auto const* input_element = as_if<HTML::HTMLInputElement>(document->active_element());
+    if (input_element && input_element->type_state() == HTML::HTMLInputElement::TypeAttributeState::Password) {
+        // Apparently nobody wants bullet characters. We leave the clipboard alone here like other browsers.
+        return Utf16String {};
+    }
+    auto selection = document->get_selection();
+    if (auto form_text = selection->try_form_control_selected_text_for_stringifier(); form_text.has_value())
+        return form_text.release_value();
+
+    auto range = selection->range();
+    if (!range)
+        return Utf16String {};
+    return Editing::serialize_range_as_plain_text_for_clipboard(*range);
+}
+
+Utf16String LocalNavigable::selected_html_for_clipboard() const
+{
+    auto document = active_document();
+    if (!document)
+        return {};
+
+    auto selection = document->get_selection();
+    if (selection->try_form_control_selected_text_for_stringifier().has_value())
+        return {};
+
+    auto range = selection->range();
+    if (!range)
+        return {};
+    return Editing::serialize_range_as_html_for_clipboard(*range);
+}
+
+Utf16String LocalNavigable::cut_selected_text() const
+{
+    auto document = active_document();
+    if (!document)
+        return {};
+
+    auto* target = document->active_input_events_target();
+    if (!target)
+        return {};
+
+    auto text = selected_text();
+    if (text.is_empty())
+        return {};
+
+    target->handle_delete(UIEvents::InputTypes::deleteByCut);
+    return text;
+}
+
+void LocalNavigable::select_all()
+{
+    auto document = active_document();
+    if (!document)
+        return;
+
+    auto selection = document->get_selection();
+    if (!selection)
+        return;
+
+    if (auto target = document->active_input_events_target()) {
+        target->select_all();
+    } else if (auto* body = document->body()) {
+        (void)selection->select_all_children(*body);
+    }
+}
+
+void LocalNavigable::paste(Utf16View text)
+{
+    auto document = active_document();
+    if (!document)
+        return;
+
+    // The UI process hands off the text to paste: The system clipboard's text for chrome-initiated paste or the primary
+    // selection's text for middle-click paste. Run the paste action with that as the content to paste — so the paste
+    // clipboard event fires, and canceling suppresses the insertion (as for a paste initiated with keyboard shortcut).
+    // INTEROP: For middle-click paste, Gecko and Blink also fire the paste event — with the event's clipboard data
+    //          reading from the primary selection.
+    auto data_store = DragDataStore::create();
+    data_store->add_item({
+        .kind = DragDataStoreItem::Kind::Text,
+        .type_string = "text/plain"_utf16_fly_string,
+        .data = Utf16String::from_utf16(text),
+        .file_data = {},
+        .file_name = {},
+    });
+    m_event_handler.perform_paste_action(data_store, nullptr);
+}
+
+void LocalNavigable::paste_from_clipboard(Vector<Clipboard::SystemClipboardItem> const& system_clipboard_data)
+{
+    // The UI process hands over the system clipboard's contents with its Paste command, keeping every supported
+    // clipboard representation — where a bare-text handover would keep only the text.
+    (void)m_event_handler.perform_paste_action(system_clipboard_data);
+}
+
+void LocalNavigable::undo()
+{
+    auto document = active_document();
+    if (!document)
+        return;
+
+    (void)Editing::perform_history_action(*document, Editing::HistoryAction::Undo);
+}
+
+void LocalNavigable::redo()
+{
+    auto document = active_document();
+    if (!document)
+        return;
+
+    (void)Editing::perform_history_action(*document, Editing::HistoryAction::Redo);
+}
+
+bool LocalNavigable::dispatch_composition_event(Utf16FlyString const& event_name, Utf16View data)
+{
+    // https://w3c.github.io/uievents/#events-compositionevents
+    auto document = active_document();
+    if (!document || !document->is_fully_active())
+        return true;
+
+    // https://w3c.github.io/uievents/#event-type-compositionstart
+    // Event.target: focused element processing the composition
+    GC::Ptr<DOM::EventTarget> target = document->focused_area();
+    if (!target)
+        target = document->body();
+    if (!target)
+        target = &document->root();
+
+    UIEvents::CompositionEventInit event_init {};
+    // https://w3c.github.io/uievents/#event-type-compositionstart
+    //   Bubbles: Yes, Cancelable: Yes
+    // https://w3c.github.io/uievents/#event-type-compositionupdate
+    //   Bubbles: Yes, Cancelable: No
+    // https://w3c.github.io/uievents/#event-type-compositionend
+    //   Bubbles: Yes, Cancelable: No
+    event_init.bubbles = true;
+    event_init.cancelable = event_name == UIEvents::EventNames::compositionstart;
+    // INTEROP: All engines also mark composition events as composed (Blink ComposedMode::kComposed, WebKit
+    //          IsComposed::Yes). So, they cross shadow boundaries — like the keyboard events they accompany.
+    event_init.composed = true;
+    // https://w3c.github.io/uievents/#dom-compositionevent-data
+    // data holds the value of the characters generated by an input method.
+    event_init.data = Utf16String::from_utf16(data);
+    // UIEvent.view: Window
+    event_init.view = document->window() ? GC::Ptr<HTML::WindowProxy> { document->window()->window() } : nullptr;
+
+    auto event = UIEvents::CompositionEvent::create(event_name, event_init, HighResolutionTime::current_high_resolution_time(relevant_global_object(*document)));
+    return target->dispatch_event(event);
+}
+
+void LocalNavigable::set_marked_text_from_input_method(Utf16View text)
+{
+    // Platform input methods call this on each composition update, with the current marked/preedit text. LibWeb owns
+    // the marked-text range – so each update replaces the previously-marked text. The UI doesn't track the preedit
+    // extent or pass a replacement length. An empty marked string means there's no preedit: so, clear any text marked
+    // thus far, and end the composition — rather than starting or keeping a composition that has no marked text.
+    if (text.is_empty()) {
+        if (m_input_method_composition_node || m_input_method_composition_active) {
+            if (m_input_method_composition_node)
+                replace_input_method_marked_text(text);
+            // https://w3c.github.io/uievents/#event-type-compositionend
+            // CompositionEvent.data: the string comprising the final result of the composition session, which MAY be
+            // the empty string if the content has been deleted or if the composition process has been canceled
+            end_input_method_composition(text);
+        }
+        return;
+    }
+    replace_input_method_marked_text(text);
+}
+
+void LocalNavigable::commit_text_from_input_method(Utf16View text, i32 replacement_start, i32 replacement_length)
+{
+    if ((replacement_start != 0 || replacement_length != 0) && apply_input_method_commit_replacement(text, replacement_start, replacement_length)) {
+        end_input_method_composition(text);
+        return;
+    }
+
+    // The input method has committed text and finished the composition. Replace the marked text with the committed
+    // text, then end the composition — so the text becomes ordinary editable content.
+    // INTEROP: Like Blink (InputMethodController::ReplaceComposition) and WebKit (Editor::confirmComposition), commit-
+    //          ted text is inserted as one last composition update: inputType insertCompositionText, with isComposing
+    //          true — and then, compositionend is dispatched. No separate insertText pair is fired for the commit.
+    replace_input_method_marked_text(text);
+    end_input_method_composition(text);
+}
+
+void LocalNavigable::unmark_text_from_input_method()
+{
+    // The input method has finished the composition — leaving the current marked text in place. End the composition
+    // without altering the content.
+    // https://w3c.github.io/uievents/#event-type-compositionend
+    // A user agent MUST dispatch this event when a text composition system completes or cancels the current composition
+    // session, and the compositionend event MUST be dispatched after the control is updated.
+    end_input_method_composition({});
+}
+
+// Drop every trace of a composition session without dispatching anything. Only for when the document a session belonged
+// to is gone: A LocalNavigable outlives its documents — so session state left behind here would leak into the next one.
+void LocalNavigable::forget_input_method_composition_session()
+{
+    if (auto document = active_document())
+        document->set_is_input_method_composing(false);
+    m_input_method_composition_node = nullptr;
+    m_input_method_composition_active = false;
+    m_input_method_last_marked_text = {};
+}
+
+void LocalNavigable::end_input_method_composition(Optional<Utf16View> final_text)
+{
+    // Only a session that actually began (and so dispatched compositionstart) ends with compositionend.
+    // https://w3c.github.io/uievents/#events-compositionevents
+    auto was_active = m_input_method_composition_active;
+    m_input_method_composition_active = false;
+    m_input_method_composition_node = nullptr;
+    auto last_marked_text = move(m_input_method_last_marked_text);
+    if (auto document = active_document())
+        document->set_is_input_method_composing(false);
+    if (!was_active)
+        return;
+
+    if (auto document = active_document()) {
+        document->spell_check_controller().did_end_input_method_composition();
+        document->writing_suggestion_controller().did_end_input_method_composition();
+    }
+
+    // https://w3c.github.io/uievents/#event-type-compositionend
+    // A user agent MUST dispatch this event when a text composition system completes or cancels the current composition
+    // session, and the compositionend event MUST be dispatched after the control is updated.
+    // https://w3c.github.io/uievents/#events-composition-input-events
+    // Since there are no DOM updates associated with the compositionend event, beforeinput and input events should not
+    // be sent at that time.
+    // https://w3c.github.io/uievents/#event-type-compositionend
+    // CompositionEvent.data: the string comprising the final result of the composition session
+    // NB: When the input method finishes without committing new text (unmark), the marked text stays in place and is
+    //     that final result.
+    dispatch_composition_event(UIEvents::EventNames::compositionend, final_text.has_value() ? *final_text : last_marked_text.utf16_view());
+}
+
+// Dispatching an event runs author script — which may move focus, detach the editable, or navigate. So, a target
+// resolved before a dispatch may no longer be the one the input method addressed. Anything that edits through a
+// target across a dispatch re-checks it with this first — and abandons the composition when it no longer holds.
+static bool input_method_target_is_still(DOM::Document& document, InputEventsTarget const* expected)
+{
+    return document.is_fully_active() && document.active_input_events_target() == expected;
+}
+
+// Dispatch the beforeinput that precedes an input-method insertion. Every such insertion needs one: Neither editing
+// hosts nor text controls dispatch it themselves — the editing command and the text control's value change each fire
+// only the matching input event.
+static void dispatch_composition_beforeinput(DOM::Document& document, Utf16View text)
+{
+    UIEvents::InputEventInit input_event_init {};
+    input_event_init.bubbles = true;
+    input_event_init.composed = true;
+    input_event_init.input_type = UIEvents::InputTypes::insertCompositionText;
+    input_event_init.data = Utf16String::from_utf16(text);
+    // https://w3c.github.io/uievents/#dom-inputevent-iscomposing
+    // true while a composition session is in progress — which is what the matching input event will report too.
+    input_event_init.is_composing = document.is_input_method_composing();
+
+    // https://w3c.github.io/input-events/#event-order-during-composition
+    // The beforeinput and input events:
+    // - Have a targetRange that surrounds the active text passage of the composition
+    GC::RootVector<GC::Ref<DOM::StaticRange>> target_ranges;
+    if (auto selection = document.get_selection(); selection) {
+        if (auto range = selection->range())
+            target_ranges.append(GC::Heap::the().allocate<DOM::StaticRange>(range->start_container(), range->start_offset(), range->end_container(), range->end_offset()));
+    }
+    auto beforeinput = UIEvents::InputEvent::create_from_platform_event(UIEvents::EventNames::beforeinput, input_event_init, target_ranges, HighResolutionTime::current_high_resolution_time(relevant_global_object(document)));
+    // https://w3c.github.io/input-events/#event-order-during-composition
+    // The beforeinput and input events:
+    // - Are not cancellable
+    beforeinput->set_cancelable(false);
+    GC::Ptr<DOM::EventTarget> event_target = document.focused_area();
+    if (!event_target)
+        event_target = document.body();
+    if (!event_target)
+        event_target = &document.root();
+    event_target->dispatch_event(beforeinput);
+}
+
+void LocalNavigable::replace_input_method_marked_text(Utf16View text)
+{
+    // Insert text from a platform input method into the currently-focused editable, via the same input-events target
+    // that keyboard typing uses — so observers see the correct InputEvent.inputType.
+    auto document = active_document();
+    if (!document || !document->is_fully_active()) {
+        // No document left to dispatch compositionend at. Forget the session outright: This navigable outlives its
+        // documents — so a session left marked active here would make the next document's first preedit look like the
+        // continuation of one that document never saw begin.
+        forget_input_method_composition_session();
+        return;
+    }
+    auto* target = document->active_input_events_target();
+    if (!target) {
+        // Nothing editable to compose into. The document is still here, so end the session properly rather than
+        // forgetting it.
+        end_input_method_composition(Utf16View { u""sv });
+        return;
+    }
+
+    // Drop a stale composition start (for example, if the editable content was replaced out from under us, or focus moved
+    // to a different editable).
+    // NB: The offset is checked against the node's current length as well. Script that runs from a composition event
+    //     can shorten the node, and set_selection_anchor() below reaches Selection::collapse() through MUST() — which
+    //     throws IndexSizeError for an offset past the node's length, and so would be fatal.
+    if (m_input_method_composition_node
+        && (!m_input_method_composition_node->is_connected()
+            || document->active_input_events_target(m_input_method_composition_node.ptr()) != target
+            || m_input_method_composition_offset > m_input_method_composition_node->length())) {
+        m_input_method_composition_node = nullptr;
+    }
+
+    // https://w3c.github.io/uievents/#event-type-compositionstart
+    // CompositionEvent.data: the original string being edited, otherwise the empty string
+    // NB: Read the selected text before anything below collapses or replaces it. Selection::to_string() returns a
+    //     focused text control's own selected text as well — which its document Selection doesn't otherwise reflect.
+    Utf16String original_string;
+    if (auto selection = document->get_selection(); selection)
+        original_string = selection->to_string();
+
+    // https://w3c.github.io/uievents/#event-type-compositionstart
+    // A user agent MUST dispatch this event when a text composition system is enabled and a new composition session is
+    // about to begin (or has begun, depending on the text composition system) in preparation for composing a passage
+    // of text.
+    if (!m_input_method_composition_active) {
+        document->set_is_input_method_composing(true);
+        if (auto* controller = document->writing_suggestion_controller_if_exists())
+            controller->did_start_input_method_composition();
+        m_input_method_composition_active = true;
+        // https://w3c.github.io/uievents/#events-composition-canceling
+        // If the initial compositionstart event is canceled then the text composition session SHOULD be terminated.
+        // Regardless of whether or not the composition session is terminated, the compositionend event MUST be sent.
+        // INTEROP: Blink honors the cancel the same way (InputMethodController::SetComposition returns without
+        //          composing, when DispatchCompositionStartEvent() reports the event was canceled).
+        if (!dispatch_composition_event(UIEvents::EventNames::compositionstart, original_string)) {
+            end_input_method_composition(Utf16View { u""sv });
+            return;
+        }
+        if (!input_method_target_is_still(*document, target)) {
+            end_input_method_composition(Utf16View { u""sv });
+            return;
+        }
+    }
+
+    // When a marked-text range is already tracked, select it [composition start, caret] — so this update replaces it.
+    // Otherwise, on the first update with a caret, remember that caret as where the marked text begins: the pre-insert
+    // caret is used (rather than one derived after the insertion) because inserting into an editing host can replace
+    // the text node — which would leave a post-insert start stale on the next update.
+    // A caret is available whenever the selection is collapsed; a text control with a non-collapsed selection has none.
+    if (auto caret = document->cursor_position(); caret) {
+        if (m_input_method_composition_node) {
+            target->set_selection_anchor(*m_input_method_composition_node, m_input_method_composition_offset);
+            target->set_selection_focus(caret->node(), caret->offset());
+        } else {
+            m_input_method_composition_node = caret->node();
+            m_input_method_composition_offset = caret->offset();
+        }
+    }
+
+    // https://w3c.github.io/input-events/#event-order-during-composition
+    // During a composition session, whenever a text composition system updates its active text passage, a
+    // compositionupdate event is dispatched. After each compositionupdate event, a pair of beforeinput and input events
+    // are dispatched. The beforeinput and input events:
+    //   Are not cancellable
+    //   Have an inputType set to "insertCompositionText"
+    //   Have a data attribute equal to that of the compositionupdate event
+    //   Have a targetRange that surrounds the active text passage of the composition
+    // The DOM contents of the active text passage are updated after the beforeinput event is dispatched and before the
+    // input event is dispatched.
+    //
+    // NB: The UI Events spec (https://w3c.github.io/uievents/#events-composition-input-events) orders those the other
+    //     way around: beforeinput, then compositionupdate, then the DOM update, then input. But no engine does that;
+    //     Blink (InputMethodController::SetComposition), WebKit (Editor::setComposition) and Gecko (TextComposition)
+    //     all dispatch compositionupdate first, then beforeinput, then update the DOM.
+    // https://github.com/w3c/uievents/issues/354
+    // INTEROP: We match the ordering in other engines and the Input Events spec — rather than the UI-Events-spec order.
+    //
+    // https://w3c.github.io/uievents/#event-type-compositionupdate
+    // A user agent SHOULD dispatch this event during a composition session when a text composition system updates its
+    // active text passage with a new character, which is reflected in the string in CompositionEvent.data. In text
+    // composition systems which keep the ongoing composition in sync with the input control, the compositionupdate event
+    // MUST be dispatched before the control is updated.
+    m_input_method_last_marked_text = Utf16String::from_utf16(text);
+    dispatch_composition_event(UIEvents::EventNames::compositionupdate, text);
+
+    // The beforeinput event for this insertion, targeting the active text passage.
+    dispatch_composition_beforeinput(*document, text);
+    if (!input_method_target_is_still(*document, target)) {
+        end_input_method_composition(Utf16View { u""sv });
+        return;
+    }
+
+    // The DOM update, which fires the matching input event (inputType insertCompositionText, isComposing true) from the
+    // editing command for an editing host, or from the text control's value change for a form control.
+    target->handle_insert(UIEvents::InputTypes::insertCompositionText, text);
+
+    // The first update over a non-collapsed selection had no pre-insert caret to remember as the marked-text start.
+    // Derive it now from the post-insert caret — which the insertion above collapsed to the end of the inserted text.
+    // So the marked text begins text's length before it.
+    if (!m_input_method_composition_node) {
+        if (auto end_caret = document->cursor_position(); end_caret && end_caret->offset() >= text.length_in_code_units()) {
+            m_input_method_composition_node = end_caret->node();
+            m_input_method_composition_offset = end_caret->offset() - text.length_in_code_units();
+        }
+    }
+}
+
+// The events that precede a replacement commit's insertion. Returns whether the insertion may still proceed: the
+// dispatches below run author script — which can move focus out from under the target.
+// INTEROP: Blink runs the same pair for a commit that replaces a range (CommitText -> ReplaceComposition ->
+//          InsertTextDuringCompositionWithEvents — which dispatches compositionupdate and then beforeinput).
+bool LocalNavigable::dispatch_input_method_replacement_events(DOM::Document& document, InputEventsTarget const* target, Utf16View text)
+{
+    // Only within a session; a compositionupdate outside one would've had no compositionstart to belong to. A
+    // replacement can arrive without a session at all — an input method correcting a word that was never composed.
+    if (m_input_method_composition_active) {
+        m_input_method_last_marked_text = Utf16String::from_utf16(text);
+        dispatch_composition_event(UIEvents::EventNames::compositionupdate, text);
+        if (!input_method_target_is_still(document, target))
+            return false;
+    }
+
+    dispatch_composition_beforeinput(document, text);
+    return input_method_target_is_still(document, target);
+}
+
+bool LocalNavigable::apply_input_method_commit_replacement(Utf16View text, i32 replacement_start, i32 replacement_length)
+{
+    if (replacement_length < 0)
+        return false;
+
+    auto document = active_document();
+    if (!document || !document->is_fully_active()) {
+        forget_input_method_composition_session();
+        return true;
+    }
+    auto* target = document->active_input_events_target();
+    if (!target) {
+        end_input_method_composition(Utf16View { u""sv });
+        return true;
+    }
+
+    if (m_input_method_composition_node && (!m_input_method_composition_node->is_connected() || document->active_input_events_target(m_input_method_composition_node.ptr()) != target))
+        m_input_method_composition_node = nullptr;
+
+    auto caret = document->cursor_position();
+    if (!caret) {
+        if (!m_input_method_composition_node) {
+            if (!dispatch_input_method_replacement_events(*document, target, text))
+                return true;
+            target->handle_insert(UIEvents::InputTypes::insertCompositionText, text);
+            return true;
+        }
+        return false;
+    }
+
+    auto preedit_start_node = m_input_method_composition_node ? m_input_method_composition_node : caret->node();
+    auto preedit_start_offset = m_input_method_composition_node ? m_input_method_composition_offset : caret->offset();
+    if (!preedit_start_node || preedit_start_node != caret->node())
+        return false;
+
+    size_t replacement_start_offset = preedit_start_offset;
+    if (replacement_start < 0) {
+        auto offset_delta = static_cast<size_t>(-static_cast<i64>(replacement_start));
+        if (offset_delta > preedit_start_offset)
+            return false;
+        replacement_start_offset -= offset_delta;
+    } else {
+        auto offset_delta = static_cast<size_t>(replacement_start);
+        if (offset_delta > NumericLimits<size_t>::max() - replacement_start_offset)
+            return false;
+        replacement_start_offset += offset_delta;
+    }
+
+    auto replacement_length_as_size = static_cast<size_t>(replacement_length);
+    if (replacement_start_offset > preedit_start_node->length() || replacement_length_as_size > preedit_start_node->length() - replacement_start_offset)
+        return false;
+
+    target->set_selection_anchor(*preedit_start_node, replacement_start_offset);
+    target->set_selection_focus(*preedit_start_node, replacement_start_offset + replacement_length_as_size);
+    // INTEROP: A commit that replaces text around the caret is still composition-typed input (Blink CommitText ->
+    //          kInsertCompositionText) — so it carries inputType insertCompositionText, like every other IME insertion.
+    if (!dispatch_input_method_replacement_events(*document, target, text))
+        return true;
+    target->handle_insert(UIEvents::InputTypes::insertCompositionText, text);
+    return true;
+}
+
+// https://drafts.csswg.org/css-view-transitions-1/#snapshot-containing-block
+CSSPixelRect LocalNavigable::snapshot_containing_block()
+{
+    // The snapshot containing block is a rectangle that covers all areas of the window that could potentially display
+    // page content (and is therefore consistent regardless of root scrollbars or interactive widgets).
+
+    // Within a child navigable, the snapshot containing block is the union of the navigable’s viewport with any scrollbar gutters.
+    // FIXME: Actually get the correct rectangle here.
+    return viewport_rect();
+}
+// https://drafts.csswg.org/css-view-transitions-1/#snapshot-containing-block-size
+CSSPixelSize LocalNavigable::snapshot_containing_block_size()
+{
+    return this->snapshot_containing_block().size();
+}
+
+void LocalNavigable::register_navigation_observer(Badge<NavigationObserver>, NavigationObserver& navigation_observer)
+{
+    m_navigation_observers.append(navigation_observer);
+}
+
+void LocalNavigable::unregister_navigation_observer(Badge<NavigationObserver>, NavigationObserver& navigation_observer)
+{
+    m_navigation_observers.remove(navigation_observer);
+}
+
+// https://html.spec.whatwg.org/multipage/document-lifecycle.html#stop-document-loading
+void LocalNavigable::stop_loading()
+{
+    // 1. Let document be navigable's active document.
+    auto document = active_document();
+
+    // NB: A navigation waiting for the UI process to continue it is not continued.
+    clear_parked_navigations();
+
+    // NB: This is what makes step 2 of navigate to a javascript: URL return for a navigation this stops.
+    m_queued_javascript_url_navigations.clear();
+
+    // 2. If document's unload counter is 0, and navigable's ongoing navigation is a navigation ID, then set the ongoing navigation for navigable to null.
+    if (document->unload_counter() == 0 && ongoing_navigation().has<Utf16String>())
+        set_ongoing_navigation(Empty {});
+
+    // 3. Abort a document and its descendants given document.
+    document->abort_a_document_and_its_descendants();
+}
+
+void LocalNavigable::set_has_session_history_entry_and_ready_for_navigation()
+{
+    m_has_session_history_entry_and_ready_for_navigation = true;
+    report_state_to_remote_container();
+}
+
+void LocalNavigable::clear_parent_compositor_context()
+{
+    if (has_compositor_context())
+        compositor_context().set_parent_context({});
+}
+
+void LocalNavigable::destroy_compositor_context()
+{
+    clear_parent_compositor_context();
+    m_compositor_context.clear();
+}
+
+OwnPtr<Compositor::CompositorContextHandle> LocalNavigable::take_compositor_context()
+{
+    clear_parent_compositor_context();
+    return move(m_compositor_context);
+}
+
+void LocalNavigable::repaint_after_compositor_process_reconnect()
+{
+    resolve_all_pending_async_scroll_operations();
+    // A new compositor process has applied none of the scrolls this navigable asked the old one for.
+    m_scroll_request_states.clear();
+    m_compositor_user_input_scroll_counts.clear();
+    m_compositor_context_user_input_scroll_count = 0;
+
+    if (has_compositor_context()) {
+        if (auto parent = this->parent()) {
+            if (auto* local_parent = as_if<LocalNavigable>(*parent)) {
+                if (local_parent->has_compositor_context())
+                    compositor_context().set_parent_context(local_parent->compositor_context().id());
+            } else {
+                compositor_context().set_parent_context(as<RemoteNavigable>(*parent).compositor_context_id());
+            }
+        }
+        compositor_context().viewport_size_updated(
+            viewport_size_in_device_pixels(),
+            page().client().device_pixel_ratio(),
+            Compositing::WindowResizingInProgress::No);
+
+        set_needs_repaint();
+        m_needs_to_record_display_list = true;
+        presenter().forget_compositor_display_list();
+    }
+
+    for (auto const& child_navigable : child_navigables())
+        child_navigable->repaint_after_compositor_process_reconnect();
+}
+
+void LocalNavigable::set_should_show_line_box_borders(bool value)
+{
+    m_should_show_line_box_borders = value;
+    set_needs_repaint();
+
+    for (auto const& child_navigable : child_navigables())
+        child_navigable->set_should_show_line_box_borders(value);
+}
+
+void LocalNavigable::set_force_dark_settings(bool enabled, HashMap<String, bool> per_host)
+{
+    m_force_dark_default = enabled;
+    m_force_dark_per_host = move(per_host);
+    update_force_dark_for_active_document();
+}
+
+void LocalNavigable::update_force_dark_for_active_document()
+{
+    if (!is_top_level_traversable())
+        return;
+    auto enabled = m_force_dark_default;
+    if (auto document = active_document()) {
+        if (auto host = WebView::host_for_settings(document->url()); !host.is_empty())
+            enabled = m_force_dark_per_host.get(host).value_or(enabled);
+    }
+    set_force_dark_enabled(enabled);
+}
+
+void LocalNavigable::set_force_dark_enabled(bool value)
+{
+    if (m_force_dark_enabled == value)
+        return;
+
+    m_force_dark_enabled = value;
+    set_needs_repaint();
+
+    // The page presents a dark preferred color scheme while its local root has force-dark on, so flipping
+    // it here changes what every media query and system color in the page resolves to.
+    if (is_local_root())
+        page().invalidate_style_for_preference_change();
+
+    for (auto const& child_navigable : child_navigables())
+        child_navigable->set_force_dark_enabled(value);
+}
+
+void LocalNavigable::set_force_dark_thresholds(i32 foreground, i32 background)
+{
+    if (m_force_dark_foreground_threshold == foreground && m_force_dark_background_threshold == background)
+        return;
+
+    m_force_dark_foreground_threshold = foreground;
+    m_force_dark_background_threshold = background;
+    set_needs_repaint();
+
+    for (auto const& child_navigable : child_navigables())
+        child_navigable->set_force_dark_thresholds(foreground, background);
+}
+
+void LocalNavigable::set_should_show_caret_hit_test_debug_overlay(bool value)
+{
+    m_should_show_caret_hit_test_debug_overlay = value;
+
+    if (auto document = active_document()) {
+        if (value)
+            document->set_needs_repaint(Badge<HTML::LocalNavigable> {}, InvalidateDisplayList::PaintCommands);
+        else
+            document->set_caret_hit_test_debug_rect({});
+    }
+
+    for (auto const& child_navigable : child_navigables())
+        child_navigable->set_should_show_caret_hit_test_debug_overlay(value);
+}
+
+// A page listing 'dark' already offers a dark theme of its own; a page saying 'only' wants its colors kept as
+// written either way — CSS Color Adjust puts UA overrides like force-dark behind exactly that keyword.
+static bool lists_a_dark_scheme(ReadonlySpan<Utf16FlyString> schemes)
+{
+    auto const dark = CSS::preferred_color_scheme_to_utf16_fly_string(CSS::PreferredColorScheme::Dark);
+    for (auto const& scheme : schemes) {
+        if (scheme == dark)
+            return true;
+    }
+    return false;
+}
+
+// Decided the way canvas_color_scheme() decides it: The root element's own list wins outright, and the meta tag only
+// gets to weigh in when the root says nothing.
+bool LocalNavigable::active_document_opts_out_of_force_dark() const
+{
+    auto document = active_document();
+    if (!document)
+        return false;
+    Layout::ForcedReadScope read { *document };
+
+    if (auto* html_element = document->html_element(); html_element && html_element->layout_node(read)) {
+        auto const& layout_node = *html_element->layout_node(read);
+        if (layout_node.color_scheme_only())
+            return true;
+        auto schemes = layout_node.color_schemes();
+        if (!schemes.is_empty())
+            return lists_a_dark_scheme(schemes);
+    }
+
+    if (document->supported_color_schemes_are_only())
+        return true;
+
+    if (auto supported = document->supported_color_schemes(); supported.has_value())
+        return lists_a_dark_scheme(supported->span());
+
+    return false;
+}
+
+// Whether the active document's paint goes through the filter: The user has force-dark on, and the document hasn't
+// opted out of it.
+bool LocalNavigable::force_dark_applies_to_active_document() const
+{
+    return m_force_dark_enabled && !active_document_opts_out_of_force_dark();
+}
+
+bool LocalNavigable::commit_frame(PaintConfig paint_config)
+{
+    // The frame committed before has the presenter and the document's recorder state, and goes to the compositor before
+    // this one.
+    take_recording_in_flight_in(TakeIn::Wait);
+
+    paint_config = stamp_paint_config(paint_config);
+
+    if (!has_compositor_context())
+        return false;
+
+    auto document = active_document();
+    if (!document)
+        return false;
+
+    Layout::ForcedReadScope read { *document };
+    adopt_pending_async_scroll_offsets();
+    document->update_highlight_states_if_needed(read);
+    Painting::publish_image_map_area_facts_if_needed(read, *document);
+    // Updating the compositor animations reads the visual context tree, which prepares the paint properties: a
+    // preparation can ask for the recording decided below.
+    document->update_compositor_animations(read);
+
+    // Hit testing can publish a display list before the next frame. Give both paths the same canvas fill so that
+    // switching between them does not force another recording. Screenshots can supply their own fill rectangle.
+    // NB: Only the top-level traversable fills its canvas. A local root under a remote parent is an iframe in another
+    //     process, and its canvas stays transparent like that of a same-process iframe.
+    if (is_top_level_traversable() && !paint_config.canvas_fill_rect.has_value())
+        paint_config.canvas_fill_rect = Gfx::IntRect { {}, viewport_size_in_device_pixels() };
+
+    // A frame is left to the next rendering update while the compositor cannot be reached.
+    if (!compositor_context().ready_for_frame())
+        return false;
+
+    auto const& compositor_display_list_paint_config = presenter().compositor_display_list_paint_config();
+    auto should_record_display_list = m_needs_to_record_display_list
+        || !compositor_display_list_paint_config.has_value()
+        || !(compositor_display_list_paint_config.value() == paint_config);
+    auto sealed = seal_presentation(read, *document, paint_config, should_record_display_list);
+    set_rendering_pending(*document, RenderingPendingReason::NeedsRenderingUpdate, 0);
+    if (!should_record_display_list) {
+        commit_unrecorded_frame(read, *document, move(sealed));
+        return true;
+    }
+    bool const sends_visual_context_tree = sealed.sends_visual_context_tree;
+    auto scroll_requests = sealed.scroll_requests;
+    auto recording = document->commit_display_list_recording(read, paint_config, take_presentation(move(sealed)));
+    // What asks for another recording once this one has started asks for the next one.
+    m_needs_to_record_display_list = false;
+    m_recording_in_flight = make<RecordingInFlight>(*document, move(recording), sends_visual_context_tree, move(scroll_requests));
+    main_thread_event_loop().did_commit_frame(*this, CommittedFrameRecords::Yes);
+    return true;
+}
+
+// The frame goes to the render owner, which samples it, and has the Paint thread record it where it records, and present
+// it beside the event loop, in the order of the frames the render clock samples. The presenter goes with the frame, and
+// comes back once the event loop takes the frame in.
+Compositor::FlightPresentation LocalNavigable::take_presentation(Compositor::SealedPresentation sealed)
+{
+    sealed.context_id = compositor_context().id();
+    sealed.present_viewport_rect = present_viewport_rect();
+    sealed.generation = ++m_committed_generation;
+    main_thread_event_loop().ensure_frame_completion_registered();
+    return { .presenter = m_presenter.ptr(), .sealed = move(sealed) };
+}
+
+void LocalNavigable::commit_unrecorded_frame(Layout::BegunRead const& read, DOM::Document& document, Compositor::SealedPresentation sealed)
+{
+    bool const sends_visual_context_tree = sealed.sends_visual_context_tree;
+    auto scroll_requests = sealed.scroll_requests;
+    Painting::commit_unrecorded_frame(read, document, take_presentation(move(sealed)));
+    m_recording_in_flight = make<RecordingInFlight>(document, OptionalNone {}, sends_visual_context_tree, move(scroll_requests));
+    main_thread_event_loop().did_commit_frame(*this, CommittedFrameRecords::No);
+}
+
+void LocalNavigable::commit_mismatched_visual_context_tree_for_testing()
+{
+    take_recording_in_flight_in(TakeIn::Wait);
+    auto document = active_document();
+    if (!document || !has_compositor_context() || !compositor_context().ready_for_frame())
+        return;
+    auto paint_config = presenter().compositor_display_list_paint_config();
+    if (!paint_config.has_value())
+        return;
+    Layout::ForcedReadScope read { *document };
+    auto sealed = seal_presentation(read, *document, *paint_config, false);
+    sealed.sends_visual_context_tree = true;
+    sealed.visual_context_tree_mismatches_for_testing = true;
+    commit_unrecorded_frame(read, *document, move(sealed));
+}
+
+// Stamps the per-navigable state onto `paint_config`, here rather than where it is built, so no call site (the headless
+// screenshot path above all) can leave it behind; kept in the config so a change compares unequal.
+PaintConfig LocalNavigable::stamp_paint_config(PaintConfig paint_config) const
+{
+    paint_config.force_dark_enabled = force_dark_applies_to_active_document();
+    paint_config.force_dark_foreground_threshold = m_force_dark_foreground_threshold;
+    paint_config.force_dark_background_threshold = m_force_dark_background_threshold;
+    paint_config.should_show_line_box_borders = m_should_show_line_box_borders;
+    return paint_config;
+}
+
+// Tells the clock lane of the active document whether a task runs, beside which the lane samples the document's
+// running animations, and has it tick at once as a task begins, where no display tick drives it already. Answers
+// whether the navigable still has a lane.
+bool LocalNavigable::note_clock_lane(ClockAnimations animations)
+{
+    auto document = active_document();
+    if (has_been_destroyed() || !document || !has_compositor_context())
+        return false;
+    auto* arena = document->layout_node_arena_if_created();
+    if (!arena)
+        return false;
+    auto* host = arena->host();
+    if (Layout::RustFFI::document_host_note_event_loop_task(host, animations == ClockAnimations::Run))
+        arm_clock_lane(TickNow::Yes);
+    return true;
+}
+
+// Has the render clock hand the clock lanes of the active document the pointer moves over this navigable's compositor
+// context, and the display ticks they ask for, ticking them at once with `TickNow::Yes` where no display tick drives
+// them.
+void LocalNavigable::arm_clock_lane(TickNow tick_now)
+{
+    // A test injects its ticks itself. The lanes of a same-process iframe's document still hear of the pointer moves the
+    // lane of the document around it hands them, which wait for a tick the test injects.
+    bool const manual = Compositor::RenderClock::the().is_manual_for_testing();
+    if (manual && is_local_root())
+        return;
+    auto document = active_document();
+    if (!document || !has_compositor_context())
+        return;
+    auto* arena = document->layout_node_arena_if_created();
+    if (!arena)
+        return;
+    auto handle = adopt_ref(*new Compositor::ClockTicksHandle { Layout::RustFFI::document_host_clock_ticks(arena->host()) });
+    Optional<i64> tick_now_at;
+    if (tick_now == TickNow::Yes && !manual)
+        tick_now_at = static_cast<i64>(HighResolutionTime::unsafe_shared_current_time() * 1'000'000.0);
+    Compositor::RenderClock::the().arm_lane(compositor_context().id(), page().client().maximum_frames_per_second(), move(handle), tick_now_at);
+}
+
+// Seals what a frame of `document` reads of the document and this navigable where the frame begins: the frame is built
+// from nothing else (see SealedPresentation).
+Compositor::SealedPresentation LocalNavigable::seal_presentation(Layout::BegunRead const& read, DOM::Document& document, PaintConfig const& paint_config, bool records_display_list)
+{
+    VERIFY(document.has_committed_viewport_box());
+    auto& paint_state = document.paint_state();
+    bool const sends_visual_context_tree = paint_state.take_visual_context_tree_compositor_update(read);
+    // A frame that records nothing takes the render state's tree as it is sampled.
+    Optional<u64> visual_context_tree_structural_epoch;
+    if (records_display_list)
+        visual_context_tree_structural_epoch = paint_state.visual_context_tree_structural_epoch(read);
+    // A keyboard scroll reads the layout, which one the host knows is stale leaves to the next frame that lays it out.
+    Optional<Compositing::KeyboardScrollState> keyboard_scroll_state;
+    if (is_top_level_traversable() && !document.layout_is_known_stale())
+        keyboard_scroll_state = page().take_keyboard_scroll_state_for_compositor();
+    return Compositor::SealedPresentation {
+        .paint_config = paint_config,
+        .visual_context_tree_structural_epoch = visual_context_tree_structural_epoch,
+        .sends_visual_context_tree = sends_visual_context_tree,
+        .scroll_requests = take_unsent_scroll_requests(),
+        .keyboard_scroll_state = move(keyboard_scroll_state),
+        .context_id = {},
+        .present_viewport_rect = {},
+    };
+}
+
+bool LocalNavigable::take_recording_in_flight_in(TakeIn take_in)
+{
+    if (!m_recording_in_flight)
+        return true;
+    GC::Ref<DOM::Document> document = m_recording_in_flight->document;
+    auto* host = document->layout_node_arena().host();
+    bool presented_other_scroll_offsets = false;
+    auto take_landing = [&] {
+        return take_in == TakeIn::Wait
+            ? Layout::RustFFI::render_state_join_recording_in_flight(host, &presented_other_scroll_offsets)
+            : Layout::RustFFI::render_state_take_finished_recording_in(host, &presented_other_scroll_offsets);
+    };
+    auto landing = take_landing();
+    // A frame whose recording renders SVG images waits for the main thread to render them, and flies again with them.
+    while (landing == Layout::RustFFI::FfiRecordingLanding::NeedsVectorImages) {
+        {
+            Layout::ForcedReadScope read { *document };
+            Painting::render_vector_images(read, *document);
+        }
+        landing = take_landing();
+    }
+    if (landing == Layout::RustFFI::FfiRecordingLanding::StillInFlight)
+        return false;
+    auto in_flight = m_recording_in_flight.release_nonnull();
+    main_thread_event_loop().did_take_frame_in(*this);
+    finish_recording_in_flight(*in_flight, landing, presented_other_scroll_offsets);
+    return true;
+}
+
+// Takes in a frame in flight that has landed, with the presenter it gives back, and what its recording published, where
+// it still goes to this navigable's active document.
+void LocalNavigable::finish_recording_in_flight(RecordingInFlight& in_flight, Layout::RustFFI::FfiRecordingLanding landing, bool presented_other_scroll_offsets)
+{
+    GC::Ref<DOM::Document> document = in_flight.document;
+    // A frame the render owner found no box to record of presents nothing: the document takes back what the frame took
+    // of it. A document whose layout tree was torn down since (one destroyed beside the seal) has no paint state to take
+    // it back: the next tree comes with a paint state of its own.
+    if (landing == Layout::RustFFI::FfiRecordingLanding::NothingRecorded) {
+        if (in_flight.sends_visual_context_tree && document->has_paint_state())
+            document->paint_state().did_update_visual_context_values();
+        give_back_unsent_scroll_requests(move(in_flight.scroll_requests));
+        if (!has_been_destroyed() && active_document().ptr() == document.ptr())
+            event_handler().note_frame_landed(Web::EventHandler::FramePlacement::Unchanged);
+        return;
+    }
+    Layout::ForcedReadScope read { *document };
+    // What the recording made goes to a document this navigable still presents, which still has the boxes it recorded.
+    if (has_been_destroyed() || !has_compositor_context() || active_document().ptr() != document.ptr() || !document->has_committed_viewport_box())
+        return;
+    // A frame presented without a recording keeps the hit-test items on screen.
+    auto hit_test_items_adoption = Painting::HitTestItemsAdoption::Kept;
+    if (landing != Layout::RustFFI::FfiRecordingLanding::PresentedUnrecorded) {
+        // What the recording made stands as the compositor's frame. One that landed after the host wrote the document's
+        // rows leaves no hit-test items standing, as the boxes it shows may be gone.
+        auto const hit_test_items_stand = landing == Layout::RustFFI::FfiRecordingLanding::LandedBehindRows ? Painting::HitTestItemsStand::No : Painting::HitTestItemsStand::Yes;
+        Painting::take_recording_trace_if_pending(read, *document);
+        hit_test_items_adoption = document->adopt_published_recording(hit_test_items_stand, *in_flight.recording);
+    }
+    // A frame that kept its hit-test items, and sent no visual context tree, placed them as the frame before it did,
+    // unless it sent other scroll offsets. The hover waits for a scroll of the user's to stop instead (see
+    // schedule_hover_update_after_async_scroll).
+    auto const frame_placement = [&] {
+        if (hit_test_items_adoption == Painting::HitTestItemsAdoption::TookNew)
+            return Web::EventHandler::FramePlacement::Changed;
+        if (hit_test_items_adoption != Painting::HitTestItemsAdoption::Kept)
+            return Web::EventHandler::FramePlacement::Unchanged;
+        if (in_flight.sends_visual_context_tree)
+            return Web::EventHandler::FramePlacement::Changed;
+        if (presented_other_scroll_offsets && !has_user_scroll_gesture())
+            return Web::EventHandler::FramePlacement::Changed;
+        return Web::EventHandler::FramePlacement::Unchanged;
+    }();
+    event_handler().note_frame_landed(frame_placement);
+}
+
+void LocalNavigable::record_rendering_invalidation()
+{
+    if (auto document = active_document())
+        set_rendering_pending(*document, RenderingPendingReason::NeedsRenderingUpdate, 1);
+}
+
+void LocalNavigable::paint_next_frame()
+{
+    if (has_been_destroyed())
+        return;
+    if (!has_compositor_context()) {
+        m_needs_repaint = false;
+        return;
+    }
+
+    PaintConfig paint_config { .paint_overlay = true, .should_show_caret_hit_test_debug_overlay = m_should_show_caret_hit_test_debug_overlay };
+    if (!is_local_root()) {
+        // Nested navigables paint transparent bitmaps for their parent compositor context.
+        auto parent = this->parent();
+        if (!parent || !as<LocalNavigable>(*parent).has_compositor_context())
+            return;
+    }
+
+    m_needs_repaint = false;
+    (void)commit_frame(paint_config);
+}
+
+Gfx::IntRect LocalNavigable::present_viewport_rect() const
+{
+    return { page().css_to_device_rect(viewport_rect()).location().to_type<int>(), viewport_size_in_device_pixels() };
+}
+
+// A viewport size in device pixels becomes one in CSS pixels floored to a fraction of a CSS pixel, so its product with
+// the scale lies just below the device size. Rounding gives the device size back, which the UI process gives the
+// compositor too.
+Gfx::IntSize LocalNavigable::viewport_size_in_device_pixels() const
+{
+    auto scale = page().client().device_pixels_per_css_pixel();
+    return {
+        static_cast<int>(round(m_viewport_size.width().to_double() * scale)),
+        static_cast<int>(round(m_viewport_size.height().to_double() * scale)),
+    };
+}
+
+bool LocalNavigable::paint_next_frame_if_needed(DOM::UpdateLayoutReason layout_reason, LayOutFirst lay_out_first)
+{
+    // The selection and find-in-page match states the document holds stale decide what this paint has to redo.
+    if (auto document = active_document()) {
+        Layout::ForcedReadScope read { *document };
+        document->update_highlight_states_if_needed(read);
+    }
+    if (!needs_repaint())
+        return false;
+    // OPTIMIZATION: Don't paint navigables hidden by an ancestor iframe with visibility: hidden.
+    //               needs_repaint() stays true — so, once the navigable becomes visible, it's painted.
+    if (has_inclusive_ancestor_with_visibility_hidden())
+        return false;
+    if (is_svg_page())
+        return false;
+    if (auto document = active_document()) {
+        if (lay_out_first == LayOutFirst::Yes)
+            document->update_layout(layout_reason);
+        if (document->font_computer().should_defer_initial_paint())
+            return false;
+    }
+    paint_next_frame();
+    return true;
+}
+
+void LocalNavigable::render_screenshot(NonnullRefPtr<Gfx::Bitmap> target, PaintConfig paint_config, Function<void(Compositor::ScreenshotResult)>&& callback)
+{
+    if (!has_compositor_context()) {
+        callback(Compositor::ScreenshotResult::Failed);
+        return;
+    }
+
+    // The compositor composes the display lists that the processes hosting the subtree's remote descendants last
+    // published as well, so it has those processes paint their documents first, as this process does its own below.
+    auto has_remote_descendant = any_of(active_document_inclusive_descendant_navigables(), [](auto const& navigable) {
+        return is<RemoteNavigable>(*navigable);
+    });
+    if (!has_remote_descendant) {
+        render_screenshot_of_painted_subtree(move(target), paint_config, move(callback));
+        return;
+    }
+    compositor_context().prepare_remote_descendants_for_screenshot([weak_this = GC::Weak { *this }, target = move(target), paint_config, callback = move(callback)]() mutable {
+        if (!weak_this || weak_this->has_been_destroyed() || !weak_this->has_compositor_context()) {
+            callback(Compositor::ScreenshotResult::Failed);
+            return;
+        }
+        weak_this->render_screenshot_of_painted_subtree(move(target), paint_config, move(callback));
+    });
+}
+
+void LocalNavigable::render_screenshot_of_painted_subtree(NonnullRefPtr<Gfx::Bitmap> target, PaintConfig paint_config, Function<void(Compositor::ScreenshotResult)>&& callback)
+{
+    // The compositor composes the display lists this process last published for the navigables of the subtree. A
+    // descendant that has not painted since it changed, such as one whose document has just loaded, would be missing
+    // from the screenshot, so paint it first as the rendering update would, after preparing the canvases.
+    // NB: The wait for the remote descendants lets tasks run, and one can change the document after the layout that
+    //     the screenshot was asked for with, so it's laid out again before it's painted.
+    if (auto document = active_document())
+        document->update_layout(DOM::UpdateLayoutReason::ProcessScreenshot);
+    page().prepare_canvas_contexts_for_compositing();
+    auto navigables = hosted_inclusive_descendant_navigables();
+    for (auto& navigable : navigables.in_reverse()) {
+        if (navigable.ptr() != this)
+            navigable->paint_next_frame_if_needed(DOM::UpdateLayoutReason::ProcessScreenshot);
+    }
+
+    paint_config.records_whole_document = true;
+    if (!commit_frame(paint_config)) {
+        callback(Compositor::ScreenshotResult::Failed);
+        return;
+    }
+    // The screenshot is of what the compositor composes, so every frame committed before it is presented first.
+    main_thread_event_loop().take_committed_frames_in();
+    compositor_context().request_screenshot(move(target), move(callback));
+}
+
+void LocalNavigable::abort_in_flight_smooth_scrolls(Web::AsyncScrollNodeStableID stable_node_id)
+{
+    if (has_compositor_context())
+        request_abort_of_smooth_scroll(stable_node_id);
+    resolve_pending_smooth_scrolls(stable_node_id);
+}
+
+Compositing::ScrollRequest& LocalNavigable::unsent_scroll_request_for(Web::AsyncScrollNodeStableID stable_node_id)
+{
+    auto& state = m_scroll_request_states.ensure(stable_node_id);
+    if (!state.unsent_request.has_value()) {
+        state.last_request_id = ++m_last_scroll_request_id;
+        state.unsent_request = Compositing::ScrollRequest { .stable_node_id = stable_node_id, .request_id = state.last_request_id, .jump_offset = {}, .visual_viewport_scale = {}, .relative_scroll = {}, .relative_scroll_moves_visual_viewport_first = false, .instant_scroll_is_for_user_input = false, .smooth_scroll = {}, .takes_over_from_momentum = false };
+        // The request goes with the next frame, which it takes one being committed for.
+        if (auto document = active_document())
+            document->set_needs_repaint(Badge<HTML::LocalNavigable> {}, InvalidateDisplayList::No);
+    }
+    if (m_user_scroll_gesture_hold_of_current_input && m_user_scroll_gesture_hold_of_current_input->takes_over_momentum())
+        state.unsent_request->takes_over_from_momentum = true;
+    return state.unsent_request.value();
+}
+
+u64 LocalNavigable::last_scroll_request_id_for(Web::AsyncScrollNodeStableID stable_node_id) const
+{
+    auto state = m_scroll_request_states.get(stable_node_id);
+    return state.has_value() ? state->last_request_id : 0;
+}
+
+// A smooth scroll that a later scroll of the same frame takes the place of never reaches the compositor, which is never
+// to report its end.
+void LocalNavigable::drop_unsent_smooth_scroll(Compositing::ScrollRequest& scroll_request)
+{
+    if (!scroll_request.smooth_scroll.has_value())
+        return;
+    auto operation_id = scroll_request.smooth_scroll->operation_id;
+    scroll_request.smooth_scroll.clear();
+    Optional<FinishedScroll> finished;
+    m_pending_async_scroll_operations.remove_first_matching([&](auto const& pending) {
+        if (pending.operation_id != operation_id)
+            return false;
+        finished = finished_scroll(pending);
+        return true;
+    });
+    if (finished.has_value())
+        resolve_promises_of_finished_scroll(finished->promises);
+    note_scroll_sequences_may_have_completed();
+}
+
+void LocalNavigable::request_scroll_jump(Web::AsyncScrollNodeStableID stable_node_id, ScrollTrigger trigger)
+{
+    auto scroll_offset = scroll_offset_for(stable_node_id);
+    if (!scroll_offset.has_value())
+        return;
+    auto& scroll_request = unsent_scroll_request_for(stable_node_id);
+    drop_unsent_smooth_scroll(scroll_request);
+    scroll_request.jump_offset = device_scroll_offset(scroll_offset.value());
+    scroll_request.relative_scroll.clear();
+    scroll_request.relative_scroll_moves_visual_viewport_first = false;
+    scroll_request.instant_scroll_is_for_user_input = trigger != ScrollTrigger::Programmatic;
+    // NB: The compositor zooms on its own, so the scale this thread knows may be old. Only a change made here goes along.
+    if (stable_node_id.kind == Web::AsyncScrollNodeKind::VisualViewport) {
+        if (auto scale = active_document()->visual_viewport()->take_scale_for_compositor(); scale.has_value())
+            scroll_request.visual_viewport_scale = static_cast<float>(scale.value());
+    }
+}
+
+void LocalNavigable::request_smooth_scroll(Web::AsyncScrollNodeStableID stable_node_id, Compositing::RequestedSmoothScroll smooth_scroll)
+{
+    if (smooth_scroll.destination_is_relative) {
+        if (auto const* scrolling_box = committed_scrolling_box_for_async_scroll_node(*active_document(), stable_node_id)) {
+            smooth_scroll.relative_lower_bound = device_scroll_offset(Painting::minimum_scroll_offset(*scrolling_box));
+            smooth_scroll.relative_upper_bound = device_scroll_offset(Painting::maximum_scroll_offset(*scrolling_box));
+        }
+    }
+    auto& scroll_request = unsent_scroll_request_for(stable_node_id);
+    // A scroll that continues the same operation folds into the request for it, whose promises carry over.
+    if (scroll_request.smooth_scroll.has_value() && scroll_request.smooth_scroll->operation_id == smooth_scroll.operation_id) {
+        scroll_request.smooth_scroll->fold_later(smooth_scroll);
+        return;
+    }
+    drop_unsent_smooth_scroll(scroll_request);
+    scroll_request.smooth_scroll = smooth_scroll;
+}
+
+void LocalNavigable::request_abort_of_smooth_scroll(Web::AsyncScrollNodeStableID stable_node_id)
+{
+    drop_unsent_smooth_scroll(unsent_scroll_request_for(stable_node_id));
+}
+
+void LocalNavigable::request_relative_scroll(Web::AsyncScrollNodeStableID stable_node_id, CSSPixelPoint displacement, ScrollTrigger trigger)
+{
+    auto document = active_document();
+    Layout::ForcedReadScope read { *document };
+    auto const* scrolling_box = layout_node_for_async_scroll_node(read, *document, stable_node_id);
+    if (!scrolling_box || !Painting::has_committed_box(*scrolling_box)) {
+        request_scroll_jump(stable_node_id, trigger);
+        return;
+    }
+    auto& scroll_request = unsent_scroll_request_for(stable_node_id);
+    drop_unsent_smooth_scroll(scroll_request);
+    VERIFY(!scroll_request.relative_scroll_moves_visual_viewport_first);
+    Compositing::RequestedRelativeScroll relative_scroll {
+        .delta = device_scroll_offset(displacement),
+        .lower_bound = device_scroll_offset(Painting::minimum_scroll_offset(*scrolling_box)),
+        .upper_bound = device_scroll_offset(Painting::maximum_scroll_offset(*scrolling_box)),
+    };
+    if (scroll_request.relative_scroll.has_value())
+        scroll_request.relative_scroll->then(relative_scroll);
+    else
+        scroll_request.relative_scroll = relative_scroll;
+    scroll_request.instant_scroll_is_for_user_input = trigger != ScrollTrigger::Programmatic;
+}
+
+void LocalNavigable::request_viewport_scroll_by_a_distance(CSSPixelPoint displacement, double visual_viewport_max_x, double visual_viewport_max_y, ScrollTrigger trigger)
+{
+    auto document = active_document();
+    Layout::ForcedReadScope read { *document };
+    Web::AsyncScrollNodeStableID viewport_stable_node_id { .node_id = document->unique_id(), .kind = Web::AsyncScrollNodeKind::Viewport };
+    auto const* viewport_box = document->layout_node(read);
+    if (!viewport_box || !Painting::has_committed_box(*viewport_box)) {
+        request_scroll_jump(viewport_stable_node_id, trigger);
+        return;
+    }
+    auto& scroll_request = unsent_scroll_request_for(viewport_stable_node_id);
+    drop_unsent_smooth_scroll(scroll_request);
+    VERIFY(!scroll_request.relative_scroll.has_value() || scroll_request.relative_scroll_moves_visual_viewport_first);
+    // The visual viewport's position in the page ranges over the layout viewport's scroll range, plus how far the
+    // visual viewport moves within the layout viewport.
+    auto maximum_page_position = Painting::maximum_scroll_offset(*viewport_box) + CSSPixelPoint { visual_viewport_max_x, visual_viewport_max_y };
+    Compositing::RequestedRelativeScroll relative_scroll {
+        .delta = device_scroll_offset(displacement),
+        .lower_bound = device_scroll_offset(Painting::minimum_scroll_offset(*viewport_box)),
+        .upper_bound = device_scroll_offset(maximum_page_position),
+    };
+    if (scroll_request.relative_scroll.has_value())
+        scroll_request.relative_scroll->then(relative_scroll);
+    else
+        scroll_request.relative_scroll = relative_scroll;
+    scroll_request.relative_scroll_moves_visual_viewport_first = true;
+    scroll_request.instant_scroll_is_for_user_input = trigger != ScrollTrigger::Programmatic;
+}
+
+void LocalNavigable::did_store_scroll_offset(Web::AsyncScrollNodeStableID stable_node_id, Painting::CompositorScrollRequest compositor_scroll_request)
+{
+    note_scroll_sequence_moved(stable_node_id);
+    if (compositor_scroll_request == Painting::CompositorScrollRequest::None || !has_compositor_context())
+        return;
+    request_scroll_jump(stable_node_id, compositor_scroll_request == Painting::CompositorScrollRequest::UserInputJump ? ScrollTrigger::UserInput : ScrollTrigger::Programmatic);
+}
+
+Vector<Compositing::ScrollRequest> LocalNavigable::take_unsent_scroll_requests()
+{
+    Vector<Compositing::ScrollRequest> scroll_requests;
+    for (auto& [stable_node_id, state] : m_scroll_request_states) {
+        if (state.unsent_request.has_value())
+            scroll_requests.append(state.unsent_request.release_value());
+    }
+    return scroll_requests;
+}
+
+// A frame that went nowhere gives its requests back to be sent with the next one, ahead of anything asked for since.
+void LocalNavigable::give_back_unsent_scroll_requests(Vector<Compositing::ScrollRequest> scroll_requests)
+{
+    for (auto& scroll_request : scroll_requests) {
+        auto& state = m_scroll_request_states.ensure(scroll_request.stable_node_id);
+        if (state.unsent_request.has_value())
+            scroll_request.fold_later(state.unsent_request.value());
+        state.unsent_request = move(scroll_request);
+    }
+    if (auto document = active_document(); document && !scroll_requests.is_empty())
+        document->set_needs_repaint(Badge<HTML::LocalNavigable> {}, InvalidateDisplayList::No);
+}
+
+void LocalNavigable::abort_in_flight_smooth_scrolls_taken_over_by_user_input(Web::AsyncScrollNodeStableID stable_node_id, CSSPixelPoint scroll_offset_at_gesture_start)
+{
+    // A user scroll that is still running belongs to the gesture this input continues, which goes on with the box's
+    // sequence once the scroll is taken over from it.
+    auto in_flight_scroll = in_flight_scroll_for(stable_node_id);
+    if (in_flight_scroll.has_value() && in_flight_scroll->trigger == ScrollTrigger::UserInput)
+        note_user_scroll_gesture_of(stable_node_id, scroll_offset_at_gesture_start, UserScrollMovedBox::No);
+
+    abort_in_flight_smooth_scrolls(stable_node_id);
+}
+
+static bool scrolls_smoothly(Bindings::ScrollBehavior behavior, GC::Ptr<DOM::Element> associated_element)
+{
+    if (behavior == Bindings::ScrollBehavior::Auto && associated_element) {
+        if (auto const* values = associated_element->style_group<CSS::ComputedValues::MiscInteractionValues>())
+            return static_cast<CSS::ScrollBehavior>(values->scroll_behavior) == CSS::ScrollBehavior::Smooth;
+    }
+    return behavior == Bindings::ScrollBehavior::Smooth;
+}
+
+LocalNavigable::PerformedScroll LocalNavigable::perform_a_scroll_of_a_scrolling_box(Web::AsyncScrollNodeStableID stable_node_id, ScrollOfScrollingBox const& scroll)
+{
+    auto document = active_document();
+    VERIFY(document);
+
+    auto position = scroll.position;
+    auto behavior = scroll.behavior;
+    auto trigger = scroll.trigger;
+    auto const& associated_element = scroll.associated_element;
+    auto const& relative_displacement = scroll.relative_displacement;
+    auto destination_snapping = scroll.destination_snapping;
+    auto animation_kind = scroll.animation_kind;
+    auto scroll_kind = scroll.scroll_kind;
+
+    // The scroll that settles a gesture is the user's, and runs as one with the user's scrolls in flight.
+    bool settles_user_scroll_gesture = trigger == ScrollTrigger::GestureEndSnap;
+    if (settles_user_scroll_gesture)
+        trigger = ScrollTrigger::UserInput;
+
+    auto initial_scroll_offset = scroll_offset_for(stable_node_id);
+    if (!initial_scroll_offset.has_value())
+        return { .promise = WebIDL::create_resolved_promise_for(*document, JS::js_undefined()) };
+
+    // The scroll joins the box's sequence, which ends without a scrollend event if no scroll in it moves the box.
+    (void)begin_scroll_sequence(stable_node_id);
+    // Nothing may be left running once the scroll is started, as for an instant scroll that no compositor answers.
+    ScopeGuard check_sequence_once_scroll_is_started = [this] { note_scroll_sequences_may_have_completed(); };
+    if (trigger == ScrollTrigger::UserInput && !settles_user_scroll_gesture && !user_scroll_gesture_for(stable_node_id))
+        note_user_scroll_gesture_of(stable_node_id, initial_scroll_offset, UserScrollMovedBox::No);
+
+    // A scroll by a distance goes from wherever the compositor has the box, unless it came to rest at a snap position:
+    // that one was selected from where the box is here.
+    bool goes_to_a_snap_position = destination_snapping == DestinationSnapping::DestinationIsSnapPosition;
+
+    // https://drafts.csswg.org/css-scroll-snap-1/#snap-strictness
+    // If a valid snap position exists then the scroll container must snap at the termination of a scroll (if none
+    // exist then no snapping occurs).
+    if (trigger == ScrollTrigger::Programmatic && destination_snapping == DestinationSnapping::SelectSnapPosition) {
+        abandon_snapping_of_user_scroll_gesture(stable_node_id);
+        Layout::ForcedReadScope read { *document };
+        document->update_layout(DOM::UpdateLayoutReason::ElementScroll);
+        if (auto const* snap_container = layout_node_for_async_scroll_node(read, *document, stable_node_id)) {
+            Compositing::SnapSelectionStrategy strategy;
+            if (relative_displacement.has_value() && !relative_displacement->is_zero())
+                strategy = { Compositing::SnapSelectionStrategy::Type::EndPositionAndDirection, *initial_scroll_offset, *relative_displacement };
+            auto snap_destination = Painting::adjust_scroll_destination_for_snapping(*snap_container, position, strategy);
+            position = snap_destination.position;
+            goes_to_a_snap_position = snap_destination.snapped_x || snap_destination.snapped_y;
+            record_snapped_areas_of_scroll_container(*document, stable_node_id, snap_destination);
+        }
+    }
+    Optional<CSSPixelPoint> relative_request_displacement;
+    if (relative_displacement.has_value() && !goes_to_a_snap_position && stable_node_id.kind != Web::AsyncScrollNodeKind::VisualViewport)
+        relative_request_displacement = relative_displacement;
+
+    if (scroll_kind == Painting::ScrollKind::Relative || relative_displacement.has_value()) {
+        // User input that continues a smooth scroll in flight scrolls on from where that scroll is headed.
+        auto relative_scroll_start = initial_scroll_offset;
+        if (trigger == ScrollTrigger::UserInput && behavior == Bindings::ScrollBehavior::Smooth) {
+            if (auto destination = in_flight_user_scroll_destination(stable_node_id, animation_kind); destination.has_value())
+                relative_scroll_start = destination;
+        }
+        if (auto* scrolling_box = committed_scrolling_box_for_async_scroll_node(*document, stable_node_id))
+            record_relative_scroll(*document, stable_node_id, relative_scroll_start, Painting::clamp_scroll_offset(*scrolling_box, position));
+    }
+
+    auto should_scroll_smoothly = scrolls_smoothly(behavior, associated_element);
+
+    // AD-HOC: A smooth scroll requested while a smooth scroll of the same scrolling box toward the same position is in
+    //         flight continues that scroll instead of restarting it, matching other engines.
+    if (should_scroll_smoothly) {
+        if (auto* promises = promises_of_smooth_scroll_in_flight_toward(stable_node_id, position, trigger, animation_kind)) {
+            auto scroll_promise = WebIDL::create_promise_for(*document);
+            promises->append(scroll_promise);
+            return { scroll_promise, goes_to_a_snap_position };
+        }
+    }
+
+    // AD-HOC: User input that arrives while the box is already scrolling smoothly under user input retargets that
+    //         scroll instead of restarting it.
+    if (should_scroll_smoothly && trigger == ScrollTrigger::UserInput) {
+        if (auto scroll_promise = continue_in_flight_user_smooth_scroll(stable_node_id, position, relative_request_displacement, animation_kind))
+            return { *scroll_promise, goes_to_a_snap_position };
+    }
+
+    // AD-HOC: A wheel step's gesture goes on once no further steps arrive.
+    if (should_scroll_smoothly && trigger == ScrollTrigger::UserInput && animation_kind == Compositing::ScrollAnimationKind::Wheel && position == *initial_scroll_offset)
+        return { WebIDL::create_resolved_promise_for(*document, JS::js_undefined()), goes_to_a_snap_position };
+
+    // https://drafts.csswg.org/cssom-view-1/#perform-a-scroll
+    // 1. Abort any ongoing smooth scroll for box.
+    // 2. Resolve all pending scroll promises for box.
+    abort_in_flight_smooth_scrolls(stable_node_id);
+
+    // 3. Let scrollPromise be a new promise and return it while the remaining
+    //    steps run in parallel.
+    auto scroll_promise = WebIDL::create_promise_for(*document);
+
+    // 4. If the user agent honors the scroll-behavior property and either the
+    //    requested behavior or the associated element's computed behavior is
+    //    smooth, perform a smooth scroll. Otherwise, perform an instant scroll.
+    if (!should_scroll_smoothly) {
+        (void)store_scroll_offset_in_scroll_range(stable_node_id, position, Painting::CompositorScrollRequest::None);
+        // The compositor may have scrolled the box elsewhere since the main thread last heard, so the box jumps to the
+        // position even where its offset here is unchanged.
+        if (has_compositor_context() && scroll.instant_scroll_requester == InstantScrollRequester::ThisScroll) {
+            if (relative_request_displacement.has_value())
+                request_relative_scroll(stable_node_id, relative_request_displacement.value(), trigger);
+            else
+                request_scroll_jump(stable_node_id, trigger);
+        }
+        // The compositor decides where a script's scroll leaves the box, which the scroll ends at once it says.
+        if (has_compositor_context() && trigger == ScrollTrigger::Programmatic) {
+            m_instant_scrolls_awaiting_answers.append({
+                .stable_node_id = stable_node_id,
+                .request_id = last_scroll_request_id_for(stable_node_id),
+                .promise = scroll_promise,
+            });
+            return { scroll_promise, goes_to_a_snap_position };
+        }
+        WebIDL::resolve_promise(scroll_promise);
+        return { scroll_promise, goes_to_a_snap_position };
+    }
+
+    // NB: The compositor has no scroll node for the visual viewport, so the main thread animates it.
+    if (has_compositor_context() && stable_node_id.kind != Web::AsyncScrollNodeKind::VisualViewport) {
+        auto operation_id = ++m_last_requested_operation_id;
+        Optional<u64> settled_user_input_scroll_count;
+        if (settles_user_scroll_gesture)
+            settled_user_input_scroll_count = m_compositor_user_input_scroll_counts.get(stable_node_id).value_or(0);
+        request_smooth_scroll(stable_node_id, {
+                                                  .operation_id = operation_id,
+                                                  .destination_offset = device_scroll_offset(relative_request_displacement.value_or(position)),
+                                                  .destination_is_relative = relative_request_displacement.has_value(),
+                                                  .animation_kind = animation_kind,
+                                                  .initiator = trigger == ScrollTrigger::UserInput ? Compositing::SmoothScrollInitiator::UserInput : Compositing::SmoothScrollInitiator::Programmatic,
+                                                  .retargets_operation = false,
+                                                  .settled_user_input_scroll_count = settled_user_input_scroll_count,
+                                              });
+        m_pending_async_scroll_operations.append(PendingAsyncScrollOperation {
+            .operation_id = operation_id,
+            .promises = { scroll_promise },
+            .stable_node_id = stable_node_id,
+            .destination_scroll_offset = position,
+            .trigger = trigger,
+            .animation_kind = animation_kind,
+        });
+        return { scroll_promise, goes_to_a_snap_position };
+    }
+
+    if (position == *initial_scroll_offset) {
+        WebIDL::resolve_promise(scroll_promise);
+        return { scroll_promise, goes_to_a_snap_position };
+    }
+    m_main_thread_smooth_scrolls.append(MainThreadSmoothScroll {
+        .stable_node_id = stable_node_id,
+        .animation = Compositing::SmoothScrollAnimation { initial_scroll_offset->to_type<float>(), position.to_type<float>(), 1.0, animation_kind },
+        .last_tick = MonotonicTime::now(),
+        .elapsed = AK::Duration::zero(),
+        .destination_scroll_offset = position,
+        .promises = { scroll_promise },
+        .trigger = trigger,
+    });
+    page().client().request_frame();
+    return { scroll_promise, goes_to_a_snap_position };
+}
+
+Gfx::FloatPoint LocalNavigable::device_scroll_offset(CSSPixelPoint offset) const
+{
+    auto device_pixels_per_css_pixel = page().client().device_pixels_per_css_pixel();
+    return {
+        static_cast<float>(offset.x().to_double() * device_pixels_per_css_pixel),
+        static_cast<float>(offset.y().to_double() * device_pixels_per_css_pixel),
+    };
+}
+
+GC::Ptr<WebIDL::Promise> LocalNavigable::continue_in_flight_user_smooth_scroll(Web::AsyncScrollNodeStableID stable_node_id, CSSPixelPoint position, Optional<CSSPixelPoint> relative_displacement, Compositing::ScrollAnimationKind animation_kind)
+{
+    auto document = active_document();
+    if (!document)
+        return nullptr;
+
+    for (auto& pending : m_pending_async_scroll_operations) {
+        if (pending.stable_node_id != stable_node_id || pending.trigger != ScrollTrigger::UserInput || pending.animation_kind != animation_kind)
+            continue;
+        if (!has_compositor_context())
+            return nullptr;
+
+        request_smooth_scroll(stable_node_id, {
+                                                  .operation_id = pending.operation_id,
+                                                  .destination_offset = device_scroll_offset(relative_displacement.value_or(position)),
+                                                  .destination_is_relative = relative_displacement.has_value(),
+                                                  .animation_kind = animation_kind,
+                                                  .initiator = Compositing::SmoothScrollInitiator::UserInput,
+                                                  .retargets_operation = true,
+                                                  .settled_user_input_scroll_count = {},
+                                              });
+        pending.destination_scroll_offset = position;
+        auto scroll_promise = WebIDL::create_promise_for(*document);
+        pending.promises.append(scroll_promise);
+        return scroll_promise;
+    }
+
+    for (auto& smooth_scroll : m_main_thread_smooth_scrolls) {
+        if (smooth_scroll.stable_node_id != stable_node_id || smooth_scroll.trigger != ScrollTrigger::UserInput || smooth_scroll.animation.kind() != animation_kind)
+            continue;
+
+        smooth_scroll.animation.retarget(position.to_type<float>(), smooth_scroll.elapsed);
+        smooth_scroll.destination_scroll_offset = position;
+        auto scroll_promise = WebIDL::create_promise_for(*document);
+        smooth_scroll.promises.append(scroll_promise);
+        page().client().request_frame();
+        return scroll_promise;
+    }
+
+    return nullptr;
+}
+
+GC::Ref<WebIDL::Promise> LocalNavigable::perform_a_scroll_of_an_element(DOM::Element& element, CSSPixelPoint position, Bindings::ScrollBehavior behavior, Optional<CSSPixelPoint> relative_displacement)
+{
+    Web::AsyncScrollNodeStableID stable_node_id { .node_id = element.unique_id(), .kind = Web::AsyncScrollNodeKind::Element };
+    return perform_a_scroll_of_a_scrolling_box(stable_node_id, {
+                                                                   .position = position,
+                                                                   .behavior = behavior,
+                                                                   .trigger = ScrollTrigger::Programmatic,
+                                                                   .associated_element = element,
+                                                                   .relative_displacement = relative_displacement,
+                                                               })
+        .promise;
+}
+
+bool LocalNavigable::perform_a_scroll_step_for_key_input(Layout::Node& scroll_container, CSSPixelPoint delta, Compositing::SnapSelectionStrategy::Type strategy_type)
+{
+    if (perform_a_snapped_relative_user_scroll(scroll_container, delta, strategy_type))
+        return true;
+
+    auto document = active_document();
+    if (!document)
+        return false;
+
+    auto stable_node_id = Painting::async_scroll_node_stable_id(scroll_container);
+    if (!stable_node_id.has_value())
+        return false;
+
+    auto current_scroll_offset = scroll_offset_for(*stable_node_id);
+    if (!current_scroll_offset.has_value())
+        return false;
+
+    // A key continues the pending destination of a smooth user scroll, including a snap on the other axis, so a burst
+    // of presses travels the sum of their distances however far the animation has progressed.
+    auto step_start = in_flight_user_scroll_destination(*stable_node_id, Compositing::ScrollAnimationKind::SmoothScroll).value_or(*current_scroll_offset);
+    auto destination = Painting::clamp_scroll_offset(scroll_container, step_start + delta);
+    if (destination == step_start)
+        return true;
+
+    // NB: The compositor animates the key steps it performs regardless of scroll-behavior, so the steps it leaves to
+    //     the main thread animate too.
+    if (scroll_container.is_viewport()) {
+        // NB: The viewport's scroll is expressed relative to the visual viewport's page position, which can be offset
+        //     from the layout viewport's scroll offset while pinch-zoomed.
+        scroll_viewport_by_delta(destination - step_start, Bindings::ScrollBehavior::Smooth, Painting::ScrollKind::Relative);
+        return true;
+    }
+    TemporaryExecutionContext temporary_execution_context { HTML::relevant_realm(*document) };
+    perform_a_scroll_of_a_scrolling_box(*stable_node_id, {
+                                                             .position = destination,
+                                                             .behavior = Bindings::ScrollBehavior::Smooth,
+                                                             .trigger = ScrollTrigger::UserInput,
+                                                             .relative_displacement = delta,
+                                                             .scroll_kind = Painting::ScrollKind::Relative,
+                                                         });
+    return true;
+}
+
+bool LocalNavigable::perform_a_snapped_relative_user_scroll(Layout::Node& scroll_container, CSSPixelPoint delta, Compositing::SnapSelectionStrategy::Type strategy_type, Painting::ScrollKind scroll_kind)
+{
+    auto document = active_document();
+    if (!document)
+        return false;
+
+    auto stable_node_id = Painting::async_scroll_node_stable_id(scroll_container);
+    if (!stable_node_id.has_value())
+        return false;
+
+    auto current_scroll_offset = scroll_offset_for(*stable_node_id);
+    if (!current_scroll_offset.has_value())
+        return false;
+
+    // A scroll started for any reason other than user input is going somewhere the gesture never asked for, so a
+    // gesture's steps then travel from the scrolling box itself instead.
+    auto in_flight_scroll = in_flight_scroll_for(*stable_node_id);
+    Optional<CSSPixelPoint> in_flight_destination;
+    if (in_flight_scroll.has_value() && in_flight_scroll->trigger == ScrollTrigger::UserInput)
+        in_flight_destination = in_flight_scroll->destination_scroll_offset;
+
+    // A step selects its snap position from the offset the gesture's input deltas have reached rather than from the
+    // snap position it is scrolling to, so a burst of steps advances by the distance they asked for instead of by one
+    // snap position each.
+    auto* latched_gesture = user_scroll_gesture_for(*stable_node_id);
+    bool travels_from_input_deltas = latched_gesture && in_flight_destination.has_value();
+    auto step_start = travels_from_input_deltas
+        ? latched_gesture->unsnapped_scroll_destination.value_or(*current_scroll_offset)
+        : *current_scroll_offset;
+    auto unsnapped_destination = Painting::clamp_scroll_offset(scroll_container, step_start + delta);
+
+    // https://drafts.csswg.org/css-scroll-snap-1/#scroll-types
+    // NOTE: Scroll snapping responds to a relative scroll by finding the nearest valid snap position in the intended
+    //       direction (if possible), so a snapped element can't get "trapped" when the snap positions are far apart.
+    Compositing::SnapSelectionStrategy strategy { strategy_type, step_start, delta };
+    // NB: A step with only an intended direction ignores every snap position up to the offset its input asked for. A
+    //     step with an intended end position selects the snap position nearest that destination, so snap positions
+    //     short of it remain selectable.
+    if (strategy_type == Compositing::SnapSelectionStrategy::Type::Direction)
+        strategy.starting_positions_boundary = unsnapped_destination;
+    auto snap_destination = Painting::adjust_scroll_destination_for_snapping(scroll_container, unsnapped_destination, strategy);
+
+    // NB: The step travels only along axes the container selects no snap position in, so it is left to the ordinary
+    //     relative scroll.
+    if (!(snap_destination.snapped_x && delta.x() != 0) && !(snap_destination.snapped_y && delta.y() != 0))
+        return false;
+
+    record_snapped_areas_of_scroll_container(*document, *stable_node_id, snap_destination);
+
+    // NB: A step whose selected snap position is where the scrolling box already rests, or is already scrolling to, is
+    //     consumed without disturbing where it is going.
+    bool step_rests_at_its_snap_position = snap_destination.position == in_flight_destination.value_or(*current_scroll_offset);
+    if (!step_rests_at_its_snap_position)
+        note_user_scroll_gesture_of(*stable_node_id, *current_scroll_offset, UserScrollMovedBox::No, SnapPositionSelection::PerScroll);
+
+    // NB: Noting the gesture above may have moved the sequence the offset is recorded on, so it is looked up again.
+    if (auto* gesture = user_scroll_gesture_for(*stable_node_id))
+        gesture->unsnapped_scroll_destination = unsnapped_destination;
+
+    if (step_rests_at_its_snap_position)
+        return true;
+
+    TemporaryExecutionContext temporary_execution_context { HTML::relevant_realm(*document) };
+    perform_a_scroll_of_a_scrolling_box(*stable_node_id, {
+                                                             .position = snap_destination.position,
+                                                             .behavior = Bindings::ScrollBehavior::Smooth,
+                                                             .trigger = ScrollTrigger::UserInput,
+                                                             .scroll_kind = scroll_kind,
+                                                         });
+    return true;
+}
+
+Optional<CSSPixelPoint> LocalNavigable::in_flight_user_scroll_destination(Web::AsyncScrollNodeStableID stable_node_id, Compositing::ScrollAnimationKind animation_kind) const
+{
+    auto in_flight_scroll = in_flight_scroll_for(stable_node_id);
+    if (!in_flight_scroll.has_value() || in_flight_scroll->trigger != ScrollTrigger::UserInput || in_flight_scroll->animation_kind != animation_kind)
+        return {};
+    return in_flight_scroll->destination_scroll_offset;
+}
+
+bool LocalNavigable::continued_scroll_step_moves(Layout::Node& scrolling_box, CSSPixelPoint delta, Compositing::ScrollAnimationKind animation_kind)
+{
+    auto scrollable_axes = Painting::wheel_scrollable_axes(scrolling_box);
+    if (!scrollable_axes.horizontal)
+        delta.set_x(0);
+    if (!scrollable_axes.vertical)
+        delta.set_y(0);
+    if (delta.is_zero())
+        return false;
+
+    auto step_start = Painting::scroll_offset(scrolling_box);
+    auto document = active_document();
+    auto stable_node_id = Painting::async_scroll_node_stable_id(scrolling_box);
+    if (document && stable_node_id.has_value()) {
+        if (auto destination = in_flight_user_scroll_destination(*stable_node_id, animation_kind); destination.has_value()) {
+            step_start = *destination;
+            // A key travels from the offset its gesture's input deltas have reached while a snap scroll is in flight,
+            // so a box scrolling to a snap position at its extent goes on taking keys until their input reaches it.
+            auto* gesture = user_scroll_gesture_for(*stable_node_id);
+            if (animation_kind == Compositing::ScrollAnimationKind::SmoothScroll && gesture && gesture->unsnapped_scroll_destination.has_value())
+                step_start = *gesture->unsnapped_scroll_destination;
+        }
+    }
+    return Painting::clamp_scroll_offset(scrolling_box, step_start + delta) != step_start;
+}
+
+bool LocalNavigable::scroll_scrolling_box_by_delta(Layout::Node& scrolling_box, CSSPixelPoint delta, Painting::ScrollKind scroll_kind, Compositing::ScrollAnimationKind animation_kind)
+{
+    auto document = active_document();
+    if (!document)
+        return false;
+
+    if (scrolling_box.is_viewport())
+        return false;
+
+    auto scrollable_axes = Painting::wheel_scrollable_axes(scrolling_box);
+    if (!scrollable_axes.horizontal)
+        delta.set_x(0);
+    if (!scrollable_axes.vertical)
+        delta.set_y(0);
+    if (delta.is_zero())
+        return false;
+
+    auto stable_node_id = Painting::async_scroll_node_stable_id(scrolling_box);
+    if (!stable_node_id.has_value())
+        return false;
+
+    auto start_offset = in_flight_user_scroll_destination(*stable_node_id, animation_kind).value_or(Painting::scroll_offset(scrolling_box));
+    auto position = Painting::clamp_scroll_offset(scrolling_box, start_offset + delta);
+    if (position == start_offset) {
+        extend_user_scroll_gesture_of(*stable_node_id);
+        return false;
+    }
+
+    Optional<CSSPixelPoint> relative_displacement;
+    if (scroll_kind == Painting::ScrollKind::Relative)
+        relative_displacement = delta;
+    TemporaryExecutionContext temporary_execution_context { HTML::relevant_realm(*document) };
+    perform_a_scroll_of_a_scrolling_box(*stable_node_id, {
+                                                             .position = position,
+                                                             .behavior = Bindings::ScrollBehavior::Smooth,
+                                                             .trigger = ScrollTrigger::UserInput,
+                                                             .relative_displacement = relative_displacement,
+                                                             .animation_kind = animation_kind,
+                                                             .scroll_kind = scroll_kind,
+                                                         });
+    return true;
+}
+
+bool LocalNavigable::scroll_viewport_by_delta(CSSPixelPoint delta, Bindings::ScrollBehavior behavior, Painting::ScrollKind scroll_kind, Compositing::ScrollAnimationKind animation_kind)
+{
+    auto document = active_document();
+    auto vv = document->visual_viewport();
+
+    auto in_flight_aware_page_position = [&] {
+        CSSPixelPoint page_position { CSSPixels(vv->page_left()), CSSPixels(vv->page_top()) };
+        if (behavior != Bindings::ScrollBehavior::Smooth)
+            return page_position;
+        Web::AsyncScrollNodeStableID viewport_stable_node_id { .node_id = document->unique_id(), .kind = Web::AsyncScrollNodeKind::Viewport };
+        if (auto destination = in_flight_user_scroll_destination(viewport_stable_node_id, animation_kind); destination.has_value())
+            page_position += *destination - viewport_scroll_offset();
+        Web::AsyncScrollNodeStableID visual_viewport_stable_node_id { .node_id = document->unique_id(), .kind = Web::AsyncScrollNodeKind::VisualViewport };
+        if (auto destination = in_flight_user_scroll_destination(visual_viewport_stable_node_id, animation_kind); destination.has_value())
+            page_position += destination.value() - vv->offset();
+        return page_position;
+    };
+
+    auto page_position = in_flight_aware_page_position();
+    Optional<CSSPixelPoint> relative_displacement;
+    if (scroll_kind == Painting::ScrollKind::Relative)
+        relative_displacement = delta;
+    perform_a_scroll_of_the_viewport(page_position + delta, behavior, ScrollTrigger::UserInput, relative_displacement, scroll_kind, animation_kind);
+
+    return in_flight_aware_page_position() != page_position;
+}
+
+// https://drafts.csswg.org/cssom-view/#viewport-perform-a-scroll
+GC::Ref<WebIDL::Promise> LocalNavigable::perform_a_scroll_of_the_viewport(CSSPixelPoint position, Bindings::ScrollBehavior behavior, ScrollTrigger trigger, Optional<CSSPixelPoint> relative_displacement, Painting::ScrollKind scroll_kind, Compositing::ScrollAnimationKind animation_kind)
+{
+    // 1. Let doc be the viewport’s associated Document.
+    auto doc = active_document();
+
+    // AD-HOC: User input keeps the scroll gesture in progress even when this scroll does not move the viewport, such
+    //         as when a held scroll key repeats at the scroll extent.
+    if (trigger == ScrollTrigger::UserInput) {
+        extend_user_scroll_gesture_of({ .node_id = doc->unique_id(), .kind = Web::AsyncScrollNodeKind::Viewport });
+        extend_user_scroll_gesture_of({ .node_id = doc->unique_id(), .kind = Web::AsyncScrollNodeKind::VisualViewport });
+    }
+
+    // 2. Let vv be the VisualViewport whose associated document is doc.
+    auto vv = doc->visual_viewport();
+
+    CSSPixelRect viewport_rect = { m_viewport_scroll_offset, m_viewport_size };
+
+    // 3. Let maxX be the difference between viewport’s scrolling box’s width and the value of vv’s width attribute.
+    auto max_x = viewport_rect.width().to_double() - vv->width();
+
+    // 4. Let maxY be the difference between viewport’s scrolling box’s height and the value of vv’s height attribute.
+    auto max_y = viewport_rect.height().to_double() - vv->height();
+
+    // 5. Let dx be the horizontal component of position - the value vv’s pageLeft attribute
+    auto dx = position.x().to_double() - vv->page_left();
+
+    // 6. Let dy be the vertical component of position - the value of vv’s pageTop attribute
+    auto dy = position.y().to_double() - vv->page_top();
+
+    // 7. Let visual x be the value of vv’s offsetLeft attribute.
+    auto visual_x = vv->offset_left();
+
+    // 8. Let visual y be the value of vv’s offsetTop attribute.
+    auto visual_y = vv->offset_top();
+
+    // 9. Let visual dx be min(maxX, max(0, visual x + dx)) - visual x.
+    auto visual_dx = min(max_x, max(0.0, visual_x + dx)) - visual_x;
+
+    // 10. Let visual dy be min(maxY, max(0, visual y + dy)) - visual y.
+    auto visual_dy = min(max_y, max(0.0, visual_y + dy)) - visual_y;
+
+    // 11. Let layout dx be dx - visual dx
+    auto layout_dx = dx - visual_dx;
+
+    // 12. Let layout dy be dy - visual dy
+    auto layout_dy = dy - visual_dy;
+
+    // 13. Let element be doc’s root element if there is one, null otherwise.
+
+    CSSPixelPoint visual_delta { visual_dx, visual_dy };
+    Web::AsyncScrollNodeStableID visual_viewport_stable_node_id { .node_id = doc->unique_id(), .kind = Web::AsyncScrollNodeKind::VisualViewport };
+    Web::AsyncScrollNodeStableID viewport_stable_node_id { .node_id = doc->unique_id(), .kind = Web::AsyncScrollNodeKind::Viewport };
+
+    // NB: The compositor may have the visual viewport somewhere this navigable has yet to hear of, so it splits an
+    //     instant scroll by a distance itself, from where it has both viewports. The split here is what the main thread
+    //     sees until the compositor answers.
+    bool compositor_splits_the_scroll = has_compositor_context() && relative_displacement.has_value() && !scrolls_smoothly(behavior, doc->document_element());
+    auto instant_scroll_requester = compositor_splits_the_scroll ? InstantScrollRequester::Caller : InstantScrollRequester::ThisScroll;
+
+    // 14. Perform a scroll of the viewport’s scrolling box to its current scroll position + (layout dx, layout dy)
+    //     with element as the associated element, and behavior as the scroll behavior. Let scrollPromise1 be the
+    //     Promise returned from this step.
+    TemporaryExecutionContext temporary_execution_context { HTML::relevant_realm(*doc) };
+    auto layout_viewport_scroll = perform_a_scroll_of_the_layout_viewport({ layout_dx, layout_dy }, behavior, trigger, relative_displacement, scroll_kind, animation_kind, instant_scroll_requester);
+
+    // 15. Perform a scroll of vv’s scrolling box to its current scroll position + (visual dx, visual dy) with element
+    //     as the associated element, and behavior as the scroll behavior. Let scrollPromise2 be the Promise returned
+    //     from this step.
+    auto visual_viewport_scroll = perform_a_scroll_of_a_scrolling_box(visual_viewport_stable_node_id, {
+                                                                                                          .position = vv->offset() + visual_delta,
+                                                                                                          .behavior = behavior,
+                                                                                                          .trigger = trigger,
+                                                                                                          .associated_element = doc->document_element(),
+                                                                                                          .animation_kind = animation_kind,
+                                                                                                          .scroll_kind = scroll_kind,
+                                                                                                          .instant_scroll_requester = instant_scroll_requester,
+                                                                                                      });
+
+    if (compositor_splits_the_scroll) {
+        // A layout viewport that came to rest at a snap position goes there, and the visual viewport with it.
+        if (layout_viewport_scroll.destination_is_a_snap_position) {
+            request_scroll_jump(viewport_stable_node_id, trigger);
+            request_scroll_jump(visual_viewport_stable_node_id, trigger);
+        } else {
+            request_viewport_scroll_by_a_distance(relative_displacement.value(), max_x, max_y, trigger);
+        }
+    }
+
+    // 16. Let scrollPromise be a new Promise.
+    auto scroll_promise = WebIDL::create_promise_for(*doc);
+
+    // 17. Return scrollPromise, and run the remaining steps in parallel.
+    // 18. Resolve scrollPromise when both scrollPromise1 and scrollPromise2 have settled.
+    auto& realm = HTML::relevant_realm(*doc);
+    TemporaryExecutionContext execution_context_for_promise_reactions { realm, TemporaryExecutionContext::CallbacksEnabled::Yes };
+    WebIDL::wait_for_all(
+        realm, { { layout_viewport_scroll.promise, visual_viewport_scroll.promise } },
+        GC::create_function(realm.heap(), GC::captures(scroll_promise), [](auto& scroll_promise, Vector<JS::Value> const&) { WebIDL::resolve_promise(scroll_promise); }),
+        GC::create_function(realm.heap(), GC::captures(scroll_promise), [](auto& scroll_promise, JS::Value) { WebIDL::resolve_promise(scroll_promise); }));
+    return scroll_promise;
+}
+
+LocalNavigable::PerformedScroll LocalNavigable::perform_a_scroll_of_the_layout_viewport(CSSPixelPoint delta, Bindings::ScrollBehavior behavior, ScrollTrigger trigger, Optional<CSSPixelPoint> relative_displacement, Painting::ScrollKind scroll_kind, Compositing::ScrollAnimationKind animation_kind, InstantScrollRequester instant_scroll_requester)
+{
+    auto doc = active_document();
+
+    // NB: Must update layout before accessing paintables.
+    Layout::ForcedReadScope read { *doc };
+    doc->update_layout(DOM::UpdateLayoutReason::NavigableViewportScroll);
+
+    auto minimum_scroll_offset = Painting::minimum_scroll_offset(*doc->layout_node(read)).to_type<double>();
+    auto maximum_scroll_offset = Painting::maximum_scroll_offset(*doc->layout_node(read)).to_type<double>();
+    auto new_viewport_scroll_offset = m_viewport_scroll_offset.to_type<double>() + delta.to_type<double>();
+    // NOTE: Clamp to the scrolling area.
+    new_viewport_scroll_offset.set_x(clamp(new_viewport_scroll_offset.x(), minimum_scroll_offset.x(), maximum_scroll_offset.x()));
+    new_viewport_scroll_offset.set_y(clamp(new_viewport_scroll_offset.y(), minimum_scroll_offset.y(), maximum_scroll_offset.y()));
+
+    // A scroll of the viewport by a distance moves the layout viewport by the part the visual viewport does not take.
+    Web::AsyncScrollNodeStableID viewport_stable_node_id { .node_id = doc->unique_id(), .kind = Web::AsyncScrollNodeKind::Viewport };
+    if (relative_displacement.has_value()) {
+        relative_displacement = delta;
+        // A step of the user's goes on from where the user's scroll of the layout viewport is headed.
+        if (trigger == ScrollTrigger::UserInput && behavior == Bindings::ScrollBehavior::Smooth) {
+            if (auto destination = in_flight_user_scroll_destination(viewport_stable_node_id, animation_kind); destination.has_value())
+                relative_displacement = m_viewport_scroll_offset + delta - destination.value();
+        }
+    }
+
+    TemporaryExecutionContext temporary_execution_context { HTML::relevant_realm(*doc) };
+    return perform_a_scroll_of_a_scrolling_box(viewport_stable_node_id, {
+                                                                            .position = new_viewport_scroll_offset.to_type<CSSPixels>(),
+                                                                            .behavior = behavior,
+                                                                            .trigger = trigger,
+                                                                            .associated_element = doc->document_element(),
+                                                                            .relative_displacement = relative_displacement,
+                                                                            .animation_kind = animation_kind,
+                                                                            .scroll_kind = scroll_kind,
+                                                                            .instant_scroll_requester = instant_scroll_requester,
+                                                                        });
+}
+
+void LocalNavigable::reset_zoom()
+{
+    auto document = active_document();
+    if (!document)
+        return;
+    document->visual_viewport()->reset();
+    did_store_scroll_offset({ .node_id = document->unique_id(), .kind = Web::AsyncScrollNodeKind::VisualViewport }, Painting::CompositorScrollRequest::ProgrammaticJump);
+}
+
+bool LocalNavigable::zoom_visual_viewport(CSSPixelPoint position, double scale_delta)
+{
+    auto document = active_document();
+    if (!document)
+        return false;
+    auto visual_viewport = document->visual_viewport();
+    auto offset_before_zoom = visual_viewport->offset();
+    visual_viewport->zoom(position, scale_delta);
+    did_store_scroll_offset({ .node_id = document->unique_id(), .kind = Web::AsyncScrollNodeKind::VisualViewport }, Painting::CompositorScrollRequest::ProgrammaticJump);
+    return visual_viewport->offset() != offset_before_zoom;
+}
+
+bool LocalNavigable::has_inclusive_ancestor_with_visibility_hidden() const
+{
+    if (auto container = this->container()) {
+        if (auto const* values = container->style_inherited_set_values()) {
+            if (CSS::visibility_from_inherited_bits(values->bits) == CSS::Visibility::Hidden)
+                return true;
+        }
+        if (auto ancestor_navigable = container->document().navigable()) {
+            if (auto ancestor_container = ancestor_navigable->container())
+                return ancestor_navigable->has_inclusive_ancestor_with_visibility_hidden();
+        }
+    }
+    return false;
+}
+
+UserScrollGestureHold::UserScrollGestureHold(LocalNavigable& navigable, TakesOverMomentum takes_over_momentum)
+    : m_navigable(navigable)
+    , m_takes_over_momentum(takes_over_momentum)
+{
+}
+
+UserScrollGestureHold::~UserScrollGestureHold()
+{
+    // NB: Ending the hold of a box can end the gesture of every box that is not held, this one's included, so each box
+    //     is let go of before it is reported.
+    while (!m_held_boxes.is_empty()) {
+        auto box = m_held_boxes.take_last();
+        if (m_navigable)
+            m_navigable->end_user_scroll_gesture_hold({}, box);
+    }
+}
+
+void UserScrollGestureHold::hold(Web::AsyncScrollNodeStableID box)
+{
+    if (m_held_boxes.contains_slow(box))
+        return;
+    m_held_boxes.append(box);
+    if (m_navigable)
+        m_navigable->begin_user_scroll_gesture_hold({}, box);
+}
+
+void UserScrollGestureHold::release(Web::AsyncScrollNodeStableID box)
+{
+    if (!m_held_boxes.remove_first_matching([&](auto const& held_box) { return held_box == box; }))
+        return;
+    if (m_navigable)
+        m_navigable->end_user_scroll_gesture_hold({}, box);
+}
+
+}

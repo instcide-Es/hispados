@@ -1,0 +1,393 @@
+/*
+ * Copyright (c) 2021, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Forward.h>
+#include <AK/Function.h>
+#include <AK/HashMap.h>
+#include <AK/Noncopyable.h>
+#include <AK/OwnPtr.h>
+#include <AK/Queue.h>
+#include <AK/Time.h>
+#include <LibCore/Forward.h>
+#include <LibGC/Ptr.h>
+#include <LibGC/Weak.h>
+#include <LibJS/Forward.h>
+#include <LibWeb/Export.h>
+#include <LibWeb/HTML/EventLoop/TaskQueue.h>
+#include <LibWeb/HTML/Scripting/EnvironmentSettingsObjectAddress.h>
+#include <LibWebCommon/HighResolutionTime/DOMHighResTimeStamp.h>
+
+namespace Web::Layout::RustFFI {
+
+enum class FfiFlightBlocker : uint8_t;
+
+}
+
+namespace Web::HTML {
+
+// Where the event loop follows the pointer at rest: between two tasks, or as a rendering update begins, which brings
+// the style and layout up to date itself.
+enum class HoverUpdatePoint : u8 {
+    BetweenTasks,
+    RenderingUpdateBegins,
+};
+
+// What the render clock's lanes do with a document's running animations.
+enum class ClockAnimations : u8 {
+    // Leaves them alone: the event loop is idle, and its rendering updates run them.
+    Hold,
+    // Samples them: a task begins, beside which only the render clock runs them.
+    Run,
+};
+
+// Whether a committed frame records the document, rather than keep the display list the compositor has.
+enum class CommittedFrameRecords : bool {
+    No,
+    Yes,
+};
+
+class WEB_API EventLoop : public JS::Cell {
+    GC_CELL(EventLoop, JS::Cell);
+    GC_DECLARE_ALLOCATOR(EventLoop);
+
+    struct WEB_API PauseHandle {
+        PauseHandle(EventLoop&, JS::Object const& global, HighResolutionTime::DOMHighResTimeStamp);
+        ~PauseHandle();
+
+        AK_MAKE_NONCOPYABLE(PauseHandle);
+        AK_MAKE_NONMOVABLE(PauseHandle);
+
+        GC::Ref<EventLoop> event_loop;
+        GC::Ref<JS::Object const> global;
+        HighResolutionTime::DOMHighResTimeStamp const time_before_pause;
+    };
+
+public:
+    // Whether the style update of a document in a rendering update may fly beside the event loop, or what keeps it
+    // in step.
+    Layout::RustFFI::FfiFlightBlocker style_flight_blocker(DOM::Document&) const;
+
+    struct RenderingSchedulerCounters {
+        u64 update_requests { 0 };
+        u64 coalesced_update_requests { 0 };
+        u64 update_requests_while_rendering { 0 };
+        u64 opportunities_received { 0 };
+        u64 opportunities_that_queued_a_task { 0 };
+        u64 watchdog_opportunities { 0 };
+        u64 updates_run { 0 };
+        u64 update_microseconds { 0 };
+        u64 tasks_between_updates { 0 };
+        u64 task_microseconds_between_updates { 0 };
+        u64 posted_message_tasks_between_updates { 0 };
+        u64 posted_message_task_microseconds_between_updates { 0 };
+        u64 timer_tasks_between_updates { 0 };
+        u64 timer_task_microseconds_between_updates { 0 };
+        u64 networking_tasks_between_updates { 0 };
+        u64 networking_task_microseconds_between_updates { 0 };
+        u64 dom_manipulation_tasks_between_updates { 0 };
+        u64 dom_manipulation_task_microseconds_between_updates { 0 };
+        u64 paints { 0 };
+    };
+
+    enum class Type {
+        // https://html.spec.whatwg.org/multipage/webappapis.html#window-event-loop
+        Window,
+        // https://html.spec.whatwg.org/multipage/webappapis.html#worker-event-loop
+        Worker,
+        // https://html.spec.whatwg.org/multipage/webappapis.html#worklet-event-loop
+        Worklet,
+    };
+
+    virtual ~EventLoop() override;
+
+    Type type() const { return m_type; }
+
+    void run_upon_reaching_step_1(GC::Ref<GC::Function<void()>> task) { m_reached_step_1_tasks.append(task); }
+
+    TaskQueue& task_queue() { return *m_task_queue; }
+    TaskQueue const& task_queue() const { return *m_task_queue; }
+
+    bool microtask_queue_empty() const { return m_microtask_queue.is_empty(); }
+    void enqueue_microtask(GC::Ref<HTML::Task> task) { m_microtask_queue.enqueue(task); }
+
+    void spin_until(GC::Ref<GC::Function<bool()>> goal_condition);
+    void process();
+    void request_rendering_update();
+    enum class RenderingOpportunitySource {
+        Compositor,
+        LocalTimer,
+        Watchdog,
+        Manual,
+    };
+    bool rendering_opportunity(HighResolutionTime::DOMHighResTimeStamp frame_time, RenderingOpportunitySource);
+    void advance_last_render_opportunity_time(HighResolutionTime::DOMHighResTimeStamp frame_time);
+    bool rendering_task_queued_or_running() const { return m_rendering_task_queued || m_running_rendering_task; }
+    double last_render_opportunity_time() const { return m_last_render_opportunity_time; }
+    void queue_task_to_process_input_events();
+    bool running_synchronous_rendering_update() const { return m_running_synchronous_rendering_update; }
+
+    // https://html.spec.whatwg.org/multipage/browsing-the-web.html#termination-nesting-level
+    size_t termination_nesting_level() const { return m_termination_nesting_level; }
+    void increment_termination_nesting_level() { ++m_termination_nesting_level; }
+    void decrement_termination_nesting_level() { --m_termination_nesting_level; }
+
+    GC::Ptr<Task const> currently_running_task() const { return m_currently_running_task; }
+
+    u64 task_generation() const { return m_task_generation; }
+
+    void schedule();
+    void schedule_for_queued_task();
+
+    // A worker event loop is destroyed once its worker's closing flag is set and the script on it has finished, which
+    // is what resumes the run a worker steps.
+    void set_on_destroyed(Function<void()> on_destroyed) { m_on_destroyed = move(on_destroyed); }
+    void destroy_once_script_has_finished();
+
+    void perform_a_microtask_checkpoint();
+
+    // NB: Style and layout run no script. A temporary execution context they use ends with an empty stack, which would
+    //     otherwise perform a checkpoint in the middle of them, for microtasks queued outside any script.
+    void defer_microtask_checkpoints() { ++m_microtask_checkpoint_deferrals; }
+    void resume_microtask_checkpoints()
+    {
+        VERIFY(m_microtask_checkpoint_deferrals > 0);
+        --m_microtask_checkpoint_deferrals;
+    }
+
+    void register_document(Badge<DOM::Document>, DOM::Document&);
+    void unregister_document(Badge<DOM::Document>, DOM::Document&);
+    void document_navigable_did_change(Badge<DOM::Document>);
+
+    [[nodiscard]] Vector<GC::Root<DOM::Document>> documents_in_this_event_loop_matching(Function<bool(DOM::Document&)> callback) const;
+    void add_stats(JsonObject&) const;
+
+    Vector<GC::Root<HTML::Window>> same_loop_windows() const;
+
+    void push_onto_backup_incumbent_realm_stack(GC::Ref<EnvironmentSettingsObject>);
+    void pop_backup_incumbent_realm_stack();
+    EnvironmentSettingsObject& top_of_backup_incumbent_realm_stack();
+    bool is_backup_incumbent_realm_stack_empty() const { return m_backup_incumbent_realm_stack.is_empty(); }
+
+    // NB: The skip-when-determining-incumbent counter of an execution context is here, and only native code that runs
+    //     a callback above the context makes it nonzero, until the callback is done.
+    u32 skip_when_determining_incumbent_counter(JS::ExecutionContext const&) const;
+    void increment_skip_when_determining_incumbent_counter(JS::ExecutionContext const&);
+    void decrement_skip_when_determining_incumbent_counter(JS::ExecutionContext const&);
+
+    void register_environment_settings_object(Badge<EnvironmentSettingsObject>, EnvironmentSettingsObject&);
+    void unregister_environment_settings_object(Badge<EnvironmentSettingsObject>, EnvironmentSettingsObject&);
+    GC::Ptr<EnvironmentSettingsObject> environment_settings_object_at(EnvironmentSettingsObjectAddress) const;
+    GC::Ptr<EnvironmentSettingsObject> environment_settings_object_with_id(EnvironmentId const&) const;
+
+    double compute_deadline() const;
+
+    void did_reject_promise_without_handler() { m_has_rejected_promises_to_notify_about = true; }
+
+    void did_run_idle_callback() { m_task_generation_of_last_idle_callback = m_task_generation; }
+    void did_request_idle_callback();
+
+    enum class UpdateTheRendering {
+        No,
+        Yes,
+    };
+
+    [[nodiscard]] PauseHandle pause(UpdateTheRendering = UpdateTheRendering::Yes);
+    void unpause(Badge<PauseHandle>, JS::Object const& global, HighResolutionTime::DOMHighResTimeStamp);
+    bool execution_paused() const { return m_execution_pause_depth > 0; }
+
+    bool running_rendering_task() const { return m_running_rendering_task; }
+
+    // A rendering update's style update and its frame fly beside the event loop until the event loop takes them in
+    // between two tasks. A rendering update whose style update flies runs its steps from its style and layout on
+    // once the transaction is taken in.
+    void did_commit_frame(LocalNavigable&, CommittedFrameRecords);
+    void did_take_frame_in(LocalNavigable&);
+    // Waits for every frame the navigables committed to be presented, and takes it in.
+    void take_committed_frames_in();
+    // A test that injects its rendering opportunities injects its render clock's ticks as well.
+    // Called before a rendering update submits a recording, on a thread with a Core event loop.
+    void ensure_frame_completion_registered();
+    // Whether a frame flies beside the event loop, which has not taken it in yet.
+    bool has_frame_in_flight() const;
+    // Notes that the hover of `navigable` may be stale, which the event loop updates between two tasks, or as the next
+    // rendering update begins.
+    void note_hover_may_be_stale(LocalNavigable&);
+    // Whether a rendering update has let its frame fly and has not run its steps from its style and layout on yet.
+    bool has_rendering_update_in_flight() const { return m_rendering_update_in_flight; }
+    // Whether the layout of the rendering update in flight runs, or ran, beside the event loop.
+    bool lays_out_rendering_update_in_flight() const;
+    // Runs the steps of the rendering update whose style update flies, which take the transaction in.
+    void finish_rendering_update_in_flight();
+    // The serial number of the first rendering update that may gather a resize observation of `document` made now. A
+    // task beside a rendering update whose style and layout of the document have yet to run comes after the whole of it.
+    u64 first_rendering_update_to_gather_resize_observations_of(DOM::Document const&) const;
+    // Whether the rendering task lets the tasks behind it go first, for a document to finish loading.
+    bool rendering_task_yields_to_document_loading() const;
+    // A rendering task that would find a rendering update not yet finished keeps its place in the queue until the update
+    // has finished, rather than wait for it. One that finds a frame still in flight runs beside it.
+    bool holds_rendering_opportunity() const;
+    // Whether the tasks of `document` wait for the rendering update in flight: its steps after its style and layout
+    // deliver to the document's script what comes before any of its tasks. A task of no document waits whenever the
+    // tasks of any document do, and an update with intersection observations to update holds every task.
+    bool holds_tasks_of(DOM::Document const*) const;
+    // Whether the rendering update in flight holds back the tasks of `document`, as it does where no test holds it.
+    bool rendering_update_in_flight_holds_tasks_of_for_testing(DOM::Document const&) const;
+    void hold_next_frame_for_testing() { m_holds_next_frame_for_testing = true; }
+    void hold_next_layout_for_testing() { m_holds_next_layout_for_testing = true; }
+    void release_held_frames_for_testing();
+
+    void begin_rendering_trace() { m_rendering_trace = Vector<RenderingTraceLine> {}; }
+    String take_rendering_trace();
+    void note_rendering_trace_event(StringView);
+
+private:
+    bool rendering_update_in_flight_holds_tasks_of(DOM::Document const*) const;
+    explicit EventLoop(Type);
+
+    virtual void visit_edges(Visitor&) override;
+
+    [[nodiscard]] bool run_one_turn_of_the_processing_model();
+
+    void process_input_events() const;
+    Vector<GC::Root<DOM::Document>> take_clock_lanes_and_input_events_in(Optional<u64> update_serial);
+    void update_the_rendering();
+    // How the steps after style and layout take the layout of the docs: up to date, or as the update's layout that flew
+    // left it, whatever was written since.
+    enum class TakenLayout : u8 {
+        UpToDate,
+        AsItFlew,
+    };
+    struct RenderingUpdateInFlight;
+    // `update_in_flight` is the rendering update whose steps go on, if it flew.
+    void update_the_rendering_after_style_and_layout(Vector<GC::Root<DOM::Document>> const& docs, double frame_timestamp, u64 update_serial, TakenLayout = TakenLayout::UpToDate, RenderingUpdateInFlight const* update_in_flight = nullptr);
+    void update_whether_font_face_sets_are_pending_on_the_environment(Vector<GC::Root<DOM::Document>> const& docs, TakenLayout);
+    void finish_rendering_update(double update_start_time);
+    void resume_rendering_update_in_flight();
+    void finish_ended_rendering_update_in_flight();
+    bool finish_ended_rendering_update_as_its_layout_flew();
+    void note_script_ran_beside_rendering_update_in_flight();
+    // Goes on with the rendering update in flight where it has landed, and presents the recordings that have landed.
+    void take_finished_frames_in();
+    void update_hovers_that_may_be_stale(HoverUpdatePoint);
+    bool queue_hover_that_may_be_stale(LocalNavigable&);
+    bool let_layout_of_rendering_update_fly();
+    void note_clock_lanes(ClockAnimations);
+
+    Type m_type { Type::Window };
+
+    Vector<GC::Ref<GC::Function<void()>>> m_reached_step_1_tasks;
+
+    GC::Ptr<TaskQueue> m_task_queue;
+    Queue<GC::Ref<HTML::Task>> m_microtask_queue;
+
+    // https://html.spec.whatwg.org/multipage/webappapis.html#currently-running-task
+    GC::Ptr<Task> m_currently_running_task { nullptr };
+    u32 m_timer_nesting_level_for_microtasks { 0 };
+
+    u64 m_task_generation { 0 };
+
+    // https://html.spec.whatwg.org/multipage/webappapis.html#last-render-opportunity-time
+    double m_last_render_opportunity_time { 0 };
+    // https://html.spec.whatwg.org/multipage/webappapis.html#last-idle-period-start-time
+    double m_last_idle_period_start_time { 0 };
+
+    GC::Ptr<Platform::Timer> m_system_event_loop_timer;
+    GC::Ptr<Platform::Timer> m_idle_period_timer;
+    u64 m_task_generation_of_last_idle_callback { 0 };
+    bool m_idle_callback_requested_outside_idle_period { false };
+    bool m_may_have_idle_callbacks { false };
+    bool m_turn_requested_without_a_task { false };
+
+    // https://html.spec.whatwg.org/multipage/webappapis.html#performing-a-microtask-checkpoint
+    bool m_performing_a_microtask_checkpoint { false };
+    bool m_has_rejected_promises_to_notify_about { false };
+    u32 m_microtask_checkpoint_deferrals { 0 };
+
+    mutable Vector<GC::Weak<DOM::Document>> m_documents;
+    mutable bool m_documents_sort_dirty { false };
+    void ensure_documents_sorted() const;
+
+    // Used to implement step 4 of "perform a microtask checkpoint".
+    // NOTE: These are weak references! ESO registers and unregisters itself from the event loop manually.
+    OrderedHashMap<EnvironmentSettingsObjectAddress, RawPtr<EnvironmentSettingsObject>> m_related_environment_settings_objects;
+
+    // https://html.spec.whatwg.org/multipage/webappapis.html#backup-incumbent-settings-object-stack
+    Vector<GC::Ref<EnvironmentSettingsObject>> m_backup_incumbent_realm_stack;
+
+    struct SkipWhenDeterminingIncumbentCounter {
+        JS::ExecutionContext const* execution_context { nullptr };
+        u32 count { 0 };
+    };
+    // NB: Only the contexts whose counter is nonzero.
+    Vector<SkipWhenDeterminingIncumbentCounter, 4> m_skip_when_determining_incumbent_counters;
+
+    // https://html.spec.whatwg.org/multipage/browsing-the-web.html#termination-nesting-level
+    size_t m_termination_nesting_level { 0 };
+
+    size_t m_execution_pause_depth { 0 };
+
+    bool m_running_rendering_task { false };
+    bool m_running_synchronous_rendering_update { false };
+    bool m_rendering_task_queued { false };
+    bool m_input_events_task_queued { false };
+    bool m_rendering_update_requested { false };
+    MonotonicTime m_rendering_task_queued_time { MonotonicTime::now_coarse() };
+
+    RenderingSchedulerCounters m_rendering_scheduler_counters;
+    RenderingSchedulerCounters m_rendering_scheduler_counters_at_last_update;
+
+    struct RenderingTraceLine {
+        String text;
+        size_t repeats { 1 };
+    };
+    Optional<Vector<RenderingTraceLine>> m_rendering_trace;
+    double m_last_rendering_update_end_time { 0 };
+
+    GC::Ptr<GC::Function<void()>> m_rendering_task_function;
+
+    // The navigables whose committed frame flies beside the event loop, which has not taken it in yet.
+    Vector<GC::Ref<LocalNavigable>> m_navigables_with_frames_in_flight;
+    // The navigables whose hover may be stale: what is under their pointer at rest may have moved, or changed its cursor.
+    Vector<GC::Root<LocalNavigable>> m_navigables_with_hover_that_may_be_stale;
+    // The navigables whose active document a rendering update left a plan for the lane of its frame, which the event
+    // loop tells whether it runs a task.
+    Vector<GC::Ref<LocalNavigable>> m_navigables_with_clock_lanes;
+    bool m_frame_completion_registered { false };
+    bool m_holds_next_frame_for_testing { false };
+    bool m_holds_next_layout_for_testing { false };
+
+    OwnPtr<RenderingUpdateInFlight> m_rendering_update_in_flight;
+    // The serial number of the last rendering update that began: the lanes an update takes in wait for its own plan,
+    // not for that of an update before it.
+    u64 m_rendering_update_serial { 0 };
+    // How deep the event loop is spun inside a task.
+    size_t m_spin_depth { 0 };
+
+    bool destroy_if_requested();
+
+    bool m_destruction_requested { false };
+    Function<void()> m_on_destroyed;
+};
+
+// The event loop of the window agent, from that agent's thread only. Code that a worker can reach has to use
+// current_event_loop().
+WEB_API EventLoop& main_thread_event_loop();
+
+// The event loop of the agent on the current thread.
+WEB_API EventLoop& current_event_loop();
+
+// Notes an event of the rendering of the window agent for a test tracing it, as the next line of the trace.
+void note_rendering_trace_event(StringView);
+
+WEB_API void run_when_event_loop_reaches_step_1(GC::Ref<GC::Function<void()>> steps);
+WEB_API TaskID queue_a_task(HTML::Task::Source, GC::Ptr<EventLoop>, GC::Ptr<DOM::Document>, GC::Ref<GC::Function<void()>> steps, Task::Priority = Task::Priority::Normal, GC::Ptr<GC::Function<void()>> discard_steps = {});
+WEB_API TaskID queue_global_task(HTML::Task::Source, JS::Object&, GC::Ref<GC::Function<void()>> steps, Task::Priority = Task::Priority::Normal, GC::Ptr<GC::Function<void()>> discard_steps = {});
+WEB_API void queue_a_microtask(GC::Ptr<DOM::Document const>, GC::Ref<GC::Function<void()>> steps);
+void perform_a_microtask_checkpoint();
+
+}

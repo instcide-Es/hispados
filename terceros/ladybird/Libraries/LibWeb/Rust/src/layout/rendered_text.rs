@@ -1,0 +1,1062 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+use super::LayoutNodeArena;
+use super::node_data::NodeSlotId;
+use super::text_transform::{TextRenderingOptions, may_require_bidi_processing, render_text};
+use crate::css::css_enums::text_transform;
+use std::sync::Arc;
+
+/// Selects the beginning or end of a transformed span for offsets inside it.
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub enum RenderedTextBoundary {
+    Start,
+    End,
+}
+
+/// Length-preserving regions have an implicit one-to-one mapping. Edits name
+/// absolute DOM offsets and offsets relative to this layout node's rendered text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub struct RenderedTextEdit {
+    pub dom_start_offset: usize,
+    pub dom_length_in_code_units: usize,
+    pub rendered_start_offset: usize,
+    pub rendered_length_in_code_units: usize,
+}
+
+/// Rendered text and its DOM offset mapping are published and invalidated together.
+/// Rust builds this snapshot from source text and rendering options; layout and painting read it.
+/// It is immutable once built, so a publication shares it.
+#[derive(Default)]
+pub(crate) struct RenderedText {
+    pub(crate) text: Vec<u16>,
+    pub(crate) untransformed_text_is_ascii_whitespace: bool,
+    pub(crate) may_require_bidi_processing: bool,
+    dom_start_offset: usize,
+    dom_length_in_code_units: usize,
+    edits: Vec<RenderedTextEdit>,
+    /// The DOM text as it was written, kept only under an SVG box: SVG text shapes the element's
+    /// raw character data, not the white-space-collapsed rendering every other box uses. Text on a
+    /// path also reads text whose parent is not a text box, such as an <a> inside a <textPath>.
+    pub(crate) svg_source_text: Option<Box<[u16]>>,
+}
+
+/// What a text row publishes for the paint side: its rendered text, and the first-letter row that
+/// renders the start of its source.
+#[derive(Clone)]
+pub(crate) struct PublishedTextSlot {
+    pub(crate) generation: u8,
+    pub(crate) first_letter: NodeSlotId,
+    /// Whether the slice ends where a writing suggestion shows — so a caret at the slice's end paints in front of it.
+    pub(crate) precedes_writing_suggestion: bool,
+    pub(crate) rendered: Option<Arc<RenderedText>>,
+}
+
+impl Default for PublishedTextSlot {
+    fn default() -> Self {
+        Self {
+            generation: 0,
+            first_letter: NodeSlotId::INVALID,
+            precedes_writing_suggestion: false,
+            rendered: None,
+        }
+    }
+}
+
+/// A slot is the same as another when it publishes the same rendered text: rendered text is
+/// never written once it is shared.
+impl PartialEq for PublishedTextSlot {
+    fn eq(&self, other: &Self) -> bool {
+        self.generation == other.generation
+            && self.first_letter == other.first_letter
+            && self.precedes_writing_suggestion == other.precedes_writing_suggestion
+            && crate::cow_column::same_payload(self.rendered.as_ref(), other.rendered.as_ref(), |_, _| false)
+    }
+}
+
+/// A text row's rendered text, with what it was rendered for.
+#[derive(Clone, Default)]
+pub(crate) struct TextContent {
+    rendered: Arc<RenderedText>,
+    pub(super) rendering_key: Option<TextRenderingKey>,
+}
+
+impl std::ops::Deref for TextContent {
+    type Target = RenderedText;
+
+    fn deref(&self) -> &RenderedText {
+        &self.rendered
+    }
+}
+
+// DOM mutations explicitly invalidate this key. Style changes enroll the node
+// for comparison, so unrelated style updates do not rebuild or copy its text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct TextRenderingKey {
+    options: TextRenderingOptions,
+    source_length: usize,
+    locale: Option<Vec<u16>>,
+}
+
+pub(super) fn transform_uses_locale(transform: u8) -> bool {
+    matches!(
+        transform,
+        text_transform::LOWERCASE | text_transform::UPPERCASE | text_transform::CAPITALIZE
+    )
+}
+
+/// Enrolls the text under `root` whose casing or loose line breaking depends on its language, and answers whether there was
+/// any. This only enrolls text; source views are requested after DOM language invalidation completes.
+pub(crate) fn enroll_text_after_language_change(arena: &mut LayoutNodeArena, root: NodeSlotId) -> bool {
+    let depends_on_language = |arena: &LayoutNodeArena, node: NodeSlotId| {
+        if !super::node_facts::kind_is_text(arena.data(node).kind.get()) {
+            return false;
+        }
+        let parent = arena.data(node).parent.get();
+        !parent.is_invalid()
+            && arena.style_view(parent).is_some_and(|values| {
+                transform_uses_locale(values.inherited_text().text_transform)
+                    || values.line_break() == crate::css::css_enums::line_break::LOOSE
+            })
+    };
+    let mut enrolled = Vec::new();
+    {
+        let arena: &LayoutNodeArena = arena;
+        if super::node_facts::kind_is_text(arena.data(root).kind.get()) {
+            enrolled.extend(
+                arena
+                    .text_fragments(root)
+                    .as_slice()
+                    .iter()
+                    .copied()
+                    .filter(|&node| depends_on_language(arena, node)),
+            );
+        } else {
+            arena.for_each_node_in_layout_subtree_in_pre_order(root, |node| {
+                if depends_on_language(arena, node) {
+                    enrolled.push(node);
+                }
+            });
+        }
+    }
+    for &node in &enrolled {
+        arena.enroll_text_node_for_content_sync(node);
+    }
+    !enrolled.is_empty()
+}
+
+#[derive(Clone, PartialEq)]
+pub(crate) struct TextChunkCacheKey {
+    pub(crate) should_wrap_lines: bool,
+    pub(crate) should_respect_linebreaks: bool,
+    pub(crate) unidirectional_ltr: bool,
+    pub(crate) white_space_collapse: u8,
+    pub(crate) word_break: u8,
+    pub(crate) line_break: u8,
+    pub(crate) line_break_language: super::text_chunker::LineBreakLanguage,
+    pub(crate) breaks_after_soft_hyphen: bool,
+    pub(crate) font_variant_emoji: u8,
+    /// A frozen cascade only moves when a load fills one of its faces in. The chunks made against it hold it.
+    pub(crate) frozen_font_list: crate::css::style::pointer_key::PointerLookup,
+    /// How many times loads had filled faces of the frozen cascade in, each of which can move the
+    /// font of a chunk.
+    pub(crate) frozen_font_list_fill_generation: u32,
+    pub(crate) splits_at_orientation_changes: bool,
+}
+
+pub(crate) struct CachedTextChunks {
+    key: TextChunkCacheKey,
+    chunks: super::text_chunker::ChunkedText,
+    /// Spacing for which horizontal LTR preparation kept every original chunk separate.
+    pub(super) independent_chunks_for_spacing: std::sync::OnceLock<(u32, u32)>,
+}
+
+impl CachedTextChunks {
+    pub(crate) fn font_of(&self, chunk: &super::text_chunker::TextChunk) -> &libgfx_rust::font::FontHandle {
+        self.chunks.font_of(chunk)
+    }
+}
+
+impl std::ops::Deref for CachedTextChunks {
+    type Target = [super::text_chunker::TextChunk];
+
+    fn deref(&self) -> &Self::Target {
+        &self.chunks
+    }
+}
+
+impl TextContent {
+    #[cfg(test)]
+    pub(crate) fn for_test(text: &str, dom_start: usize, dom_length: usize, edits: Vec<RenderedTextEdit>) -> Self {
+        Self {
+            rendered: Arc::new(RenderedText {
+                text: text.encode_utf16().collect(),
+                dom_start_offset: dom_start,
+                dom_length_in_code_units: dom_length,
+                edits,
+                ..RenderedText::default()
+            }),
+            ..Self::default()
+        }
+    }
+
+    /// The rendered text, as a text row publishes it.
+    pub(crate) fn rendered(&self) -> &Arc<RenderedText> {
+        &self.rendered
+    }
+
+    pub(super) fn rendered_text_edits(&self) -> &[RenderedTextEdit] {
+        &self.edits
+    }
+
+    pub(super) fn is_password_input(&self) -> bool {
+        self.rendering_key
+            .as_ref()
+            .is_some_and(|key| key.options.is_password_input)
+    }
+}
+
+/// What layout keeps beside the rendered text of the text rows it lays out: the chunks the last run that chunked a row
+/// made, and the row's grapheme segmenter. Each keeps the rendered text it was made for, which tells whether the row's
+/// text is still that text. They are indexed by the row's text state in the arena, so boxes without text take no room.
+pub(crate) struct TextMemos {
+    /// Written in place, while a fork of the arena reads them as they were when it was made.
+    chunks: super::pass_column::ForkSharedRows<Option<ChunksOfText>>,
+    grapheme_segmenters:
+        super::pass_column::PassColumn<super::pass_column::ExclusiveRow<Option<GraphemeSegmenterOfText>>>,
+}
+
+/// The chunks a run made of a row's rendered text, and that text.
+#[derive(Clone)]
+struct ChunksOfText {
+    rendered: Arc<RenderedText>,
+    chunks: Arc<CachedTextChunks>,
+}
+
+/// A grapheme segmenter and the rendered text it segments, which it points into, and so drops before.
+struct GraphemeSegmenterOfText {
+    segmenter: super::text_chunker::GraphemeSegmenter,
+    rendered: Arc<RenderedText>,
+}
+
+impl Default for TextMemos {
+    fn default() -> Self {
+        Self {
+            chunks: super::pass_column::ForkSharedRows::with_rows_of_no_slot(),
+            grapheme_segmenters: super::pass_column::PassColumn::with_rows_of_no_slot(),
+        }
+    }
+}
+
+impl TextMemos {
+    /// The memos of a fork of the arena, which keeps the chunks and makes grapheme segmenters anew.
+    pub(crate) fn fork(&self) -> Self {
+        Self {
+            chunks: self.chunks.fork(),
+            grapheme_segmenters: super::pass_column::PassColumn::with_rows_of_no_slot(),
+        }
+    }
+
+    /// The chunks of the text row `node`, whose rendered text is `rendered`, for `key`, made by `compute` where the last
+    /// run that chunked the row's text did so for another key.
+    pub(crate) fn text_chunks(
+        &self,
+        text_state: u32,
+        rendered: &Arc<RenderedText>,
+        key: &TextChunkCacheKey,
+        compute: impl FnOnce() -> super::text_chunker::ChunkedText,
+    ) -> Arc<CachedTextChunks> {
+        let index = text_state as usize;
+        let memoized = self.chunks.with_row(index, |memo| match memo {
+            Some(Some(memo)) if Arc::ptr_eq(&memo.rendered, rendered) && memo.chunks.key == *key => {
+                Some(memo.chunks.clone())
+            }
+            _ => None,
+        });
+        if let Some(memoized) = memoized {
+            return memoized;
+        }
+
+        // A nested measurement can request a different key while an iterator
+        // still uses the previous chunks. Keep the chunks and their fonts alive
+        // until that iterator finishes, even if this snapshot is replaced.
+        let entry = Arc::new(CachedTextChunks {
+            key: key.clone(),
+            chunks: compute(),
+            independent_chunks_for_spacing: Default::default(),
+        });
+        self.chunks.with_row_mut(index, |memo| {
+            *memo = Some(ChunksOfText {
+                rendered: rendered.clone(),
+                chunks: entry.clone(),
+            });
+        });
+        entry
+    }
+
+    /// Runs `read` with the grapheme segmenter of the text row `node`, whose rendered text is `rendered`.
+    pub(crate) fn with_grapheme_segmenter<R>(
+        &self,
+        text_state: u32,
+        rendered: &Arc<RenderedText>,
+        read: impl FnOnce(&super::text_chunker::GraphemeSegmenter) -> R,
+    ) -> R {
+        self.grapheme_segmenters.with_row_mut(text_state as usize, |memo| {
+            let memo = memo.get_mut();
+            if !memo.as_ref().is_some_and(|memo| Arc::ptr_eq(&memo.rendered, rendered)) {
+                *memo = Some(GraphemeSegmenterOfText {
+                    segmenter: super::text_chunker::GraphemeSegmenter::new(&rendered.text),
+                    rendered: rendered.clone(),
+                });
+            }
+            read(&memo.as_ref().expect("the memo was just made").segmenter)
+        })
+    }
+
+    pub(super) fn cover_text_states(&mut self, text_state_count: usize) {
+        self.chunks.cover_slots(text_state_count);
+        self.grapheme_segmenters.cover_slots(text_state_count);
+    }
+
+    /// Lets go of what the memos keep for the row in `slot`, which the arena freed.
+    pub(crate) fn forget(&mut self, text_state: u32) {
+        let index = text_state as usize;
+        self.chunks.reset_row_where(index, Option::is_some);
+        if let Some(segmenter) = self.grapheme_segmenters.row_mut(index) {
+            *segmenter.get_mut() = None;
+        }
+    }
+}
+
+impl RenderedText {
+    pub(super) fn dom_range(&self) -> std::ops::Range<usize> {
+        self.dom_start_offset..self.dom_start_offset + self.dom_length_in_code_units
+    }
+
+    pub(crate) fn has_same_content_as(&self, other: &Self) -> bool {
+        self.text == other.text
+            && self.untransformed_text_is_ascii_whitespace == other.untransformed_text_is_ascii_whitespace
+            && self.may_require_bidi_processing == other.may_require_bidi_processing
+            && self.dom_start_offset == other.dom_start_offset
+            && self.dom_length_in_code_units == other.dom_length_in_code_units
+            && self.edits == other.edits
+            && self.svg_source_text == other.svg_source_text
+    }
+
+    pub(crate) fn dom_offset_for_rendered_text_offset(&self, offset: usize, boundary: RenderedTextBoundary) -> usize {
+        let offset = offset.min(self.text.len());
+        let mut previous_dom_end = self.dom_start_offset;
+        let mut previous_rendered_end = 0;
+        for edit in &self.edits {
+            if offset < edit.rendered_start_offset {
+                return previous_dom_end + offset - previous_rendered_end;
+            }
+
+            let dom_end = edit.dom_start_offset + edit.dom_length_in_code_units;
+            let rendered_end = edit.rendered_start_offset + edit.rendered_length_in_code_units;
+            if offset == edit.rendered_start_offset {
+                if edit.rendered_length_in_code_units > 0 || matches!(boundary, RenderedTextBoundary::End) {
+                    return edit.dom_start_offset;
+                }
+            } else if offset < rendered_end {
+                return match boundary {
+                    RenderedTextBoundary::Start => edit.dom_start_offset,
+                    RenderedTextBoundary::End => dom_end,
+                };
+            } else if offset == rendered_end && matches!(boundary, RenderedTextBoundary::End) {
+                return dom_end;
+            }
+
+            previous_dom_end = dom_end;
+            previous_rendered_end = rendered_end;
+        }
+        previous_dom_end + offset - previous_rendered_end
+    }
+
+    pub(crate) fn rendered_text_offset_for_dom_offset(&self, offset: usize, boundary: RenderedTextBoundary) -> usize {
+        let offset = offset.clamp(
+            self.dom_start_offset,
+            self.dom_start_offset + self.dom_length_in_code_units,
+        );
+        rendered_text_offset_for_dom_offset(&self.edits, self.dom_start_offset, offset, boundary).min(self.text.len())
+    }
+
+    /// Calls `callback` with each DOM offset from `start` through `end`, in order, and the rendered offset that
+    /// rendered_text_offset_for_dom_offset() maps it to, walking the edits once for the whole range rather than once
+    /// per offset.
+    pub(crate) fn for_each_rendered_text_offset_of_dom_offsets(
+        &self,
+        start: usize,
+        end: usize,
+        boundary: RenderedTextBoundary,
+        mut callback: impl FnMut(usize, usize),
+    ) {
+        // Start past the edits that end before the first offset, since offsets only grow and the loop below would
+        // just step over them; so a range late in a text with many edits doesn't walk them all again.
+        let first = start.clamp(
+            self.dom_start_offset,
+            self.dom_start_offset + self.dom_length_in_code_units,
+        );
+        let mut edit_index = self
+            .edits
+            .partition_point(|edit| edit.dom_start_offset + edit.dom_length_in_code_units < first);
+        let (mut previous_dom_end, mut previous_rendered_end) = match edit_index.checked_sub(1) {
+            Some(index) => {
+                let edit = &self.edits[index];
+                (
+                    edit.dom_start_offset + edit.dom_length_in_code_units,
+                    edit.rendered_start_offset + edit.rendered_length_in_code_units,
+                )
+            }
+            None => (self.dom_start_offset, 0),
+        };
+        for dom_offset in start..=end {
+            let offset = dom_offset.clamp(
+                self.dom_start_offset,
+                self.dom_start_offset + self.dom_length_in_code_units,
+            );
+            let rendered_offset = loop {
+                let Some(edit) = self.edits.get(edit_index) else {
+                    break previous_rendered_end + offset - previous_dom_end;
+                };
+                if offset < edit.dom_start_offset {
+                    break previous_rendered_end + offset - previous_dom_end;
+                }
+                let dom_end = edit.dom_start_offset + edit.dom_length_in_code_units;
+                let rendered_end = edit.rendered_start_offset + edit.rendered_length_in_code_units;
+                if offset <= dom_end {
+                    break if offset == edit.dom_start_offset {
+                        edit.rendered_start_offset
+                    } else if offset == dom_end {
+                        rendered_end
+                    } else {
+                        match boundary {
+                            RenderedTextBoundary::Start => edit.rendered_start_offset,
+                            RenderedTextBoundary::End => rendered_end,
+                        }
+                    };
+                }
+                // Offsets only grow, so an edit the offset is past is past every later offset too.
+                previous_dom_end = dom_end;
+                previous_rendered_end = rendered_end;
+                edit_index += 1;
+            };
+            callback(dom_offset, rendered_offset.min(self.text.len()));
+        }
+    }
+}
+
+pub(super) fn rendered_text_offset_for_dom_offset(
+    edits: &[RenderedTextEdit],
+    dom_base_offset: usize,
+    offset: usize,
+    boundary: RenderedTextBoundary,
+) -> usize {
+    let mut previous_dom_end = dom_base_offset;
+    let mut previous_rendered_end = 0;
+    for edit in edits {
+        if offset < edit.dom_start_offset {
+            return previous_rendered_end + offset - previous_dom_end;
+        }
+
+        let dom_end = edit.dom_start_offset + edit.dom_length_in_code_units;
+        let rendered_end = edit.rendered_start_offset + edit.rendered_length_in_code_units;
+        if offset <= dom_end {
+            if offset == edit.dom_start_offset {
+                return edit.rendered_start_offset;
+            }
+            if offset == dom_end {
+                return rendered_end;
+            }
+            return match boundary {
+                RenderedTextBoundary::Start => edit.rendered_start_offset,
+                RenderedTextBoundary::End => rendered_end,
+            };
+        }
+
+        previous_dom_end = dom_end;
+        previous_rendered_end = rendered_end;
+    }
+    previous_rendered_end + offset - previous_dom_end
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub struct FfiTextSourceRange {
+    pub start: usize,
+    pub length: usize,
+}
+
+/// Layout fragments of one DOM text node, in source order with the primary last.
+pub(crate) struct TextFragments {
+    pub nodes: [NodeSlotId; 2],
+    pub length: usize,
+}
+
+impl TextFragments {
+    pub(crate) fn as_slice(&self) -> &[NodeSlotId] {
+        &self.nodes[..self.length]
+    }
+}
+
+/// The code units a published string spells, without widening Latin-1 storage to count them.
+pub(super) fn length_in_code_units(text: &ak::Utf16String) -> usize {
+    match text.as_units() {
+        ak::Utf16StringUnits::Ascii(units) | ak::Utf16StringUnits::Latin1(units) => units.len(),
+        ak::Utf16StringUnits::Utf16(units) => units.len(),
+    }
+}
+
+/// Publishes the rendered text of `id`, a live text node with a styled parent, where what it renders changed.
+pub(super) fn ensure_text_content(arena: &mut LayoutNodeArena, id: NodeSlotId) {
+    if arena.text_content_needs_sync(id) {
+        sync_text_content(arena, id);
+    }
+}
+
+fn sync_text_content(arena: &mut LayoutNodeArena, id: NodeSlotId) {
+    let parent = arena.data(id).parent.get();
+    let parent_style = arena.style_view(parent).expect("text parent must have style");
+    let inherited = parent_style.inherited_text();
+    let uses_locale = transform_uses_locale(inherited.text_transform);
+    let input = arena.published_text_source(id, uses_locale);
+    let source_length = length_in_code_units(&input.data);
+    let source_range = arena.text_source_range(id, source_length);
+    let options = TextRenderingOptions {
+        text_transform: inherited.text_transform,
+        text_security: inherited.text_security,
+        white_space_collapse: parent_style.white_space_collapse(),
+        is_password_input: input.is_password_input,
+        dom_start_offset: source_range.start,
+        dom_length_in_code_units: source_range.length,
+    };
+    let key = TextRenderingKey {
+        options,
+        source_length,
+        locale: input.locale,
+    };
+    if !arena
+        .text_content(id)
+        .is_some_and(|content| content.rendering_key.as_ref() == Some(&key))
+    {
+        let source = input.data.to_utf16().into_owned();
+        let masks_text =
+            options.text_security != crate::css::css_enums::text_security::NONE || options.is_password_input;
+        let untransformed_text_is_ascii_whitespace =
+            !masks_text && source.iter().all(|unit| matches!(unit, 0x09..=0x0d | 0x20));
+        let is_svg = super::node_facts::kind_is_svg_box(arena.data(parent).kind.get());
+        let svg_source_text = (is_svg && !masks_text).then(|| Box::from(&source[..]));
+        let rendered = render_text(source, key.locale.as_deref(), key.options);
+        let svg_source_text = svg_source_text.or_else(|| is_svg.then(|| Box::from(&rendered.text[..])));
+        let content = TextContent {
+            rendered: Arc::new(RenderedText {
+                svg_source_text,
+                may_require_bidi_processing: may_require_bidi_processing(&rendered.text),
+                text: rendered.text,
+                untransformed_text_is_ascii_whitespace,
+                dom_start_offset: source_range.start,
+                dom_length_in_code_units: source_range.length,
+                edits: rendered.edits,
+            }),
+            rendering_key: Some(key),
+        };
+        arena.set_text_content(id, content);
+    }
+    arena.finish_text_content_sync(id);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::layout::SLOTS_PER_CHUNK;
+    use crate::layout::node_data::NodeKind;
+    use crate::painting::paint_read::PaintRead;
+    use RenderedTextBoundary::{End, Start};
+
+    fn content(text: &str, dom_start: usize, dom_length: usize, edits: Vec<RenderedTextEdit>) -> TextContent {
+        TextContent::for_test(text, dom_start, dom_length, edits)
+    }
+
+    fn edit(dom_start: usize, dom_length: usize, rendered_start: usize, rendered_length: usize) -> RenderedTextEdit {
+        RenderedTextEdit {
+            dom_start_offset: dom_start,
+            dom_length_in_code_units: dom_length,
+            rendered_start_offset: rendered_start,
+            rendered_length_in_code_units: rendered_length,
+        }
+    }
+
+    #[test]
+    fn text_chunk_cache_tracks_line_break_language_changes() {
+        use crate::layout::text_chunker::{ChunkedText, LineBreakLanguage};
+        let content = content("文・", 0, 2, Vec::new());
+        let frozen_font_list =
+            libgfx_rust::font::FrozenFontListRef::new(std::sync::Arc::new(libgfx_rust::font::FrozenFontList::empty()));
+        let mut key = TextChunkCacheKey {
+            should_wrap_lines: true,
+            should_respect_linebreaks: false,
+            unidirectional_ltr: true,
+            white_space_collapse: 0,
+            word_break: 0,
+            line_break: crate::css::css_enums::line_break::LOOSE,
+            line_break_language: LineBreakLanguage::Japanese,
+            breaks_after_soft_hyphen: true,
+            font_variant_emoji: 0,
+            frozen_font_list: crate::css::style::pointer_key::PointerLookup::new(&frozen_font_list, ()),
+            frozen_font_list_fill_generation: 0,
+            splits_at_orientation_changes: false,
+        };
+        let mut memos = TextMemos::default();
+        memos.cover_text_states(1);
+        let text_state = 0;
+        let mut previous = memos.text_chunks(text_state, content.rendered(), &key, ChunkedText::default);
+        for language in [
+            LineBreakLanguage::Other,
+            LineBreakLanguage::Chinese,
+            LineBreakLanguage::Japanese,
+        ] {
+            key.line_break_language = language;
+            let chunks = memos.text_chunks(text_state, content.rendered(), &key, ChunkedText::default);
+            assert!(!std::sync::Arc::ptr_eq(&previous, &chunks));
+            let hit = memos.text_chunks(text_state, content.rendered(), &key, || {
+                panic!("unchanged language should reuse chunks")
+            });
+            assert!(std::sync::Arc::ptr_eq(&chunks, &hit));
+            previous = chunks;
+        }
+    }
+
+    #[test]
+    fn text_chunk_users_survive_cache_and_snapshot_replacement() {
+        use super::TextChunkCacheKey;
+        use crate::layout::text_chunker::{ChunkedText, TextChunk};
+        use std::sync::Arc;
+
+        let mut arena = LayoutNodeArena::new();
+        let mut scratch = crate::layout::run_state::LayoutScratch::default();
+        let node = arena.allocate_for_test().slot;
+        arena.set_text_content(node, content("hello", 0, 5, Vec::new()));
+        scratch.apply_memo_invalidations(&mut arena);
+        let text_chunks = |scratch: &crate::layout::run_state::LayoutScratch,
+                           arena: &LayoutNodeArena,
+                           key: &TextChunkCacheKey,
+                           compute: &dyn Fn() -> ChunkedText| {
+            scratch.text_memos().text_chunks(
+                arena.text_state_index(node).unwrap(),
+                arena.text_content(node).unwrap().rendered(),
+                key,
+                compute,
+            )
+        };
+        let frozen_font_list =
+            libgfx_rust::font::FrozenFontListRef::new(std::sync::Arc::new(libgfx_rust::font::FrozenFontList::empty()));
+        let key = TextChunkCacheKey {
+            should_wrap_lines: true,
+            should_respect_linebreaks: false,
+            unidirectional_ltr: true,
+            white_space_collapse: 0,
+            word_break: 0,
+            line_break: crate::css::css_enums::line_break::AUTO,
+            line_break_language: crate::layout::text_chunker::LineBreakLanguage::Other,
+            breaks_after_soft_hyphen: true,
+            font_variant_emoji: 0,
+            frozen_font_list: crate::css::style::pointer_key::PointerLookup::new(&frozen_font_list, ()),
+            frozen_font_list_fill_generation: 0,
+            splits_at_orientation_changes: false,
+        };
+        let chunk = TextChunk {
+            start: 0,
+            length: 5,
+            font_index: 0,
+            has_breaking_newline: false,
+            has_breaking_tab: false,
+            is_all_whitespace: false,
+            can_break_after: true,
+            text_type: 0,
+        };
+        let font = unsafe { libgfx_rust::font::FontHandle::intern(std::ptr::dangling()) };
+        let chunked_hello = || ChunkedText {
+            chunks: vec![chunk],
+            fonts: Box::new([font.clone()]),
+            frozen_font_list_held_for_memo_key: None,
+        };
+        let original = text_chunks(&scratch, &arena, &key, &chunked_hello);
+        let hit = text_chunks(&scratch, &arena, &key, &|| panic!("matching chunks should be cached"));
+        assert!(Arc::ptr_eq(&original, &hit));
+        drop(hit);
+        let original_weak = Arc::downgrade(&original);
+        let replacement = text_chunks(
+            &scratch,
+            &arena,
+            &TextChunkCacheKey {
+                should_wrap_lines: false,
+                ..key.clone()
+            },
+            &ChunkedText::default,
+        );
+        assert!(replacement.is_empty());
+        assert_eq!(&**original, std::slice::from_ref(&chunk));
+        assert_eq!(Arc::strong_count(&original), 1);
+        drop(original);
+        assert!(original_weak.upgrade().is_none());
+
+        let replacement_weak = Arc::downgrade(&replacement);
+        let published = arena.publish_paint_facts().text;
+        let published_text = |published: &crate::cow_column::ColumnSnapshot<PublishedTextSlot, SLOTS_PER_CHUNK>| {
+            published
+                .get(node.slot_index() as usize)
+                .unwrap()
+                .rendered
+                .clone()
+                .unwrap()
+        };
+        let published_hello = published_text(&published);
+        arena.set_text_content(node, content("hello", 0, 5, Vec::new()));
+        scratch.apply_memo_invalidations(&mut arena);
+        assert_eq!(Arc::strong_count(&replacement), 2);
+        // The same content keeps the rendered text the publication shares.
+        assert!(std::sync::Arc::ptr_eq(
+            &published_hello,
+            &published_text(&arena.publish_paint_facts().text)
+        ));
+        arena.set_text_content(node, content("goodbye", 0, 7, Vec::new()));
+        scratch.apply_memo_invalidations(&mut arena);
+        assert_eq!(Arc::strong_count(&replacement), 1);
+        // A publication keeps the rendered text it was made with.
+        assert_eq!(
+            published_text(&published).text,
+            "hello".encode_utf16().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            published_text(&arena.publish_paint_facts().text).text,
+            "goodbye".encode_utf16().collect::<Vec<_>>()
+        );
+        let new_chunks = text_chunks(&scratch, &arena, &key, &chunked_hello);
+        assert_eq!(&**new_chunks, std::slice::from_ref(&chunk));
+        drop(replacement);
+        assert!(replacement_weak.upgrade().is_none());
+        let _ = arena.free_subtree(node);
+        scratch.apply_memo_invalidations(&mut arena);
+        assert_eq!(Arc::strong_count(&new_chunks), 1);
+    }
+
+    #[test]
+    fn kept_prepared_inline_content_goes_with_an_epoch_bump_or_a_freed_slot_and_survives_a_fork() {
+        use crate::layout::LayoutPass;
+        use crate::layout::fc_run_cache::run_root_validity;
+        use crate::layout::prepared_inline_content::PreparedInlineContent;
+        use crate::layout::run_state::LayoutScratch;
+        use std::sync::Arc;
+
+        let mut arena = LayoutNodeArena::new();
+        let mut scratch = LayoutScratch::default();
+        let block = arena.allocate_for_test().slot;
+        scratch.apply_memo_invalidations(&mut arena);
+        let keep = |arena: &LayoutNodeArena, scratch: &LayoutScratch| {
+            let host_findings_outside_runs = crate::layout::run_state::HostFindingsSink::default();
+            let validity = run_root_validity(
+                &LayoutPass::for_test(arena, scratch, &host_findings_outside_runs),
+                block,
+            );
+            let prepared = Arc::new(PreparedInlineContent {
+                validity,
+                items: Box::default(),
+                box_events: Box::default(),
+                fonts: Box::default(),
+                tab_stops: Box::default(),
+                tab_stop_items: Box::default(),
+                soft_wraps: Box::default(),
+            });
+            scratch.prepared_inline_content_memos().keep(block, prepared.clone());
+            (validity, Arc::downgrade(&prepared))
+        };
+        let kept = |scratch: &LayoutScratch, validity| scratch.prepared_inline_content_memos().kept(block, validity);
+
+        let (validity, prepared) = keep(&arena, &scratch);
+        arena.clear_committed_fragment_link(block);
+        scratch.apply_memo_invalidations(&mut arena);
+        assert!(kept(&scratch, validity).is_some_and(|kept| Arc::ptr_eq(&kept, &prepared.upgrade().unwrap())));
+
+        let fork = scratch.fork();
+        arena.invalidate_fragments_of_self_and_ancestors_for_change_that_sizes_no_box(block);
+        scratch.apply_memo_invalidations(&mut arena);
+        assert!(kept(&scratch, validity).is_none());
+        assert!(kept(&fork, validity).is_some_and(|kept| Arc::ptr_eq(&kept, &prepared.upgrade().unwrap())));
+        drop(fork);
+        scratch.apply_memo_invalidations(&mut arena);
+        assert!(prepared.upgrade().is_none());
+
+        let (validity, prepared) = keep(&arena, &scratch);
+        assert!(kept(&scratch, validity).is_some());
+        let _ = arena.free_subtree(block);
+        scratch.apply_memo_invalidations(&mut arena);
+        assert!(prepared.upgrade().is_none());
+    }
+
+    #[test]
+    fn identity_mapping_clamps_offsets_to_the_dom_slice() {
+        let text = content("hello", 3, 5, Vec::new());
+        for boundary in [Start, End] {
+            assert_eq!(text.rendered_text_offset_for_dom_offset(0, boundary), 0);
+            assert_eq!(text.rendered_text_offset_for_dom_offset(5, boundary), 2);
+            assert_eq!(text.rendered_text_offset_for_dom_offset(usize::MAX, boundary), 5);
+            assert_eq!(text.dom_offset_for_rendered_text_offset(0, boundary), 3);
+            assert_eq!(text.dom_offset_for_rendered_text_offset(2, boundary), 5);
+            assert_eq!(text.dom_offset_for_rendered_text_offset(usize::MAX, boundary), 8);
+        }
+    }
+
+    #[test]
+    fn expansions_contractions_and_deletions_preserve_boundary_choices() {
+        // Combine the edits used for uppercasing sharp s, masking a surrogate
+        // pair, and deleting a combining dot in contextual lowercasing.
+        let text = content(
+            "SSa●iX",
+            0,
+            7,
+            vec![edit(0, 1, 0, 2), edit(2, 2, 3, 1), edit(5, 1, 5, 0)],
+        );
+        let dom_boundaries = [(0, 0), (0, 1), (1, 1), (2, 2), (4, 4), (6, 5), (7, 7)];
+        for (offset, (start, end)) in dom_boundaries.into_iter().enumerate() {
+            assert_eq!(text.dom_offset_for_rendered_text_offset(offset, Start), start);
+            assert_eq!(text.dom_offset_for_rendered_text_offset(offset, End), end);
+        }
+        let rendered_boundaries = [(0, 0), (2, 2), (3, 3), (3, 4), (4, 4), (5, 5), (5, 5), (6, 6)];
+        for (offset, (start, end)) in rendered_boundaries.into_iter().enumerate() {
+            assert_eq!(text.rendered_text_offset_for_dom_offset(offset, Start), start);
+            assert_eq!(text.rendered_text_offset_for_dom_offset(offset, End), end);
+        }
+    }
+
+    #[test]
+    fn first_letter_mapping_uses_absolute_dom_and_slice_relative_rendered_offsets() {
+        let complete_edits = [edit(2, 1, 2, 2)];
+        assert_eq!(rendered_text_offset_for_dom_offset(&complete_edits, 0, 2, Start), 2);
+        assert_eq!(rendered_text_offset_for_dom_offset(&complete_edits, 0, 3, End), 4);
+
+        let first_letter = content("SS", 2, 1, vec![edit(2, 1, 0, 2)]);
+        assert_eq!(first_letter.dom_offset_for_rendered_text_offset(1, Start), 2);
+        assert_eq!(first_letter.dom_offset_for_rendered_text_offset(1, End), 3);
+        assert_eq!(first_letter.rendered_text_offset_for_dom_offset(0, Start), 0);
+        assert_eq!(first_letter.rendered_text_offset_for_dom_offset(usize::MAX, End), 2);
+
+        let remainder = content("ello", 3, 4, Vec::new());
+        assert_eq!(remainder.dom_offset_for_rendered_text_offset(0, Start), 3);
+        assert_eq!(remainder.rendered_text_offset_for_dom_offset(4, End), 1);
+    }
+
+    #[test]
+    fn mapping_only_publication_invalidates_layout_without_a_cpp_shell() {
+        let mut arena = LayoutNodeArena::new();
+        let parent = arena.allocate_for_test().slot;
+        let node = arena.allocate_for_test().slot;
+        arena.write_shape(parent).set_kind(NodeKind::BlockContainer);
+        arena.write_shape(node).set_kind(NodeKind::TextNode);
+        arena.write_shape(node).set_parent(parent);
+        let sharp_s_first = || content("SSS", 0, 2, vec![edit(0, 1, 0, 2)]);
+        arena.set_text_content(node, sharp_s_first());
+        let epoch = arena.data(parent).fragment_cache_epoch;
+        assert_eq!(arena.rendered_text_offset_for_dom_offset(node, 1, Start), 2);
+        arena.set_text_content(node, sharp_s_first());
+        assert_eq!(arena.data(parent).fragment_cache_epoch, epoch);
+
+        arena.set_text_content(node, content("SSS", 0, 2, vec![edit(1, 1, 1, 2)]));
+        assert_ne!(arena.data(parent).fragment_cache_epoch, epoch);
+        assert_eq!(arena.rendered_text_offset_for_dom_offset(node, 1, Start), 1);
+        assert_eq!(arena.dom_offset_for_rendered_text_offset(node, 2, End), 2);
+    }
+
+    #[test]
+    fn refreshing_the_key_preserves_identical_text_storage_and_layout() {
+        let mut arena = LayoutNodeArena::new();
+        let node = arena.allocate_for_test().slot;
+        arena.write_shape(node).set_kind(NodeKind::TextNode);
+        let key = TextRenderingKey {
+            options: TextRenderingOptions {
+                text_transform: text_transform::UPPERCASE,
+                white_space_collapse: crate::css::css_enums::white_space_collapse::PRESERVE,
+                text_security: crate::css::css_enums::text_security::NONE,
+                is_password_input: false,
+                dom_start_offset: 0,
+                dom_length_in_code_units: 3,
+            },
+            source_length: 3,
+            locale: None,
+        };
+        let mut original = content("123", 0, 3, Vec::new());
+        original.rendering_key = Some(key.clone());
+        arena.set_text_content(node, original);
+        let storage = arena.text_content(node).unwrap().text.as_ptr();
+        let epoch = arena.data(node).fragment_cache_epoch;
+
+        arena.invalidate_text_content(node);
+        assert!(arena.text_content(node).unwrap().rendering_key.is_none());
+        let mut new_key = key;
+        new_key.options.text_transform = text_transform::LOWERCASE;
+        let mut rebuilt = content("123", 0, 3, Vec::new());
+        rebuilt.rendering_key = Some(new_key.clone());
+        arena.set_text_content(node, rebuilt);
+        arena.finish_text_content_sync(node);
+
+        assert_eq!(arena.text_content(node).unwrap().rendering_key.as_ref(), Some(&new_key));
+        assert_eq!(arena.text_content(node).unwrap().text.as_ptr(), storage);
+        assert_eq!(arena.data(node).fragment_cache_epoch, epoch);
+        assert!(arena.pending_text_nodes_for_content_sync().is_empty());
+    }
+
+    #[test]
+    fn native_style_and_dom_notifications_share_one_pending_enrollment() {
+        let mut arena = LayoutNodeArena::new();
+        let node = arena.allocate_for_test().slot;
+        arena.write_shape(node).set_kind(NodeKind::TextNode);
+        arena.enroll_text_node_for_content_sync(node);
+        arena.invalidate_text_content(node);
+        arena.enroll_text_node_for_content_sync(node);
+        let pending = arena.pending_text_nodes_for_content_sync();
+        assert_eq!(pending.len(), 1);
+        assert!(pending.contains(&node));
+
+        arena.enroll_text_node_for_content_sync(node);
+        arena.finish_text_content_sync(node);
+        assert!(arena.pending_text_nodes_for_content_sync().is_empty());
+    }
+
+    #[test]
+    fn clean_reads_skip_source_reads_and_pending_style_reads_do_not() {
+        let mut arena = LayoutNodeArena::new();
+        let parent = arena.allocate_for_test().slot;
+        let node = arena.allocate_for_test().slot;
+        arena.write_shape(node).set_kind(NodeKind::GeneratedTextNode);
+        arena.write_shape(node).set_parent(parent);
+        arena.write_shape(parent).set_first_child(node);
+        let hello = ak::Utf16FlyString::from_utf16(&"hello".encode_utf16().collect::<Vec<_>>());
+        arena.set_generated_text(node, ak::Utf16String::from(hello));
+        let mut text = content("hello", 0, 5, Vec::new());
+        text.rendering_key = Some(TextRenderingKey {
+            options: TextRenderingOptions {
+                text_transform: text_transform::NONE,
+                white_space_collapse: crate::css::css_enums::white_space_collapse::COLLAPSE,
+                text_security: crate::css::css_enums::text_security::NONE,
+                is_password_input: false,
+                dom_start_offset: 0,
+                dom_length_in_code_units: 5,
+            },
+            source_length: 5,
+            locale: None,
+        });
+        arena.set_text_content(node, text);
+        assert!(!arena.text_content_needs_sync(node));
+
+        arena.set_node_style(parent, 1, None);
+        let pending = arena.pending_text_nodes_for_content_sync();
+        assert_eq!(pending, [node]);
+        assert!(arena.text_content_needs_sync(node));
+        assert_eq!(length_in_code_units(&arena.published_text_source(node, false).data), 5);
+        arena.finish_text_content_sync(node);
+        assert!(!arena.text_content_needs_sync(node));
+
+        arena.invalidate_text_content(node);
+        assert!(arena.text_content_needs_sync(node));
+    }
+
+    fn first_letter_slices(arena: &mut LayoutNodeArena, end: usize, length: usize) -> (NodeSlotId, NodeSlotId) {
+        let first = arena.allocate_for_test().slot;
+        let remainder = arena.allocate_for_test().slot;
+        arena.write_shape(first).set_kind(NodeKind::TextNode);
+        arena.write_shape(remainder).set_kind(NodeKind::TextNode);
+        arena.set_first_letter_slices(first, remainder, end, length);
+        (first, remainder)
+    }
+
+    #[test]
+    fn slice_ranges_and_relationships_survive_content_publication() {
+        let mut arena = LayoutNodeArena::new();
+        let (first, remainder) = first_letter_slices(&mut arena, 2, 5);
+        assert!(arena.text_has_source_range(first));
+        assert!(arena.text_has_source_range(remainder));
+        assert_eq!(arena.text_fragments(remainder).as_slice(), &[first, remainder]);
+
+        arena.set_text_content(first, content("«SS", 0, 2, vec![edit(1, 1, 1, 2)]));
+        arena.set_text_content(remainder, content("abc", 2, 3, Vec::new()));
+        arena.invalidate_text_content(first);
+        arena.set_text_content(first, content("«ß", 0, 2, Vec::new()));
+        assert_eq!(
+            arena.text_source_range(first, 5),
+            FfiTextSourceRange { start: 0, length: 2 }
+        );
+        assert_eq!(
+            arena.text_source_range(remainder, 5),
+            FfiTextSourceRange { start: 2, length: 3 }
+        );
+        assert_eq!(arena.text_fragments(remainder).as_slice(), &[first, remainder]);
+        assert_eq!(arena.text_fragments(first).as_slice(), &[first]);
+    }
+
+    #[test]
+    fn freed_slices_do_not_resolve_to_reused_slots() {
+        let mut arena = LayoutNodeArena::new();
+        let (first, remainder) = first_letter_slices(&mut arena, 1, 1);
+        assert_eq!(
+            arena.text_source_range(remainder, 1),
+            FfiTextSourceRange { start: 1, length: 0 }
+        );
+        let _ = arena.free_subtree(first);
+        let replacement = arena.allocate_for_test().slot;
+        arena.write_shape(replacement).set_kind(NodeKind::TextNode);
+        assert_eq!(replacement.slot_index(), first.slot_index());
+        assert_ne!(replacement, first);
+        assert!(!arena.text_has_source_range(first));
+        assert!(!arena.text_has_source_range(replacement));
+        assert_eq!(arena.text_fragments(remainder).as_slice(), &[remainder]);
+        assert_eq!(
+            arena.text_source_range(replacement, 4),
+            FfiTextSourceRange { start: 0, length: 4 }
+        );
+
+        let _ = arena.free_subtree(remainder);
+        let replacement = arena.allocate_for_test().slot;
+        arena.write_shape(replacement).set_kind(NodeKind::TextNode);
+        assert_eq!(replacement.slot_index(), remainder.slot_index());
+        assert!(arena.text_fragments(remainder).as_slice().is_empty());
+        assert_eq!(arena.text_fragments(replacement).as_slice(), &[replacement]);
+        assert!(arena.text_fragments(NodeSlotId::INVALID).as_slice().is_empty());
+    }
+
+    #[test]
+    fn slice_ranges_are_clamped_to_text_that_changed_after_the_split() {
+        let mut arena = LayoutNodeArena::new();
+        let (first, remainder) = first_letter_slices(&mut arena, 1, 19);
+        assert_eq!(
+            arena.text_source_range(remainder, 5),
+            FfiTextSourceRange { start: 1, length: 4 }
+        );
+        let _ = arena.free_subtree(first);
+        assert_eq!(
+            arena.text_source_range(remainder, 0),
+            FfiTextSourceRange { start: 0, length: 0 }
+        );
+    }
+
+    #[test]
+    fn selection_entries_expand_the_primary_text_node_to_both_slices() {
+        use crate::painting::paintable_data::{FfiSelectionEntry, SELECTION_STATE_START_AND_END};
+
+        let mut arena = LayoutNodeArena::new();
+        let (first, remainder) = first_letter_slices(&mut arena, 1, 4);
+        let entries = [FfiSelectionEntry {
+            is_text_node_entry: true,
+            layout_node: remainder,
+            state: SELECTION_STATE_START_AND_END,
+        }];
+        let selection = crate::painting::selection::apply(&mut arena.paintable_rows_mut(), &entries, 0, 4);
+        let states = &selection.text_states;
+        assert_eq!(states.len(), 2);
+        assert_eq!(states.get(&first), Some(&SELECTION_STATE_START_AND_END));
+        assert_eq!(states.get(&remainder), Some(&SELECTION_STATE_START_AND_END));
+    }
+}

@@ -1,0 +1,154 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/ByteBuffer.h>
+#include <AK/HashMap.h>
+#include <AK/HashTable.h>
+#include <AK/Optional.h>
+#include <AK/RefCounted.h>
+#include <AK/Utf16String.h>
+#include <AK/WeakPtr.h>
+#include <AK/Weakable.h>
+#include <LibCore/Promise.h>
+#include <LibCore/Timer.h>
+#include <LibIPC/TransportHandle.h>
+#include <LibRequests/CacheSizes.h>
+#include <LibRequests/RequestClient.h>
+#include <LibRequests/RequestControlClient.h>
+#include <LibWebView/BrowsingSession.h>
+#include <LibWebView/Forward.h>
+#include <RequestServer/SiteBinding.h>
+
+namespace WebView {
+
+// One RequestServer process. The UI process speaks its control endpoint and holds a data client of its own on it, and
+// hands out the data clients of the renderers and workers it serves.
+class WEBVIEW_API RequestServerInstance
+    : public RefCounted<RequestServerInstance>
+    , public Weakable<RequestServerInstance> {
+public:
+    ~RequestServerInstance();
+
+    // The top-level site whose requests this RequestServer makes, or nothing for the one that serves the UI process and
+    // requests under no site.
+    Optional<Utf16String> const& site() const { return m_site; }
+    BrowsingSession& session() const { return *m_session; }
+    ByteString const& cache_path() const { return m_cache_path; }
+
+    Requests::RequestControlClient& control_client() { return *m_control_client; }
+    Requests::RequestClient& ui_client() { return *m_ui_client; }
+
+    // The IDs of the clients this RequestServer handed out, besides the UI process's own.
+    HashTable<int> const& client_ids() const { return m_client_ids; }
+    bool is_retired() const { return m_retired; }
+    bool has_client(int client_id) const { return m_client_ids.contains(client_id); }
+
+private:
+    friend class RequestServerManager;
+
+    RequestServerInstance(NonnullRefPtr<BrowsingSession>, Optional<Utf16String> site, ByteString cache_path);
+
+    NonnullRefPtr<BrowsingSession> m_session;
+    Optional<Utf16String> m_site;
+    ByteString m_cache_path;
+
+    RefPtr<Requests::RequestControlClient> m_control_client;
+    RefPtr<Requests::RequestClient> m_ui_client;
+    HashTable<int> m_client_ids;
+    HashTable<int> m_client_ids_retiring_without_delay;
+    RefPtr<Core::Timer> m_idle_timer;
+    bool m_retired { false };
+
+    // As last reported by the RequestServer.
+    u64 m_disk_cache_size { 0 };
+};
+
+struct RequestServerClientConnection;
+
+// Manages RequestServers per browsing session and top-level site, plus one with no site for the UI process
+// and requests under no site. Each site's server only makes and caches requests for that site's partitions;
+// its sandbox confines the cache to that site's directory.
+class WEBVIEW_API RequestServerManager {
+public:
+    AK_ALLOC_WITH_KMALLOC;
+
+    static RequestServerManager& the();
+
+    RequestServerManager();
+    ~RequestServerManager();
+
+    // The RequestServer with no site of the session. The default session's is launched with the browser.
+    ErrorOr<NonnullRefPtr<RequestServerInstance>> browser_instance(BrowsingSession&);
+
+    // The RequestServer of a site, launched when first asked for. Once there are as many as allowed and none is idle,
+    // further sites share the RequestServer with no site.
+    ErrorOr<NonnullRefPtr<RequestServerInstance>> instance_for_site(BrowsingSession&, Utf16String const& top_level_site);
+
+    RefPtr<RequestServerInstance> instance_for_client(int client_id);
+    void for_each_instance(Function<IterationDecision(RequestServerInstance&)> const&);
+
+    ErrorOr<RequestServerClientConnection> connect_new_client(RequestServerInstance&, BrowsingSession&, RequestServer::SiteBinding);
+
+    // The recently rejected certificate for this session, host and port, if unambiguous.
+    Optional<BrowsingSession::RejectedCertificate> rejected_certificate(BrowsingSession&, URL::URL const&) const;
+    void did_reject_certificate(BrowsingSession&, BrowsingSession::CertificateException);
+
+    // Makes every RequestServer of the session accept the certificate, including those launched later.
+    void trust_certificate(BrowsingSession&, BrowsingSession::CertificateException const&);
+
+    void disk_cache_settings_changed();
+    void dns_settings_changed();
+
+    NonnullRefPtr<Core::Promise<Requests::CacheSizes>> estimate_cache_size_accessed_since(UnixDateTime since);
+    NonnullRefPtr<Core::Promise<Empty>> clear_cache(UnixDateTime since);
+
+    bool uses_site_request_servers() const { return m_maximum_site_instances > 0; }
+
+    // The process of the client is about to exit for good, such as for a discarded tab. If no other client of its
+    // RequestServer is left then, nothing is likely to need that server soon, so it is retired right away.
+    void retire_without_delay_once_disconnected(int client_id);
+
+private:
+    ErrorOr<NonnullRefPtr<RequestServerInstance>> launch(NonnullRefPtr<BrowsingSession>, Optional<Utf16String> site);
+    ErrorOr<void> launch_process(RequestServerInstance&);
+    void did_lose_process(RequestServerInstance&);
+    void client_disconnected(RequestServerInstance&, int client_id);
+    void retire(RequestServerInstance&);
+    void retire_idle_instances();
+
+    ByteString sites_directory() const;
+    ByteString cache_path_for_site(Utf16String const& site) const;
+    ByteBuffer load_or_create_site_cache_key() const;
+    bool is_live_cache_path(ByteString const&) const;
+    Vector<ByteString> dormant_site_cache_paths();
+
+    // Enforce the user's combined cache size limit with least-recently-used eviction.
+    // Caches of sites without a RequestServer are evicted whole.
+    void disk_cache_size_changed(RequestServerInstance&, u64 size);
+    void evict_least_recently_used_cache_entries_if_needed();
+    u64 maximum_disk_cache_size() const;
+
+    struct DormantSiteCache {
+        UnixDateTime last_use;
+        u64 size { 0 };
+    };
+    HashMap<ByteString, DormantSiteCache>& dormant_site_caches();
+
+    Vector<NonnullRefPtr<RequestServerInstance>> m_instances;
+    size_t m_maximum_site_instances { 0 };
+
+    // Only the UI process has this. It names the cache directories of sites, see cache_path_for_site().
+    ByteBuffer m_site_cache_key;
+
+    Optional<HashMap<ByteString, DormantSiteCache>> m_dormant_site_caches;
+    // Time out evictions if a RequestServer disappears before answering.
+    Optional<MonotonicTime> m_cache_eviction_start_time;
+    u64 m_cache_eviction_id { 0 };
+};
+
+}

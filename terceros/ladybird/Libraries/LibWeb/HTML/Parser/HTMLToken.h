@@ -1,0 +1,270 @@
+/*
+ * Copyright (c) 2020, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2021, Max Wipfli <max.wipfli@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Function.h>
+#include <AK/OwnPtr.h>
+#include <AK/Types.h>
+#include <AK/Utf16FlyString.h>
+#include <AK/Utf16String.h>
+#include <AK/Variant.h>
+#include <AK/Vector.h>
+#include <LibWeb/Export.h>
+
+namespace Web::HTML {
+
+class HTMLTokenizer;
+
+class WEB_API HTMLToken {
+    AK_MAKE_NONCOPYABLE(HTMLToken);
+    AK_MAKE_DEFAULT_MOVABLE(HTMLToken);
+
+public:
+    enum class Type : u8 {
+        Invalid,
+        DOCTYPE,
+        StartTag,
+        EndTag,
+        Comment,
+        Character,
+        EndOfFile,
+    };
+
+    struct Position {
+        size_t line { 0 };
+        size_t column { 0 };
+    };
+
+    struct Attribute {
+        Utf16FlyString local_name;
+        Utf16String value;
+        Position name_start_position;
+        Position value_start_position;
+        Position name_end_position;
+        Position value_end_position;
+    };
+
+    struct DoctypeData {
+        AK_ALLOC_WITH_KMALLOC;
+
+        // NOTE: "Missing" is a distinct state from the empty string.
+        Utf16FlyString name;
+        Utf16String public_identifier;
+        Utf16String system_identifier;
+        bool missing_name { true };
+        bool missing_public_identifier { true };
+        bool missing_system_identifier { true };
+        bool force_quirks { false };
+    };
+
+    HTMLToken() = default;
+
+    HTMLToken(Type type)
+        : m_type(type)
+    {
+        switch (m_type) {
+        case Type::Character:
+            m_data.set(0u);
+            break;
+        case Type::DOCTYPE:
+            m_data.set(OwnPtr<DoctypeData> {});
+            break;
+        case Type::StartTag:
+        case Type::EndTag:
+            m_data.set(OwnPtr<Vector<Attribute>>());
+            break;
+        default:
+            break;
+        }
+    }
+
+    bool is_doctype() const { return m_type == Type::DOCTYPE; }
+    bool is_start_tag() const { return m_type == Type::StartTag; }
+    bool is_end_tag() const { return m_type == Type::EndTag; }
+    bool is_comment() const { return m_type == Type::Comment; }
+    bool is_character() const { return m_type == Type::Character; }
+    bool is_end_of_file() const { return m_type == Type::EndOfFile; }
+
+    u32 code_point() const
+    {
+        VERIFY(is_character());
+        return m_data.get<u32>();
+    }
+
+    void set_code_point(u32 code_point)
+    {
+        VERIFY(is_character());
+        m_data.get<u32>() = code_point;
+    }
+
+    Utf16String const& comment() const
+    {
+        VERIFY(is_comment());
+        return m_comment_data;
+    }
+
+    void set_comment(Utf16String comment)
+    {
+        VERIFY(is_comment());
+        m_comment_data = move(comment);
+    }
+
+    Utf16FlyString const& tag_name() const
+    {
+        VERIFY(is_start_tag() || is_end_tag());
+        return m_string_data;
+    }
+
+    void set_tag_name(Utf16FlyString name)
+    {
+        VERIFY(is_start_tag() || is_end_tag());
+        m_string_data = move(name);
+    }
+
+    bool is_self_closing() const
+    {
+        VERIFY(is_start_tag() || is_end_tag());
+        return m_tag_self_closing;
+    }
+
+    void set_self_closing(bool self_closing)
+    {
+        VERIFY(is_start_tag() || is_end_tag());
+        m_tag_self_closing = self_closing;
+    }
+
+    size_t attribute_count() const
+    {
+        VERIFY(is_start_tag() || is_end_tag());
+        if (auto* ptr = tag_attributes())
+            return ptr->size();
+        return 0;
+    }
+
+    void add_attribute(Attribute attribute)
+    {
+        VERIFY(is_start_tag() || is_end_tag());
+        ensure_tag_attributes().append(move(attribute));
+    }
+
+    void for_each_attribute(Function<IterationDecision(Attribute const&)> callback) const
+    {
+        VERIFY(is_start_tag() || is_end_tag());
+        auto* ptr = tag_attributes();
+        if (!ptr)
+            return;
+        for (auto& attribute : *ptr) {
+            if (callback(attribute) == IterationDecision::Break)
+                break;
+        }
+    }
+
+    Optional<Attribute const&> raw_attribute(Utf16FlyString const& attribute_name) const
+    {
+        VERIFY(is_start_tag() || is_end_tag());
+
+        auto* ptr = tag_attributes();
+        if (!ptr)
+            return {};
+        for (auto const& attribute : *ptr) {
+            if (attribute_name == attribute.local_name)
+                return attribute;
+        }
+        return {};
+    }
+
+    DoctypeData const& doctype_data() const
+    {
+        VERIFY(is_doctype());
+        auto* ptr = m_data.get<OwnPtr<DoctypeData>>().ptr();
+        VERIFY(ptr);
+        return *ptr;
+    }
+
+    DoctypeData& ensure_doctype_data()
+    {
+        VERIFY(is_doctype());
+        auto& ptr = m_data.get<OwnPtr<DoctypeData>>();
+        if (!ptr)
+            ptr = make<DoctypeData>();
+        return *ptr;
+    }
+
+    Type type() const { return m_type; }
+
+    Utf16String to_string() const;
+
+    Position const& start_position() const { return m_start_position; }
+    Position const& end_position() const { return m_end_position; }
+
+    void set_start_position(Badge<HTMLTokenizer>, Position start_position) { m_start_position = start_position; }
+    void set_end_position(Badge<HTMLTokenizer>, Position end_position) { m_end_position = end_position; }
+    void set_had_duplicate_attribute(Badge<HTMLTokenizer>) { m_had_duplicate_attribute = true; }
+
+    void normalize_attributes();
+    bool had_duplicate_attribute() const { return m_had_duplicate_attribute; }
+
+private:
+    Vector<Attribute> const* tag_attributes() const
+    {
+        return m_data.get<OwnPtr<Vector<Attribute>>>().ptr();
+    }
+
+    Vector<Attribute>* tag_attributes()
+    {
+        return m_data.get<OwnPtr<Vector<Attribute>>>().ptr();
+    }
+
+    Vector<Attribute>& ensure_tag_attributes()
+    {
+        VERIFY(is_start_tag() || is_end_tag());
+        auto& ptr = m_data.get<OwnPtr<Vector<Attribute>>>();
+        if (!ptr)
+            ptr = make<Vector<Attribute>>();
+        return *ptr;
+    }
+
+    Type m_type { Type::Invalid };
+
+    // Type::StartTag and Type::EndTag
+    bool m_tag_self_closing { false };
+
+    // AD-HOC: We need to know if the token had duplicate attributes, as Content Security Policy disables the nonce
+    //         attribute on the element that will be created from such a token.
+    //         https://w3c.github.io/webappsec-csp/#is-element-nonceable
+    bool m_had_duplicate_attribute { false };
+
+    // Type::StartTag and Type::EndTag (tag name)
+    Utf16FlyString m_string_data;
+
+    // Type::Comment (comment data)
+    Utf16String m_comment_data;
+
+    Variant<Empty, u32, OwnPtr<DoctypeData>, OwnPtr<Vector<Attribute>>> m_data {};
+
+    Position m_start_position;
+    Position m_end_position;
+};
+
+}
+
+namespace AK {
+
+template<>
+struct SentinelOptionalTraits<Web::HTML::HTMLToken> {
+    static Web::HTML::HTMLToken sentinel_value() { return {}; }
+    static bool is_sentinel(Web::HTML::HTMLToken const& value) { return value.type() == Web::HTML::HTMLToken::Type::Invalid; }
+};
+
+template<>
+class Optional<Web::HTML::HTMLToken> : public SentinelOptional<Web::HTML::HTMLToken> {
+public:
+    using SentinelOptional::SentinelOptional;
+};
+
+}

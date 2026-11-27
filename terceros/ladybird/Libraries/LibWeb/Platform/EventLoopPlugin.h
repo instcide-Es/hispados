@@ -1,0 +1,34 @@
+/*
+ * Copyright (c) 2022, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Forward.h>
+#include <AK/kmalloc.h>
+#include <LibGC/Function.h>
+#include <LibWeb/Export.h>
+
+namespace Web::Platform {
+
+class WEB_API EventLoopPlugin {
+public:
+    AK_ALLOC_WITH_KMALLOC;
+
+    static EventLoopPlugin& the();
+    static void install(EventLoopPlugin&);
+
+    ~EventLoopPlugin();
+
+    void spin_until(GC::Root<GC::Function<bool()>> goal_condition);
+    void deferred_invoke(ESCAPING GC::Root<GC::Function<void()>>);
+
+    // For an agent that goes away on this thread: what was deferred until now goes unrun.
+    static void set_discard_deferred_invocations_on_this_thread(bool);
+
+    void quit();
+};
+
+}

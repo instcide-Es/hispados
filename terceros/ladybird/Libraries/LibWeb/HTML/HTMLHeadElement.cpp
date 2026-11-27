@@ -1,0 +1,20 @@
+/*
+ * Copyright (c) 2018-2020, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibWeb/HTML/HTMLHeadElement.h>
+
+namespace Web::HTML {
+
+GC_DEFINE_ALLOCATOR(HTMLHeadElement);
+
+HTMLHeadElement::HTMLHeadElement(DOM::Document& document, DOM::QualifiedName qualified_name)
+    : HTMLElement(document, move(qualified_name))
+{
+}
+
+HTMLHeadElement::~HTMLHeadElement() = default;
+
+}

@@ -1,0 +1,10 @@
+// https://html.spec.whatwg.org/multipage/semantics.html#htmldetailselement
+[Exposed=Window]
+interface HTMLDetailsElement : HTMLElement {
+
+    [HTMLConstructor] constructor();
+
+    [CEReactions, Reflect] attribute DOMString name;
+    [CEReactions, Reflect] attribute boolean open;
+
+};

@@ -1,0 +1,775 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/AnyOf.h>
+#include <LibCore/Directory.h>
+#include <LibCore/EventLoop.h>
+#include <LibCore/File.h>
+#include <LibHTTP/HeaderList.h>
+#include <LibRequests/Request.h>
+#include <LibRequests/RequestClient.h>
+#include <LibRequests/RequestControlClient.h>
+#include <LibThreading/ThreadPool.h>
+#include <LibURL/Parser.h>
+#include <LibURL/Site.h>
+#include <LibWebCommon/Fetch/Infrastructure/URL.h>
+#include <LibWebCommon/HTML/BrowsingContext.h>
+#include <LibWebCommon/HTML/CrossOrigin/OpenerPolicyEnforcement.h>
+#include <LibWebCommon/HTML/EmbedderPolicy.h>
+#include <LibWebCommon/HTML/NavigationParamsDescriptor.h>
+#include <LibWebCommon/Loader/FileResponseHeaders.h>
+#include <LibWebCommon/SecureContexts/AbstractOperations.h>
+#include <LibWebView/Application.h>
+#include <LibWebView/CanonicalBrowsingContext.h>
+#include <LibWebView/CanonicalBrowsingContextGroup.h>
+#include <LibWebView/CanonicalDocument.h>
+#include <LibWebView/CanonicalEnvironmentSettingsObject.h>
+#include <LibWebView/CanonicalNavigable.h>
+#include <LibWebView/CanonicalTraversable.h>
+#include <LibWebView/CanonicalWindow.h>
+#include <LibWebView/NavigationLoader.h>
+#include <LibWebView/RequestServerManager.h>
+#include <LibWebView/RequestServerSiteBindings.h>
+#include <LibWebView/Utilities.h>
+#include <LibWebView/WebContentClient.h>
+#include <LibWebView/WebContentPage.h>
+#include <LibWebView/WorkerAgentManager.h>
+
+namespace WebView {
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#attempt-to-populate-the-history-entry's-document
+// The document that the task queued by step 5 creates, if it creates one.
+Optional<NavigationLoader::ResponseDocument> NavigationLoader::response_document() const
+{
+    auto const& navigation_params = result().navigation_params;
+
+    // 3. If navigationParams is a non-fetch scheme navigation params:
+    //    1. Set entry's document state's document to the result of running attempt to create a non-fetch scheme
+    //       document given navigationParams.
+    // NB: That hands the URL off to external software, which creates no document.
+    if (navigation_params.has<Web::HTML::NonFetchSchemeNavigationParamsDescriptor>())
+        return {};
+
+    // 4. Otherwise, if any of the following are true:
+    //    - navigationParams is null;
+    //    [...]
+    //    then:
+    //    1. Set entry's document state's document to the result of creating a document for inline content that
+    //       doesn't have a DOM, given navigable, null, navTimingType, and userInvolvement. The inline content
+    //       should indicate to the user the sort of error that occurred.
+    // NB: That document is created with the new opaque origin the result carries to the process creating it, a new
+    //     opener policy enforcement result, and about:error as its URL.
+    if (navigation_params.has<Web::HTML::NavigationParamsNullOrError>()) {
+        auto origin = *result().inline_content_origin;
+        return ResponseDocument {
+            .is_inline_content = true,
+            .coop_enforcement_result = { .url = URL::about_error(), .origin = origin, .opener_policy = {} },
+            .response_url = URL::about_error(),
+            .request_current_url = {},
+            .origin = origin,
+            .opener_policy = {},
+            .embedder_policy = {},
+            .final_sandboxing_flag_set = {},
+            .environment_id = {},
+            .document_id = {},
+        };
+    }
+
+    auto const& fetched_navigation_params = navigation_params.get<Web::HTML::NavigationParamsDescriptor>();
+
+    // FIXME: 5. Otherwise, if navigationParams's response has a `Content-Disposition` header specifying the
+    //           attachment disposition type: [...]
+    //        A download creates no document.
+
+    // 6. Otherwise, if navigationParams's response's status is not 204 and is not 205, then set entry's
+    //    document state's document to the result of loading a document given navigationParams,
+    //    sourceSnapshotParams, and entry's document state's initiator origin.
+    if (fetched_navigation_params.response.status == 204 || fetched_navigation_params.response.status == 205)
+        return {};
+    // https://html.spec.whatwg.org/multipage/document-lifecycle.html#initialise-the-document-object
+    // 7.1. Let oacHeader be the result of getting a structured field value given `Origin-Agent-Cluster` and "item"
+    //      from navigationParams's response's header list.
+    auto header_list = m_response_header_list ? NonnullRefPtr { *m_response_header_list } : HTTP::HeaderList::create(fetched_navigation_params.response.headers);
+    auto oac_header = header_list->get_structured_field_value<HTTP::StructuredFields::Item>("Origin-Agent-Cluster"sv);
+
+    // 7.2. Let requestsOAC be true if oacHeader is not null and oacHeader[0] is the boolean true; otherwise false.
+    auto requests_oac = oac_header.has_value() && oac_header->bare_item.has<bool>() && oac_header->bare_item.get<bool>();
+
+    return ResponseDocument {
+        .is_inline_content = false,
+        .coop_enforcement_result = fetched_navigation_params.coop_enforcement_result,
+        // The COOP enforcement result still describes the source document until an opener policy is enforced.
+        // Placement uses the response's final URL, including any redirects.
+        .response_url = fetched_navigation_params.response.url_list.is_empty() ? m_request.history_entry.url : fetched_navigation_params.response.url_list.last(),
+        .request_current_url = fetched_navigation_params.request.has_value() && !fetched_navigation_params.request->url_list.is_empty()
+            ? Optional<URL::URL> { fetched_navigation_params.request->url_list.last() }
+            : Optional<URL::URL> {},
+        .origin = fetched_navigation_params.origin,
+        .opener_policy = fetched_navigation_params.opener_policy,
+        .embedder_policy = fetched_navigation_params.policy_container.embedder_policy,
+        .final_sandboxing_flag_set = fetched_navigation_params.final_sandboxing_flag_set,
+        .environment_id = {},
+        .document_id = {},
+        .permissions_policy = fetched_navigation_params.permissions_policy,
+        .requests_oac = requests_oac,
+    };
+}
+
+static Web::HTML::NavigationResponseBodyHandle const* response_body_handle(Web::HTML::NavigationPopulationResult const& result)
+{
+    if (!result.navigation_params.has<Web::HTML::NavigationParamsDescriptor>())
+        return nullptr;
+    auto const& response = result.navigation_params.get<Web::HTML::NavigationParamsDescriptor>().response;
+    return response.body.get_pointer<Web::HTML::NavigationResponseBodyHandle>();
+}
+
+static Web::HTML::NavigationResponseBodyHandle* response_body_handle(Web::HTML::NavigationPopulationResult& result)
+{
+    if (!result.navigation_params.has<Web::HTML::NavigationParamsDescriptor>())
+        return nullptr;
+    auto& response = result.navigation_params.get<Web::HTML::NavigationParamsDescriptor>().response;
+    return response.body.get_pointer<Web::HTML::NavigationResponseBodyHandle>();
+}
+
+static bool response_body_was_fetched_by(Web::HTML::NavigationResponseBodyHandle const& body_handle, WebContentClient const& population_worker)
+{
+    return population_worker.request_server_site_bindings().has_connected_client(body_handle.request_server_client_id);
+}
+
+bool NavigationLoader::response_body_belongs_to_another_process(Web::HTML::NavigationPopulationResult const& result, WebContentClient const& process)
+{
+    auto const* body_handle = response_body_handle(result);
+    if (!body_handle)
+        return false;
+
+    bool belongs_to_another_process = false;
+    auto check_bindings = [&](RequestServerSiteBindings const& bindings) {
+        if (!bindings.has_connected_client(body_handle->request_server_client_id))
+            return IterationDecision::Continue;
+        belongs_to_another_process = true;
+        return IterationDecision::Break;
+    };
+    WebContentClient::for_each_client([&](WebContentClient& client) {
+        if (&client == &process)
+            return IterationDecision::Continue;
+        return check_bindings(client.request_server_site_bindings());
+    });
+    if (!belongs_to_another_process)
+        WorkerAgentManager::the().for_each_request_server_site_bindings([&](RequestServerSiteBindings& bindings) { return check_bindings(bindings); });
+    if (!belongs_to_another_process) {
+        RequestServerManager::the().for_each_instance([&](RequestServerInstance& instance) {
+            if (instance.ui_client().request_server_client_id() != body_handle->request_server_client_id)
+                return IterationDecision::Continue;
+            belongs_to_another_process = true;
+            return IterationDecision::Break;
+        });
+    }
+    return belongs_to_another_process;
+}
+
+NavigationLoader::~NavigationLoader()
+{
+    release_response_body();
+}
+
+// NB: The process that fetched the response reports the URLs it reached. Fetching never redirects a request to a
+//     file: URL, so one among them other than the file: URL of a navigation the UI process admitted is made up: the
+//     document it would create could read local files, and the UI process would read the file it names. Such a
+//     navigation creates an error document instead.
+void NavigationLoader::refuse_made_up_local_file_urls(WebContentClient const& population_worker, Web::HTML::NavigationPopulationResult& result) const
+{
+    auto is_made_up_file_url = [&](URL::URL const& url) {
+        if (url.scheme() != "file"sv)
+            return false;
+        return m_requested_url.scheme() != "file"sv || !url.equals(m_requested_url, URL::ExcludeFragment::Yes);
+    };
+    auto names_a_made_up_local_file = result.redirected_url.has_value() && is_made_up_file_url(*result.redirected_url);
+    if (auto const* navigation_params = result.navigation_params.get_pointer<Web::HTML::NavigationParamsDescriptor>()) {
+        names_a_made_up_local_file |= any_of(navigation_params->response.url_list, is_made_up_file_url);
+        if (navigation_params->request.has_value())
+            names_a_made_up_local_file |= any_of(navigation_params->request->url_list, is_made_up_file_url);
+    }
+    if (names_a_made_up_local_file) {
+        discard(population_worker, result);
+        result.navigation_params = Web::HTML::NavigationParamsNullOrError {};
+        result.redirected_url.clear();
+    }
+}
+
+void NavigationLoader::did_finish_navigation_params_creation(Web::HTML::NavigationPopulationResult result)
+{
+    VERIFY(!m_result.has_value());
+    VERIFY(!m_response_body_request);
+    VERIFY(!m_completion_steps);
+
+    Web::HTML::apply_navigation_population_result(m_request, result);
+    m_result = move(result);
+    m_result->inline_content_origin = URL::Origin::create_opaque();
+    determine_the_origin_of_the_response();
+}
+
+// NB: The process that created the navigation params determined responseOrigin for its own checks. The UI process
+//     runs the step again with what it holds, and the process creating the document takes the origin from here.
+void NavigationLoader::determine_the_origin_of_the_response()
+{
+    auto* navigation_params = m_result->navigation_params.get_pointer<Web::HTML::NavigationParamsDescriptor>();
+    if (!navigation_params)
+        return;
+
+    auto const& entry = m_request.history_entry;
+    auto const& target_snapshot_params = m_request.target_snapshot_params;
+    auto response_url = navigation_params->response.url_list.is_empty() ? entry.url : navigation_params->response.url_list.last();
+
+    // https://html.spec.whatwg.org/multipage/browsing-the-web.html#create-navigation-params-from-a-srcdoc-resource
+    if (Web::HTML::url_matches_about_srcdoc(response_url)) {
+        // 3. Let responseOrigin be the result of determining the origin given response's URL, targetSnapshotParams's
+        //    sandboxing flags, and entry's document state's origin.
+        // AD-HOC: Determining the origin asserts that sourceOrigin is non-null for about:srcdoc, which the process that
+        //         gave entry need not uphold. Such a document gets a new opaque origin.
+        if (!entry.document_state.origin.has_value()) {
+            navigation_params->origin = URL::Origin::create_opaque();
+            return;
+        }
+        navigation_params->origin = Web::HTML::determine_the_origin(response_url, target_snapshot_params.sandboxing_flags, entry.document_state.origin);
+        return;
+    }
+
+    // https://html.spec.whatwg.org/multipage/browsing-the-web.html#create-navigation-params-by-fetching
+    // 10. Set finalSandboxFlags to the union of targetSnapshotParams's sandboxing flags and responsePolicyContainer's CSP
+    //     list's CSP-derived sandboxing flags.
+    // NB: The process that fetched the response created responsePolicyContainer, and its finalSandboxFlags hold the
+    //     CSP-derived sandboxing flags. Sandboxing flags only ever make an origin opaque, so the UI process takes them.
+    navigation_params->final_sandboxing_flag_set |= target_snapshot_params.sandboxing_flags;
+
+    // 11. Set responseOrigin to the result of determining the origin given response's URL, finalSandboxFlags, and
+    //     entry's document state's initiator origin.
+    navigation_params->origin = Web::HTML::determine_the_origin(response_url, navigation_params->final_sandboxing_flag_set, entry.document_state.initiator_origin);
+}
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#create-navigation-params-by-fetching
+// NB: The process that fetched the response can host another site, so the UI process obtains the response's opener and
+//     embedder policies itself, from the headers that RequestServer gave it with the response.
+void NavigationLoader::obtain_the_response_policies(CanonicalNavigable const& navigable)
+{
+    auto* navigation_params = m_result->navigation_params.get_pointer<Web::HTML::NavigationParamsDescriptor>();
+    if (!navigation_params)
+        return;
+
+    auto const& response_url = navigation_params->response.url_list.is_empty() ? m_request.history_entry.url : navigation_params->response.url_list.last();
+
+    // NB: A response without a RequestServer request, such as one for a non-HTTP(S) URL or one that WebDriver BiDi
+    //     provided, has the headers that the fetching process reported.
+    auto header_list = m_response_header_list ? NonnullRefPtr { *m_response_header_list } : HTTP::HeaderList::create(navigation_params->response.headers);
+
+    // 17. Let responseCOOP be a new opener policy.
+    Web::HTML::OpenerPolicy response_coop;
+
+    // 21. While true:
+    //     2. If request's reserved client is null:
+    //        1. Let topLevelCreationURL be currentURL.
+    //        3. If navigable is not a top-level traversable:
+    //           1. Let parentEnvironment be navigable's parent's active document's relevant settings object.
+    //           2. Set topLevelCreationURL to parentEnvironment's top-level creation URL.
+    // NB: The UI process runs these steps for the final response only.
+    auto top_level_creation_url = response_url;
+    if (!navigable.is_top_level_traversable())
+        top_level_creation_url = navigable.parent()->active_document().relevant_global_object().relevant_settings_object().top_level_creation_url().value();
+
+    // https://html.spec.whatwg.org/multipage/webappapis.html#secure-context
+    // 2. If environment's top-level creation URL's scheme is "data", then return false.
+    // 3. If the result of Is url potentially trustworthy? given environment's top-level creation URL is "Potentially
+    //    Trustworthy", then return true.
+    auto reserved_environment_is_a_non_secure_context = top_level_creation_url.scheme() == "data"sv
+        || Web::SecureContexts::is_url_potentially_trustworthy(top_level_creation_url) == Web::SecureContexts::Trustworthiness::NotTrustworthy;
+
+    //     9. Set responsePolicyContainer to the result of creating a policy container from a fetch response given
+    //        response and request's reserved client.
+    // NB: The document takes responsePolicyContainer unless the response's URL is local, when it inherits a policy
+    //     container instead.
+    if (!Web::Fetch::Infrastructure::is_local_url(response_url))
+        navigation_params->policy_container.embedder_policy = Web::HTML::obtain_an_embedder_policy(header_list, reserved_environment_is_a_non_secure_context);
+
+    //     12. If navigable is a top-level traversable:
+    if (navigable.is_top_level_traversable()) {
+        // 1. Set responseCOOP to the result of obtaining an opener policy given response and request's reserved client.
+        response_coop = Web::HTML::obtain_an_opener_policy(header_list, reserved_environment_is_a_non_secure_context);
+
+        // 2. Set coopEnforcementResult to the result of enforcing the response's opener policy given navigable's active
+        //    browsing context, response's URL, responseOrigin, responseCOOP, coopEnforcementResult, and request's
+        //    referrer.
+        // NB: The fetching process enforced the opener policy of each response along the redirects, which the UI
+        //     process does not see. Enforcing the final response's opener policy again, against navigable's active
+        //     document, lets that process add a browsing context group switch but not withhold one. Only the switch
+        //     flags are taken from this result.
+        auto const& active_document = navigable.active_document();
+        Web::HTML::OpenerPolicyEnforcementResult active_document_coop_enforcement_result {
+            .needs_a_browsing_context_group_switch = false,
+            .would_need_a_browsing_context_group_switch_due_to_report_only = false,
+            .url = active_document.creation_url(),
+            .origin = active_document.origin(),
+            .opener_policy = active_document.opener_policy(),
+            .current_context_is_navigation_source = false,
+        };
+        auto coop_enforcement_result = Web::HTML::enforce_a_responses_opener_policy(active_document.is_initial_about_blank(), response_url, navigation_params->origin, response_coop, active_document_coop_enforcement_result);
+        navigation_params->coop_enforcement_result.opener_policy = response_coop;
+        navigation_params->coop_enforcement_result.needs_a_browsing_context_group_switch |= coop_enforcement_result.needs_a_browsing_context_group_switch;
+        navigation_params->coop_enforcement_result.would_need_a_browsing_context_group_switch_due_to_report_only |= coop_enforcement_result.would_need_a_browsing_context_group_switch_due_to_report_only;
+    }
+
+    navigation_params->opener_policy = response_coop;
+
+    // https://html.spec.whatwg.org/multipage/document-lifecycle.html#initialise-the-document-object
+    // 2. Let permissionsPolicy be the result of creating a permissions policy from a response given navigationParams's
+    //    navigable's container, navigationParams's origin, and navigationParams's response.
+    // NB: The UI process creates it here, from the response's headers, so that the process creating the document
+    //     takes it with navigationParams.
+    navigation_params->permissions_policy = navigable.create_a_permissions_policy_from_a_response(navigation_params->origin, header_list);
+}
+
+// https://html.spec.whatwg.org/multipage/browsers.html#check-a-navigation-response's-adherence-to-its-embedder-policy
+// NB: response is only used for violation reports, which are not queued.
+static bool check_a_navigation_responses_adherence_to_its_embedder_policy(CanonicalNavigable const& navigable, Web::HTML::EmbedderPolicy const& response_policy)
+{
+    // 1. If navigable is not a child navigable, then return true.
+    auto const* container_document = navigable.container_document();
+    if (!container_document)
+        return true;
+
+    // 2. Let parentPolicy be navigable's container document's policy container's embedder policy.
+    auto const& parent_policy = container_document->embedder_policy();
+
+    // FIXME: 3. If parentPolicy's report-only value is compatible with cross-origin isolation and responsePolicy's value
+    //           is not, then queue a cross-origin embedder policy inheritance violation with response, "navigation",
+    //           parentPolicy's report-only reporting endpoint, "reporting", and navigable's container document's
+    //           relevant settings object.
+
+    // 4. If parentPolicy's value is not compatible with cross-origin isolation or responsePolicy's value is compatible
+    //    with cross-origin isolation, then return true.
+    if (!Web::HTML::is_compatible_with_cross_origin_isolation(parent_policy.value) || Web::HTML::is_compatible_with_cross_origin_isolation(response_policy.value))
+        return true;
+
+    // FIXME: 5. Queue a cross-origin embedder policy inheritance violation with response, "navigation", parentPolicy's
+    //           reporting endpoint, "enforce", and navigable's container document's relevant settings object.
+
+    // 6. Return false.
+    return false;
+}
+
+// https://html.spec.whatwg.org/multipage/browsing-the-web.html#attempt-to-populate-the-history-entry's-document
+// NB: The UI process checks the response's adherence to its embedder policy, as it holds navigable's container
+//     document.
+void NavigationLoader::check_the_responses_adherence_to_its_embedder_policy(CanonicalNavigable const& navigable)
+{
+    auto* navigation_params = m_result->navigation_params.get_pointer<Web::HTML::NavigationParamsDescriptor>();
+    if (!navigation_params)
+        return;
+
+    // 5. Queue a global task on the navigation and traversal task source, given navigable's active window, to run these
+    //    steps:
+    //    4. Otherwise, if any of the following are true:
+    //       [...]
+    //       - navigationParams's reserved environment is non-null and the result of checking a navigation response's
+    //         adherence to its embedder policy given navigationParams's response, navigable, and navigationParams's
+    //         policy container's embedder policy is false; or
+    //       [...]
+    //       then:
+    //       1. Set entry's document state's document to the result of creating a document for inline content that
+    //          doesn't have a DOM, given navigable, null, navTimingType, and userInvolvement. The inline content
+    //          should indicate to the user the sort of error that occurred.
+    // NB: The UI process checks this before the page that hosts the document queues the task, which creates that
+    //     document for navigation params that are null.
+    if (!navigation_params->reserved_environment.has_value()
+        || check_a_navigation_responses_adherence_to_its_embedder_policy(navigable, navigation_params->policy_container.embedder_policy)) {
+        return;
+    }
+    release_response_body();
+    m_result->navigation_params = Web::HTML::NavigationParamsNullOrError { "Blocked by Cross-Origin-Embedder-Policy"_utf16 };
+}
+
+void NavigationLoader::acquire_response_body(WebContentClient const& population_worker, Function<void(bool)> completion_steps)
+{
+    VERIFY(m_result.has_value());
+    VERIFY(!m_response_body_request);
+    VERIFY(!m_completion_steps);
+
+    m_completion_steps = move(completion_steps);
+
+    auto const* body_handle = response_body_handle(*m_result);
+    if (auto const* navigation_params = m_result->navigation_params.get_pointer<Web::HTML::NavigationParamsDescriptor>()) {
+        auto const& response_url = navigation_params->response.url_list.is_empty() ? m_request.history_entry.url : navigation_params->response.url_list.last();
+        if (response_url.scheme() == "file"sv) {
+            // NB: Only the UI process reads the file, so a response for it that names a body is made up.
+            if (body_handle) {
+                did_acquire(false);
+                return;
+            }
+            read_local_file_for_response();
+            return;
+        }
+    }
+    if (!body_handle) {
+        did_acquire(!reports_an_http_response_of_its_own());
+        return;
+    }
+    if (!response_body_was_fetched_by(*body_handle, population_worker)) {
+        did_acquire(false);
+        return;
+    }
+
+    // The response lives in the RequestServer of the client that fetched it.
+    auto owner_client_id = body_handle->request_server_client_id;
+    auto request_server = RequestServerManager::the().instance_for_client(owner_client_id);
+    if (!request_server) {
+        did_acquire(false);
+        return;
+    }
+    auto request = request_server->ui_client().adopt_request(owner_client_id, body_handle->request_server_request_id, Requests::RequestClient::TransferLease::Yes, owner_client_id);
+    if (!request) {
+        did_acquire(false);
+        return;
+    }
+    m_response_body_request_server = request_server;
+    m_response_body_transfer_lease = Requests::RequestTransferLeaseKey { body_handle->request_server_client_id, body_handle->request_server_request_id };
+
+    request->set_body_delivery_paused(true);
+    set_response_body_callbacks(*request);
+    m_response_body_request = request;
+}
+
+// NB: The UI process reads the file off its main thread.
+void NavigationLoader::read_local_file_for_response()
+{
+    if (m_may_read_local_file == MayReadLocalFile::No || m_requested_url.scheme() != "file"sv) {
+        did_read_local_file_for_response(Error::from_errno(EACCES));
+        return;
+    }
+
+    Threading::ThreadPool::the().submit([weak_this = make_weak_ptr(), path = m_requested_url.file_path(), event_loop = Core::EventLoop::current_weak()] mutable {
+        auto read_local_file = [&] -> ErrorOr<LocalFile> {
+            auto file = TRY(Core::File::adopt_fd(TRY(open_local_file_for_renderer(path)).take_fd(), Core::File::OpenMode::Read));
+            if (TRY(Core::Directory::is_valid_directory(file->fd())))
+                return Error::from_errno(EISDIR);
+            auto stat = TRY(file->stat());
+            return LocalFile { TRY(file->read_until_eof()), stat.st_mtime };
+        };
+        auto local_file = read_local_file();
+
+        auto origin_event_loop = event_loop->take();
+        if (!origin_event_loop.is_alive())
+            return;
+        origin_event_loop->deferred_invoke([weak_this = move(weak_this), local_file = move(local_file)] mutable {
+            if (auto* loader = weak_this.ptr())
+                loader->did_read_local_file_for_response(move(local_file));
+        });
+    });
+}
+
+void NavigationLoader::did_read_local_file_for_response(ErrorOr<LocalFile> local_file)
+{
+    if (!m_completion_steps)
+        return;
+
+    // NB: A file the UI process cannot read creates an error document, as a network error does.
+    if (local_file.is_error()) {
+        m_result->navigation_params = Web::HTML::NavigationParamsNullOrError { Utf16String::formatted("{}", local_file.error()) };
+        did_acquire(true);
+        return;
+    }
+
+    auto& response = m_result->navigation_params.get<Web::HTML::NavigationParamsDescriptor>().response;
+    auto header_list = Web::response_headers_for_file(m_requested_url.file_path(), local_file.value().contents.size(), local_file.value().modified_time);
+    response.headers = header_list->headers();
+    response.body = move(local_file.value().contents);
+    did_acquire(true);
+}
+
+// NB: The process that fetched a navigation's response reports the URLs it reached: the history entry's URL, and the
+//     last URLs of the response's and the request's URL lists.
+template<typename Callback>
+static bool any_reported_url(URL::URL const& history_entry_url, Web::HTML::NavigationParamsDescriptor const* navigation_params, Callback const& callback)
+{
+    if (callback(history_entry_url))
+        return true;
+    if (!navigation_params)
+        return false;
+    if (!navigation_params->response.url_list.is_empty() && callback(navigation_params->response.url_list.last()))
+        return true;
+    return navigation_params->request.has_value() && !navigation_params->request->url_list.is_empty() && callback(navigation_params->request->url_list.last());
+}
+
+// NB: The process that fetched the response reports the URLs it reached, and they name the document, its origin, and
+//     the process that hosts it. RequestServer follows no redirects, so the URL of the request it made for the response
+//     is the response's URL. A navigation that reports another URL is made up: the document it would create could
+//     place another site's response in a process of the fetching process's choosing. Such a navigation is canceled.
+bool NavigationLoader::reported_urls_match_the_response_url(URL::URL const& response_url) const
+{
+    auto const* navigation_params = m_result->navigation_params.get_pointer<Web::HTML::NavigationParamsDescriptor>();
+    // NB: RequestServer's URL is parsed from its serialization, and a URL the UI process gave a navigation need not be.
+    return !any_reported_url(m_request.history_entry.url, navigation_params, [&](URL::URL const& url) {
+        auto parsed_url = URL::Parser::basic_parse(url.serialize());
+        return !parsed_url.has_value() || !parsed_url->equals(response_url, URL::ExcludeFragment::Yes);
+    });
+}
+
+// NB: A navigation's response to a request with an HTTP(S) URL comes from RequestServer, from which the UI process
+//     takes it. One the process that fetched it reports with a response of its own is made up: the document it would
+//     create could run what that process chose with the origin of another site, in a process of that site. Such a
+//     navigation is canceled.
+bool NavigationLoader::reports_an_http_response_of_its_own() const
+{
+    auto const* navigation_params = m_result->navigation_params.get_pointer<Web::HTML::NavigationParamsDescriptor>();
+    if (!navigation_params)
+        return false;
+
+    auto reports_an_http_url = any_reported_url(m_request.history_entry.url, navigation_params, [](URL::URL const& url) {
+        return Web::Fetch::Infrastructure::is_http_or_https_scheme(url.scheme());
+    });
+    if (!reports_an_http_url)
+        return false;
+
+    // AD-HOC: WebDriver BiDi provides the responses of the requests it intercepts, which the process running a request
+    //         reports with the body that WebDriver gave it. The Hub saw that body when it routed the command, so the
+    //         process must report exactly those bytes.
+    if (!m_response_provided_by_webdriver.has_value())
+        return true;
+    auto const& provided = *m_response_provided_by_webdriver;
+    auto const& response_url = navigation_params->response.url_list.is_empty() ? m_request.history_entry.url : navigation_params->response.url_list.last();
+    if (!provided.url.equals(response_url, URL::ExcludeFragment::Yes))
+        return true;
+    auto const* reported_body = navigation_params->response.body.get_pointer<ByteBuffer>();
+    auto reported_bytes = reported_body ? reported_body->bytes() : ReadonlyBytes {};
+    if (reported_bytes != provided.body.bytes())
+        return true;
+    return !reported_urls_match_the_response_url(response_url);
+}
+
+void NavigationLoader::set_response_body_callbacks(Requests::Request& request)
+{
+    auto weak_this = make_weak_ptr();
+    request.set_unbuffered_request_callbacks(
+        // NB: The request owns its callbacks, so it is alive while they run.
+        [weak_this, &request](NonnullRefPtr<HTTP::HeaderList> response_header_list, Optional<u32>, Optional<String> const&, Requests::CacheState) {
+            auto* loader = weak_this.ptr();
+            if (!loader)
+                return;
+            if (!request.response_url().has_value() || !loader->reported_urls_match_the_response_url(*request.response_url())) {
+                loader->did_acquire(false);
+                return;
+            }
+            loader->m_response_header_list = move(response_header_list);
+            loader->did_acquire(true);
+        },
+        [](Requests::ResponseData) { },
+        [](Core::ImmutableBytes) { },
+        [weak_this](u64, Requests::RequestTimingInfo const&, Optional<Requests::NetworkError>) {
+            if (auto* loader = weak_this.ptr())
+                loader->did_acquire(false);
+        });
+}
+
+void NavigationLoader::move_response_body_to(RequestServerSiteBindings const& host_bindings, Function<void(bool)> completion_steps)
+{
+    VERIFY(!m_completion_steps);
+    m_completion_steps = move(completion_steps);
+
+    // The host adopts the response through its client of the RequestServer of the document's top-level site.
+    auto top_level_site = m_top_level_site;
+    auto client_id = host_bindings.client_id_for(top_level_site);
+    if (!client_id.has_value()) {
+        top_level_site = {};
+        client_id = host_bindings.client_id();
+    }
+    auto request_server_or_null = client_id.has_value() ? RequestServerManager::the().instance_for_client(*client_id) : nullptr;
+    if (!request_server_or_null) {
+        did_acquire(false);
+        return;
+    }
+    auto& request_server = *request_server_or_null;
+    if (auto* body_handle = response_body_handle(*m_result))
+        body_handle->request_server_top_level_site = top_level_site;
+
+    if (request_server.is_retired() || (m_response_body_request_server && m_response_body_request_server->is_retired())) {
+        did_acquire(false);
+        return;
+    }
+    if (!m_response_body_request || !m_response_body_request_server || m_response_body_request_server.ptr() == &request_server) {
+        did_acquire(true);
+        return;
+    }
+
+    auto* body_handle = response_body_handle(*m_result);
+    if (!body_handle) {
+        did_acquire(true);
+        return;
+    }
+
+    auto exported = m_response_body_request_server->ui_client().export_request(*m_response_body_request);
+    if (exported.is_error()) {
+        warnln("Unable to move a navigation response between RequestServers: {}", exported.error());
+        did_acquire(false);
+        return;
+    }
+
+    auto request = request_server.ui_client().import_request(exported.release_value(), Requests::RequestClient::TransferLease::Yes);
+    if (!request) {
+        did_acquire(false);
+        return;
+    }
+    request->set_body_delivery_paused(true);
+    set_response_body_callbacks(*request);
+    m_response_body_request = request;
+    m_response_body_request_server = request_server;
+
+    // The handle names the lease the host adopts, which is now the UI process's request in the host's RequestServer.
+    body_handle->request_server_client_id = request_server.ui_client().request_server_client_id();
+    body_handle->request_server_request_id = request->id();
+    m_response_body_transfer_lease = Requests::RequestTransferLeaseKey { body_handle->request_server_client_id, body_handle->request_server_request_id };
+}
+
+void NavigationLoader::let_host_adopt_response_body(WebContentPage const& host, Function<void()> steps)
+{
+    VERIFY(m_result.has_value());
+    VERIFY(!m_steps_after_adopter_designation);
+
+    auto* host_process = host.routed_connection();
+    m_response_body_host = host_process;
+
+    // The host adopts the response through its client of the RequestServer that the body handle names.
+    Optional<int> host_client_id;
+    if (auto const* body_handle = response_body_handle(*m_result); body_handle && host_process)
+        host_client_id = host_process->request_server_site_bindings().client_id_for(body_handle->request_server_top_level_site);
+    if (!m_response_body_request || !m_response_body_request_server || m_response_body_request_server->is_retired() || !host_client_id.has_value()) {
+        steps();
+        return;
+    }
+
+    m_response_body_adopter_client_id = host_client_id;
+    m_steps_after_adopter_designation = move(steps);
+    auto designation = m_response_body_request_server->control_client().designate_request_adopter(*m_response_body_transfer_lease, *host_client_id);
+    auto weak_this = make_weak_ptr();
+    designation->when_resolved([weak_this](Empty) {
+        if (auto* loader = weak_this.ptr())
+            loader->did_designate_response_body_adopter();
+    });
+    designation->when_rejected([weak_this](Error&) {
+        if (auto* loader = weak_this.ptr())
+            loader->did_designate_response_body_adopter();
+    });
+}
+
+void NavigationLoader::did_designate_response_body_adopter()
+{
+    if (auto steps = move(m_steps_after_adopter_designation))
+        steps();
+}
+
+Web::HTML::NavigationPopulationResult NavigationLoader::take_result()
+{
+    VERIFY(m_result.has_value());
+    if (m_response_body_request)
+        m_response_body_was_handed_off = true;
+    return m_result.release_value();
+}
+
+bool NavigationLoader::response_body_matches(int request_server_client_id, u64 request_server_request_id) const
+{
+    return m_response_body_transfer_lease == Requests::RequestTransferLeaseKey { request_server_client_id, request_server_request_id };
+}
+
+bool NavigationLoader::response_body_was_handed_to_another_process(WebContentClient const& process) const
+{
+    return m_response_body_host && m_response_body_host.ptr() != &process;
+}
+
+void NavigationLoader::reclaim_response_body_after_failed_handoff()
+{
+    if (!m_response_body_was_handed_off)
+        return;
+    m_response_body_was_handed_off = false;
+    m_response_body_host = nullptr;
+    m_response_body_adopter_client_id = {};
+    release_response_body();
+}
+
+Web::HTML::NavigationPopulationResult const& NavigationLoader::result() const
+{
+    VERIFY(m_result.has_value());
+    return *m_result;
+}
+
+// The document the result creates takes the UI process's id for it. Its window takes over the navigation params'
+// reserved environment's id, which the UI process generates, and is in the agent cluster of the agent the UI process
+// obtained for it. A navigation without a reserved environment gets one with the id.
+void NavigationLoader::set_document(CanonicalDocument const& document, CanonicalNavigable const& navigable)
+{
+    VERIFY(m_result.has_value());
+    m_result->document_id = document.id();
+    if (auto top_level_origin = document.top_level_origin(); top_level_origin.has_value())
+        m_top_level_site = URL::Site::serialize_for_partitioning(*top_level_origin);
+
+    auto* navigation_params = m_result->navigation_params.get_pointer<Web::HTML::NavigationParamsDescriptor>();
+    if (!navigation_params)
+        return;
+    auto const& window = document.relevant_global_object();
+    if (!navigation_params->reserved_environment.has_value()) {
+        navigation_params->reserved_environment = Web::HTML::NavigationEnvironmentDescriptor {
+            .id = {},
+            .creation_url = m_request.history_entry.url,
+            .top_level_creation_url = {},
+            .top_level_origin = {},
+        };
+    }
+    navigation_params->reserved_environment->id = window.relevant_settings_object().id();
+    navigation_params->agent_cluster_id = window.agent().agent_cluster_id();
+    navigation_params->agent_cluster_is_origin_keyed = window.agent().agent_cluster_is_origin_keyed();
+    navigation_params->agent_cluster_cross_origin_isolation_mode = window.agent().agent_cluster_cross_origin_isolation_mode();
+
+    if (&document.browsing_context() != &navigable.active_browsing_context())
+        navigation_params->new_browsing_context_group_id = document.browsing_context().group()->id();
+}
+
+void NavigationLoader::discard(WebContentClient const& population_worker, Web::HTML::NavigationPopulationResult& result)
+{
+    auto const* body_handle = response_body_handle(result);
+    if (!body_handle || !response_body_was_fetched_by(*body_handle, population_worker))
+        return;
+
+    auto owner_client_id = body_handle->request_server_client_id;
+    auto request_server = RequestServerManager::the().instance_for_client(owner_client_id);
+    if (!request_server)
+        return;
+    auto request = request_server->ui_client().adopt_request(owner_client_id, body_handle->request_server_request_id, Requests::RequestClient::TransferLease::No, owner_client_id);
+    if (request)
+        request->stop();
+}
+
+void NavigationLoader::did_acquire(bool succeeded)
+{
+    if (!m_completion_steps)
+        return;
+
+    auto completion_steps = move(m_completion_steps);
+    completion_steps(succeeded);
+}
+
+void NavigationLoader::release_response_body()
+{
+    if (!m_response_body_request)
+        return;
+
+    // Once the descriptor has been sent, the destination is responsible for adopting the request. Dropping our
+    // local reference before that IPC is handled must not release the lease or cancel the request being transferred.
+    if (m_response_body_was_handed_off) {
+        m_response_body_request = nullptr;
+        return;
+    }
+
+    m_response_body_request->release_transfer_lease();
+    m_response_body_request->stop();
+    m_response_body_request = nullptr;
+}
+
+}

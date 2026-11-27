@@ -1,0 +1,108 @@
+/*
+ * Copyright (c) 2025-2026, Tim Flynn <trflynn89@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Error.h>
+#include <AK/LexicalPath.h>
+#include <AK/Optional.h>
+#include <AK/StringView.h>
+#include <AK/Time.h>
+#include <AK/Types.h>
+#include <AK/WeakPtr.h>
+#include <LibDatabase/Database.h>
+#include <LibHTTP/Cache/CacheEntry.h>
+#include <LibHTTP/Cache/CacheIndex.h>
+#include <LibHTTP/Cache/CacheMode.h>
+#include <LibHTTP/Cache/Utilities.h>
+#include <LibURL/Forward.h>
+
+namespace HTTP {
+
+class DiskCache {
+public:
+    enum class Mode {
+        Normal,
+
+        // In test mode, we only enable caching of responses on a per-request basis, signified by a request header. The
+        // response headers will include some status on how the request was handled.
+        Testing,
+    };
+    static ErrorOr<Optional<DiskCache>> create(Mode, LexicalPath const& cache_root);
+    static void remove(Mode, LexicalPath const& cache_root);
+
+    DiskCache(DiskCache&&);
+    DiskCache& operator=(DiskCache&&);
+
+    ~DiskCache();
+
+    Mode mode() const { return m_mode; }
+
+    // Every entry belongs to a partition (see NetworkIsolationKey::disk_cache_partition()). A request finds only the
+    // entries of its own partition.
+    struct CacheHasOpenEntry { };
+    Variant<Optional<CacheEntryWriter&>, CacheHasOpenEntry> create_entry(CacheRequest&, Utf16String const& partition, URL::URL const&, StringView method, HeaderList const& request_headers, UnixDateTime request_start_time);
+
+    enum class OpenMode {
+        Read,
+        Revalidate,
+    };
+    Variant<Optional<CacheEntryReader&>, CacheHasOpenEntry> open_entry(CacheRequest&, Utf16String const& partition, URL::URL const&, StringView method, HeaderList const& request_headers, CacheMode, OpenMode);
+
+    void remove_entries_exceeding_cache_limit();
+    void remove_variants_exceeding_limit(Badge<CacheEntryWriter>, CacheDigest const& cache_key, CacheDigest const& vary_key_to_keep);
+    void set_maximum_disk_cache_size(u64 maximum_disk_cache_size);
+
+    Requests::CacheSizes estimate_cache_size_accessed_since(UnixDateTime since);
+    void remove_entries_accessed_since(UnixDateTime since);
+
+    // Supports least-recently-used eviction across disk caches sharing one size limit.
+    Vector<Requests::CacheAccessBucket> access_profile(AK::Duration granularity) { return m_index.access_profile(granularity); }
+    void remove_entries_accessed_before(UnixDateTime before);
+    u64 estimated_size() const { return m_index.total_estimated_size(); }
+    void set_on_estimated_size_change(Function<void()> callback) { m_index.on_total_estimated_size_change = move(callback); }
+
+    void invalidate(Utf16String const& partition, URL::URL const&);
+
+    LexicalPath const& cache_directory() const { return m_cache_directory; }
+
+    void cache_entry_closed(Badge<CacheEntry>, CacheEntry const&);
+
+    // Leaves writers for the request to finish or discard.
+    void close_entries_read_by(CacheRequest const&);
+
+    // The time when any request holding open a cache entry for this URL and method last made progress — or nothing, if
+    // no such request reports any. A request waiting on that entry reads it to judge whether the holder has stalled.
+    Optional<MonotonicTime> last_activity_time_of_open_entries(Utf16String const& partition, URL::URL const&, StringView method) const;
+
+private:
+    DiskCache(Mode, NonnullRefPtr<Database::Database>, LexicalPath cache_directory, CacheIndex);
+
+    enum class CheckReaderEntries {
+        No,
+        Yes,
+    };
+    bool check_if_cache_has_open_entry(CacheRequest&, CacheDigest const& cache_key, URL::URL const&, CheckReaderEntries);
+
+    void close_entry(CacheEntry const&);
+    void delete_entry(CacheDigest const& cache_key, CacheDigest const& vary_key);
+    void remove_entry_files(CacheDigest const& cache_key, CacheDigest const& vary_key);
+
+    Mode m_mode;
+    NonnullRefPtr<Database::Database> m_database;
+
+    struct OpenCacheEntry {
+        NonnullOwnPtr<CacheEntry> entry;
+        WeakPtr<CacheRequest> request;
+    };
+    HashMap<CacheDigest, Vector<OpenCacheEntry, 1>> m_open_cache_entries;
+    HashMap<CacheDigest, Vector<WeakPtr<CacheRequest>, 1>> m_requests_waiting_completion;
+
+    LexicalPath m_cache_directory;
+    CacheIndex m_index;
+};
+
+}

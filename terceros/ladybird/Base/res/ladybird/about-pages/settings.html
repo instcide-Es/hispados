@@ -1,0 +1,1997 @@
+<!doctype html>
+<html>
+    <head>
+        <title>Settings</title>
+        <link rel="icon" type="image/png" href="resource://icons/48x48/app-browser.png" />
+        <link rel="stylesheet" type="text/css" href="resource://ladybird/ladybird.css" />
+        <link rel="stylesheet" type="text/css" href="resource://ladybird/about-pages/webui.css" />
+        <style>
+            body {
+                font-size: 14px;
+                line-height: 1.5;
+            }
+
+            hr {
+                height: 1px;
+                background-color: var(--border-color);
+                border: none;
+            }
+
+            .inline-container {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 10px;
+            }
+
+            .input-with-reset {
+                position: relative;
+                display: flex;
+                width: 50%;
+            }
+
+            .input-with-reset input {
+                width: 100% !important;
+                padding-right: 32px;
+            }
+
+            .input-reset-button {
+                position: absolute;
+                right: 6px;
+                top: 50%;
+
+                transform: translateY(-50%);
+
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                width: 20px;
+                height: 20px;
+
+                color: inherit;
+                background: none;
+                border: none;
+                border-radius: 5px;
+                padding: 0;
+
+                font-size: 18px;
+                line-height: 1;
+                opacity: 0.4;
+
+                cursor: pointer;
+            }
+
+            .input-reset-button:hover {
+                background-color: var(--control);
+                opacity: 0.8;
+            }
+
+            .inline-container input[type="number"],
+            .inline-container input[type="text"],
+            .inline-container input[type="url"],
+            .inline-container textarea {
+                width: 50%;
+            }
+
+            .config-row.dependent {
+                padding-left: 24px;
+            }
+
+            .config-row > input[type="number"] {
+                max-width: 256px;
+                flex-shrink: 0;
+            }
+
+            .inline-container input[type="checkbox"],
+            .inline-container > button {
+                flex-shrink: 0;
+            }
+
+            #tab-advanced .search-container {
+                width: auto;
+                margin: 16px 0 16px 0;
+            }
+
+            #tab-layout-group {
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+            }
+
+            #tab-appearance:has(#vertical-tabs-position > option[value="right"]:checked)
+                input[value="vertical"]
+                + .vertical-preview {
+                flex-direction: row-reverse;
+            }
+
+            .inline-container > label {
+                max-width: 60ch;
+                margin-bottom: 0;
+            }
+
+            .card-group.control-row {
+                --row-fill-inset: 4px -10px;
+            }
+
+            .button-container {
+                display: flex;
+                align-items: center;
+                justify-content: flex-end;
+                gap: 10px;
+
+                margin-top: 20px;
+            }
+
+            .input-field-container {
+                --row-fill-inset: -6px -10px;
+
+                display: flex;
+                align-items: center;
+                justify-content: flex-start;
+                gap: 10px;
+            }
+
+            .input-field-container + .input-field-container {
+                margin-top: 16px;
+            }
+
+            .input-field-container label,
+            .input-field-container p {
+                margin: 0;
+            }
+
+            .forcibly-enabled {
+                opacity: 0.6;
+            }
+
+            .card-body > .description:first-child {
+                margin: 0 0 16px;
+            }
+
+            .tab-panel > .description {
+                margin-bottom: 16px;
+            }
+
+            .form-row input {
+                flex: 1;
+            }
+
+            label {
+                display: block;
+                margin-bottom: 8px;
+            }
+
+            input[type="number"],
+            input[type="search"],
+            input[type="text"],
+            input[type="url"],
+            textarea {
+                color: var(--text);
+                background-color: var(--control);
+
+                width: 100%;
+                border: none;
+                border-radius: 7px;
+            }
+
+            input[type="number"],
+            input[type="search"],
+            input[type="text"],
+            input[type="url"] {
+                height: 28px;
+            }
+
+            textarea {
+                font: inherit;
+                line-height: inherit;
+                padding: 6px 10px;
+                resize: vertical;
+            }
+
+            input[type="number"]:focus-visible,
+            input[type="search"]:focus-visible,
+            input[type="text"]:focus-visible,
+            input[type="url"]:focus-visible,
+            textarea:focus-visible {
+                background-color: var(--page);
+                outline: none;
+                box-shadow:
+                    0 0 0 1px var(--focus-edge),
+                    0 0 0 3px var(--focus-ring);
+            }
+
+            textarea:focus {
+                outline: none;
+            }
+
+            textarea:where(:not(:disabled, :focus)):hover {
+                background-color: var(--control-hover);
+            }
+
+            input[type="number"].error,
+            input[type="text"].error,
+            input[type="url"].error {
+                box-shadow: inset 0 0 0 1px var(--error);
+            }
+
+            input[type="number"].error:focus-visible,
+            input[type="text"].error:focus-visible,
+            input[type="url"].error:focus-visible {
+                box-shadow:
+                    inset 0 0 0 1px var(--error),
+                    0 0 0 1px var(--focus-edge),
+                    0 0 0 3px var(--focus-ring);
+            }
+
+            dialog {
+                color: var(--text);
+                background-color: var(--surface);
+                box-shadow:
+                    0 0 0 1px var(--edge),
+                    var(--dialog-shadow);
+
+                width: 90%;
+                max-width: 500px;
+
+                margin: auto;
+                padding: 0;
+
+                border: none;
+                border-radius: 12px;
+                outline: none;
+            }
+
+            dialog::backdrop {
+                background-color: rgba(0, 0, 0, 0.5);
+            }
+
+            dialog .dialog-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+
+                padding: 15px 20px;
+            }
+
+            dialog .dialog-body {
+                height: 450px;
+
+                border-top: 1px solid var(--border-color);
+
+                display: flex;
+                flex-direction: column;
+
+                padding: 15px 20px;
+            }
+
+            dialog .dialog-body hr {
+                margin: 8px 4px 10px 4px;
+            }
+
+            dialog .dialog-form {
+                border-top: 1px solid var(--border-color);
+
+                display: flex;
+                flex-direction: column;
+
+                padding: 15px 20px;
+            }
+
+            dialog .form-group {
+                margin-bottom: 20px;
+            }
+
+            dialog .dialog-footer {
+                display: flex;
+                justify-content: flex-end;
+
+                border-top: 1px solid var(--border-color);
+
+                padding: 15px 20px;
+                gap: 10px;
+            }
+
+            dialog .dialog-title {
+                font-size: 15px;
+                font-weight: 600;
+            }
+
+            /* An icon button, filled under the pointer like the toolbar's buttons. */
+            dialog .dialog-button {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                min-width: 28px;
+                height: 28px;
+
+                color: inherit;
+                background: none;
+                border: none;
+                border-radius: 6px;
+                outline: none;
+
+                padding: 0;
+
+                font-size: 22px;
+                line-height: 1;
+                opacity: 0.8;
+
+                cursor: pointer;
+            }
+
+            /* NB: The close button's glyph keeps its place at the header's edge, with the fill reaching past it. */
+            dialog .dialog-header .dialog-button {
+                margin-right: -7px;
+            }
+
+            dialog .dialog-button:not(:disabled):hover {
+                background-color: var(--control);
+                opacity: 1;
+            }
+
+            dialog .dialog-button:disabled {
+                opacity: 0.3;
+                cursor: default;
+            }
+
+            dialog .dialog-list {
+                border-radius: 10px;
+                box-shadow: inset 0 0 0 1px var(--separator);
+
+                margin: 10px 0;
+
+                font-size: 14px;
+
+                overflow-y: auto;
+                flex-grow: 1;
+            }
+
+            dialog .dialog-list-item {
+                padding: 10px;
+
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }
+
+            dialog .dialog-list-item-placeholder {
+                padding: 10px;
+                opacity: 0.6;
+            }
+
+            dialog .dialog-list-item-label {
+                flex-grow: 1;
+            }
+
+            #site-settings .dialog-list-item {
+                gap: 10px;
+            }
+
+            #site-settings .dialog-list-item .dialog-button svg {
+                display: block;
+                width: 16px;
+                height: 16px;
+            }
+
+            #host-settings .dialog-list-item {
+                gap: 16px;
+            }
+
+            #host-settings .dialog-list-item-label {
+                min-width: 0;
+                overflow-wrap: anywhere;
+            }
+
+            #host-settings .dialog-list-item-value,
+            #host-settings button {
+                flex-shrink: 0;
+            }
+
+            #host-settings .dialog-list-item-value {
+                font-variant-numeric: tabular-nums;
+            }
+
+            dialog .dialog-controls {
+                display: flex;
+                justify-content: flex-end;
+
+                margin-top: auto;
+                gap: 10px;
+            }
+
+            dialog .dialog-controls button svg {
+                width: 16px;
+                height: 16px;
+            }
+
+            dialog .dialog-controls input,
+            dialog .dialog-controls select {
+                flex-grow: 1;
+            }
+
+            .tab-bar {
+                display: flex;
+                gap: 4px;
+
+                margin-bottom: 20px;
+                border-bottom: 1px solid var(--border-color);
+
+                overflow-x: auto;
+            }
+
+            .crash-modes {
+                margin-top: 10px;
+
+                border-radius: 10px;
+                box-shadow: inset 0 0 0 1px var(--separator);
+                overflow: hidden;
+            }
+
+            .crash-mode {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+
+                min-height: 40px;
+                margin: 0;
+                padding: 8px 14px;
+
+                cursor: pointer;
+            }
+
+            .crash-mode + .crash-mode {
+                border-top: 1px solid var(--separator-soft);
+            }
+
+            .crash-mode:not(:has(input:checked)):hover {
+                background: var(--control);
+            }
+
+            .crash-mode:has(input:checked) {
+                background: var(--choice-fill);
+            }
+
+            .crash-mode:has(input:focus-visible) {
+                box-shadow: inset 0 0 0 2px var(--focus-ring);
+            }
+
+            .crash-mode input {
+                position: absolute;
+                opacity: 0;
+                pointer-events: none;
+            }
+
+            .crash-mode-text {
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                gap: 1px;
+            }
+
+            .crash-mode .description {
+                margin: 0;
+                font-size: 12px;
+            }
+
+            .crash-mode svg {
+                visibility: hidden;
+                flex: none;
+                width: 14px;
+                height: 14px;
+
+                fill: none;
+                stroke: var(--choice);
+                stroke-width: 1.8;
+                stroke-linecap: round;
+                stroke-linejoin: round;
+            }
+
+            .crash-mode:has(input:checked) svg {
+                visibility: visible;
+            }
+
+            .tab-button {
+                background: none;
+                border: none;
+                border-bottom: 3px solid transparent;
+
+                padding: 10px 16px;
+
+                font-size: 14px;
+                font-weight: 500;
+                color: inherit;
+                opacity: 0.6;
+
+                cursor: pointer;
+                white-space: nowrap;
+            }
+
+            .tab-button:hover {
+                opacity: 0.8;
+            }
+
+            .tab-button.active {
+                border-bottom-color: var(--accent);
+                opacity: 1;
+            }
+
+            .tab-panel {
+                display: none;
+            }
+
+            .tab-panel.active {
+                display: block;
+            }
+
+            .expandable-list {
+                margin-top: 6px;
+            }
+
+            .expandable-list summary {
+                width: fit-content;
+                margin-left: -6px;
+                padding: 2px 6px;
+                border-radius: 5px;
+
+                cursor: pointer;
+            }
+
+            .expandable-list summary:hover {
+                background-color: var(--control);
+            }
+
+            .expandable-list[open] summary {
+                margin-bottom: 20px;
+            }
+
+            @media (max-width: 600px) {
+                .form-row {
+                    align-items: stretch;
+                    flex-direction: column;
+                }
+
+                .form-row button {
+                    align-self: flex-end;
+                }
+            }
+            /* The Quiet design: a sidebar of sections, and each section's settings as rows divided by soft lines. */
+            body {
+                display: grid;
+                grid-template-columns: 232px minmax(0, 1fr);
+                align-items: start;
+                max-width: none;
+                min-height: 100vh;
+                padding: 0;
+                font-size: 13px;
+            }
+
+            .settings-sidebar {
+                position: sticky;
+                top: 0;
+                display: flex;
+                flex-direction: column;
+                height: 100vh;
+                box-sizing: border-box;
+                padding: 28px 12px;
+                border-right: 1px solid var(--separator-soft);
+                overflow: auto;
+            }
+
+            .search-field {
+                cursor: text;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                height: 28px;
+                margin: 0 0 14px;
+                padding: 0 10px;
+                border-radius: 7px;
+                background-color: var(--control);
+            }
+
+            .search-field:not(:focus-within):hover {
+                background-color: var(--control-hover);
+            }
+
+            .search-field:focus-within {
+                background-color: var(--page);
+                box-shadow:
+                    0 0 0 1px var(--focus-edge),
+                    0 0 0 3px var(--focus-ring);
+            }
+
+            .search-field svg {
+                flex-shrink: 0;
+                width: 14px;
+                height: 14px;
+                color: var(--muted);
+            }
+
+            .search-field input,
+            .search-field input:focus,
+            .search-field input:hover {
+                flex: 1;
+                min-width: 0;
+                height: auto;
+                padding: 0;
+                border: none;
+                background: transparent;
+                box-shadow: none;
+            }
+
+            .visually-hidden {
+                position: absolute;
+                width: 1px;
+                height: 1px;
+                margin: -1px;
+                padding: 0;
+                overflow: hidden;
+                clip: rect(0, 0, 0, 0);
+                border: 0;
+            }
+
+            .tab-bar {
+                flex-direction: column;
+                gap: 2px;
+                margin: 0;
+                border-bottom: none;
+            }
+
+            .tab-button {
+                height: 30px;
+                padding: 0 10px;
+                border: none;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: 400;
+                text-align: left;
+                opacity: 1;
+            }
+
+            /* The chosen section's fill is deeper than the faint hover fill, so a hovered section never looks chosen. */
+            .tab-button:hover {
+                background-color: var(--hover-faint);
+                opacity: 1;
+            }
+
+            .tab-button.active {
+                background-color: var(--control-pressed);
+            }
+
+            /* The focus ring appears only for keyboard focus, never after a click. */
+            .tab-button:focus {
+                outline: none;
+            }
+
+            .tab-button:focus-visible {
+                box-shadow:
+                    0 0 0 1px var(--focus-edge),
+                    0 0 0 3px var(--focus-ring);
+            }
+
+            /* A setting's default and its overrides sit side by side. */
+            .setting-controls {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+            }
+
+            /* The content column is centered in the room right of the sidebar, so a wide window doesn't leave it leaning
+               left. */
+            .settings-content {
+                box-sizing: border-box;
+                width: 100%;
+                max-width: 824px;
+                margin: 0 auto;
+                padding: 28px 56px;
+            }
+
+            .tab-panel::before {
+                content: attr(data-title);
+                display: block;
+                margin-bottom: 10px;
+                font-size: 22px;
+                font-weight: 600;
+                line-height: 28px;
+            }
+
+            /* A list of choices or of items, in one rounded box with soft lines between its rows. */
+            .boxed-list {
+                border-radius: 10px;
+                box-shadow: inset 0 0 0 1px var(--separator);
+                overflow: hidden;
+            }
+
+            .boxed-list > * {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                min-height: 40px;
+                margin: 0;
+                padding: 8px 14px;
+                box-sizing: border-box;
+            }
+
+            .boxed-list > * + * {
+                border-top: 1px solid var(--separator-soft);
+            }
+
+            .boxed-list .item-name {
+                display: flex;
+                flex: 1;
+                flex-direction: column;
+                gap: 1px;
+                min-width: 0;
+                margin: 0;
+                overflow-wrap: anywhere;
+            }
+
+            .boxed-list .item-name .description {
+                margin: 0;
+                font-size: 12px;
+            }
+
+            .list-heading {
+                display: flex;
+                align-items: baseline;
+                justify-content: space-between;
+                gap: 16px;
+                margin-bottom: 10px;
+            }
+
+            .list-footer {
+                display: flex;
+                justify-content: flex-end;
+                margin-top: 6px;
+            }
+
+            .search-suggestions-row {
+                border-top: 1px solid var(--separator-soft);
+            }
+
+            .add-filter-list:not([hidden]) {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                margin-top: 12px;
+            }
+
+            .add-filter-list .description {
+                margin: 0;
+            }
+
+            .add-filter-list button {
+                flex-shrink: 0;
+                white-space: nowrap;
+            }
+
+            .list-section {
+                padding: 16px 0 6px;
+            }
+
+            .tab-panel > .list-section {
+                padding-top: 40px;
+            }
+
+            button.link-button {
+                height: auto;
+                margin: 0;
+                padding: 2px 4px;
+                border: none;
+                border-radius: 5px;
+                background: transparent;
+                font-size: 12px;
+                font-weight: 500;
+                color: var(--text);
+                cursor: pointer;
+            }
+
+            button.link-button:not(:disabled):hover {
+                background-color: var(--control);
+            }
+
+            button.link-button:disabled {
+                opacity: 0.5;
+                cursor: default;
+            }
+
+            .engine-choice {
+                cursor: pointer;
+            }
+
+            .engine-choice input {
+                position: absolute;
+                opacity: 0;
+                pointer-events: none;
+            }
+
+            .engine-choice:not(:has(input:checked)):hover {
+                background: var(--control);
+            }
+
+            .engine-choice:has(input:checked) {
+                background: var(--choice-fill);
+            }
+
+            .engine-choice:has(input:focus-visible) {
+                box-shadow: inset 0 0 0 1.5px var(--choice);
+            }
+
+            .engine-name {
+                flex: 1;
+            }
+
+            .empty-tile {
+                flex-shrink: 0;
+                width: 18px;
+                height: 18px;
+                border-radius: 4px;
+                box-shadow: inset 0 0 0 1px var(--separator);
+            }
+
+            .engine-check {
+                width: 14px;
+                height: 14px;
+                fill: none;
+                stroke: var(--choice);
+                stroke-width: 1.8;
+                stroke-linecap: round;
+                stroke-linejoin: round;
+                visibility: hidden;
+            }
+
+            .engine-choice:has(input:checked) .engine-check {
+                visibility: visible;
+            }
+
+            .filter-list-row {
+                --row-fill-radius: 0;
+            }
+
+            .filter-list-row input[type="checkbox"] {
+                flex-shrink: 0;
+                margin: 0;
+            }
+
+            /* While searching, every section shows the settings that match, and the sidebar selects none. */
+            body.searching .tab-panel:not(.search-miss) {
+                display: block;
+            }
+
+            body.searching .tab-panel + .tab-panel:not(.search-miss) {
+                margin-top: 30px;
+            }
+
+            body.searching .tab-panel > .description,
+            body.searching .search-miss {
+                display: none !important;
+            }
+
+            body.searching .tab-button.active {
+                background-color: transparent;
+            }
+
+            .search-empty {
+                padding: 36px 0;
+                color: var(--muted);
+                text-align: center;
+            }
+
+            .card-title {
+                margin: 24px 0 2px;
+                font-size: 13px;
+                font-weight: 600;
+                color: var(--text);
+            }
+
+            .tab-panel > .card-title:not(:first-child) {
+                margin-top: 40px;
+            }
+
+            .card,
+            .card.card-body {
+                background: none;
+                border: none;
+                border-radius: 0;
+                margin-bottom: 0;
+            }
+
+            .card-body,
+            .card.card-body {
+                padding: 0;
+            }
+
+            .card-group,
+            .card.card-body.inline-container {
+                padding: 14px 0;
+                border-bottom: 1px solid var(--separator-soft);
+            }
+
+            .card-group:not(.hidden) ~ .card-group:not(.hidden) {
+                margin-top: 0;
+                padding-top: 14px;
+                border-top: none;
+            }
+
+            @media (max-width: 720px) {
+                body {
+                    grid-template-columns: minmax(0, 1fr);
+                }
+
+                .settings-sidebar {
+                    position: static;
+                    height: auto;
+                    padding: 12px;
+                    border-right: none;
+                    border-bottom: 1px solid var(--separator-soft);
+                }
+
+                .tab-bar {
+                    flex-direction: row;
+                    overflow-x: auto;
+                }
+
+                .settings-content {
+                    padding: 20px;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <nav class="settings-sidebar">
+            <label class="search-field">
+                <span class="visually-hidden">Search settings</span>
+                <svg
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                    aria-hidden="true"
+                >
+                    <path d="M7 2.5a4.5 4.5 0 1 1 0 9a4.5 4.5 0 1 1 0-9zM10.5 10.5L14 14" />
+                </svg>
+                <input id="settings-search" type="search" placeholder="Search settings" spellcheck="false" />
+            </label>
+            <div class="tab-bar" role="tablist" aria-label="Settings categories">
+                <button id="tab-button-appearance" class="tab-button active" data-tab="appearance" role="tab">
+                    Appearance
+                </button>
+                <button id="tab-button-search" class="tab-button" data-tab="search" role="tab">Search</button>
+                <button id="tab-button-browsing" class="tab-button" data-tab="browsing" role="tab">
+                    Startup and browsing
+                </button>
+                <button id="tab-button-memory" class="tab-button" data-tab="memory" role="tab">Memory</button>
+                <button id="tab-button-privacy" class="tab-button" data-tab="privacy" role="tab">
+                    Privacy and security
+                </button>
+                <button id="tab-button-permissions" class="tab-button" data-tab="permissions" role="tab">
+                    Permissions
+                </button>
+                <button id="tab-button-blocking" class="tab-button" data-tab="blocking" role="tab">
+                    Content blocking
+                </button>
+                <button id="tab-button-feedback" class="tab-button" data-tab="feedback" role="tab">Feedback</button>
+                <button id="tab-button-advanced" class="tab-button" data-tab="advanced" role="tab">Advanced</button>
+            </div>
+        </nav>
+
+        <main class="settings-content">
+            <p id="search-empty" class="search-empty" hidden>No settings match this search.</p>
+            <div class="tab-panel active" id="tab-appearance" data-title="Appearance">
+                <div class="card">
+                    <div class="card-body">
+                        <div class="card-group inline-container">
+                            <span>Appearance</span>
+                            <div id="interface-theme" class="segmented" role="radiogroup" aria-label="Appearance">
+                                <label><input type="radio" name="interface-theme" value="system" />System</label>
+                                <label><input type="radio" name="interface-theme" value="light" />Light</label>
+                                <label><input type="radio" name="interface-theme" value="dark" />Dark</label>
+                            </div>
+                        </div>
+                        <div class="card-group inline-container">
+                            <span id="color-theme-title">
+                                Accent color
+                                <p class="description">The colors of tabs, toolbars, menus and highlights.</p>
+                            </span>
+                            <div
+                                id="color-theme"
+                                class="color-swatches"
+                                role="radiogroup"
+                                aria-labelledby="color-theme-title"
+                            >
+                                <label class="color-swatch system-swatch" title="System" style="--swatch: #8e8e93">
+                                    <input type="radio" name="color-theme" value="neutral" aria-label="System" />
+                                </label>
+                                <label class="color-swatch" title="Harbor" style="--swatch: #2f6fd6">
+                                    <input type="radio" name="color-theme" value="harbor" aria-label="Harbor" />
+                                </label>
+                                <label class="color-swatch" title="Glacier" style="--swatch: #1798b8">
+                                    <input type="radio" name="color-theme" value="glacier" aria-label="Glacier" />
+                                </label>
+                                <label class="color-swatch" title="Lagoon" style="--swatch: #12957f">
+                                    <input type="radio" name="color-theme" value="lagoon" aria-label="Lagoon" />
+                                </label>
+                                <label class="color-swatch" title="Moss" style="--swatch: #3b8f3e">
+                                    <input type="radio" name="color-theme" value="moss" aria-label="Moss" />
+                                </label>
+                                <label class="color-swatch" title="Saffron" style="--swatch: #c99500">
+                                    <input type="radio" name="color-theme" value="saffron" aria-label="Saffron" />
+                                </label>
+                                <label class="color-swatch" title="Copper" style="--swatch: #d0631c">
+                                    <input type="radio" name="color-theme" value="copper" aria-label="Copper" />
+                                </label>
+                                <label class="color-swatch" title="Cherry" style="--swatch: #d1344b">
+                                    <input type="radio" name="color-theme" value="cherry" aria-label="Cherry" />
+                                </label>
+                                <label class="color-swatch" title="Blossom" style="--swatch: #d2459a">
+                                    <input type="radio" name="color-theme" value="blossom" aria-label="Blossom" />
+                                </label>
+                                <label class="color-swatch" title="Lavender" style="--swatch: #7563d4">
+                                    <input type="radio" name="color-theme" value="lavender" aria-label="Lavender" />
+                                </label>
+                            </div>
+                        </div>
+                        <div class="card-group inline-container">
+                            <span>
+                                Websites
+                                <p id="website-color-scheme-description" class="description">
+                                    Whether websites are asked to show their light or dark design.
+                                </p>
+                            </span>
+                            <div
+                                id="website-color-scheme"
+                                class="segmented"
+                                role="radiogroup"
+                                aria-label="Websites"
+                                aria-describedby="website-color-scheme-description"
+                            >
+                                <label><input type="radio" name="website-color-scheme" value="system" />System</label>
+                                <label><input type="radio" name="website-color-scheme" value="light" />Light</label>
+                                <label><input type="radio" name="website-color-scheme" value="dark" />Dark</label>
+                            </div>
+                        </div>
+                        <div class="card-group inline-container control-row">
+                            <label for="enable-force-dark">
+                                Force dark mode
+                                <p class="description">
+                                    Darken web pages that don’t provide a dark theme of their own.
+                                </p>
+                            </label>
+                            <div class="setting-controls">
+                                <input id="enable-force-dark" type="checkbox" switch />
+                                <button id="force-dark-settings" class="secondary-button row-action" hidden>
+                                    Overrides…
+                                </button>
+                            </div>
+                        </div>
+                        <div id="tab-layout-group" class="card-group">
+                            <span id="tab-layout-title">Layout</span>
+                            <div class="tab-options" role="radiogroup" aria-labelledby="tab-layout-title">
+                                <label class="tab-option choice-card">
+                                    <input type="radio" name="tab-layout" value="horizontal" />
+                                    <span class="tab-preview horizontal-preview" aria-hidden="true">
+                                        <span class="preview-strip"><i class="active"></i><i></i><i></i></span>
+                                        <span class="preview-toolbar"><i></i></span>
+                                    </span>
+                                    <span class="tab-option-label">Tabs on top</span>
+                                </label>
+                                <label class="tab-option choice-card">
+                                    <input type="radio" name="tab-layout" value="vertical" />
+                                    <span class="tab-preview vertical-preview" aria-hidden="true">
+                                        <span class="preview-sidebar"><i></i><i class="active"></i><i></i></span>
+                                        <span class="preview-main">
+                                            <span class="preview-toolbar"><i></i></span>
+                                        </span>
+                                    </span>
+                                    <span class="tab-option-label">Tabs on the side</span>
+                                </label>
+                                <label class="tab-option choice-card">
+                                    <input type="radio" name="tab-layout" value="sidebar" />
+                                    <span class="tab-preview vertical-preview" aria-hidden="true">
+                                        <span class="preview-sidebar"><b></b><i></i><i class="active"></i><i></i></span>
+                                        <span class="preview-main"></span>
+                                    </span>
+                                    <span class="tab-option-label">Everything in the sidebar</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="card-group inline-container control-row hidden">
+                            <label for="vertical-tabs-expand-on-hover">
+                                Expand vertical tabs on hover when collapsed
+                            </label>
+                            <input id="vertical-tabs-expand-on-hover" type="checkbox" switch />
+                        </div>
+                        <div class="card-group inline-container control-row hidden">
+                            <label for="vertical-tabs-position">Sidebar position</label>
+                            <select id="vertical-tabs-position">
+                                <option value="left">Left</option>
+                                <option value="right">Right</option>
+                            </select>
+                        </div>
+                        <div class="card-group inline-container control-row">
+                            <label for="always-show-scrollbars">Always show scrollbars</label>
+                            <input id="always-show-scrollbars" type="checkbox" switch />
+                        </div>
+                        <div class="card-group inline-container control-row" id="show-menu-bar-group">
+                            <label for="show-menu-bar">Show system menu bar</label>
+                            <input id="show-menu-bar" type="checkbox" switch />
+                        </div>
+                        <div class="card-group inline-container control-row hidden" id="window-decorations-group">
+                            <label for="use-client-side-window-decorations">
+                                Use client-side window decorations
+                                <p class="description">
+                                    Use custom title bar and window controls instead of the system window frame.
+                                </p>
+                            </label>
+                            <input id="use-client-side-window-decorations" type="checkbox" switch />
+                        </div>
+                        <div class="card-group inline-container control-row">
+                            <label for="show-bookmarks-bar">Show bookmarks bar</label>
+                            <select id="show-bookmarks-bar">
+                                <option value="always">Always</option>
+                                <option value="never">Never</option>
+                                <option value="onHover">Only when hovering the navigation toolbar</option>
+                            </select>
+                        </div>
+                        <div class="card-group inline-container control-row">
+                            <label for="default-zoom-level">Default page zoom</label>
+                            <div class="setting-controls">
+                                <select id="default-zoom-level"></select>
+                                <button id="zoom-settings" class="secondary-button row-action" hidden>
+                                    Overrides…
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-panel" id="tab-search" data-title="Search">
+                <div class="card">
+                    <div class="card-body">
+                        <div class="list-section">
+                            <div class="list-heading">
+                                <span id="search-engine-title">Search engine</span>
+                            </div>
+                            <div
+                                id="search-engine"
+                                class="boxed-list"
+                                role="radiogroup"
+                                aria-labelledby="search-engine-title"
+                            ></div>
+                            <div class="list-footer">
+                                <button id="search-settings" class="link-button">Custom search engines…</button>
+                            </div>
+                        </div>
+                        <div class="card-group inline-container control-row search-suggestions-row">
+                            <label for="search-suggestions-enabled">
+                                Show search suggestions
+                                <p id="search-suggestions-description" class="description"></p>
+                            </label>
+                            <input
+                                id="search-suggestions-enabled"
+                                type="checkbox"
+                                switch
+                                aria-describedby="search-suggestions-description"
+                            />
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-panel" id="tab-browsing" data-title="Startup and browsing">
+                <h3 class="card-title">Startup</h3>
+                <div class="card">
+                    <div class="card-body">
+                        <div class="card-group inline-container hidden" id="default-browser-group">
+                            <label id="default-browser-label">
+                                Default browser
+                                <p id="default-browser-status" class="description" role="status"></p>
+                            </label>
+                            <button id="make-default-browser" class="secondary-button">Make default</button>
+                        </div>
+                        <div class="card-group inline-container control-row">
+                            <label for="restore-previous-session">Restore previous windows and tabs</label>
+                            <input id="restore-previous-session" type="checkbox" switch />
+                        </div>
+                        <div class="card-group inline-container control-row">
+                            <label for="new-tab-page-url">New tab page URL</label>
+                            <div class="input-with-reset">
+                                <input id="new-tab-page-url" type="url" spellcheck="false" />
+                                <button
+                                    id="new-tab-page-url-reset"
+                                    class="input-reset-button row-action hidden"
+                                    title="Restore default"
+                                >
+                                    &times;
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <h3 class="card-title">Browsing</h3>
+                <div class="card">
+                    <div class="card-body">
+                        <div class="card-group inline-container control-row">
+                            <label for="languages-settings">
+                                Website languages
+                                <p class="description">
+                                    Languages that websites are asked to use, in order of preference.
+                                </p>
+                            </label>
+                            <button id="languages-settings" class="secondary-button">Edit…</button>
+                        </div>
+                        <div class="card-group inline-container control-row">
+                            <label for="enable-autoscroll">
+                                Use autoscrolling
+                                <p class="description">
+                                    Scroll pages by pressing the middle mouse button and moving the mouse.
+                                </p>
+                            </label>
+                            <input id="enable-autoscroll" type="checkbox" switch />
+                        </div>
+                        <div class="card-group inline-container control-row" id="enable-primary-paste-group">
+                            <label for="enable-primary-paste">
+                                Paste with the middle mouse button
+                                <p class="description">
+                                    Paste text from the clipboard when the middle mouse button is clicked.
+                                </p>
+                            </label>
+                            <input id="enable-primary-paste" type="checkbox" switch />
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-panel" id="tab-memory" data-title="Memory">
+                <h3 class="card-title">Tabs</h3>
+                <div class="card">
+                    <div class="card-body">
+                        <div class="card-group inline-container control-row">
+                            <label for="discard-hidden-tabs-after">
+                                Unload tabs you haven’t looked at
+                                <p class="description">
+                                    Free the memory of tabs in the background. A tab reloads when you return to it. Tabs
+                                    that play sound, download, or have unsaved changes stay loaded.
+                                </p>
+                            </label>
+                            <select id="discard-hidden-tabs-after">
+                                <option value="0">Never</option>
+                                <option value="30">After 30 minutes</option>
+                                <option value="60">After 1 hour</option>
+                                <option value="120">After 2 hours</option>
+                                <option value="240">After 4 hours</option>
+                                <option value="480">After 8 hours</option>
+                            </select>
+                        </div>
+                        <div class="card-group inline-container control-row">
+                            <label for="tab-processes">
+                                Let tabs share a process
+                                <p class="description">
+                                    Tabs that share a process use less memory, but if one of them crashes, the others
+                                    crash with it. Tabs of the same subdomain are on mail.example.com, and tabs of the
+                                    same site are anywhere on example.com.
+                                </p>
+                            </label>
+                            <select id="tab-processes">
+                                <option value="perTab">Never</option>
+                                <option value="perOrigin">Same subdomain</option>
+                                <option value="perSite">Same site</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-panel" id="tab-privacy" data-title="Privacy and security">
+                <h3 class="card-title">Browsing data</h3>
+                <div class="card">
+                    <div class="card-body">
+                        <p id="browsing-data-total-size" class="card-group"></p>
+                        <div class="card-group inline-container control-row">
+                            <label for="browsing-data-settings">Clear browsing data</label>
+                            <button id="browsing-data-settings" class="secondary-button">Clear…</button>
+                        </div>
+                    </div>
+                </div>
+
+                <h3 class="card-title">Websites</h3>
+                <div class="card">
+                    <div class="card-body">
+                        <div class="card-group inline-container control-row">
+                            <label for="global-privacy-control-toggle">
+                                Global Privacy Control
+                                <p class="description">Tell websites not to sell or share your data.</p>
+                            </label>
+                            <input id="global-privacy-control-toggle" type="checkbox" switch />
+                        </div>
+                    </div>
+                </div>
+
+                <h3 class="card-title">Automatic connections</h3>
+                <p class="description">
+                    Services are automatic connections Ladybird makes for browser features in the background. These
+                    controls do not affect normal browsing or actions you explicitly request, such as updating filter
+                    lists.
+                </p>
+
+                <div class="card card-body">
+                    <div class="card-group inline-container control-row">
+                        <label for="allow-services-network-access">
+                            Allow automatic service connections
+                            <p class="description">Let individually enabled services connect in the background.</p>
+                        </label>
+                        <input id="allow-services-network-access" type="checkbox" switch />
+                    </div>
+                    <div class="card-group inline-container control-row">
+                        <label for="filter-list-updates">
+                            Filter list updates
+                            <p class="description">
+                                Periodically download updates for enabled filter list subscriptions.
+                            </p>
+                        </label>
+                        <input id="filter-list-updates" type="checkbox" switch />
+                    </div>
+                    <div class="card-group inline-container control-row">
+                        <label for="update-checks">
+                            Update checks
+                            <p id="update-checks-description" class="description">
+                                Ladybird tells you when a newer version is available. Shares your version and system
+                                type, without an identifier.
+                            </p>
+                        </label>
+                        <input id="update-checks" type="checkbox" switch />
+                    </div>
+                </div>
+                <p id="services-paused-note" class="description hidden" role="status">
+                    Automatic service connections are paused. Individual service choices are preserved.
+                </p>
+            </div>
+
+            <div class="tab-panel" id="tab-permissions" data-title="Permissions">
+                <div class="card">
+                    <div class="card-body">
+                        <div class="card-group inline-container control-row">
+                            <label for="autoplay-policy">
+                                Autoplay
+                                <p class="description">Sites can play audio and video on their own.</p>
+                            </label>
+                            <span id="autoplay-forcibly-enabled" class="forcibly-enabled hidden">
+                                This setting is controlled via the command line
+                            </span>
+                            <div id="autoplay-controls" class="setting-controls">
+                                <select id="autoplay-policy">
+                                    <option value="allow-audio-and-video">Allow audio and video</option>
+                                    <option value="block-audio">Block audio</option>
+                                    <option value="block-audio-and-video">Block audio and video</option>
+                                </select>
+                                <button id="autoplay-settings" class="secondary-button row-action">Exceptions…</button>
+                            </div>
+                        </div>
+                        <div class="card-group inline-container control-row">
+                            <label for="geolocation-policy">
+                                Location
+                                <p class="description">Sites can ask to know your location.</p>
+                            </label>
+                            <div class="setting-controls">
+                                <input id="geolocation-policy" type="checkbox" switch />
+                                <button id="geolocation-settings" class="secondary-button row-action">
+                                    Exceptions…
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-group inline-container control-row">
+                            <label for="microphone-policy">
+                                Microphone
+                                <p class="description">Sites can ask to use your microphone.</p>
+                            </label>
+                            <div class="setting-controls">
+                                <input id="microphone-policy" type="checkbox" switch />
+                                <button id="microphone-settings" class="secondary-button row-action">
+                                    Exceptions…
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-group inline-container control-row">
+                            <label for="notifications-policy">
+                                Notifications
+                                <p class="description">Sites can ask to send you notifications.</p>
+                            </label>
+                            <div class="setting-controls">
+                                <input id="notifications-policy" type="checkbox" switch />
+                                <button id="notifications-settings" class="secondary-button row-action">
+                                    Exceptions…
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="tab-panel" id="tab-blocking" data-title="Content blocking">
+                <div class="card card-body">
+                    <div class="card-group inline-container control-row">
+                        <label for="enable-content-blocking">Block ads, trackers and more</label>
+                        <input id="enable-content-blocking" type="checkbox" switch />
+                    </div>
+                    <template id="filter-list-row">
+                        <div class="filter-list-row control-row">
+                            <input type="checkbox" />
+                            <label class="item-name">
+                                <span class="label"></span>
+                                <span class="description"></span>
+                            </label>
+                            <button class="link-button row-action">Remove</button>
+                        </div>
+                    </template>
+                    <div class="card-group list-section">
+                        <div class="list-heading">
+                            <span>Filter lists</span>
+                            <span>
+                                <button id="update-content-blocker-lists" class="link-button">
+                                    Update enabled lists
+                                </button>
+                                <button
+                                    id="add-filter-list"
+                                    class="link-button"
+                                    aria-expanded="false"
+                                    aria-controls="add-filter-list-form"
+                                >
+                                    Add filter list…
+                                </button>
+                            </span>
+                        </div>
+                        <div id="content-blocker-lists" class="boxed-list"></div>
+                        <div id="add-filter-list-form" class="add-filter-list" hidden>
+                            <p class="description">
+                                Add a filter list maintained by a source you trust. Automatic updates reveal your IP
+                                address to that source.
+                            </p>
+                            <div class="input-field-container form-row">
+                                <input
+                                    id="custom-content-blocker-subscription-url"
+                                    type="url"
+                                    placeholder="Filter list URL"
+                                    spellcheck="false"
+                                />
+                                <button id="add-content-blocker-subscription" class="secondary-button">Add</button>
+                            </div>
+                            <p id="custom-content-blocker-subscription-status" class="description" role="status"></p>
+                            <div class="inline-container">
+                                <p class="description">Or import an Adblock-compatible list stored on this computer.</p>
+                                <input
+                                    id="local-content-blocker-list-picker"
+                                    type="file"
+                                    accept=".txt,text/plain"
+                                    hidden
+                                />
+                                <button id="import-local-content-blocker-list" class="secondary-button">
+                                    Import list…
+                                </button>
+                            </div>
+                            <p id="local-content-blocker-list-status" class="description" role="status"></p>
+                        </div>
+                        <details class="expandable-list">
+                            <summary>Show language-specific lists</summary>
+                            <div id="language-content-blocker-lists" class="boxed-list"></div>
+                        </details>
+                    </div>
+
+                    <div id="content-blocker-disabled-sites-section" class="card-group list-section" hidden>
+                        <div class="list-heading"><span>Turned off on</span></div>
+                        <div id="content-blocker-disabled-sites" class="boxed-list"></div>
+                    </div>
+
+                    <div class="card-group">
+                        <div class="list-heading"><span>Custom filters</span></div>
+                        <label for="custom-content-blocker-filters">
+                            Add Adblock-compatible rules, one per line.
+                        </label>
+                        <textarea id="custom-content-blocker-filters" rows="12" spellcheck="false"></textarea>
+                        <div class="button-container">
+                            <span id="custom-content-blocker-filters-status" class="description" role="status"></span>
+                            <button id="save-custom-content-blocker-filters" class="secondary-button">
+                                Save changes
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-panel" id="tab-feedback" data-title="Feedback">
+                <div class="card">
+                    <div class="card-body">
+                        <div id="show-feedback-button-group" class="card-group inline-container control-row hidden">
+                            <label for="show-feedback-button">Show Feedback button in toolbar</label>
+                            <input id="show-feedback-button" type="checkbox" switch />
+                        </div>
+                        <div class="card-group">
+                            <span id="crash-reports-title">Crash reports</span>
+                            <div class="crash-modes" role="radiogroup" aria-labelledby="crash-reports-title">
+                                <label class="crash-mode">
+                                    <input type="radio" name="crash-report-sending" value="ask" />
+                                    <span class="crash-mode-text">
+                                        Ask me
+                                        <span class="description">
+                                            Reports are kept on this computer until you review them
+                                        </span>
+                                    </span>
+                                    <svg aria-hidden="true" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7" /></svg>
+                                </label>
+                                <label class="crash-mode">
+                                    <input type="radio" name="crash-report-sending" value="never" />
+                                    <span class="crash-mode-text">
+                                        Never send
+                                        <span class="description">Nothing is kept</span>
+                                    </span>
+                                    <svg aria-hidden="true" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7" /></svg>
+                                </label>
+                            </div>
+                        </div>
+                        <div id="crash-reports-waiting-group" class="card-group inline-container hidden">
+                            <span id="crash-reports-waiting" class="description"></span>
+                            <button id="review-crash-reports" class="secondary-button">Review reports</button>
+                        </div>
+                        <div class="card-group inline-container control-row">
+                            <label for="open-crash-reports">Open the folder containing saved crash reports.</label>
+                            <button id="open-crash-reports" class="secondary-button">Open folder</button>
+                        </div>
+                        <p id="crash-reports-status" class="description" role="status" hidden></p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-panel" id="tab-advanced" data-title="Advanced">
+                <h3 class="card-title">DNS</h3>
+                <div class="card">
+                    <div class="card-body">
+                        <span id="dns-forcibly-enabled" class="forcibly-enabled hidden">
+                            This setting is controlled via the command line
+                        </span>
+                        <p id="dns-proxy-note" class="description hidden"></p>
+
+                        <div class="card-group inline-container control-row" id="dns-settings-container">
+                            <label for="dns-upstream">DNS provider</label>
+                            <select id="dns-upstream">
+                                <option value="system">System DNS</option>
+                                <option value="custom">Custom DNS server</option>
+                            </select>
+                        </div>
+                        <div id="custom-dns-settings" class="hidden">
+                            <div class="card-group inline-container control-row">
+                                <label for="dns-type">Type</label>
+                                <select id="dns-type">
+                                    <option value="udp">UDP</option>
+                                    <option value="tls">TLS</option>
+                                </select>
+                            </div>
+                            <div class="card-group inline-container control-row">
+                                <label for="dnssec-toggle">Validate DNSSEC locally</label>
+                                <input id="dnssec-toggle" type="checkbox" switch />
+                            </div>
+                            <div class="card-group inline-container control-row">
+                                <label for="dns-server">DNS server (IP or hostname)</label>
+                                <input id="dns-server" type="text" spellcheck="false" />
+                            </div>
+                            <div class="card-group inline-container control-row">
+                                <label for="dns-port">Port</label>
+                                <input id="dns-port" type="text" placeholder="53" spellcheck="false" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <h3 class="card-title">Developer</h3>
+                <label class="search-container">
+                    <svg
+                        class="search-icon"
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                    >
+                        <circle cx="11" cy="11" r="7" />
+                        <line x1="16" y1="16" x2="22" y2="22" />
+                    </svg>
+                    <input
+                        id="config-filter"
+                        type="search"
+                        class="search-input"
+                        placeholder="Filter configuration keys"
+                        spellcheck="false"
+                    />
+                </label>
+                <div class="card">
+                    <div class="card-body">
+                        <div id="config-list"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <dialog id="languages-dialog" closedby="any">
+            <div class="dialog-header">
+                <h3 class="dialog-title">Languages</h3>
+                <button id="languages-close" class="close-button dialog-button">&times;</button>
+            </div>
+            <div class="dialog-body">
+                <p class="description">Choose languages for websites in order of preference</p>
+                <div id="languages-list" class="dialog-list"></div>
+                <div class="dialog-controls">
+                    <select id="languages-select">
+                        <option value="">Select a language to add…</option>
+                    </select>
+                    <button id="languages-add" class="primary-button" disabled>Add</button>
+                </div>
+            </div>
+        </dialog>
+
+        <dialog id="search-dialog" closedby="any">
+            <div class="dialog-header">
+                <h3 class="dialog-title">Search settings</h3>
+                <button id="search-close" class="close-button dialog-button">&times;</button>
+            </div>
+            <div class="dialog-body" style="height: 300px">
+                <p class="description">Manage custom search engines</p>
+                <div id="search-list" class="dialog-list"></div>
+            </div>
+            <div class="dialog-form">
+                <div class="form-group">
+                    <label for="search-custom-name">Search engine name</label>
+                    <input id="search-custom-name" type="text" placeholder="Example" />
+                </div>
+                <div class="form-group">
+                    <label for="search-custom-url">
+                        Search URL
+                        <p class="description">Use %s as a placeholder for the search query</p>
+                    </label>
+                    <input
+                        id="search-custom-url"
+                        type="url"
+                        placeholder="https://example.com/search?q=%s"
+                        spellcheck="false"
+                    />
+                </div>
+                <div class="form-group">
+                    <label for="search-custom-suggestions-url">
+                        Suggestions URL (optional)
+                        <p class="description">
+                            Use %s for the query. The response must use the OpenSearch JSON format.
+                        </p>
+                    </label>
+                    <input
+                        id="search-custom-suggestions-url"
+                        type="url"
+                        placeholder="https://example.com/suggest?q=%s"
+                        spellcheck="false"
+                    />
+                </div>
+                <div class="dialog-controls">
+                    <button id="search-custom-add" class="primary-button">Add&nbsp;engine</button>
+                </div>
+            </div>
+        </dialog>
+
+        <dialog id="site-settings" closedby="any">
+            <div class="dialog-header">
+                <h3 id="site-settings-title" class="dialog-title"></h3>
+                <button id="site-settings-close" class="close-button dialog-button">&times;</button>
+            </div>
+            <div class="dialog-body">
+                <label>Site exceptions</label>
+                <div id="site-settings-list" class="dialog-list"></div>
+                <div class="dialog-controls">
+                    <input id="site-settings-input" type="text" placeholder="https://example.com" spellcheck="false" />
+                    <select id="site-settings-decision" aria-label="Site policy"></select>
+                    <button id="site-settings-add" class="primary-button">Add&nbsp;site</button>
+                </div>
+            </div>
+            <div class="dialog-footer">
+                <button id="site-settings-remove-all" class="secondary-button">Remove all sites</button>
+            </div>
+        </dialog>
+
+        <dialog id="host-settings" closedby="any" aria-labelledby="host-settings-title">
+            <div class="dialog-header">
+                <h3 id="host-settings-title" class="dialog-title"></h3>
+                <button id="host-settings-close" class="close-button dialog-button" aria-label="Close">&times;</button>
+            </div>
+            <div class="dialog-body">
+                <p>Sites without an override use the default setting.</p>
+                <div id="host-settings-list" class="dialog-list"></div>
+            </div>
+            <div class="dialog-footer">
+                <button id="host-settings-reset-all" class="secondary-button">Reset all</button>
+            </div>
+        </dialog>
+
+        <dialog id="browsing-data-settings-dialog" closedby="any">
+            <div class="dialog-header">
+                <h3 class="dialog-title">Clear browsing data</h3>
+                <button id="browsing-data-settings-close" class="close-button dialog-button">&times;</button>
+            </div>
+            <div class="dialog-body" style="height: auto">
+                <div class="input-field-container control-row">
+                    <label for="clear-browsing-data-time-range">Remove&nbsp;browsing&nbsp;data&nbsp;from:</label>
+                    <select id="clear-browsing-data-time-range">
+                        <option value="lastHour">Last hour</option>
+                        <option value="last4Hours">Last 4 hours</option>
+                        <option value="today">Today</option>
+                        <option value="all" selected>All time</option>
+                    </select>
+                </div>
+                <div class="input-field-container control-row">
+                    <input id="clear-browsing-data-cached-files" type="checkbox" value="" checked />
+                    <label for="clear-browsing-data-cached-files">
+                        Cached files<span id="clear-browsing-data-cached-files-size"></span>
+                        <p class="description">Remove items that help pages load faster</p>
+                    </label>
+                </div>
+                <div class="input-field-container control-row">
+                    <input id="clear-browsing-data-history" type="checkbox" value="" checked />
+                    <label for="clear-browsing-data-history">
+                        Browsing history
+                        <p class="description">Remove visited pages from history and address bar suggestions</p>
+                    </label>
+                </div>
+                <div class="input-field-container control-row">
+                    <input id="clear-browsing-data-download-history" type="checkbox" value="" checked />
+                    <label for="clear-browsing-data-download-history">
+                        Download history
+                        <p class="description">Remove records of downloaded files, but keep the files themselves</p>
+                    </label>
+                </div>
+                <div class="input-field-container control-row">
+                    <input id="clear-browsing-data-site-data" type="checkbox" value="" checked />
+                    <label for="clear-browsing-data-site-data">
+                        Cookies and site data<span id="clear-browsing-data-site-data-size"></span>
+                        <p class="description">Remove items that may sign you out of most sites</p>
+                    </label>
+                </div>
+                <div class="button-container">
+                    <button id="clear-browsing-data-remove-data" class="secondary-button">Remove data</button>
+                </div>
+            </div>
+        </dialog>
+
+        <script>
+            // FIXME: When we support per-glyph font fallbacks, replace these SVGs with analogous code points.
+            //        https://github.com/LadybirdBrowser/ladybird/issues/864
+            const upwardArrowSVG =
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>';
+            const downwardArrowSVG =
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+
+            const containsValidURL = input => {
+                return input.value.length !== 0 && input.checkValidity();
+            };
+
+            const ensureURLHasScheme = value => {
+                value = value.trim();
+                if (!value) {
+                    return value;
+                }
+
+                const hasScheme = /^[a-z][a-z\d+.-]*:/i.test(value);
+                // A host followed by a port can parse as a scheme with an opaque path.
+                const isHostWithPort =
+                    URL.parse(value)?.origin === "null" &&
+                    /^[^:/?#]+:\d+(?:[/?#]|$)/.test(value) &&
+                    !/^(?:about|blob|data|file|javascript|mailto|tel|urn):/i.test(value);
+                if (hasScheme && !isHostWithPort) {
+                    return value;
+                }
+
+                return value.startsWith("//") ? `https:${value}` : `https://${value}`;
+            };
+        </script>
+
+        <script src="resource://ladybird/about-pages/settings/advanced.js" type="module"></script>
+        <script src="resource://ladybird/about-pages/settings/appearance.js" type="module"></script>
+        <script src="resource://ladybird/about-pages/settings/blocking.js" type="module"></script>
+        <script src="resource://ladybird/about-pages/settings/browsing-behavior.js" type="module"></script>
+        <script src="resource://ladybird/about-pages/settings/content.js" type="module"></script>
+        <script src="resource://ladybird/about-pages/settings/feedback.js" type="module"></script>
+        <script src="resource://ladybird/about-pages/settings/languages.js" type="module"></script>
+        <script src="resource://ladybird/about-pages/settings/network.js" type="module"></script>
+        <script src="resource://ladybird/about-pages/settings/permissions.js" type="module"></script>
+        <script src="resource://ladybird/about-pages/settings/privacy.js" type="module"></script>
+        <script src="resource://ladybird/about-pages/settings/search.js" type="module"></script>
+        <script src="resource://ladybird/about-pages/settings/services.js" type="module"></script>
+        <script src="resource://ladybird/about-pages/settings/startup.js" type="module"></script>
+        <script src="resource://ladybird/about-pages/settings/tabs.js" type="module"></script>
+
+        <script type="module">
+            import { tabForDeepLink } from "resource://ladybird/about-pages/settings/dialog-deep-link.js";
+
+            const tabButtons = [...document.querySelectorAll(".tab-button")];
+            const searchInput = document.querySelector("#settings-search");
+            const searchEmpty = document.querySelector("#search-empty");
+
+            // Each setting is a row of a card, or a card of its own.
+            function searchableItems(card) {
+                return [card, ...card.querySelectorAll(".card-group, .card-body")].filter(
+                    item => item.matches(".card-group, .card-body") && !item.querySelector(".card-group")
+                );
+            }
+
+            function matches(element, query) {
+                return element.textContent.toLocaleLowerCase().includes(query);
+            }
+
+            // While searching, every section shows the settings whose text matches. A section or a card whose title
+            // matches shows all of its settings.
+            function search() {
+                const query = searchInput.value.trim().toLocaleLowerCase();
+                const searching = query.length !== 0;
+                document.body.classList.toggle("searching", searching);
+
+                let anyMatch = false;
+                document.querySelectorAll(".tab-panel").forEach(panel => {
+                    panel.hidden = !searching && !panel.classList.contains("active");
+                    const panelMatches = searching && panel.dataset.title.toLocaleLowerCase().includes(query);
+                    let panelHasMatch = panelMatches;
+                    panel.querySelectorAll(".card").forEach(card => {
+                        const title = card.previousElementSibling?.classList.contains("card-title")
+                            ? card.previousElementSibling
+                            : null;
+                        const cardMatches = panelMatches || (title && searching && matches(title, query));
+                        let cardHasMatch = cardMatches;
+                        searchableItems(card).forEach(item => {
+                            const itemMatches = !searching || cardMatches || matches(item, query);
+                            item.classList.toggle("search-miss", !itemMatches);
+                            cardHasMatch ||= itemMatches && !item.classList.contains("hidden");
+                        });
+                        card.classList.toggle("search-miss", searching && !cardHasMatch);
+                        title?.classList.toggle("search-miss", searching && !cardHasMatch);
+                        panelHasMatch ||= cardHasMatch;
+                    });
+                    panel.classList.toggle("search-miss", searching && !panelHasMatch);
+                    anyMatch ||= panelHasMatch;
+                });
+                searchEmpty.hidden = !searching || anyMatch;
+            }
+
+            searchInput.addEventListener("input", search);
+            searchInput.addEventListener("keydown", event => {
+                if (event.key === "Escape" && searchInput.value.length !== 0) {
+                    event.preventDefault();
+                    searchInput.value = "";
+                    search();
+                }
+            });
+
+            function switchTab(name) {
+                const button = document.querySelector(`.tab-button[data-tab="${name}"]`);
+                const panel = document.getElementById(`tab-${name}`);
+                if (!button || !panel) {
+                    return;
+                }
+
+                tabButtons.forEach(tabButton => {
+                    const active = tabButton === button;
+                    tabButton.classList.toggle("active", active);
+                    tabButton.setAttribute("aria-selected", active ? "true" : "false");
+                    tabButton.tabIndex = active ? 0 : -1;
+                });
+                document.querySelectorAll(".tab-panel").forEach(tabPanel => {
+                    const active = tabPanel === panel;
+                    tabPanel.classList.toggle("active", active);
+                    tabPanel.hidden = !active;
+                });
+
+                button.scrollIntoView({ block: "nearest", inline: "nearest" });
+            }
+
+            tabButtons.forEach((button, index) => {
+                const panel = document.getElementById(`tab-${button.dataset.tab}`);
+                button.setAttribute("aria-controls", panel.id);
+                panel.setAttribute("role", "tabpanel");
+                panel.setAttribute("aria-labelledby", button.id);
+
+                button.addEventListener("click", () => {
+                    if (searchInput.value.length !== 0) {
+                        searchInput.value = "";
+                        search();
+                    }
+                    switchTab(button.dataset.tab);
+                    history.replaceState(null, "", `#${button.dataset.tab}`);
+                });
+                button.addEventListener("keydown", event => {
+                    let targetIndex;
+                    if (event.key === "ArrowLeft") {
+                        targetIndex = (index - 1 + tabButtons.length) % tabButtons.length;
+                    } else if (event.key === "ArrowRight") {
+                        targetIndex = (index + 1) % tabButtons.length;
+                    } else if (event.key === "Home") {
+                        targetIndex = 0;
+                    } else if (event.key === "End") {
+                        targetIndex = tabButtons.length - 1;
+                    } else {
+                        return;
+                    }
+
+                    event.preventDefault();
+                    tabButtons[targetIndex].click();
+                    tabButtons[targetIndex].focus();
+                });
+            });
+
+            const hash = location.hash.slice(1);
+            switchTab(hash ? tabForDeepLink(hash) : "appearance");
+
+            // FIXME: Remove this once closedby="any" triggers for Esc key.
+            document.querySelectorAll("dialog").forEach(dialog => {
+                dialog.addEventListener("keydown", event => {
+                    if (event.key === "Escape") {
+                        dialog.close();
+                    }
+                });
+            });
+
+            // A label names a field to type a new value into, so clicking it selects the field's text, and typing
+            // replaces it.
+            const TEXT_FIELD_SELECTOR = 'input:is([type="text"], [type="url"], [type="number"], [type="search"])';
+
+            document.addEventListener("click", event => {
+                const field = event.target.closest?.("label[for]")?.control;
+                if (!field || field.disabled || !field.matches(TEXT_FIELD_SELECTOR)) {
+                    return;
+                }
+
+                event.preventDefault();
+                field.focus();
+                field.select();
+            });
+
+            // Enter commits a field's new value and leaves the field, and Escape restores the value the field had when it
+            // took focus and leaves it. A search field holds no setting to restore, so Escape clears it, and leaves it once
+            // it is empty. A field in a dialog keeps the dialog's keys instead, and a textarea keeps Enter for new lines
+            // and keeps its text on Escape, as its changes are saved with a button of their own.
+            const valueAtFocus = new WeakMap();
+
+            document.addEventListener("focusin", event => {
+                if (event.target.matches?.(TEXT_FIELD_SELECTOR)) {
+                    valueAtFocus.set(event.target, event.target.value);
+                }
+            });
+
+            document.addEventListener("keydown", event => {
+                if ((event.key !== "Enter" && event.key !== "Escape") || event.defaultPrevented) {
+                    return;
+                }
+
+                const field = event.target;
+                if (field.closest?.("dialog")) {
+                    return;
+                }
+
+                if (field.matches?.(TEXT_FIELD_SELECTOR)) {
+                    const isSearch = field.type === "search";
+                    const restoredValue = isSearch ? "" : valueAtFocus.get(field);
+                    if (event.key === "Escape" && restoredValue !== undefined && field.value !== restoredValue) {
+                        field.value = restoredValue;
+                        // NB: Filters and the like follow the field as it is edited, so they learn of the new value.
+                        field.dispatchEvent(new Event("input", { bubbles: true }));
+                        if (isSearch) {
+                            event.preventDefault();
+                            return;
+                        }
+                    }
+                } else if (!(event.key === "Escape" && field.matches?.("textarea"))) {
+                    return;
+                }
+
+                event.preventDefault();
+                field.blur();
+            });
+
+            document.addEventListener("WebUILoaded", () => {
+                ladybird.sendMessage("loadFeatures");
+                ladybird.sendMessage("loadCurrentSettings");
+            });
+        </script>
+    </body>
+</html>

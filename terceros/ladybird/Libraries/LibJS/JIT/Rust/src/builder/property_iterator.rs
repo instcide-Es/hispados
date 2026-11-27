@@ -1,0 +1,84 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+//! The next key of a for-in loop, built as IR.
+
+use super::Flow;
+use super::GraphBuilder;
+use crate::CompileFailure;
+use crate::bytecode::Operand;
+use crate::code::Repr;
+use crate::ir::BinaryOp;
+use crate::ir::BranchCondition;
+use crate::ir::Comparison;
+use crate::ir::Op;
+use crate::ir::value;
+
+impl GraphBuilder<'_, '_> {
+    /// Builds `ObjectPropertyIteratorNext`, the next key of a for-in loop
+    /// over `receiver`: while the property iterator cache `keys` still holds
+    /// the receiver's keys and the cursor is an int32, the key at the cursor,
+    /// or done once there are no more. The instruction's slow path, in cold
+    /// blocks, handles everything else.
+    pub(super) fn build_object_property_iterator_next(
+        &mut self,
+        dst_value: Operand,
+        dst_done: Operand,
+        receiver: Operand,
+        keys: Operand,
+        cursor: Operand,
+    ) -> Result<Flow, CompileFailure> {
+        let receiver = self.read(receiver)?;
+        let keys = self.read(keys)?;
+        let cursor_value = self.read(cursor)?;
+        // NB: Once there are no more keys, the value stays what it was. It is dead before the instruction, which
+        //     writes it, so where the walk does not know its value it is undefined (see `AbstractFrame::slots`), as
+        //     the slow path writes it once done.
+        let old_value = self.read(dst_value)?;
+        let mut slow_paths = self.start_slow_paths(Some(Repr::Tagged))?;
+        // NB: The cache stops holding the receiver's keys only where the loop changes the receiver's shape, which is
+        //     rare. Exiting there, until an exit was taken, makes the key the cache's key wherever the loop's body
+        //     reads it, which keyed accesses of the key rely on to read the property at its known place.
+        self.exit_instead_of_slow_path(&mut slow_paths);
+        let receiver = self.branch_to_slow_path(&mut slow_paths, BranchCondition::Object, &[receiver], true);
+        self.branch_to_slow_path(
+            &mut slow_paths,
+            BranchCondition::PropertyIteratorCacheValid,
+            &[receiver, keys],
+            true,
+        );
+        let cursor_index = self.branch_to_slow_path(
+            &mut slow_paths,
+            BranchCondition::NonNegativeInt32,
+            &[cursor_value],
+            true,
+        );
+        let index = self.emit(Op::UnboxInt32, &[cursor_index], Some(Repr::Int32));
+        let count = self.emit(Op::LoadPropertyIteratorKeyCount, &[keys], Some(Repr::Int32));
+        let (more, finished) = self.branch_both_ways(BranchCondition::Int32(Comparison::LessThan), &[index, count]);
+
+        self.block = more;
+        let index = self.refine(BranchCondition::Int32(Comparison::LessThan), true, &[index, count]);
+        let key = self.emit(Op::LoadPropertyIteratorKey, &[keys, index], Some(Repr::Tagged));
+        // NB: The index is below the count, so the next one is an int32 too.
+        let one = self.int32_constant(1);
+        let next = self.emit_checked(Op::Int32Binary { op: BinaryOp::Add }, &[index, one], Some(Repr::Int32));
+        let next = self.emit(Op::BoxInt32, &[next], Some(Repr::Tagged));
+        let not_done = self.constant(value::FALSE);
+
+        let done = self.constant(value::TRUE);
+        self.join_blocks(&[more, finished]);
+        let value = self.add_phi(&[key, old_value]);
+        let is_done = self.add_phi(&[not_done, done]);
+        let new_cursor = self.add_phi(&[next, cursor_value]);
+
+        let outputs = self.join_paths(slow_paths, &[value, is_done, new_cursor], |_, _| {});
+        self.write(dst_value, outputs[0])?;
+        self.write(dst_done, outputs[1])?;
+        self.write(cursor, outputs[2])?;
+        Ok(Flow::Continue)
+    }
+}

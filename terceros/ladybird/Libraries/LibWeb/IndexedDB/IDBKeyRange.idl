@@ -1,0 +1,15 @@
+[Exposed=(Window,Worker), ImplementedIn=Rust]
+interface IDBKeyRange {
+    [ImplementedAs=key_range_lower, NeedsCallerRealm] readonly attribute any lower;
+    [ImplementedAs=key_range_upper, NeedsCallerRealm] readonly attribute any upper;
+    readonly attribute boolean lowerOpen;
+    readonly attribute boolean upperOpen;
+
+    // Static construction methods:
+    [NeedsCallerRealm, NewObject] static IDBKeyRange only(any value);
+    [NeedsCallerRealm, NewObject] static IDBKeyRange lowerBound(any lower, optional boolean open = false);
+    [NeedsCallerRealm, NewObject] static IDBKeyRange upperBound(any upper, optional boolean open = false);
+    [NeedsCallerRealm, NewObject] static IDBKeyRange bound(any lower, any upper, optional boolean lowerOpen = false, optional boolean upperOpen = false);
+
+    [NeedsCallerRealm] boolean includes(any key);
+};

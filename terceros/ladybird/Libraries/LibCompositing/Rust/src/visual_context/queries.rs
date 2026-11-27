@@ -1,0 +1,1754 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+use super::world_transforms::MINIMUM_PROJECTION_W;
+use super::{
+    ClipData, ClipMode, ClipNode, ClipNodeData, ClipNodeIndex, ContextRef, EffectNodeData, EffectNodeIndex,
+    IncludeVisualViewportTransform, SpatialData, SpatialNodeIndex, StickyData, TransformDataRole,
+    VISUAL_VIEWPORT_NODE_INDEX, VisualContextTree, WorldTransforms, device_offset_for_index,
+};
+use libgfx_rust::{CompositingAndBlendingOperator, FloatMatrix4x4, FloatPoint, FloatRect, IntPoint, IntRect};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClipBehavior {
+    Respect,
+    /// Transform the point without rejecting it against clip rects and clip paths. Used when searching for the
+    /// closest caret position within a scope the point may lie entirely outside of.
+    Ignore,
+}
+
+pub fn should_cull_back_face(accumulated_matrix: FloatMatrix4x4, plane_root_matrix: FloatMatrix4x4) -> bool {
+    let Some(inverse_plane_root_matrix) = plane_root_matrix.flattened().inverse() else {
+        return false;
+    };
+    inverse_plane_root_matrix
+        .multiplied(accumulated_matrix)
+        .is_back_face_visible()
+}
+
+impl ClipData {
+    pub fn contains(&self, point: FloatPoint) -> bool {
+        let integral_rect = IntRect::new(
+            self.rect.x as i32,
+            self.rect.y as i32,
+            self.rect.width as i32,
+            self.rect.height as i32,
+        );
+        if integral_rect.to_float() == self.rect {
+            return self.corner_radii.contains_int_point(
+                IntPoint {
+                    x: point.x as i32,
+                    y: point.y as i32,
+                },
+                integral_rect,
+            );
+        }
+        self.corner_radii.contains_float_point(point, self.rect)
+    }
+}
+
+// Clips attach to a path in non-decreasing depth order, so the steps still to apply before a clip always start where
+// the previous clip left off.
+struct SpatialChainWalk {
+    chain: Vec<SpatialNodeIndex>,
+    // Through a 3D transform, per-node 2D inverses would lose the depth.
+    maps_point_onto_each_plane_through_flattened_matrix: bool,
+    point: FloatPoint,
+    applied_steps: usize,
+}
+
+/// Whether nothing painted under a node can show, plus the clip depths the replay needs to place effects on a context's
+/// clip chain. Depth counts the absent clip as 0, so a node's depth is the length of its root path.
+#[derive(Clone, Default)]
+pub struct TreeCullingScratch {
+    pub clip_depths: Vec<u32>,
+    clip_has_empty_effective_clip: Vec<bool>,
+    effect_culls_everything: Vec<bool>,
+}
+
+impl TreeCullingScratch {
+    pub fn clear(&mut self) {
+        self.clip_depths.clear();
+        self.clip_has_empty_effective_clip.clear();
+        self.effect_culls_everything.clear();
+    }
+
+    pub fn context_culls_everything(&self, context: ContextRef) -> bool {
+        (!context.clip.is_none() && self.clip_has_empty_effective_clip[context.clip.0 as usize])
+            || (!context.effect.is_none() && self.effect_culls_everything[context.effect.0 as usize])
+    }
+
+    pub fn clip_depth(&self, index: ClipNodeIndex) -> u32 {
+        if index.is_none() {
+            0
+        } else {
+            self.clip_depths[index.0 as usize]
+        }
+    }
+}
+
+impl VisualContextTree {
+    pub fn fill_culling_scratch(&self, scratch: &mut TreeCullingScratch) {
+        scratch.clear();
+        scratch.clip_depths.resize(self.clip_nodes.len(), 0);
+        scratch
+            .clip_has_empty_effective_clip
+            .resize(self.clip_nodes.len(), false);
+        self.visit_clip_nodes_parents_first(|index| {
+            let node = &self.clip_nodes[index];
+            let (parent_depth, parent_is_empty) = if node.parent.is_none() {
+                (0, false)
+            } else {
+                (
+                    scratch.clip_depths[node.parent.0 as usize],
+                    scratch.clip_has_empty_effective_clip[node.parent.0 as usize],
+                )
+            };
+            scratch.clip_depths[index] = parent_depth + 1;
+            scratch.clip_has_empty_effective_clip[index] = node.clips_everything || parent_is_empty;
+        });
+        scratch.effect_culls_everything.resize(self.effect_nodes.len(), false);
+        self.visit_effect_nodes_parents_first(|index| {
+            let node = &self.effect_nodes[index];
+            let parent_culls = !node.parent.is_none() && scratch.effect_culls_everything[node.parent.0 as usize];
+            scratch.effect_culls_everything[index] = node.data.culls_everything() || parent_culls;
+        });
+    }
+
+    fn begin_hit_test_walk(
+        &self,
+        world: &WorldTransforms,
+        leaf: SpatialNodeIndex,
+        screen_point: FloatPoint,
+    ) -> SpatialChainWalk {
+        let mut chain = self.ancestor_chain(leaf);
+        chain.reverse();
+        SpatialChainWalk {
+            chain,
+            maps_point_onto_each_plane_through_flattened_matrix: !world.to_root[leaf.0 as usize].is_2d_affine(),
+            point: screen_point,
+            applied_steps: 0,
+        }
+    }
+
+    fn apply_hit_test_spatial_step(
+        world: &WorldTransforms,
+        walk: &mut SpatialChainWalk,
+        position: usize,
+        screen_point: FloatPoint,
+    ) -> bool {
+        let node = walk.chain[position];
+        if !walk.maps_point_onto_each_plane_through_flattened_matrix {
+            let Some(inverse) = world.local[node.0 as usize].extract_2d_affine().inverse() else {
+                return false;
+            };
+            walk.point = inverse.map_point(walk.point);
+            return true;
+        }
+        let is_backface_marker_drawing_in_plane_of_parent = world.draw_space[node.0 as usize] != node;
+        if is_backface_marker_drawing_in_plane_of_parent {
+            return true;
+        }
+        let Some(inverse) = world
+            .to_viewport_matrix(node, IncludeVisualViewportTransform::Yes)
+            .flattened()
+            .inverse()
+        else {
+            return false;
+        };
+        let mapped = inverse.map_vector4([screen_point.x, screen_point.y, 0.0, 1.0]);
+        if mapped[3] < MINIMUM_PROJECTION_W {
+            return false;
+        }
+        walk.point = FloatPoint {
+            x: mapped[0] / mapped[3],
+            y: mapped[1] / mapped[3],
+        };
+        true
+    }
+
+    fn apply_hit_test_spatial_steps_through_node(
+        world: &WorldTransforms,
+        walk: &mut SpatialChainWalk,
+        node_index: SpatialNodeIndex,
+        screen_point: FloatPoint,
+    ) -> bool {
+        if walk.applied_steps > 0 && walk.chain[walk.applied_steps - 1] == node_index {
+            return true;
+        }
+        loop {
+            assert!(walk.applied_steps < walk.chain.len());
+            if !Self::apply_hit_test_spatial_step(world, walk, walk.applied_steps, screen_point) {
+                return false;
+            }
+            if walk.chain[walk.applied_steps] == node_index {
+                walk.applied_steps += 1;
+                return true;
+            }
+            walk.applied_steps += 1;
+        }
+    }
+
+    fn point_passes_clip(clip: &ClipNode, point_in_device_pixels: FloatPoint, clip_behavior: ClipBehavior) -> bool {
+        if clip_behavior == ClipBehavior::Ignore {
+            return true;
+        }
+        let point = point_in_device_pixels;
+        match &clip.data {
+            ClipNodeData::Rect(clip) => {
+                let inside = clip.contains(point);
+                if clip.mode == ClipMode::Intersect {
+                    inside
+                } else {
+                    !inside
+                }
+            }
+            ClipNodeData::Path(clip_path) => {
+                if !clip_path.bounding_rect.contains_point(IntPoint {
+                    x: point.x.floor() as i32,
+                    y: point.y.floor() as i32,
+                }) {
+                    return false;
+                }
+                clip_path.path.contains(point.x, point.y, clip_path.fill_rule)
+            }
+            ClipNodeData::Dead => true,
+        }
+    }
+
+    pub fn transform_point_for_hit_test(
+        &self,
+        world: &WorldTransforms,
+        context: ContextRef,
+        screen_point: FloatPoint,
+        clip_behavior: ClipBehavior,
+    ) -> Option<FloatPoint> {
+        let mut clip_chain: Vec<ClipNodeIndex> = Vec::with_capacity(8);
+        let mut clip = context.clip;
+        while !clip.is_none() {
+            clip_chain.push(clip);
+            clip = self.clip_nodes[clip.0 as usize].parent;
+        }
+        clip_chain.reverse();
+
+        let mut context_walk = self.begin_hit_test_walk(world, context.spatial, screen_point);
+        for clip_index in clip_chain {
+            let clip = &self.clip_nodes[clip_index.0 as usize];
+            let mut clip_walk;
+            let walk = if context_walk.chain.contains(&clip.spatial) {
+                &mut context_walk
+            } else {
+                // A fixed-background context is rooted above the scroll nodes its clips record in.
+                clip_walk = self.begin_hit_test_walk(world, clip.spatial, screen_point);
+                &mut clip_walk
+            };
+            if !Self::apply_hit_test_spatial_steps_through_node(world, walk, clip.spatial, screen_point)
+                || !Self::point_passes_clip(clip, walk.point, clip_behavior)
+            {
+                return None;
+            }
+        }
+        if !Self::apply_hit_test_spatial_steps_through_node(world, &mut context_walk, context.spatial, screen_point)
+            || world.backface_culled[context.spatial.0 as usize]
+        {
+            return None;
+        }
+
+        Some(context_walk.point)
+    }
+
+    /// Whether the node's scroll translations and the origins drawn in its space round to whole device pixels: no
+    /// transform but identities lies above it. A table of world transforms answers the same for every node at once.
+    pub fn translations_snap_to_device_pixels(&self, node: SpatialNodeIndex) -> bool {
+        let mut index = node;
+        loop {
+            let Some(spatial_node) = self.spatial_nodes.get(index.0 as usize) else {
+                return false;
+            };
+            if !spatial_node.data.is_live() {
+                return false;
+            }
+            if index == VISUAL_VIEWPORT_NODE_INDEX {
+                return true;
+            }
+            let local = self.local_transform(index, &[]);
+            if local.is_transform_or_perspective() && local.matrix != FloatMatrix4x4::identity() {
+                return false;
+            }
+            index = spatial_node.parent;
+        }
+    }
+
+    /// The sum of the resolved offsets of the sticky nodes on the spatial chain from `index` up to the viewport, in
+    /// device pixels.
+    pub fn accumulated_sticky_offset(&self, index: SpatialNodeIndex, resolved_offsets: &[FloatPoint]) -> FloatPoint {
+        let mut offset = FloatPoint::default();
+        let mut current = index;
+        while current != VISUAL_VIEWPORT_NODE_INDEX && (current.0 as usize) < self.spatial_nodes.len() {
+            let node = &self.spatial_nodes[current.0 as usize];
+            if matches!(node.data, SpatialData::Sticky(_)) {
+                let entry = device_offset_for_index(resolved_offsets, current);
+                offset.x += entry.x;
+                offset.y += entry.y;
+            }
+            current = node.parent;
+        }
+        offset
+    }
+
+    /// The sticky nodes' resolved offsets as `(node, offset)` pairs in dependency order, for a
+    /// consumer that keeps its own copy of the scroll offsets: the compositor overlays them on the
+    /// snapshot it received.
+    pub fn resolve_sticky_offsets(&self, scroll_offsets: &[FloatPoint]) -> Vec<(SpatialNodeIndex, FloatPoint)> {
+        let mut resolved_offsets = scroll_offsets.to_vec();
+        let mut resolved_sticky_entries = Vec::new();
+        self.resolve_sticky_offsets_with(&mut resolved_offsets, |node_index, offset| {
+            resolved_sticky_entries.push((node_index, offset));
+        });
+        resolved_sticky_entries
+    }
+
+    /// Resolves every sticky node's offset on top of the scroll containers' entries in `offsets`
+    /// (their negated scroll offsets in device pixels), writing it at the node's own index and
+    /// growing the vector as needed.
+    pub fn resolve_sticky_offsets_in_place(&self, offsets: &mut Vec<FloatPoint>) {
+        self.resolve_sticky_offsets_with(offsets, |_, _| {});
+    }
+
+    fn resolve_sticky_offsets_with(
+        &self,
+        offsets: &mut Vec<FloatPoint>,
+        mut on_entry: impl FnMut(SpatialNodeIndex, FloatPoint),
+    ) {
+        if !self
+            .spatial_nodes
+            .iter()
+            .any(|node| matches!(node.data, SpatialData::Sticky(_)))
+        {
+            return;
+        }
+        let mut record_entry = |offsets: &mut Vec<FloatPoint>, node_index: SpatialNodeIndex, offset: FloatPoint| {
+            let slot = node_index.0 as usize;
+            if slot >= offsets.len() {
+                offsets.resize(slot + 1, FloatPoint::default());
+            }
+            offsets[slot] = offset;
+            on_entry(node_index, offset);
+        };
+        for index in self.spatial_dependency_order() {
+            let node = &self.spatial_nodes[index as usize];
+            let SpatialData::Sticky(sticky) = &node.data else {
+                continue;
+            };
+            let node_index = SpatialNodeIndex(index);
+            let scrollport_is_static = !sticky.non_scrolling_scroll_container.is_invalid();
+            if sticky.scroller == VISUAL_VIEWPORT_NODE_INDEX && !scrollport_is_static {
+                record_entry(offsets, node_index, FloatPoint::default());
+                continue;
+            }
+
+            // NB: A fixed-position ancestor can disconnect the sticky box's spatial chain from its scrollport. Only
+            //     offsets on the spatial chain move the box, though the scrollport still gives its size and insets.
+            // NB: A non-scrolling scroll container moves with the sticky ancestors outside it, so only the sticky
+            //     ancestors inside it move the box within its scrollport.
+            let mut parent_sticky_offset = FloatPoint::default();
+            let mut ancestor = node.parent;
+            while ancestor != sticky.scroller && ancestor != VISUAL_VIEWPORT_NODE_INDEX {
+                let ancestor_node = &self.spatial_nodes[ancestor.0 as usize];
+                if let SpatialData::Sticky(ancestor_sticky) = &ancestor_node.data
+                    && (!scrollport_is_static
+                        || ancestor_sticky.non_scrolling_scroll_container == sticky.non_scrolling_scroll_container)
+                {
+                    let entry = device_offset_for_index(offsets, ancestor);
+                    parent_sticky_offset.x += entry.x;
+                    parent_sticky_offset.y += entry.y;
+                }
+                ancestor = ancestor_node.parent;
+            }
+            let negated_scroll_offset_of_scroller = if ancestor == sticky.scroller && !scrollport_is_static {
+                device_offset_for_index(offsets, sticky.scroller)
+            } else {
+                FloatPoint::default()
+            };
+
+            let position_in_scroller = FloatPoint {
+                x: sticky.position_relative_to_scroller.x + parent_sticky_offset.x,
+                y: sticky.position_relative_to_scroller.y + parent_sticky_offset.y,
+            };
+            let mut containing_block_region = sticky.containing_block_region;
+            if sticky.needs_parent_offset_adjustment {
+                containing_block_region =
+                    containing_block_region.translated(parent_sticky_offset.x, parent_sticky_offset.y);
+            }
+            let min_offset_within_containing_block = containing_block_region.top_left();
+            let max_offset_within_containing_block = FloatPoint {
+                x: containing_block_region.right() - sticky.border_box_size.width,
+                y: containing_block_region.bottom() - sticky.border_box_size.height,
+            };
+
+            let scrollport_rect = FloatRect::new(
+                -negated_scroll_offset_of_scroller.x,
+                -negated_scroll_offset_of_scroller.y,
+                sticky.scrollport_size.width,
+                sticky.scrollport_size.height,
+            );
+
+            // NB: An inset only pushes the box in its own direction. A box that already overflows its containing
+            //     block is not pulled back into it.
+            let mut sticky_offset = FloatPoint::default();
+            if let Some(inset_top) = sticky.inset_top
+                && scrollport_rect.y > position_in_scroller.y - inset_top
+            {
+                sticky_offset.y = (scrollport_rect.y + inset_top - position_in_scroller.y)
+                    .min((max_offset_within_containing_block.y - position_in_scroller.y).max(0.0));
+            }
+            if let Some(inset_left) = sticky.inset_left
+                && scrollport_rect.x > position_in_scroller.x - inset_left
+            {
+                sticky_offset.x = (scrollport_rect.x + inset_left - position_in_scroller.x)
+                    .min((max_offset_within_containing_block.x - position_in_scroller.x).max(0.0));
+            }
+            if let Some(inset_bottom) = sticky.inset_bottom
+                && scrollport_rect.bottom() < position_in_scroller.y + sticky.border_box_size.height + inset_bottom
+            {
+                sticky_offset.y =
+                    (scrollport_rect.bottom() - sticky.border_box_size.height - inset_bottom - position_in_scroller.y)
+                        .max((min_offset_within_containing_block.y - position_in_scroller.y).min(0.0));
+            }
+            if let Some(inset_right) = sticky.inset_right
+                && scrollport_rect.right() < position_in_scroller.x + sticky.border_box_size.width + inset_right
+            {
+                sticky_offset.x =
+                    (scrollport_rect.right() - sticky.border_box_size.width - inset_right - position_in_scroller.x)
+                        .max((min_offset_within_containing_block.x - position_in_scroller.x).min(0.0));
+            }
+
+            record_entry(offsets, node_index, sticky_offset);
+        }
+    }
+}
+
+impl StickyData {
+    /// The lowest and the highest offset that resolving can give the box, on each axis, where no sticky box on its
+    /// spatial chain moves it within its scroller. An inset pushes the box from where it is laid out to as far as its
+    /// containing block lets it go, the way resolving does.
+    pub fn offset_range_without_sticky_ancestors(&self) -> (FloatPoint, FloatPoint) {
+        let position_in_scroller = self.position_relative_to_scroller;
+        let containing_block_region = self.containing_block_region;
+        let min_offset_within_containing_block = containing_block_region.top_left();
+        let max_offset_within_containing_block = FloatPoint {
+            x: containing_block_region.right() - self.border_box_size.width,
+            y: containing_block_region.bottom() - self.border_box_size.height,
+        };
+        let mut lowest = FloatPoint::default();
+        let mut highest = FloatPoint::default();
+        if self.inset_top.is_some() {
+            highest.y = (max_offset_within_containing_block.y - position_in_scroller.y).max(0.0);
+        }
+        if self.inset_left.is_some() {
+            highest.x = (max_offset_within_containing_block.x - position_in_scroller.x).max(0.0);
+        }
+        if self.inset_bottom.is_some() {
+            lowest.y = (min_offset_within_containing_block.y - position_in_scroller.y).min(0.0);
+        }
+        if self.inset_right.is_some() {
+            lowest.x = (min_offset_within_containing_block.x - position_in_scroller.x).min(0.0);
+        }
+        (lowest, highest)
+    }
+}
+
+impl VisualContextTree {
+    /// An effects node whose values are all no-ops (opacity 1, normal blending, no filters) exists as the target of
+    /// values that may arrive later; replay draws its content directly rather than through a layer. The root isolation
+    /// effect keeps its layer at those values, and so does an effect whose opacity or filter an animation of the tree
+    /// animates, which isolates its content at every sample of the animation.
+    pub fn effect_pushes_layer_at_replay(&self, effect: EffectNodeIndex) -> bool {
+        match &self.effect_nodes[effect.0 as usize].data {
+            EffectNodeData::Effects(effects) => {
+                effects.needs_layer()
+                    || self.root_isolation_effect == Some(effect)
+                    || self.effect_opacity_or_filter_is_animated(effect)
+            }
+            EffectNodeData::Mask(_) => true,
+            EffectNodeData::BackgroundColorAnimation | EffectNodeData::Dead => false,
+        }
+    }
+
+    pub fn nearest_layer_at_or_above(&self, mut effect: EffectNodeIndex) -> Option<EffectNodeIndex> {
+        while !effect.is_none() {
+            if self.effect_pushes_layer_at_replay(effect) {
+                return Some(effect);
+            }
+            effect = self.effect_nodes[effect.0 as usize].parent;
+        }
+        None
+    }
+
+    pub fn content_under_effect_composites_into_root_group(&self, effect: EffectNodeIndex) -> bool {
+        self.nearest_layer_at_or_above(effect)
+            .is_none_or(|layer| self.root_isolation_effect == Some(layer))
+    }
+
+    /// Per live effect node, the node whose layer reads its backdrop: the outermost of the masks of the effect's box
+    /// that draw its filtered backdrop, or the effect itself. None for a node that is not live.
+    pub fn nodes_reading_the_backdrops_of_effects(&self) -> Vec<EffectNodeIndex> {
+        let mut reader_by_effect_index = vec![EffectNodeIndex::NONE; self.effect_nodes.len()];
+        self.visit_effect_nodes_parents_first(|index| {
+            let parent = self.effect_nodes[index].parent;
+            let reader_of_parent_masking_backdrop = (!parent.is_none()
+                && matches!(&self.effect_nodes[parent.0 as usize].data, EffectNodeData::Mask(mask) if mask.masks_backdrop))
+            .then(|| reader_by_effect_index[parent.0 as usize])
+            .filter(|reader| !reader.is_none());
+            reader_by_effect_index[index] = reader_of_parent_masking_backdrop.unwrap_or(EffectNodeIndex(index as u32));
+        });
+        reader_by_effect_index
+    }
+
+    /// Whether a blend mode or a backdrop filter reads the root group. The backdrop of an effect whose box's masks draw
+    /// it is read where the outermost of those masks composites.
+    pub fn blend_mode_or_backdrop_filter_reads_root_group(&self) -> bool {
+        let reads_backdrop = |data: &EffectNodeData| {
+            matches!(data, EffectNodeData::Effects(effects)
+                if effects.blend_mode != CompositingAndBlendingOperator::Normal || effects.backdrop_filter.is_some())
+        };
+        if !self.effect_nodes.iter().any(|node| reads_backdrop(&node.data)) {
+            return false;
+        }
+        let reader_by_effect_index = self.nodes_reading_the_backdrops_of_effects();
+        let mut content_composites_into_root_group_by_effect_index = vec![true; self.effect_nodes.len()];
+        self.visit_effect_nodes_parents_first(|index| {
+            let effect = EffectNodeIndex(index as u32);
+            let parent = self.effect_nodes[index].parent;
+            content_composites_into_root_group_by_effect_index[index] = if self.effect_pushes_layer_at_replay(effect) {
+                self.root_isolation_effect == Some(effect)
+            } else {
+                parent.is_none() || content_composites_into_root_group_by_effect_index[parent.0 as usize]
+            };
+        });
+        self.effect_nodes.iter().enumerate().any(|(index, node)| {
+            let parent_of_reader = || self.effect_nodes[reader_by_effect_index[index].0 as usize].parent;
+            reads_backdrop(&node.data)
+                && (parent_of_reader().is_none()
+                    || content_composites_into_root_group_by_effect_index[parent_of_reader().0 as usize])
+        })
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct BackdropReader {
+    pub(crate) effect_with_backdrop_filter: Option<EffectNodeIndex>,
+}
+
+// Per effect node, whether it reads what is below it, and if it reads for a backdrop filter, the effect of the filter.
+pub(crate) fn backdrop_reader_by_reading_effect_index(tree: &VisualContextTree) -> Vec<Option<BackdropReader>> {
+    let mut backdrop_reader_by_reading_effect_index = vec![None; tree.effect_nodes.len()];
+    let mut node_reading_backdrop_by_effect_index = None;
+    for (index, effect_node) in tree.effect_nodes.iter().enumerate() {
+        let EffectNodeData::Effects(effects) = &effect_node.data else {
+            continue;
+        };
+        let effect = EffectNodeIndex(index as u32);
+        if effects.backdrop_filter.is_some() {
+            let reading_effect = node_reading_backdrop_by_effect_index
+                .get_or_insert_with(|| tree.nodes_reading_the_backdrops_of_effects())[index];
+            backdrop_reader_by_reading_effect_index[reading_effect.0 as usize] = Some(BackdropReader {
+                effect_with_backdrop_filter: Some(effect),
+            });
+        } else if effects.blend_mode != CompositingAndBlendingOperator::Normal {
+            backdrop_reader_by_reading_effect_index[index] = Some(BackdropReader {
+                effect_with_backdrop_filter: None,
+            });
+        }
+    }
+    backdrop_reader_by_reading_effect_index
+}
+
+/// Whether one live effect node of a tree is inside another, without a walk up the tree for each question. Decoding a
+/// tree checks the parents of its live nodes only, so a node that is not live is in no effect and holds none. The
+/// table is worked out at the first question.
+pub(crate) struct NestingOfLiveEffects<'a> {
+    tree: &'a VisualContextTree,
+    // Where a walk of the live nodes enters each node and how many nodes it walks from there until it leaves it, or
+    // zero nodes for a node the walk does not enter.
+    walk_step_and_node_count_by_effect_index: std::cell::OnceCell<Vec<(u32, u32)>>,
+}
+
+impl<'a> NestingOfLiveEffects<'a> {
+    pub(crate) fn of(tree: &'a VisualContextTree) -> Self {
+        Self {
+            tree,
+            walk_step_and_node_count_by_effect_index: std::cell::OnceCell::new(),
+        }
+    }
+
+    fn walk_step_and_node_count_of(&self, effect: EffectNodeIndex) -> Option<(u32, u32)> {
+        self.walk_step_and_node_count_by_effect_index
+            .get_or_init(|| walk_steps_and_node_counts_of_live_effects(self.tree))
+            .get(effect.0 as usize)
+            .copied()
+            .filter(|&(_, node_count)| node_count != 0)
+    }
+
+    pub(crate) fn is_or_is_inside(&self, effect: EffectNodeIndex, ancestor: EffectNodeIndex) -> bool {
+        match (
+            self.walk_step_and_node_count_of(effect),
+            self.walk_step_and_node_count_of(ancestor),
+        ) {
+            (Some((effect_step, _)), Some((ancestor_step, ancestor_node_count))) => {
+                ancestor_step <= effect_step && effect_step - ancestor_step < ancestor_node_count
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn is_strictly_inside(&self, effect: EffectNodeIndex, ancestor: EffectNodeIndex) -> bool {
+        effect != ancestor && self.is_or_is_inside(effect, ancestor)
+    }
+}
+
+// A node goes into the walk after its parent, so a parent that a broken tree visits later is taken as no parent.
+fn walk_steps_and_node_counts_of_live_effects(tree: &VisualContextTree) -> Vec<(u32, u32)> {
+    let effect_count = tree.effect_nodes.len();
+    let mut live_effects_parents_first: Vec<u32> = Vec::with_capacity(effect_count);
+    tree.visit_effect_nodes_parents_first(|index| live_effects_parents_first.push(index as u32));
+    let mut visit_position_by_effect_index = vec![u32::MAX; effect_count];
+    for (position, &index) in live_effects_parents_first.iter().enumerate() {
+        visit_position_by_effect_index[index as usize] = position as u32;
+    }
+    let walked_parent_by_effect_index: Vec<Option<u32>> = (0..effect_count)
+        .map(|index| {
+            let parent = tree.effect_nodes[index].parent;
+            (!parent.is_none()
+                && visit_position_by_effect_index
+                    .get(parent.0 as usize)
+                    .is_some_and(|&parent_position| parent_position < visit_position_by_effect_index[index]))
+            .then_some(parent.0)
+        })
+        .collect();
+    let mut walk_step_and_node_count_by_effect_index = vec![(0u32, 0u32); effect_count];
+    for &index in live_effects_parents_first.iter().rev() {
+        let index = index as usize;
+        walk_step_and_node_count_by_effect_index[index].1 += 1;
+        if let Some(parent) = walked_parent_by_effect_index[index] {
+            walk_step_and_node_count_by_effect_index[parent as usize].1 +=
+                walk_step_and_node_count_by_effect_index[index].1;
+        }
+    }
+    // The walk enters each child of a node right after the nodes inside the children before it.
+    let mut next_step_inside_by_effect_index = visit_position_by_effect_index;
+    let mut next_step_of_root = 0u32;
+    for &index in &live_effects_parents_first {
+        let index = index as usize;
+        let next_step = match walked_parent_by_effect_index[index] {
+            Some(parent) => &mut next_step_inside_by_effect_index[parent as usize],
+            None => &mut next_step_of_root,
+        };
+        let step = *next_step;
+        let node_count = walk_step_and_node_count_by_effect_index[index].1;
+        *next_step += node_count;
+        walk_step_and_node_count_by_effect_index[index].0 = step;
+        next_step_inside_by_effect_index[index] = step + 1;
+    }
+    walk_step_and_node_count_by_effect_index
+}
+
+impl VisualContextTree {
+    pub fn visual_animation_target_is_valid(
+        &self,
+        target_kind: crate::host::FfiVisualAnimationTargetKind,
+        target: u32,
+    ) -> bool {
+        use crate::host::FfiVisualAnimationTargetKind;
+        match target_kind {
+            FfiVisualAnimationTargetKind::Opacity | FfiVisualAnimationTargetKind::Filter => matches!(
+                self.effect_nodes.get(target as usize).map(|node| &node.data),
+                Some(EffectNodeData::Effects(_))
+            ),
+            FfiVisualAnimationTargetKind::BackgroundColor => matches!(
+                self.effect_nodes.get(target as usize).map(|node| &node.data),
+                Some(EffectNodeData::BackgroundColorAnimation)
+            ),
+            FfiVisualAnimationTargetKind::Transform => matches!(
+                self.spatial_nodes.get(target as usize).map(|node| &node.data),
+                Some(SpatialData::Transform(transform)) if transform.role == TransformDataRole::CssTransform && !transform.synthetic_plane
+            ),
+        }
+    }
+
+    pub fn sampled_background_color(&self, effect: EffectNodeIndex) -> Option<libgfx_rust::Color> {
+        self.sampled_background_color_by_effect_index.get(&effect.0).copied()
+    }
+
+    pub fn visual_animation_targets_are_valid(
+        &self,
+        target_kind: crate::host::FfiVisualAnimationTargetKind,
+        targets: &[u32],
+    ) -> bool {
+        targets
+            .iter()
+            .all(|&target| self.visual_animation_target_is_valid(target_kind, target))
+    }
+
+    pub fn effects_opacity(&self, effect: EffectNodeIndex) -> Option<f32> {
+        match self.effect_nodes.get(effect.0 as usize).map(|node| &node.data) {
+            Some(EffectNodeData::Effects(effects)) => Some(effects.opacity),
+            _ => None,
+        }
+    }
+
+    pub fn context_is_valid(&self, context: ContextRef) -> bool {
+        // A recorded context may escape its effect's starting clip. Replay resolves
+        // the shared output boundary once all of the list's contexts are available.
+        self.spatial_is_live(context.spatial)
+            && self.clip_is_none_or_live(context.clip)
+            && self.effect_is_none_or_live(context.effect)
+            && (context.effect.is_none()
+                || self.clip_is_none_or_live(self.effect_nodes[context.effect.0 as usize].local_clip))
+    }
+
+    /// Visits the id of every image frame that a filter or backdrop filter of an effect node draws.
+    pub fn for_each_effects_filter_image_frame_id(&self, visit: &mut dyn FnMut(u64)) {
+        for node in &self.effect_nodes {
+            let EffectNodeData::Effects(effects) = &node.data else {
+                continue;
+            };
+            let backdrop_filter_bytes = effects.backdrop_filter.as_ref().map(|backdrop| &backdrop.filter);
+            for filter_bytes in effects.filter.iter().chain(backdrop_filter_bytes) {
+                let Some(filter) = libgfx_rust::filter::Filter::deserialize(filter_bytes) else {
+                    continue;
+                };
+                filter.for_each_image_frame_id(&mut |id| visit(id));
+            }
+        }
+    }
+
+    pub fn display_list_references_only_live_nodes<'a>(
+        &self,
+        command_runs: impl IntoIterator<Item = &'a crate::display_list::commands::DisplayListCommandRun>,
+    ) -> bool {
+        command_runs.into_iter().all(|run| self.context_is_valid(run.context))
+    }
+
+    pub fn spatial_nodes_in_subtrees_of(&self, roots: &[SpatialNodeIndex]) -> Vec<bool> {
+        let mut in_subtree = vec![false; self.spatial_nodes.len()];
+        for root in roots {
+            if let Some(flag) = in_subtree.get_mut(root.0 as usize) {
+                *flag = true;
+            }
+        }
+        for index in self.spatial_dependency_order() {
+            if index == VISUAL_VIEWPORT_NODE_INDEX.0 {
+                continue;
+            }
+            if in_subtree[self.spatial_nodes[index as usize].parent.0 as usize] {
+                in_subtree[index as usize] = true;
+            }
+        }
+        in_subtree
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::node_slot_id::NodeSlotId;
+    use crate::visual_context::{
+        BackfaceVisibilityData, ClipData, ClipMode, EffectsData, PerspectiveData, ScrollData, SpatialData, SpatialNode,
+        StickyData, TransformData, TransformDataRole, UniqueNodeId, scroll_state::NO_SCROLL_STATE_SLOT,
+    };
+    use libgfx_rust::{CornerRadii, FloatMatrix4x4, FloatSize, perspective_matrix, scale_matrix, translation_matrix};
+
+    fn transform_data(matrix: FloatMatrix4x4, origin: FloatPoint) -> TransformData {
+        TransformData {
+            matrix,
+            origin,
+            sorting_context_root_index: None,
+            flattens_inherited_transform: false,
+            role: TransformDataRole::CssTransform,
+            synthetic_plane: false,
+            establishes_sorting_context: false,
+            bounds: FloatRect::default(),
+        }
+    }
+
+    fn identity_tree() -> VisualContextTree {
+        VisualContextTree::create(transform_data(FloatMatrix4x4::identity(), FloatPoint::default()))
+    }
+
+    fn scroll() -> SpatialData {
+        SpatialData::Scroll(ScrollData {
+            state_slot: NO_SCROLL_STATE_SLOT,
+            owner_paintable: NodeSlotId::INVALID,
+        })
+    }
+
+    fn clip(rect: FloatRect, mode: ClipMode) -> ClipNodeData {
+        ClipNodeData::Rect(ClipData {
+            rect,
+            corner_radii: CornerRadii::default(),
+            mode,
+        })
+    }
+
+    fn empty_clip_flags(tree: &VisualContextTree) -> Vec<bool> {
+        let mut scratch = TreeCullingScratch::default();
+        tree.fill_culling_scratch(&mut scratch);
+        scratch.clip_has_empty_effective_clip
+    }
+
+    fn context_under_new_clip_without_effect(
+        tree: &mut VisualContextTree,
+        data: ClipNodeData,
+        spatial: SpatialNodeIndex,
+    ) -> ContextRef {
+        let clip = tree.append_clip(data, ClipNodeIndex::NONE, spatial);
+        ContextRef {
+            clip,
+            effect: EffectNodeIndex::NONE,
+            ..ContextRef::default()
+        }
+    }
+
+    // A backdrop is read where the outermost of the masks of its box that draw it composites, which is the root group
+    // where no layer but the root isolation layer is around that mask.
+    #[test]
+    fn a_blend_mode_or_backdrop_filter_reads_the_root_group_where_no_other_layer_is_around_where_it_reads() {
+        let effects = |opacity: f32, blend_mode, backdrop_filter: Option<crate::visual_context::BackdropFilterData>| {
+            EffectNodeData::Effects(EffectsData {
+                isolation: false,
+                opacity,
+                blend_mode,
+                filter: None,
+                backdrop_filter,
+            })
+        };
+        let backdrop_filter = || {
+            Some(crate::visual_context::BackdropFilterData {
+                filter: std::sync::Arc::new(Vec::new()),
+                region: IntRect::new(0, 0, 10, 10),
+                corner_radii: CornerRadii::default(),
+            })
+        };
+        let mask_drawing_backdrop = || {
+            EffectNodeData::Mask(crate::visual_context::MaskData {
+                rect: IntRect::new(0, 0, 10, 10),
+                kind: crate::visual_context::MaskKind::Luminance,
+                origin: crate::visual_context::MaskLayerOrigin::CssMaskLayers,
+                masks_backdrop: true,
+            })
+        };
+        let append = |tree: &mut VisualContextTree, data: EffectNodeData, parent: EffectNodeIndex| {
+            tree.append_effect(data, parent, VISUAL_VIEWPORT_NODE_INDEX, ClipNodeIndex::NONE)
+        };
+        let normal = CompositingAndBlendingOperator::Normal;
+
+        let mut tree = identity_tree();
+        let plain_group = append(&mut tree, effects(1.0, normal, None), EffectNodeIndex::NONE);
+        assert!(!tree.blend_mode_or_backdrop_filter_reads_root_group());
+        append(
+            &mut tree,
+            effects(1.0, CompositingAndBlendingOperator::Multiply, None),
+            plain_group,
+        );
+        assert!(tree.blend_mode_or_backdrop_filter_reads_root_group());
+
+        let mut tree = identity_tree();
+        let root_isolation = append(&mut tree, effects(1.0, normal, None), EffectNodeIndex::NONE);
+        tree.root_isolation_effect = Some(root_isolation);
+        let translucent_group = append(&mut tree, effects(0.5, normal, None), root_isolation);
+        let mask_in_translucent_group = append(&mut tree, mask_drawing_backdrop(), translucent_group);
+        append(
+            &mut tree,
+            effects(1.0, normal, backdrop_filter()),
+            mask_in_translucent_group,
+        );
+        assert!(!tree.blend_mode_or_backdrop_filter_reads_root_group());
+        let outer_mask = append(&mut tree, mask_drawing_backdrop(), root_isolation);
+        let inner_mask = append(&mut tree, mask_drawing_backdrop(), outer_mask);
+        append(&mut tree, effects(1.0, normal, backdrop_filter()), inner_mask);
+        assert!(tree.blend_mode_or_backdrop_filter_reads_root_group());
+    }
+
+    #[test]
+    fn translations_snap_under_identities_as_the_world_transforms_table_says() {
+        let mut tree = identity_tree();
+        let scroller = tree.append_spatial(scroll(), VISUAL_VIEWPORT_NODE_INDEX);
+        let identity = tree.append_spatial(
+            SpatialData::Transform(transform_data(FloatMatrix4x4::identity(), FloatPoint::default())),
+            scroller,
+        );
+        let scroller_under_identity = tree.append_spatial(scroll(), identity);
+        let scaled = tree.append_spatial(
+            SpatialData::Transform(transform_data(scale_matrix(2.0, 2.0, 1.0), FloatPoint::default())),
+            scroller,
+        );
+        let scroller_under_scale = tree.append_spatial(scroll(), scaled);
+        let removed = tree.append_spatial(scroll(), VISUAL_VIEWPORT_NODE_INDEX);
+        assert!(tree.tombstone_spatial_slot(removed));
+
+        let world = WorldTransforms::new(&tree, &[], None);
+        let nodes = [
+            (VISUAL_VIEWPORT_NODE_INDEX, true),
+            (scroller, true),
+            (identity, true),
+            (scroller_under_identity, true),
+            (scaled, false),
+            (scroller_under_scale, false),
+            (removed, false),
+            (SpatialNodeIndex(tree.spatial_nodes.len() as u32), false),
+        ];
+        for (node, snaps) in nodes {
+            assert_eq!(tree.translations_snap_to_device_pixels(node), snaps, "{node:?}");
+            assert_eq!(world.translations_snap_to_device_pixels(node), snaps, "{node:?}");
+        }
+    }
+
+    fn hit_test_point(
+        tree: &VisualContextTree,
+        context: ContextRef,
+        screen_point: FloatPoint,
+        scroll_offsets: &[FloatPoint],
+        clip_behavior: ClipBehavior,
+    ) -> Option<FloatPoint> {
+        let world = WorldTransforms::new(tree, scroll_offsets, None);
+        tree.transform_point_for_hit_test(&world, context, screen_point, clip_behavior)
+    }
+
+    fn rect_to_viewport(
+        tree: &VisualContextTree,
+        node: SpatialNodeIndex,
+        rect: FloatRect,
+        scroll_offsets: &[FloatPoint],
+        include_visual_viewport_transform: IncludeVisualViewportTransform,
+    ) -> FloatRect {
+        WorldTransforms::new(tree, scroll_offsets, None).transform_rect_to_viewport(
+            node,
+            rect,
+            include_visual_viewport_transform,
+        )
+    }
+
+    fn point(x: f32, y: f32) -> FloatPoint {
+        FloatPoint { x, y }
+    }
+
+    fn context_of(spatial: SpatialNodeIndex, context: ContextRef) -> ContextRef {
+        ContextRef { spatial, ..context }
+    }
+
+    fn rotate_y_180_degrees() -> FloatMatrix4x4 {
+        scale_matrix(-1.0, 1.0, -1.0)
+    }
+
+    fn effects(opacity: f32, blend_mode: CompositingAndBlendingOperator) -> EffectNodeData {
+        EffectNodeData::Effects(EffectsData {
+            isolation: false,
+            opacity,
+            blend_mode,
+            filter: None,
+            backdrop_filter: None,
+        })
+    }
+
+    #[test]
+    fn direct_contexts_validate_indices_and_allow_clip_escapes() {
+        let mut tree = identity_tree();
+        let outer = tree.append_clip(
+            clip(FloatRect::new(0.0, 0.0, 20.0, 20.0), ClipMode::Intersect),
+            ClipNodeIndex::NONE,
+            VISUAL_VIEWPORT_NODE_INDEX,
+        );
+        let inner = tree.append_clip(
+            clip(FloatRect::new(0.0, 0.0, 10.0, 10.0), ClipMode::Intersect),
+            outer,
+            VISUAL_VIEWPORT_NODE_INDEX,
+        );
+        let effect = tree.append_effect(
+            effects(0.5, CompositingAndBlendingOperator::Normal),
+            EffectNodeIndex::NONE,
+            VISUAL_VIEWPORT_NODE_INDEX,
+            inner,
+        );
+        let context = ContextRef {
+            clip: inner,
+            effect,
+            ..ContextRef::default()
+        };
+        assert!(tree.context_is_valid(context));
+        assert!(tree.context_is_valid(ContextRef::default()));
+        assert!(!tree.context_is_valid(ContextRef {
+            spatial: SpatialNodeIndex(50),
+            ..context
+        }));
+        assert!(!tree.context_is_valid(ContextRef {
+            clip: ClipNodeIndex(50),
+            ..context
+        }));
+        assert!(!tree.context_is_valid(ContextRef {
+            effect: EffectNodeIndex(50),
+            ..context
+        }));
+        assert!(tree.context_is_valid(ContextRef { clip: outer, ..context }));
+        assert!(tree.context_is_valid(ContextRef {
+            clip: ClipNodeIndex::NONE,
+            ..context
+        }));
+        assert!(tree.tombstone_effect_slot(effect));
+        assert!(!tree.context_is_valid(context));
+    }
+
+    #[test]
+    fn a_difference_clip_passes_only_points_outside_its_rect() {
+        let mut tree = identity_tree();
+        let context = context_under_new_clip_without_effect(
+            &mut tree,
+            clip(FloatRect::new(10.0, 10.0, 20.0, 20.0), ClipMode::Difference),
+            VISUAL_VIEWPORT_NODE_INDEX,
+        );
+        let context = context_of(VISUAL_VIEWPORT_NODE_INDEX, context);
+        assert!(hit_test_point(&tree, context, point(15.0, 15.0), &[], ClipBehavior::Respect).is_none());
+        assert!(hit_test_point(&tree, context, point(5.0, 5.0), &[], ClipBehavior::Respect).is_some());
+    }
+
+    #[test]
+    fn a_fractional_clip_rect_contains_points_by_float_containment() {
+        let mut tree = identity_tree();
+        let context = context_under_new_clip_without_effect(
+            &mut tree,
+            clip(FloatRect::new(10.5, 10.5, 20.0, 20.0), ClipMode::Intersect),
+            VISUAL_VIEWPORT_NODE_INDEX,
+        );
+        let context = context_of(VISUAL_VIEWPORT_NODE_INDEX, context);
+        assert!(hit_test_point(&tree, context, point(10.25, 15.0), &[], ClipBehavior::Respect).is_none());
+        assert!(hit_test_point(&tree, context, point(10.75, 15.0), &[], ClipBehavior::Respect).is_some());
+    }
+
+    #[test]
+    fn an_integral_clip_rect_contains_points_by_integer_containment() {
+        let mut tree = identity_tree();
+        let context = context_under_new_clip_without_effect(
+            &mut tree,
+            clip(FloatRect::new(10.0, 10.0, 20.0, 20.0), ClipMode::Intersect),
+            VISUAL_VIEWPORT_NODE_INDEX,
+        );
+        let context = context_of(VISUAL_VIEWPORT_NODE_INDEX, context);
+        assert!(hit_test_point(&tree, context, point(9.5, 15.0), &[], ClipBehavior::Respect).is_none());
+        assert!(hit_test_point(&tree, context, point(29.5, 15.0), &[], ClipBehavior::Respect).is_some());
+        assert!(hit_test_point(&tree, context, point(9.5, 15.0), &[], ClipBehavior::Ignore).is_some());
+    }
+
+    #[test]
+    fn a_rounded_clip_rejects_points_outside_its_corner_ellipses() {
+        let mut tree = identity_tree();
+        let context = context_under_new_clip_without_effect(
+            &mut tree,
+            ClipNodeData::Rect(ClipData {
+                rect: FloatRect::new(0.0, 0.0, 100.0, 100.0),
+                corner_radii: CornerRadii::uniform(20.0 as i32),
+                mode: ClipMode::Intersect,
+            }),
+            VISUAL_VIEWPORT_NODE_INDEX,
+        );
+        let context = context_of(VISUAL_VIEWPORT_NODE_INDEX, context);
+        assert!(hit_test_point(&tree, context, point(1.0, 1.0), &[], ClipBehavior::Respect).is_none());
+        assert!(hit_test_point(&tree, context, point(50.0, 1.0), &[], ClipBehavior::Respect).is_some());
+        assert!(hit_test_point(&tree, context, point(98.0, 98.0), &[], ClipBehavior::Respect).is_none());
+    }
+
+    #[test]
+    fn a_2d_transform_chain_inverts_each_node_around_its_origin() {
+        let mut tree = identity_tree();
+        let translated = tree.append_spatial(
+            SpatialData::Transform(transform_data(
+                translation_matrix(10.0, 20.0, 0.0),
+                FloatPoint::default(),
+            )),
+            VISUAL_VIEWPORT_NODE_INDEX,
+        );
+        let scaled = tree.append_spatial(
+            SpatialData::Transform(transform_data(scale_matrix(2.0, 2.0, 1.0), point(10.0, 10.0))),
+            translated,
+        );
+        let scroll_node = tree.append_spatial(scroll(), scaled);
+        let mut scroll_offsets = vec![FloatPoint::default(); 4];
+        scroll_offsets[scroll_node.0 as usize] = point(0.0, -100.0);
+
+        let local = hit_test_point(
+            &tree,
+            context_of(scroll_node, ContextRef::default()),
+            point(40.0, 60.0),
+            &scroll_offsets,
+            ClipBehavior::Respect,
+        )
+        .expect("the point maps");
+        assert_eq!(local, point(20.0, 125.0));
+    }
+
+    #[test]
+    fn a_3d_chain_inverts_the_flattened_accumulated_matrix() {
+        let mut tree = identity_tree();
+        let perspective = tree.append_spatial(
+            SpatialData::Perspective(PerspectiveData {
+                matrix: perspective_matrix(1000.0),
+                flattens_inherited_transform: false,
+            }),
+            VISUAL_VIEWPORT_NODE_INDEX,
+        );
+        let lifted = tree.append_spatial(
+            SpatialData::Transform(transform_data(
+                translation_matrix(0.0, 0.0, 500.0),
+                FloatPoint::default(),
+            )),
+            perspective,
+        );
+        let local = hit_test_point(
+            &tree,
+            context_of(lifted, ContextRef::default()),
+            point(100.0, 100.0),
+            &[],
+            ClipBehavior::Respect,
+        )
+        .expect("the point maps");
+        assert_eq!(local, point(50.0, 50.0));
+        assert_eq!(
+            rect_to_viewport(
+                &tree,
+                lifted,
+                FloatRect::new(0.0, 0.0, 10.0, 10.0),
+                &[],
+                IncludeVisualViewportTransform::Yes
+            ),
+            FloatRect::new(0.0, 0.0, 20.0, 20.0)
+        );
+    }
+
+    #[test]
+    fn a_rect_crossing_the_eye_plane_is_clamped_instead_of_projected_without_bound() {
+        let mut tree = identity_tree();
+        let perspective = tree.append_spatial(
+            SpatialData::Perspective(PerspectiveData {
+                matrix: perspective_matrix(1000.0),
+                flattens_inherited_transform: false,
+            }),
+            VISUAL_VIEWPORT_NODE_INDEX,
+        );
+        let on_the_eye_plane = tree.append_spatial(
+            SpatialData::Transform(transform_data(
+                translation_matrix(0.0, 0.0, 1000.0),
+                FloatPoint::default(),
+            )),
+            perspective,
+        );
+        let rect = rect_to_viewport(
+            &tree,
+            on_the_eye_plane,
+            FloatRect::new(0.0, 0.0, 10.0, 10.0),
+            &[],
+            IncludeVisualViewportTransform::Yes,
+        );
+        assert!(rect.width.is_finite() && rect.height.is_finite());
+        assert_eq!(rect.width, 100000.0);
+        assert!(
+            hit_test_point(
+                &tree,
+                context_of(on_the_eye_plane, ContextRef::default()),
+                point(100.0, 100.0),
+                &[],
+                ClipBehavior::Respect,
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn a_backface_marker_rejects_points_on_a_flipped_plane() {
+        let mut tree = identity_tree();
+        let flipped = tree.append_spatial(
+            SpatialData::Transform(transform_data(rotate_y_180_degrees(), FloatPoint::default())),
+            VISUAL_VIEWPORT_NODE_INDEX,
+        );
+        let marker = tree.append_spatial(
+            SpatialData::BackfaceVisibility(BackfaceVisibilityData {
+                plane_root_index: VISUAL_VIEWPORT_NODE_INDEX,
+                flattens_inherited_transform: false,
+            }),
+            flipped,
+        );
+        assert!(
+            hit_test_point(
+                &tree,
+                context_of(marker, ContextRef::default()),
+                point(0.0, 0.0),
+                &[],
+                ClipBehavior::Respect
+            )
+            .is_none()
+        );
+
+        let mut front_facing_tree = identity_tree();
+        let front_marker = front_facing_tree.append_spatial(
+            SpatialData::BackfaceVisibility(BackfaceVisibilityData {
+                plane_root_index: VISUAL_VIEWPORT_NODE_INDEX,
+                flattens_inherited_transform: false,
+            }),
+            VISUAL_VIEWPORT_NODE_INDEX,
+        );
+        assert_eq!(
+            hit_test_point(
+                &front_facing_tree,
+                context_of(front_marker, ContextRef::default()),
+                point(3.0, 4.0),
+                &[],
+                ClipBehavior::Respect
+            ),
+            Some(point(3.0, 4.0))
+        );
+    }
+
+    #[test]
+    fn a_context_below_the_context_node_takes_its_own_walk_from_the_root() {
+        let mut tree = identity_tree();
+        let scroll_node = tree.append_spatial(scroll(), VISUAL_VIEWPORT_NODE_INDEX);
+        let context = context_under_new_clip_without_effect(
+            &mut tree,
+            clip(FloatRect::new(0.0, 0.0, 50.0, 50.0), ClipMode::Intersect),
+            scroll_node,
+        );
+        let mut scroll_offsets = vec![FloatPoint::default(); 2];
+        scroll_offsets[scroll_node.0 as usize] = point(0.0, -100.0);
+        let fixed_background_context = context_of(VISUAL_VIEWPORT_NODE_INDEX, context);
+
+        assert!(
+            hit_test_point(
+                &tree,
+                fixed_background_context,
+                point(10.0, 120.0),
+                &scroll_offsets,
+                ClipBehavior::Respect
+            )
+            .is_none()
+        );
+        assert_eq!(
+            hit_test_point(
+                &tree,
+                fixed_background_context,
+                point(10.0, -60.0),
+                &scroll_offsets,
+                ClipBehavior::Respect
+            ),
+            Some(point(10.0, -60.0))
+        );
+    }
+
+    #[test]
+    fn scroll_translations_round_to_device_pixels_unless_a_transform_is_above_them() {
+        // The visual viewport's own transform does not keep translations below it from snapping.
+        let mut tree = VisualContextTree::create(transform_data(scale_matrix(2.0, 2.0, 1.0), FloatPoint::default()));
+        let outer = tree.append_spatial(scroll(), VISUAL_VIEWPORT_NODE_INDEX);
+        let identity = tree.append_spatial(
+            SpatialData::Transform(transform_data(FloatMatrix4x4::identity(), point(5.0, 5.0))),
+            outer,
+        );
+        let inner = tree.append_spatial(scroll(), identity);
+        let scaled = tree.append_spatial(
+            SpatialData::Transform(transform_data(scale_matrix(2.0, 2.0, 1.0), FloatPoint::default())),
+            VISUAL_VIEWPORT_NODE_INDEX,
+        );
+        let under_scale = tree.append_spatial(scroll(), scaled);
+        let mut offsets = vec![FloatPoint::default(); tree.spatial_nodes.len()];
+        offsets[outer.0 as usize] = point(0.0, -10.5);
+        offsets[inner.0 as usize] = point(-0.25, -0.75);
+        offsets[under_scale.0 as usize] = point(0.0, -10.5);
+        let rect = FloatRect::new(0.0, 0.0, 10.0, 10.0);
+        let mapped = |node| rect_to_viewport(&tree, node, rect, &offsets, IncludeVisualViewportTransform::No);
+        assert_eq!(mapped(inner), FloatRect::new(0.0, -12.0, 10.0, 10.0));
+        assert_eq!(mapped(under_scale), FloatRect::new(0.0, -21.0, 20.0, 20.0));
+    }
+
+    #[test]
+    fn a_2d_rect_maps_node_by_node_and_may_leave_out_the_visual_viewport() {
+        let mut tree = VisualContextTree::create(transform_data(scale_matrix(2.0, 2.0, 1.0), FloatPoint::default()));
+        let translated = tree.append_spatial(
+            SpatialData::Transform(transform_data(translation_matrix(10.0, 20.0, 0.0), point(5.0, 5.0))),
+            VISUAL_VIEWPORT_NODE_INDEX,
+        );
+        let scroll_node = tree.append_spatial(scroll(), translated);
+        let mut scroll_offsets = vec![FloatPoint::default(); 3];
+        scroll_offsets[scroll_node.0 as usize] = point(-1.0, -2.0);
+        let rect = FloatRect::new(0.0, 0.0, 10.0, 10.0);
+
+        assert_eq!(
+            rect_to_viewport(
+                &tree,
+                scroll_node,
+                rect,
+                &scroll_offsets,
+                IncludeVisualViewportTransform::No
+            ),
+            FloatRect::new(9.0, 18.0, 10.0, 10.0)
+        );
+        assert_eq!(
+            rect_to_viewport(
+                &tree,
+                scroll_node,
+                rect,
+                &scroll_offsets,
+                IncludeVisualViewportTransform::Yes
+            ),
+            FloatRect::new(18.0, 36.0, 20.0, 20.0)
+        );
+    }
+
+    #[test]
+    fn sticky_offsets_resolve_from_the_scroller_entry_and_the_parent_sticky_chain() {
+        let mut tree = identity_tree();
+        let viewport_scroll_node = tree.append_spatial(scroll(), VISUAL_VIEWPORT_NODE_INDEX);
+        // A 50px header 100px down the document, sticking to the top of the scrollport within a 2000px containing block.
+        let header_node = tree.append_spatial(
+            SpatialData::Sticky(StickyData {
+                scroller: viewport_scroll_node,
+                parent_sticky: None,
+                position_relative_to_scroller: point(0.0, 100.0),
+                border_box_origin: FloatPoint::default(),
+                border_box_size: FloatSize {
+                    width: 800.0,
+                    height: 50.0,
+                },
+                scrollport_size: FloatSize {
+                    width: 800.0,
+                    height: 600.0,
+                },
+                containing_block_region: FloatRect::new(0.0, 0.0, 800.0, 2000.0),
+                needs_parent_offset_adjustment: true,
+                non_scrolling_scroll_container: NodeSlotId::INVALID,
+                inset_top: Some(0.0),
+                inset_right: None,
+                inset_bottom: None,
+                inset_left: None,
+                box_node_id: UniqueNodeId(0),
+                box_pseudo_element_type: 0,
+                state_slot: NO_SCROLL_STATE_SLOT,
+                owner_paintable: NodeSlotId::INVALID,
+            }),
+            viewport_scroll_node,
+        );
+        // A 10px bar inside the header, sticking 20px below the scrollport top within the header's box.
+        let bar_node = tree.append_spatial(
+            SpatialData::Sticky(StickyData {
+                scroller: viewport_scroll_node,
+                parent_sticky: Some(header_node),
+                position_relative_to_scroller: point(0.0, 110.0),
+                border_box_origin: FloatPoint::default(),
+                border_box_size: FloatSize {
+                    width: 800.0,
+                    height: 10.0,
+                },
+                scrollport_size: FloatSize {
+                    width: 800.0,
+                    height: 600.0,
+                },
+                containing_block_region: FloatRect::new(0.0, 100.0, 800.0, 50.0),
+                needs_parent_offset_adjustment: true,
+                non_scrolling_scroll_container: NodeSlotId::INVALID,
+                inset_top: Some(20.0),
+                inset_right: None,
+                inset_bottom: None,
+                inset_left: None,
+                box_node_id: UniqueNodeId(0),
+                box_pseudo_element_type: 0,
+                state_slot: NO_SCROLL_STATE_SLOT,
+                owner_paintable: NodeSlotId::INVALID,
+            }),
+            header_node,
+        );
+
+        let resolve = |scroll_position: f32| {
+            let scroll_offsets = [FloatPoint::default(), point(0.0, -scroll_position)];
+            tree.resolve_sticky_offsets(&scroll_offsets)
+        };
+
+        // The scrollport top passed the header by 200px, so the header follows it by that much;
+        // with the header at 300, the bar sits at 310 and its inset asks for 320.
+        assert_eq!(
+            resolve(300.0),
+            vec![(header_node, point(0.0, 200.0)), (bar_node, point(0.0, 10.0))]
+        );
+        // Past the end of the containing block, the header pins to the block's bottom edge and the bar to the header's.
+        assert_eq!(
+            resolve(1960.0),
+            vec![(header_node, point(0.0, 1850.0)), (bar_node, point(0.0, 20.0))]
+        );
+        // Scrolled back above the header, nothing sticks.
+        assert_eq!(
+            resolve(50.0),
+            vec![(header_node, point(0.0, 0.0)), (bar_node, point(0.0, 0.0))]
+        );
+    }
+
+    fn sticky(scroller: SpatialNodeIndex, parent_sticky: Option<SpatialNodeIndex>, top: f32) -> SpatialData {
+        SpatialData::Sticky(StickyData {
+            scroller,
+            parent_sticky,
+            position_relative_to_scroller: point(0.0, top),
+            border_box_origin: FloatPoint::default(),
+            border_box_size: FloatSize {
+                width: 10.0,
+                height: 10.0,
+            },
+            scrollport_size: FloatSize {
+                width: 100.0,
+                height: 100.0,
+            },
+            containing_block_region: FloatRect::new(0.0, 0.0, 100.0, 1000.0),
+            needs_parent_offset_adjustment: false,
+            non_scrolling_scroll_container: NodeSlotId::INVALID,
+            inset_top: Some(0.0),
+            inset_right: None,
+            inset_bottom: None,
+            inset_left: None,
+            box_node_id: UniqueNodeId(0),
+            box_pseudo_element_type: 0,
+            state_slot: NO_SCROLL_STATE_SLOT,
+            owner_paintable: NodeSlotId::INVALID,
+        })
+    }
+
+    #[test]
+    fn sticky_insets_never_pull_a_box_back_into_its_containing_block() {
+        let mut tree = identity_tree();
+        let viewport_scroll = tree.append_spatial(scroll(), VISUAL_VIEWPORT_NODE_INDEX);
+        // A 15px box overflowing the left edge of its containing block by 14px, with a right inset that asks for it
+        // to move left. Its containing block must not push it right.
+        let mut data = sticky(viewport_scroll, None, 0.0);
+        if let SpatialData::Sticky(sticky) = &mut data {
+            sticky.position_relative_to_scroller = point(78.0, 21.0);
+            sticky.border_box_size = FloatSize {
+                width: 15.0,
+                height: 22.0,
+            };
+            sticky.scrollport_size = FloatSize {
+                width: 776.0,
+                height: 192.0,
+            };
+            sticky.containing_block_region = FloatRect::new(92.0, 32.0, 404.0, 64.0);
+            sticky.inset_top = None;
+            sticky.inset_right = Some(775.0);
+        }
+        let node = tree.append_spatial(data, viewport_scroll);
+        let offsets = [FloatPoint::default(), FloatPoint::default()];
+        assert_eq!(tree.resolve_sticky_offsets(&offsets), vec![(node, point(0.0, 0.0))]);
+    }
+
+    #[test]
+    fn sticky_offsets_in_a_non_scrolling_scroll_container_ignore_the_scroller_and_outer_sticky_boxes() {
+        let mut tree = identity_tree();
+        let viewport_scroll = tree.append_spatial(scroll(), VISUAL_VIEWPORT_NODE_INDEX);
+        let outer_sticky = tree.append_spatial(sticky(viewport_scroll, None, 0.0), viewport_scroll);
+        // A 22px box 21px into a scroll container without overflow, sticking 51px below its scrollport top within a
+        // 64px containing block that starts 32px down.
+        let mut data = sticky(viewport_scroll, Some(outer_sticky), 21.0);
+        if let SpatialData::Sticky(sticky) = &mut data {
+            sticky.border_box_size = FloatSize {
+                width: 15.0,
+                height: 22.0,
+            };
+            sticky.containing_block_region = FloatRect::new(0.0, 32.0, 404.0, 64.0);
+            sticky.inset_top = Some(51.0);
+            sticky.non_scrolling_scroll_container = NodeSlotId { index: 1 };
+        }
+        let inner_sticky = tree.append_spatial(data, outer_sticky);
+
+        for scroll_position in [0.0, 300.0] {
+            let offsets = [FloatPoint::default(), point(0.0, -scroll_position)];
+            assert_eq!(
+                tree.resolve_sticky_offsets(&offsets),
+                vec![
+                    (outer_sticky, point(0.0, scroll_position)),
+                    (inner_sticky, point(0.0, 30.0))
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn sticky_offsets_ignore_scrollers_outside_the_spatial_chain() {
+        let mut tree = identity_tree();
+        let viewport_scroll = tree.append_spatial(scroll(), VISUAL_VIEWPORT_NODE_INDEX);
+        let outer_sticky = tree.append_spatial(sticky(viewport_scroll, None, 0.0), viewport_scroll);
+        // A viewport-fixed subtree bypasses both the viewport scroller and the outer sticky box.
+        let mut fixed_sticky_data = sticky(viewport_scroll, Some(outer_sticky), 0.0);
+        if let SpatialData::Sticky(data) = &mut fixed_sticky_data {
+            data.inset_top = Some(20.0);
+        }
+        let fixed_sticky = tree.append_spatial(fixed_sticky_data, VISUAL_VIEWPORT_NODE_INDEX);
+        let nested_sticky = tree.append_spatial(sticky(viewport_scroll, Some(fixed_sticky), 0.0), fixed_sticky);
+        let inner_scroll = tree.append_spatial(scroll(), VISUAL_VIEWPORT_NODE_INDEX);
+        let scrolling_sticky = tree.append_spatial(sticky(inner_scroll, None, 0.0), inner_scroll);
+        let mut offsets = vec![FloatPoint::default(); tree.spatial_nodes.len()];
+        offsets[viewport_scroll.0 as usize] = point(0.0, -100.0);
+        offsets[inner_scroll.0 as usize] = point(0.0, -30.0);
+
+        assert_eq!(
+            tree.resolve_sticky_offsets(&offsets),
+            vec![
+                (outer_sticky, point(0.0, 100.0)),
+                (fixed_sticky, point(0.0, 20.0)),
+                (nested_sticky, FloatPoint::default()),
+                (scrolling_sticky, point(0.0, 30.0)),
+            ]
+        );
+    }
+
+    fn remap_spatial_data(data: &SpatialData, map: &dyn Fn(SpatialNodeIndex) -> SpatialNodeIndex) -> SpatialData {
+        match data {
+            SpatialData::Transform(transform) => SpatialData::Transform(TransformData {
+                sorting_context_root_index: transform.sorting_context_root_index.map(map),
+                ..*transform
+            }),
+            SpatialData::BackfaceVisibility(backface) => SpatialData::BackfaceVisibility(BackfaceVisibilityData {
+                plane_root_index: map(backface.plane_root_index),
+                ..*backface
+            }),
+            SpatialData::Sticky(sticky) => SpatialData::Sticky(StickyData {
+                scroller: map(sticky.scroller),
+                parent_sticky: sticky.parent_sticky.map(map),
+                ..*sticky
+            }),
+            other => other.clone(),
+        }
+    }
+
+    fn permuted_tree(tree: &VisualContextTree, permutation: &[u32]) -> VisualContextTree {
+        let map = |index: SpatialNodeIndex| SpatialNodeIndex(permutation[index.0 as usize]);
+        let mut permuted = tree.clone();
+        for (index, node) in tree.spatial_nodes.iter().enumerate() {
+            permuted.spatial_nodes[permutation[index] as usize] = SpatialNode {
+                data: remap_spatial_data(&node.data, &map),
+                parent: map(node.parent),
+            };
+        }
+        for (index, node) in tree.clip_nodes.iter().enumerate() {
+            permuted.clip_nodes[index].spatial = map(node.spatial);
+        }
+        for (index, node) in tree.effect_nodes.iter().enumerate() {
+            permuted.effect_nodes[index].spatial = map(node.spatial);
+        }
+        permuted
+    }
+
+    #[test]
+    fn a_child_stored_below_its_parent_resolves_like_the_in_order_tree() {
+        let mut in_order = identity_tree();
+        let scroll_node = in_order.append_spatial(scroll(), VISUAL_VIEWPORT_NODE_INDEX);
+        let context_root = in_order.append_spatial(
+            SpatialData::Transform(transform_data(translation_matrix(2.0, 2.0, 0.0), FloatPoint::default())),
+            scroll_node,
+        );
+        let sorted_transform = in_order.append_spatial(
+            SpatialData::Transform(TransformData {
+                sorting_context_root_index: Some(context_root),
+                ..transform_data(translation_matrix(3.0, 3.0, 0.0), FloatPoint::default())
+            }),
+            context_root,
+        );
+        let backface = in_order.append_spatial(
+            SpatialData::BackfaceVisibility(BackfaceVisibilityData {
+                plane_root_index: context_root,
+                flattens_inherited_transform: false,
+            }),
+            sorted_transform,
+        );
+        let outer_sticky = in_order.append_spatial(sticky(scroll_node, None, 100.0), scroll_node);
+        let inner_sticky = in_order.append_spatial(sticky(scroll_node, Some(outer_sticky), 120.0), outer_sticky);
+        let outer_clip = in_order.append_clip(
+            clip(FloatRect::new(0.0, 0.0, 0.0, 0.0), ClipMode::Intersect),
+            ClipNodeIndex::NONE,
+            sorted_transform,
+        );
+        in_order.append_clip(
+            clip(FloatRect::new(0.0, 0.0, 50.0, 50.0), ClipMode::Intersect),
+            outer_clip,
+            sorted_transform,
+        );
+        in_order.clip_nodes.swap(0, 1);
+        in_order.clip_nodes[0].parent = ClipNodeIndex(1);
+        in_order.clip_nodes[1].parent = ClipNodeIndex::NONE;
+        ContextRef {
+            clip: ClipNodeIndex(0),
+            effect: EffectNodeIndex::NONE,
+            ..ContextRef::default()
+        };
+        ContextRef {
+            clip: ClipNodeIndex(1),
+            effect: EffectNodeIndex::NONE,
+            ..ContextRef::default()
+        };
+
+        let permutation = [0, 6, 5, 4, 3, 2, 1];
+        let permuted = permuted_tree(&in_order, &permutation);
+        let mapped = |index: SpatialNodeIndex| SpatialNodeIndex(permutation[index.0 as usize]);
+
+        let order = permuted.spatial_dependency_order();
+        let position = |index: SpatialNodeIndex| order.iter().position(|entry| *entry == index.0).unwrap();
+        assert_eq!(order.len(), in_order.spatial_nodes.len());
+        assert!(position(mapped(context_root)) < position(mapped(sorted_transform)));
+        assert!(position(mapped(sorted_transform)) < position(mapped(backface)));
+        assert!(position(mapped(scroll_node)) < position(mapped(outer_sticky)));
+        assert!(position(mapped(outer_sticky)) < position(mapped(inner_sticky)));
+
+        let mut in_order_offsets = vec![FloatPoint::default(); in_order.spatial_nodes.len()];
+        in_order_offsets[scroll_node.0 as usize] = point(0.0, -150.0);
+        let mut permuted_offsets = vec![FloatPoint::default(); permuted.spatial_nodes.len()];
+        permuted_offsets[mapped(scroll_node).0 as usize] = point(0.0, -150.0);
+        let in_order_sticky_entries = in_order.resolve_sticky_offsets(&in_order_offsets);
+        let permuted_sticky_entries = permuted.resolve_sticky_offsets(&permuted_offsets);
+        for (node, offset) in &in_order_sticky_entries {
+            assert!(permuted_sticky_entries.contains(&(mapped(*node), *offset)));
+        }
+        assert_eq!(in_order_sticky_entries.len(), permuted_sticky_entries.len());
+        for (node, offset) in in_order_sticky_entries {
+            in_order_offsets[node.0 as usize] = offset;
+            permuted_offsets[mapped(node).0 as usize] = offset;
+        }
+
+        let rect = FloatRect::new(0.0, 0.0, 10.0, 10.0);
+        for node in [backface, inner_sticky, sorted_transform] {
+            assert_eq!(
+                rect_to_viewport(
+                    &permuted,
+                    mapped(node),
+                    rect,
+                    &permuted_offsets,
+                    IncludeVisualViewportTransform::Yes
+                ),
+                rect_to_viewport(
+                    &in_order,
+                    node,
+                    rect,
+                    &in_order_offsets,
+                    IncludeVisualViewportTransform::Yes
+                )
+            );
+        }
+
+        let in_order_subtree = in_order.spatial_nodes_in_subtrees_of(&[context_root]);
+        let permuted_subtree = permuted.spatial_nodes_in_subtrees_of(&[mapped(context_root)]);
+        for index in 0..in_order.spatial_nodes.len() {
+            assert_eq!(permuted_subtree[permutation[index] as usize], in_order_subtree[index]);
+        }
+
+        assert_eq!(empty_clip_flags(&permuted), empty_clip_flags(&in_order));
+        assert_eq!(empty_clip_flags(&in_order), vec![true, true]);
+    }
+
+    #[test]
+    fn a_display_list_naming_a_dead_node_is_rejected() {
+        use crate::display_list::commands::DisplayListCommandRun;
+        let mut tree = identity_tree();
+        let live_spatial = tree.append_spatial(
+            SpatialData::Transform(transform_data(FloatMatrix4x4::identity(), FloatPoint::default())),
+            VISUAL_VIEWPORT_NODE_INDEX,
+        );
+        let dead_spatial = tree.append_spatial(
+            SpatialData::Transform(transform_data(FloatMatrix4x4::identity(), FloatPoint::default())),
+            VISUAL_VIEWPORT_NODE_INDEX,
+        );
+        let live_effect = tree.append_effect(
+            effects(1.0, CompositingAndBlendingOperator::Normal),
+            EffectNodeIndex::NONE,
+            live_spatial,
+            ClipNodeIndex::NONE,
+        );
+        let live_context = ContextRef {
+            clip: ClipNodeIndex::NONE,
+            effect: live_effect,
+            ..ContextRef::default()
+        };
+        let dead_effect = tree.append_effect(
+            effects(1.0, CompositingAndBlendingOperator::Normal),
+            EffectNodeIndex::NONE,
+            live_spatial,
+            ClipNodeIndex::NONE,
+        );
+        let context_of_dead_effect = ContextRef {
+            clip: ClipNodeIndex::NONE,
+            effect: dead_effect,
+            ..ContextRef::default()
+        };
+        assert!(tree.tombstone_spatial_slot(dead_spatial));
+        assert!(tree.tombstone_effect_slot(dead_effect));
+        let run = |context: ContextRef| DisplayListCommandRun {
+            context,
+            ..DisplayListCommandRun::default()
+        };
+        assert!(tree.display_list_references_only_live_nodes(&[run(context_of(live_spatial, live_context))]));
+        assert!(tree.display_list_references_only_live_nodes(&[run(context_of(live_spatial, ContextRef::default()))]));
+        assert!(!tree.display_list_references_only_live_nodes(&[run(context_of(dead_spatial, ContextRef::default()))]));
+        assert!(
+            !tree.display_list_references_only_live_nodes(&[run(context_of(live_spatial, context_of_dead_effect))])
+        );
+    }
+
+    #[test]
+    fn sticky_resolution_and_subtree_marks_leave_tombstones_out() {
+        let mut tree = identity_tree();
+        let scroll_node = tree.append_spatial(scroll(), VISUAL_VIEWPORT_NODE_INDEX);
+        let stale = tree.append_spatial(
+            SpatialData::Transform(transform_data(FloatMatrix4x4::identity(), FloatPoint::default())),
+            scroll_node,
+        );
+        let sticky_node = tree.append_spatial(sticky(scroll_node, None, 100.0), scroll_node);
+        assert!(tree.tombstone_spatial_slot(stale));
+        let mut scroll_offsets = vec![FloatPoint::default(); 4];
+        scroll_offsets[scroll_node.0 as usize] = point(0.0, -150.0);
+        assert_eq!(
+            tree.resolve_sticky_offsets(&scroll_offsets),
+            vec![(sticky_node, point(0.0, 50.0))]
+        );
+        assert_eq!(
+            tree.spatial_nodes_in_subtrees_of(&[scroll_node]),
+            vec![false, true, false, true]
+        );
+    }
+
+    #[test]
+    fn resolving_in_place_writes_the_entries_the_pairs_report() {
+        let mut tree = identity_tree();
+        let scroll_node = tree.append_spatial(scroll(), VISUAL_VIEWPORT_NODE_INDEX);
+        let outer_sticky = tree.append_spatial(sticky(scroll_node, None, 100.0), scroll_node);
+        let inner_sticky = tree.append_spatial(sticky(scroll_node, Some(outer_sticky), 110.0), outer_sticky);
+        // Only the scroll containers' entries are present; the sticky nodes' indices lie past the end.
+        let mut scroll_offsets = vec![FloatPoint::default(); scroll_node.0 as usize + 1];
+        scroll_offsets[scroll_node.0 as usize] = point(0.0, -150.0);
+
+        let entries = tree.resolve_sticky_offsets(&scroll_offsets);
+        let mut resolved_in_place = scroll_offsets.clone();
+        tree.resolve_sticky_offsets_in_place(&mut resolved_in_place);
+
+        assert_eq!(resolved_in_place.len(), inner_sticky.0 as usize + 1);
+        assert_eq!(resolved_in_place[..scroll_offsets.len()], scroll_offsets[..]);
+        assert_eq!(entries.len(), 2);
+        for (node, offset) in entries {
+            assert_eq!(resolved_in_place[node.0 as usize], offset);
+        }
+    }
+
+    #[test]
+    fn a_sticky_node_under_the_root_scroller_resolves_to_a_zero_entry() {
+        let mut tree = identity_tree();
+        let sticky = tree.append_spatial(
+            SpatialData::Sticky(StickyData::unconstrained(
+                VISUAL_VIEWPORT_NODE_INDEX,
+                None,
+                NO_SCROLL_STATE_SLOT,
+                NodeSlotId::INVALID,
+            )),
+            VISUAL_VIEWPORT_NODE_INDEX,
+        );
+        assert_eq!(tree.resolve_sticky_offsets(&[]), vec![(sticky, FloatPoint::default())]);
+    }
+}

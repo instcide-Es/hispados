@@ -1,0 +1,56 @@
+/*
+ * Copyright (c) 2018-2020, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2021, Tobias Christiansen <tobyase@serenityos.org>
+ * Copyright (c) 2021-2024, Sam Atkins <sam@ladybird.org>
+ * Copyright (c) 2022-2023, MacDue <macdue@dueutil.tech>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <LibWeb/CSS/Percentage.h>
+#include <LibWeb/CSS/StyleValues/DimensionStyleValue.h>
+
+namespace Web::CSS {
+
+class PercentageStyleValue final : public DimensionStyleValue {
+public:
+    static ValueComparingNonnullRefPtr<PercentageStyleValue const> create(Percentage percentage)
+    {
+        // The 0%, 50% and 100% values dominate real-world percentages, so they are interned.
+        if (percentage.value() == 0) {
+            static auto const& zero_instance = *make_immortal(new (nothrow) PercentageStyleValue(Percentage(0)));
+            return zero_instance;
+        }
+        if (percentage.value() == 50) {
+            static auto const& fifty_instance = *make_immortal(new (nothrow) PercentageStyleValue(Percentage(50)));
+            return fifty_instance;
+        }
+        if (percentage.value() == 100) {
+            static auto const& hundred_instance = *make_immortal(new (nothrow) PercentageStyleValue(Percentage(100)));
+            return hundred_instance;
+        }
+        return adopt_ref(*new (nothrow) PercentageStyleValue(move(percentage)));
+    }
+    virtual ~PercentageStyleValue() override = default;
+
+    Percentage percentage() const { return Percentage(m_value->percentage.value); }
+    virtual double raw_value() const override { return m_value->percentage.value; }
+    virtual Utf16FlyString unit_name() const override { return "percent"_utf16_fly_string; }
+
+private:
+    friend class StyleValue;
+
+    explicit PercentageStyleValue(StyleValueFFI::StyleValueData const* data)
+        : DimensionStyleValue(Type::Percentage, data)
+    {
+    }
+
+    PercentageStyleValue(Percentage&& percentage)
+        : DimensionStyleValue(Type::Percentage, StyleValueFFI::rust_style_value_create_percentage(percentage.value()))
+    {
+    }
+};
+
+}

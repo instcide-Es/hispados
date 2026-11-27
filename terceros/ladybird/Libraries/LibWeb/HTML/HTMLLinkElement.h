@@ -1,0 +1,253 @@
+/*
+ * Copyright (c) 2018-2025, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2021, the SerenityOS developers.
+ * Copyright (c) 2021, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2023, Srikavin Ramkumar <me@srikavin.me>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Function.h>
+#include <AK/Utf16View.h>
+#include <LibHTTP/Forward.h>
+#include <LibWeb/CSS/StyleScope.h>
+#include <LibWeb/DOM/DocumentLoadEventDelayer.h>
+#include <LibWeb/Fetch/Infrastructure/FetchAlgorithms.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/Requests.h>
+#include <LibWeb/Forward.h>
+#include <LibWeb/HTML/CORSSettingAttribute.h>
+#include <LibWeb/HTML/HTMLElement.h>
+#include <LibWeb/HTML/PreloadEntry.h>
+#include <LibWeb/HTML/SourceSet.h>
+#include <LibWebCommon/MimeSniff/MimeType.h>
+
+namespace Web::HTML {
+
+class WEB_API HTMLLinkElement final : public HTMLElement {
+    WEB_WRAPPABLE(HTMLLinkElement, HTMLElement);
+    GC_DECLARE_ALLOCATOR(HTMLLinkElement);
+
+public:
+    virtual ~HTMLLinkElement() override;
+
+    GC::Ref<DOM::DOMTokenList> blocking();
+
+    virtual void inserted() override;
+    virtual void removed_from(IsSubtreeRoot, Node* old_ancestor, Node& old_root) override;
+    virtual void moved_from(IsSubtreeRoot, GC::Ptr<Node> old_ancestor) override;
+
+    Utf16String rel() const { return get_attribute_value(HTML::AttributeNames::rel); }
+    void set_rel(Utf16View value) { set_attribute_value(HTML::AttributeNames::rel, value); }
+    Utf16String type() const { return get_attribute_value(HTML::AttributeNames::type); }
+    void set_type(Utf16View value) { set_attribute_value(HTML::AttributeNames::type, value); }
+    Utf16String href() const { return get_attribute_value(HTML::AttributeNames::href); }
+    void set_href(Utf16View value) { set_attribute_value(HTML::AttributeNames::href, value); }
+
+    GC::Ref<DOM::DOMTokenList> rel_list();
+    GC::Ref<DOM::DOMTokenList> sizes();
+
+    bool has_loaded_icon() const;
+    bool has_icon_keyword() const;
+    RefPtr<Gfx::Bitmap const> associated_favicon() { return m_loaded_icon; }
+
+    static void load_fallback_favicon_if_needed(GC::Ref<DOM::Document>);
+
+    enum class LinkHeaderPhase : u8 {
+        PreMedia,
+        Media,
+    };
+    static void process_link_headers(DOM::Document&, HTTP::HeaderList const& response_header_list, URL::URL const& response_url, LinkHeaderPhase);
+
+    void set_parser_document(Badge<HTMLParser>, GC::Ref<DOM::Document> document) { m_parser_document = document; }
+    void set_was_enabled_when_created_by_parser(Badge<HTMLParser>, bool was_enabled_when_created_by_parser) { m_was_enabled_when_created_by_parser = was_enabled_when_created_by_parser; }
+    void set_parser_document(Badge<XMLDocumentBuilder>, GC::Ref<DOM::Document> document) { m_parser_document = document; }
+    void set_was_enabled_when_created_by_parser(Badge<XMLDocumentBuilder>, bool was_enabled_when_created_by_parser) { m_was_enabled_when_created_by_parser = was_enabled_when_created_by_parser; }
+
+    void set_media(Utf16View);
+    Utf16String media() const;
+
+    RefPtr<CSS::StyleSheetState> sheet() const;
+    CSS::CSSStyleSheet* cssom_sheet() const;
+
+    void set_source_set(SourceSet source_set) { m_source_set = move(source_set); }
+
+    enum class AnyFailed : u8 {
+        No,
+        Yes,
+    };
+    void finished_loading_critical_style_subresources(AnyFailed);
+
+private:
+    // https://html.spec.whatwg.org/multipage/semantics.html#link-processing-options
+    struct LinkProcessingOptions final : public JS::Cell {
+        GC_CELL(LinkProcessingOptions, JS::Cell);
+        GC_DECLARE_ALLOCATOR(LinkProcessingOptions);
+
+        LinkProcessingOptions(
+            CORSSettingAttribute crossorigin,
+            ReferrerPolicy::ReferrerPolicy referrer_policy,
+            Optional<SourceSet> source_set,
+            URL::URL base_url,
+            URL::Origin origin,
+            GC::Ref<HTML::EnvironmentSettingsObject> environment,
+            NonnullRefPtr<HTML::PolicyContainer> policy_container,
+            GC::Ptr<Web::DOM::Document> document,
+            Utf16String cryptographic_nonce_metadata,
+            Fetch::Infrastructure::Request::Priority fetch_priority);
+
+        virtual void visit_edges(Cell::Visitor& visitor) override;
+
+        // href (default the empty string)
+        Utf16String href;
+
+        // initiator (default "link")
+        Optional<Fetch::Infrastructure::Request::InitiatorType> initiator { Fetch::Infrastructure::Request::InitiatorType::Link };
+
+        // integrity (default the empty string)
+        Utf16String integrity;
+
+        // type (default the empty string)
+        Utf16String type;
+
+        // cryptographic nonce metadata (default the empty string)
+        //     A string
+        Utf16String cryptographic_nonce_metadata;
+
+        // destination (default the empty string)
+        //     A destination type.
+        Optional<Fetch::Infrastructure::Request::Destination> destination;
+
+        // crossorigin (default No CORS)
+        //     A CORS settings attribute state
+        CORSSettingAttribute crossorigin { CORSSettingAttribute::NoCORS };
+
+        // referrer policy (default the empty string)
+        //     A referrer policy
+        ReferrerPolicy::ReferrerPolicy referrer_policy { ReferrerPolicy::ReferrerPolicy::EmptyString };
+
+        // source set (default null)
+        //     Null or a source set
+        Optional<SourceSet> source_set;
+
+        // base URL
+        //     A URL
+        URL::URL base_url;
+
+        // origin
+        //     An origin
+        URL::Origin origin;
+
+        // environment
+        //     An environment
+        GC::Ref<HTML::EnvironmentSettingsObject> environment;
+
+        // policy container
+        //     A policy container
+        NonnullRefPtr<HTML::PolicyContainer> policy_container;
+
+        // document (default null)
+        //     Null or a Document
+        GC::Ptr<Web::DOM::Document> document;
+
+        // on document ready (default null)
+        //     Null or an algorithm accepting a Document
+        GC::Ptr<GC::Function<void(DOM::Document&)>> on_document_ready;
+
+        // fetch priority (default Auto)
+        //     A fetch priority attribute state
+        Fetch::Infrastructure::Request::Priority fetch_priority { Fetch::Infrastructure::Request::Priority::Auto };
+    };
+
+    HTMLLinkElement(DOM::Document&, DOM::QualifiedName);
+
+    GC::Ptr<DOM::DOMTokenList> m_blocking;
+    virtual void visit_edges(Cell::Visitor&) override;
+    virtual void adopted_from(DOM::Document&) override;
+
+    // ^DOM::Node
+    virtual bool is_html_link_element() const override { return true; }
+
+    // ^HTMLElement
+    virtual void attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_) override;
+    virtual bool contributes_a_script_blocking_style_sheet() const final;
+    virtual bool is_implicitly_potentially_render_blocking() const override;
+
+    GC::Ref<LinkProcessingOptions> create_link_options();
+    static RefPtr<Fetch::Infrastructure::Request> create_link_request(LinkProcessingOptions const&);
+    static bool apply_link_options_from_parsed_header_attributes(LinkProcessingOptions&, HTTP::Link const&);
+
+    void fetch_and_process_linked_resource();
+    void default_fetch_and_process_linked_resource(u64 fetch_generation);
+    void fetch_and_process_linked_dns_prefetch_resource();
+    void fetch_and_process_linked_preconnect_resource();
+    void fetch_and_process_linked_preload_resource();
+    void fetch_and_process_linked_modulepreload_resource();
+    void fetch_and_process_linked_prefetch_resource();
+
+    bool linked_resource_fetch_setup_steps(Fetch::Infrastructure::Request&);
+    bool icon_linked_resource_fetch_setup_steps(Fetch::Infrastructure::Request&);
+    bool stylesheet_linked_resource_fetch_setup_steps(Fetch::Infrastructure::Request&);
+
+    static void preconnect(LinkProcessingOptions const&);
+    static void preload(LinkProcessingOptions&, GC::Ptr<GC::Function<void(Fetch::Infrastructure::Response&)>> process_response = {});
+    static void modulepreload(LinkProcessingOptions const&);
+
+    void process_linked_resource(bool success, Fetch::Infrastructure::ResponseView const&, CSS::StyleScope::OriginClean, Core::ImmutableBytes const*);
+    void process_icon_resource(bool success, Fetch::Infrastructure::ResponseView const&, ByteBuffer);
+    void process_stylesheet_resource(bool success, Fetch::Infrastructure::ResponseView const&, CSS::StyleScope::OriginClean, ReadonlyBytes);
+    void associate_style_sheet(CSS::StyleSheetState&, CSS::StyleScope::OriginClean);
+    void associate_empty_style_sheet(Fetch::Infrastructure::ResponseView const&, CSS::StyleScope::OriginClean);
+    void finish_processing_stylesheet_resource(u64 fetch_generation);
+    enum class UnblockRendering : u8 {
+        No,
+        Yes,
+    };
+    void cancel_pending_stylesheet_processing(UnblockRendering = UnblockRendering::Yes);
+    void stop_blocking_on_style_sheet(UnblockRendering = UnblockRendering::Yes);
+
+    bool should_fetch_and_process_resource_type() const;
+
+    struct Relationship {
+        enum {
+            Alternate = 1 << 0,
+            Stylesheet = 1 << 1,
+            Preload = 1 << 2,
+            DNSPrefetch = 1 << 3,
+            Preconnect = 1 << 4,
+            Icon = 1 << 5,
+            ModulePreload = 1 << 6,
+            Prefetch = 1 << 7,
+        };
+    };
+
+    GC::Ptr<Fetch::Infrastructure::FetchController> m_fetch_controller;
+    Optional<DOM::DocumentLoadEventDelayer> m_document_load_event_delayer;
+
+    RefPtr<Gfx::Bitmap const> m_loaded_icon;
+    RefPtr<CSS::StyleSheetState> m_loaded_style_sheet;
+    // The style sheet the link had when it was disabled, and the fetch generation then: enabling the link again before
+    // it starts another fetch puts the sheet back.
+    RefPtr<CSS::StyleSheetState> m_style_sheet_kept_while_disabled;
+    u64 m_style_sheet_kept_while_disabled_fetch_generation { 0 };
+
+    GC::Ptr<DOM::DOMTokenList> m_rel_list;
+    GC::Ptr<DOM::DOMTokenList> m_sizes;
+    unsigned m_relationship { 0 };
+    u64 m_current_fetch_generation { 0 };
+    bool m_stylesheet_processing_pending { false };
+    Optional<u64> m_fetch_generation_waiting_for_critical_subresources;
+    u64 m_loaded_style_sheet_fetch_generation { 0 };
+
+    // https://html.spec.whatwg.org/multipage/semantics.html#explicitly-enabled
+    bool m_explicitly_enabled { false };
+
+    bool m_was_enabled_when_created_by_parser { false };
+
+    SourceSet m_source_set;
+
+    GC::Weak<DOM::Document> m_parser_document;
+};
+
+}

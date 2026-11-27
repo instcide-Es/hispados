@@ -1,0 +1,104 @@
+/*
+ * Copyright (c) 2023, MacDue <macdue@dueutil.tech>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/IterationDecision.h>
+#include <LibGC/RootHashTable.h>
+#include <LibWeb/Layout/LayoutRustFFI.h>
+#include <LibWeb/SVG/AttributeParsing.h>
+#include <LibWeb/SVG/SVGElement.h>
+#include <LibWeb/SVG/SVGStopElement.h>
+#include <LibWeb/SVG/SVGURIReference.h>
+
+namespace Web::SVG {
+
+class SVGAnimatedTransformList;
+
+class SVGGradientElement
+    : public SVGElement
+    , public SVGURIReferenceMixin<SupportsXLinkHref::Yes> {
+    WEB_WRAPPABLE(SVGGradientElement, SVGElement);
+
+public:
+    virtual ~SVGGradientElement() override = default;
+
+    virtual void attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_) override;
+
+    virtual void push_paint_server_description(void* sink) const = 0;
+
+    GradientUnits gradient_units() const;
+
+    SpreadMethod spread_method() const;
+
+    Gfx::InterpolationColorSpace color_space() const;
+
+    Optional<Gfx::AffineTransform> gradient_transform() const;
+
+    static constexpr u16 SVG_SPREADMETHOD_UNKNOWN = 0;
+    static constexpr u16 SVG_SPREADMETHOD_PAD = 1;
+    static constexpr u16 SVG_SPREADMETHOD_REFLECT = 2;
+    static constexpr u16 SVG_SPREADMETHOD_REPEAT = 3;
+
+    GC::Ref<SVGAnimatedEnumeration> gradient_units_for_bindings();
+    GC::Ref<SVGAnimatedEnumeration> spread_method_for_bindings();
+    GC::Ref<SVGAnimatedTransformList> gradient_transform_for_bindings();
+
+protected:
+    SVGGradientElement(DOM::Document&, DOM::QualifiedName);
+
+    Layout::RustFFI::FfiSvgGradientDescription base_paint_server_description(Layout::RustFFI::FfiSvgGradientKind) const;
+    virtual void visit_edges(Cell::Visitor&) override;
+
+    GC::Ptr<SVGGradientElement const> linked_gradient(GC::RootHashTable<SVGGradientElement const*>& seen_gradients) const;
+
+    template<VoidFunction<SVGStopElement> Callback>
+    void for_each_color_stop(Callback const& callback) const
+    {
+        GC::RootHashTable<SVGGradientElement const*> seen_gradients;
+        return for_each_color_stop_impl(callback, seen_gradients);
+    }
+
+    void push_color_stops(void* sink) const;
+
+private:
+    virtual bool is_svg_gradient_element() const final { return true; }
+
+    template<VoidFunction<SVGStopElement> Callback>
+    void for_each_color_stop_impl(Callback const& callback, GC::RootHashTable<SVGGradientElement const*>& seen_gradients) const
+    {
+        bool color_stops_found = false;
+        for_each_child_of_type<SVG::SVGStopElement>([&](auto& stop) {
+            color_stops_found = true;
+            callback(stop);
+            return IterationDecision::Continue;
+        });
+        if (!color_stops_found) {
+            if (auto gradient = linked_gradient(seen_gradients))
+                gradient->for_each_color_stop_impl(callback, seen_gradients);
+        }
+    }
+
+    GradientUnits gradient_units_impl(GC::RootHashTable<SVGGradientElement const*>& seen_gradients) const;
+    SpreadMethod spread_method_impl(GC::RootHashTable<SVGGradientElement const*>& seen_gradients) const;
+    Optional<Gfx::AffineTransform> gradient_transform_impl(GC::RootHashTable<SVGGradientElement const*>& seen_gradients) const;
+
+    // https://svgwg.org/svg2-draft/pservers.html#LinearGradientAttributes
+    Optional<GradientUnits> m_gradient_units = {};
+
+    Optional<SpreadMethod> m_spread_method = {};
+    Optional<Gfx::AffineTransform> m_gradient_transform = {};
+    GC::Ptr<SVGAnimatedTransformList> m_gradient_transform_for_bindings;
+};
+
+}
+
+namespace Web::DOM {
+
+template<>
+inline bool Node::fast_is<SVG::SVGGradientElement>() const { return is_svg_gradient_element(); }
+
+}

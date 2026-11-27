@@ -1,0 +1,22 @@
+/*
+ * Copyright (c) 2024, Jamie Mansfield <jmansfield@cadixdev.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <LibWeb/SVG/SVGElement.h>
+
+namespace Web::SVG {
+
+class SVGDescElement final : public SVGElement {
+    WEB_WRAPPABLE(SVGDescElement, SVGElement);
+    GC_DECLARE_ALLOCATOR(SVGDescElement);
+
+private:
+    SVGDescElement(DOM::Document&, DOM::QualifiedName);
+    virtual CSS::ElementBoxKind box_kind() const override;
+};
+
+}

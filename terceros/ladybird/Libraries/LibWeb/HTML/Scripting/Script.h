@@ -1,0 +1,95 @@
+/*
+ * Copyright (c) 2021-2023, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/OwnPtr.h>
+#include <AK/Utf16String.h>
+#include <LibJS/Heap/Cell.h>
+#include <LibJS/Position.h>
+#include <LibJS/Script.h>
+#include <LibJS/SourceCode.h>
+#include <LibURL/URL.h>
+#include <LibWeb/Export.h>
+#include <LibWeb/Forward.h>
+#include <LibWeb/HTML/Scripting/ScriptRegistry.h>
+
+namespace Web::HTML {
+
+struct ScriptFetchOptions;
+
+// https://html.spec.whatwg.org/multipage/webappapis.html#concept-script
+class WEB_API Script : public JS::Cell {
+    GC_CELL(Script, JS::Cell);
+    GC_DECLARE_ALLOCATOR(Script);
+
+public:
+    virtual ~Script() override;
+
+    template<typename T>
+    bool fast_is() const = delete;
+
+    Optional<URL::URL> const& base_url() const { return m_base_url; }
+    ByteString const& filename() const { return m_filename; }
+    Utf16String const& display_filename() const { return m_display_filename; }
+
+    EnvironmentSettingsObject& settings_object();
+
+    ScriptFetchOptions const& fetch_options() const;
+    void set_fetch_options(ScriptFetchOptions);
+
+    [[nodiscard]] JS::Value error_to_rethrow() const { return m_error_to_rethrow; }
+    void set_error_to_rethrow(JS::Value value) { m_error_to_rethrow = value; }
+
+    [[nodiscard]] JS::Value parse_error() const { return m_parse_error; }
+    void set_parse_error(JS::Value value, Optional<JS::Position> position = {})
+    {
+        m_parse_error = value;
+        m_parse_error_position = position;
+    }
+
+    // NB: A parse error is created before the script runs, so it has no source location of its own.
+    [[nodiscard]] Optional<JS::Position> const& parse_error_position() const { return m_parse_error_position; }
+
+protected:
+    Script(Optional<URL::URL> base_url, ByteString filename, EnvironmentSettingsObject&);
+    Script(Optional<URL::URL> base_url, ByteString filename, Utf16String display_filename, EnvironmentSettingsObject&);
+
+    virtual void visit_edges(Visitor&) override;
+
+private:
+    virtual bool is_classic_script() const { return false; }
+    virtual bool is_module_script() const { return false; }
+
+    Optional<URL::URL> m_base_url;
+    ByteString m_filename;
+    Utf16String m_display_filename;
+
+    // https://html.spec.whatwg.org/multipage/webappapis.html#settings-object
+    // An environment settings object, containing various settings that are shared with other scripts in the same context.
+    GC::Ref<EnvironmentSettingsObject> m_settings;
+
+    // https://html.spec.whatwg.org/multipage/webappapis.html#concept-script-script-fetch-options
+    // NB: This is null while the script has the default script fetch options.
+    OwnPtr<ScriptFetchOptions> m_fetch_options;
+
+    // https://html.spec.whatwg.org/multipage/webappapis.html#concept-script-parse-error
+    JS::Value m_parse_error;
+    Optional<JS::Position> m_parse_error_position;
+
+    // https://html.spec.whatwg.org/multipage/webappapis.html#concept-script-error-to-rethrow
+    JS::Value m_error_to_rethrow;
+};
+
+void register_javascript_source(Script&, NonnullRefPtr<JS::SourceCode const>, ScriptRegistry::JavaScriptSource::Type, ScriptRegistry::IsInlineSource, size_t source_line_number);
+
+// LibWeb puts the HTML::Script in the [[HostDefined]] field of every script and module record it creates.
+[[nodiscard]] inline Script* script_from_host_defined(GC::Ptr<GC::Cell> host_defined)
+{
+    return static_cast<Script*>(host_defined.ptr());
+}
+
+}

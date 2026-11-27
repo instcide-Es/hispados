@@ -1,0 +1,75 @@
+/*
+ * Copyright (c) 2020-2025, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <LibWeb/HTML/HTMLElement.h>
+#include <LibWeb/HTML/HTMLTableCaptionElement.h>
+#include <LibWeb/HTML/HTMLTableRowElement.h>
+#include <LibWeb/HTML/HTMLTableSectionElement.h>
+#include <LibWeb/WebIDL/ExceptionOr.h>
+#include <LibWebCommon/WebIDL/Types.h>
+
+namespace Web::HTML {
+
+class HTMLTableElement final : public HTMLElement {
+    WEB_WRAPPABLE(HTMLTableElement, HTMLElement);
+    GC_DECLARE_ALLOCATOR(HTMLTableElement);
+
+public:
+    virtual ~HTMLTableElement() override;
+
+    GC::Ptr<HTMLTableCaptionElement> caption();
+    WebIDL::ExceptionOr<void> set_caption(HTMLTableCaptionElement*);
+    GC::Ref<HTMLTableCaptionElement> create_caption();
+    void delete_caption();
+
+    GC::Ptr<HTMLTableSectionElement> t_head();
+    WebIDL::ExceptionOr<void> set_t_head(HTMLTableSectionElement* thead);
+    GC::Ref<HTMLTableSectionElement> create_t_head();
+    void delete_t_head();
+
+    GC::Ptr<HTMLTableSectionElement> t_foot();
+    WebIDL::ExceptionOr<void> set_t_foot(HTMLTableSectionElement* tfoot);
+    GC::Ref<HTMLTableSectionElement> create_t_foot();
+    void delete_t_foot();
+
+    GC::Ref<DOM::HTMLCollection> t_bodies();
+    GC::Ref<HTMLTableSectionElement> create_t_body();
+
+    GC::Ref<DOM::HTMLCollection> rows();
+    GC::Ref<DOM::HTMLCollection> rows() const { return const_cast<HTMLTableElement&>(*this).rows(); }
+    WebIDL::ExceptionOr<GC::Ref<HTMLTableRowElement>> insert_row(WebIDL::Long index);
+    WebIDL::ExceptionOr<void> delete_row(WebIDL::Long index);
+
+    // https://www.w3.org/TR/html-aria/#el-table
+    virtual Optional<ARIA::Role> default_role() const override { return ARIA::Role::table; }
+
+    unsigned border() const;
+    [[nodiscard]] Optional<u32> cellpadding() const;
+
+private:
+    HTMLTableElement(DOM::Document&, DOM::QualifiedName);
+
+    virtual bool is_html_table_element() const override { return true; }
+    virtual void visit_edges(Cell::Visitor&) override;
+
+    virtual bool is_presentational_hint(Utf16FlyString const&) const override;
+    virtual void apply_presentational_hints(Vector<CSS::StyleProperty>&) const override;
+    virtual void attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_) override;
+    GC::Ptr<DOM::HTMLCollection> mutable m_rows;
+    GC::Ptr<DOM::HTMLCollection> mutable m_t_bodies;
+    Optional<u32> m_cellpadding;
+};
+
+}
+
+namespace Web::DOM {
+
+template<>
+inline bool Node::fast_is<HTML::HTMLTableElement>() const { return is_html_table_element(); }
+
+}

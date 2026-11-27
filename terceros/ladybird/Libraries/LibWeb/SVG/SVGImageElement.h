@@ -1,0 +1,86 @@
+/*
+ * Copyright (c) 2024, Tim Ledbetter <tim.ledbetter@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <LibGC/Ptr.h>
+#include <LibWeb/DOM/DocumentLoadEventDelayer.h>
+#include <LibWeb/HTML/DecodedImageData.h>
+#include <LibWeb/Layout/ImageProvider.h>
+#include <LibWeb/SVG/SVGAnimatedPreserveAspectRatio.h>
+#include <LibWeb/SVG/SVGGraphicsElement.h>
+
+namespace Web::SVG {
+
+class SVGImageElement final
+    : public SVGGraphicsElement
+    , public SVGURIReferenceMixin<SupportsXLinkHref::Yes>
+    , public Layout::ImageProvider
+    , public HTML::DecodedImageData::Client {
+    WEB_WRAPPABLE(SVGImageElement, SVGGraphicsElement);
+    GC_DECLARE_ALLOCATOR(SVGImageElement);
+
+public:
+    virtual ~SVGImageElement() override;
+
+    virtual void attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_) override;
+
+    // AD-HOC: The spec states that the x, y, width and height IDL attributes reflect the respective computed values and their
+    //         corresponding presentation attributes but other browsers reflect the attribute values instead - see
+    //         https://github.com/w3c/svgwg/issues/1153
+
+    // https://w3c.github.io/svgwg/svg2-draft/embedded.html#__svg__SVGImageElement__x
+    REFLECT_ANIMATED_LENGTH_ATTRIBUTE(x, Horizontal, SVGLengthValue::number(0));
+
+    // https://w3c.github.io/svgwg/svg2-draft/embedded.html#__svg__SVGImageElement__y
+    REFLECT_ANIMATED_LENGTH_ATTRIBUTE(y, Vertical, SVGLengthValue::number(0));
+
+    // https://w3c.github.io/svgwg/svg2-draft/embedded.html#__svg__SVGImageElement__width
+    REFLECT_ANIMATED_LENGTH_ATTRIBUTE(width, Horizontal, SVGLengthValue::number(0));
+
+    // https://w3c.github.io/svgwg/svg2-draft/embedded.html#__svg__SVGImageElement__height
+    REFLECT_ANIMATED_LENGTH_ATTRIBUTE(height, Vertical, SVGLengthValue::number(0));
+
+    GC::Ref<SVGAnimatedPreserveAspectRatio> preserve_aspect_ratio_for_bindings();
+
+    // ^Layout::ImageProvider
+    virtual GC::Ptr<HTML::DecodedImageData> decoded_image_data() const override;
+    virtual SVG::PreserveAspectRatio preserve_aspect_ratio() const override;
+
+protected:
+    SVGImageElement(DOM::Document&, DOM::QualifiedName);
+    virtual void visit_edges(Cell::Visitor&) override;
+    virtual void adopted_from(DOM::Document&) override;
+
+    void process_the_url(Optional<Utf16String> const& href);
+    void fetch_the_document(URL::URL const& url);
+    void abandon_the_current_fetch();
+
+private:
+    virtual void finalize() override;
+
+    virtual bool is_svg_image_element() const override { return true; }
+
+    virtual CSS::ElementBoxKind box_kind() const override;
+    virtual void decoded_image_data_did_update() override;
+    virtual bool decoded_image_data_may_be_rendered() const override { return has_layout_box(); }
+
+    Optional<URL::URL> m_href;
+
+    GC::Ptr<HTML::SharedResourceRequest> m_resource_request;
+    Optional<DOM::DocumentLoadEventDelayer> m_load_event_delayer;
+    u64 m_current_fetch_id { 0 };
+    GC::Ptr<SVGAnimatedPreserveAspectRatio> m_preserve_aspect_ratio;
+};
+
+}
+
+namespace Web::DOM {
+
+template<>
+inline bool Node::fast_is<SVG::SVGImageElement>() const { return is_svg_image_element(); }
+
+}

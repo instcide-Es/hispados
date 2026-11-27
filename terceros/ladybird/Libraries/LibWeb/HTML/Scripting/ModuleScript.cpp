@@ -1,0 +1,349 @@
+/*
+ * Copyright (c) 2022, networkException <networkexception@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibGC/Heap.h>
+#include <LibJS/Runtime/ModuleRequest.h>
+#include <LibJS/ScriptCompilation.h>
+#include <LibWeb/CSS/StyleSheetState.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HTML/Scripting/ExceptionReporter.h>
+#include <LibWeb/HTML/Scripting/Fetching.h>
+#include <LibWeb/HTML/Scripting/ModuleScript.h>
+#include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
+#include <LibWeb/WebAssembly/WebAssembly.h>
+#include <LibWeb/WebIDL/DOMException.h>
+#include <LibWeb/WebIDL/ExceptionOr.h>
+#include <LibWeb/WebIDL/ExceptionOrUtils.h>
+#include <LibWeb/WebIDL/QuotaExceededError.h>
+
+namespace Web::HTML {
+
+GC_DEFINE_ALLOCATOR(ModuleScript);
+
+static void register_source(ModuleScript& script, ScriptRegistry::IsInlineSource is_inline_source, size_t source_line_number)
+{
+    auto record = script.record();
+    auto* module_record = record.get_pointer<GC::Ref<JS::SourceTextModule>>();
+    if (!module_record)
+        return;
+
+    auto source_code = JS::top_level_source_code(**module_record);
+    if (!source_code)
+        return;
+
+    register_javascript_source(script, source_code.release_nonnull(), ScriptRegistry::JavaScriptSource::Type::Module, is_inline_source, source_line_number);
+}
+
+ModuleScript::~ModuleScript() = default;
+
+ModuleScript::ModuleScript(Optional<URL::URL> base_url, ByteString filename, EnvironmentSettingsObject& settings)
+    : Script(move(base_url), move(filename), settings)
+{
+}
+
+GC::Ref<ModuleScript> ModuleScript::create_internal(Optional<URL::URL> base_url, ByteString const& filename, EnvironmentSettingsObject& settings)
+{
+    return settings.realm().create<ModuleScript>(move(base_url), filename, settings);
+}
+
+// https://html.spec.whatwg.org/multipage/webappapis.html#creating-a-javascript-module-script
+WebIDL::ExceptionOr<GC::Ptr<ModuleScript>> ModuleScript::create_a_javascript_module_script(ByteString const& filename, Utf16View source, EnvironmentSettingsObject& settings, URL::URL base_url, size_t source_line_number, ScriptRegistry::IsInlineSource is_inline_source)
+{
+    auto& realm = settings.realm();
+
+    // 1. If scripting is disabled for settings, then set source to the empty string.
+    if (HTML::is_scripting_disabled(settings))
+        source = {};
+
+    // 2. Let script be a new module script that this algorithm will subsequently initialize.
+    // 3. Set script's settings object to settings.
+    // 4. Set script's base URL to baseURL.
+    auto script = create_internal(move(base_url), filename, settings);
+
+    // 5. Set script's fetch options to options.
+    // NB: Callers set the script's fetch options once it has been created.
+
+    // 6. Set script's parse error and error to rethrow to null.
+    script->set_parse_error(JS::js_null());
+    script->set_error_to_rethrow(JS::js_null());
+
+    // 7. Let result be ParseModule(source, realm, script).
+    auto result = JS::SourceTextModule::parse(source, realm, script->filename(), script->display_filename(), script.ptr(), source_line_number);
+
+    // 8. If result is a list of errors, then:
+    if (result.is_error()) {
+        auto& parse_error = result.error().first();
+        dbgln("JavaScriptModuleScript: Failed to parse: {}", parse_error.to_utf16_string());
+
+        // 1. Set script's parse error to result[0].
+        script->set_parse_error(JS::SyntaxError::create(realm, parse_error.to_utf16_string()), parse_error.position);
+
+        // 2. Return script.
+        return script;
+    }
+
+    // 9. Set script's record to result.
+    script->m_record = result.value();
+    register_source(*script, is_inline_source, source_line_number);
+
+    // 10. Return script.
+    return script;
+}
+
+WebIDL::ExceptionOr<GC::Ptr<ModuleScript>> ModuleScript::create_from_pre_parsed(ByteString const& filename, NonnullRefPtr<JS::SourceCode const> source_code, EnvironmentSettingsObject& settings, URL::URL base_url, JS::ParsedProgram parsed)
+{
+    auto& realm = settings.realm();
+    auto script = create_internal(move(base_url), filename, settings);
+
+    script->set_parse_error(JS::js_null());
+    script->set_error_to_rethrow(JS::js_null());
+
+    auto result = JS::create_module(move(parsed), move(source_code), realm, script->filename(), script.ptr());
+
+    if (result.is_error()) {
+        auto& parse_error = result.error().first();
+        dbgln("JavaScriptModuleScript: Failed to parse: {}", parse_error.to_utf16_string());
+        script->set_parse_error(JS::SyntaxError::create(realm, parse_error.to_utf16_string()), parse_error.position);
+        return script;
+    }
+
+    script->m_record = result.value();
+    register_source(*script, ScriptRegistry::IsInlineSource::No, 1);
+    return script;
+}
+
+WebIDL::ExceptionOr<GC::Ptr<ModuleScript>> ModuleScript::create_from_pre_compiled(ByteString const& filename, NonnullRefPtr<JS::SourceCode const> source_code, EnvironmentSettingsObject& settings, URL::URL base_url, JS::CompiledProgram compiled)
+{
+    auto& realm = settings.realm();
+    auto script = create_internal(move(base_url), filename, settings);
+
+    script->set_parse_error(JS::js_null());
+    script->set_error_to_rethrow(JS::js_null());
+
+    auto result = JS::create_module(move(compiled), move(source_code), realm, script->filename(), script.ptr());
+
+    if (result.is_error()) {
+        auto& parse_error = result.error().first();
+        dbgln("JavaScriptModuleScript: Failed to materialize: {}", parse_error.to_utf16_string());
+        script->set_parse_error(JS::SyntaxError::create(realm, parse_error.to_utf16_string()), parse_error.position);
+        return script;
+    }
+
+    script->m_record = result.value();
+    register_source(*script, ScriptRegistry::IsInlineSource::No, 1);
+    return script;
+}
+
+// https://html.spec.whatwg.org/multipage/webappapis.html#creating-a-css-module-script
+WebIDL::ExceptionOr<GC::Ptr<ModuleScript>> ModuleScript::create_a_css_module_script(ByteString const& filename, Utf16View source, EnvironmentSettingsObject& settings)
+{
+    auto& realm = settings.realm();
+
+    // 1. Let script be a new module script that this algorithm will subsequently initialize.
+    // 2. Set script's settings object to settings.
+    // 3. Set script's base URL and fetch options to null.
+    auto script = create_internal(Optional<URL::URL> {}, filename, settings);
+
+    // 4. Set script's parse error and error to rethrow to null.
+    script->set_parse_error(JS::js_null());
+    script->set_error_to_rethrow(JS::js_null());
+
+    // 5. Let sheet be the result of running the steps to create a constructed CSSStyleSheet with an empty dictionary as
+    //    the argument.
+    auto sheet = TRY(CSS::StyleSheetState::create_constructed(*settings.responsible_document()));
+
+    // 6. Run the steps to synchronously replace the rules of a CSSStyleSheet on sheet given source.
+    //    If this throws an exception, catch it, and set script's parse error to that exception, and return script.
+    // NB: A new constructed sheet has the constructed flag and not the disallow modification flag, so this cannot throw.
+    sheet->replace_rules(source);
+
+    // 7. Set script's record to the result of CreateDefaultExportSyntheticModule(sheet).
+    script->m_record = CSS::create_css_style_sheet_default_export_module(realm, sheet, filename.view());
+
+    // 8. Return script.
+    return script;
+}
+
+// https://html.spec.whatwg.org/multipage/webappapis.html#creating-a-json-module-script
+WebIDL::ExceptionOr<GC::Ptr<ModuleScript>> ModuleScript::create_a_json_module_script(ByteString const& filename, Utf16View source, EnvironmentSettingsObject& settings)
+{
+    auto& realm = settings.realm();
+
+    // 1. Let script be a new module script that this algorithm will subsequently initialize.
+    // 2. Set script's settings object to settings.
+    // 3. Set script's base URL and fetch options to null.
+    //    FIXME: Set options.
+    auto script = create_internal(Optional<URL::URL> {}, filename, settings);
+
+    // 4. Set script's parse error and error to rethrow to null.
+    script->set_parse_error(JS::js_null());
+    script->set_error_to_rethrow(JS::js_null());
+
+    // 5. Let result be ParseJSONModule(source).
+    //    If this throws an exception, catch it, and set script's parse error to that exception, and return script.
+    TemporaryExecutionContext execution_context { realm };
+    auto result = JS::parse_json_module(realm, source, filename);
+    if (result.is_error()) {
+        script->set_parse_error(result.error().value());
+        return script;
+    }
+
+    // 6. Set script's record to result.
+    script->m_record = result.value();
+
+    // 7. Return script.
+    return script;
+}
+
+// https://html.spec.whatwg.org/multipage/webappapis.html#creating-a-text-module-script
+WebIDL::ExceptionOr<GC::Ptr<ModuleScript>> ModuleScript::create_a_text_module_script(ByteString const& filename, Utf16View text, EnvironmentSettingsObject& settings)
+{
+    auto& realm = settings.realm();
+
+    // 1. Let script be a new module script that this algorithm will subsequently initialize.
+    // 2. Set script's settings object to settings.
+    // 3. Set script's base URL and fetch options to null.
+    auto script = create_internal(Optional<URL::URL> {}, filename, settings);
+
+    // 4. Set script's parse error and error to rethrow to null.
+    script->set_parse_error(JS::js_null());
+    script->set_error_to_rethrow(JS::js_null());
+
+    // 5. Let result be CreateTextModule(text).
+    auto result = JS::create_text_module(realm, text, filename);
+
+    // 6. Set script's record to result.
+    script->m_record = result;
+
+    // 7. Return script.
+    return script;
+}
+
+// https://html.spec.whatwg.org/multipage/webappapis.html#creating-a-webassembly-module-script
+WebIDL::ExceptionOr<GC::Ptr<ModuleScript>> ModuleScript::create_a_webassembly_module_script(ByteString const& filename, ByteBuffer body_bytes, EnvironmentSettingsObject& settings, URL::URL base_url)
+{
+    auto& realm = settings.realm();
+
+    // 1. If scripting is disabled for settings, then set bodyBytes to the byte sequence 0x00 0x61 0x73 0x6D 0x01 0x00 0x00 0x00.
+    // NOTE: This byte sequence corresponds to an empty WebAssembly module with only the magic bytes and version number provided.
+    if (HTML::is_scripting_disabled(settings)) {
+        auto byte_sequence = "\x00\x61\x73\x6d\x01\x00\x00\x00"sv.bytes();
+        body_bytes = MUST(ByteBuffer::create_uninitialized(byte_sequence.size()));
+        byte_sequence.copy_to(body_bytes);
+    }
+
+    // 2. Let script be a new module script that this algorithm will subsequently initialize.
+    // 3. Set script's settings object to settings.
+    // 4. Set script's base URL to baseURL.
+    // 5. Set script's fetch options to options.
+    // NB: Callers set the script's fetch options once it has been created.
+    auto script = create_internal(move(base_url), filename, settings);
+
+    // 6. Set script's parse error and error to rethrow to null.
+    script->set_parse_error(JS::js_null());
+    script->set_error_to_rethrow(JS::js_null());
+
+    // 7. Let result be the result of parsing a web assembly module given bodyBytes, realm, and script.
+    // NOTE: Passing script as the last parameter here ensures result.[[HostDefined]] will be script.
+    TemporaryExecutionContext execution_context { realm };
+    auto result = WebAssembly::parse_a_webassembly_module(body_bytes, realm, filename, script.ptr());
+
+    // 8. If the previous step threw an error error, then:
+    if (result.is_error()) {
+        // 1. Set script's parse error to error.
+        script->set_parse_error(result.error().value());
+
+        // 2. Return script.
+        return script;
+    }
+
+    // 9. Set script's record to result.
+    script->m_record = result.value();
+
+    // 10. Return script.
+    return script;
+}
+
+// https://html.spec.whatwg.org/multipage/webappapis.html#run-a-module-script
+GC::Ptr<WebIDL::Promise> ModuleScript::run(PreventErrorReporting prevent_error_reporting)
+{
+    // 1. Let settings be the settings object of script.
+    auto& settings = this->settings_object();
+    auto& realm = settings.realm();
+
+    // 2. Check if we can run script with realm. If this returns "do not run", then return a promise resolved with undefined.
+    if (can_run_script(settings) == RunScriptDecision::DoNotRun) {
+        return WebIDL::create_resolved_promise(realm, JS::js_undefined());
+    }
+
+    // FIXME: 3. Record module script execution start time given script.
+
+    // 4. Prepare to run script given settings.
+    prepare_to_run_script(settings);
+
+    // 5. Let evaluationPromise be null.
+    GC::Ptr<WebIDL::Promise> evaluation_promise = nullptr;
+
+    // 6. If script's error to rethrow is not null, then set evaluationPromise to a promise rejected with script's error to rethrow.
+    if (!error_to_rethrow().is_null()) {
+        evaluation_promise = WebIDL::create_rejected_promise(realm, error_to_rethrow());
+    }
+    // 7. Otherwise:
+    else {
+        // 1. Let record be script's record.
+        auto record = m_record.visit(
+            [](Empty) -> GC::Ref<JS::Module> { VERIFY_NOT_REACHED(); },
+            [](auto& module) -> GC::Ref<JS::Module> { return module; });
+
+        // NON-STANDARD: To ensure that LibJS can find the module on the stack, we push a new execution context.
+        auto& stack = vm().interpreter_stack();
+        auto* stack_mark = stack.top();
+        auto* module_execution_context = stack.allocate(0, ReadonlySpan<JS::Value> {}, 0);
+        VERIFY(module_execution_context);
+        module_execution_context->set_realm(&realm);
+        module_execution_context->set_script_or_module(record);
+        vm().push_execution_context(*module_execution_context);
+
+        // 2. Set evaluationPromise to record.Evaluate().
+        auto elevation_promise_or_error = record->evaluate(vm());
+
+        // NOTE: This step will recursively evaluate all of the module's dependencies.
+        // If Evaluate fails to complete as a result of the user agent aborting the running script,
+        // then set evaluationPromise to a promise rejected with a new "QuotaExceededError" DOMException.
+        if (elevation_promise_or_error.is_error()) {
+            evaluation_promise = WebIDL::create_rejected_promise(realm, WebIDL::QuotaExceededError::create("Failed to evaluate module script"_utf16));
+        } else {
+            evaluation_promise = elevation_promise_or_error.value();
+        }
+
+        // NON-STANDARD: Pop the execution context mentioned above.
+        vm().pop_execution_context();
+        stack.deallocate(stack_mark);
+    }
+
+    // 8. If preventErrorReporting is false, then upon rejection of evaluationPromise with reason, report the exception given by reason for script.
+    if (prevent_error_reporting == PreventErrorReporting::No) {
+        HTML::TemporaryExecutionContext execution_context { realm, HTML::TemporaryExecutionContext::CallbacksEnabled::Yes };
+        WebIDL::upon_rejection(*evaluation_promise, GC::create_function(GC::Heap::the(), GC::captures(realm, GC::Ref { *this }), [](auto& realm, auto& script, JS::Value reason) -> WebIDL::ExceptionOr<JS::Value> {
+            report_an_exception(realm.global_object(), reason, OmitError::No, script);
+            return JS::js_undefined();
+        }));
+    }
+
+    // 9. Clean up after running script with settings.
+    clean_up_after_running_script(settings);
+
+    // 10. Return evaluationPromise.
+    return evaluation_promise;
+}
+
+void ModuleScript::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_record);
+}
+
+}

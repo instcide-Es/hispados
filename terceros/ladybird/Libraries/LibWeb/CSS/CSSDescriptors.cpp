@@ -1,0 +1,305 @@
+/*
+ * Copyright (c) 2025, Sam Atkins <sam@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibJS/Runtime/ExternalMemory.h>
+#include <LibWeb/CSS/CSSDescriptors.h>
+#include <LibWeb/CSS/CSSFontFaceRule.h>
+#include <LibWeb/CSS/Parser/Parser.h>
+#include <LibWeb/CSS/PropertyID.h>
+#include <LibWeb/CSS/StyleEngineInput.h>
+#include <LibWeb/CSS/StyleSheetState.h>
+#include <LibWeb/CSS/StyleValues/ShorthandStyleValue.h>
+#include <LibWeb/WebIDL/ExceptionOr.h>
+#include <LibWebCommon/Infra/Strings.h>
+
+namespace Web::CSS {
+
+GC_DEFINE_ALLOCATOR(CSSDescriptors);
+
+GC::Ref<CSSDescriptors> CSSDescriptors::create(AtRuleID at_rule_id, RustDescriptorBlock descriptors)
+{
+    return GC::Heap::the().allocate<CSSDescriptors>(at_rule_id, move(descriptors));
+}
+
+CSSDescriptors::CSSDescriptors(AtRuleID at_rule_id, RustDescriptorBlock descriptors)
+    : CSSStyleDeclaration(Computed::No, Readonly::No)
+    , m_at_rule_id(at_rule_id)
+    , m_descriptors(move(descriptors))
+{
+}
+
+CSSDescriptors::~CSSDescriptors() = default;
+
+size_t CSSDescriptors::external_memory_size() const
+{
+    return JS::saturating_add_external_memory_size(Base::external_memory_size(), m_descriptors.external_memory_size());
+}
+
+// https://drafts.csswg.org/cssom/#dom-cssstyledeclaration-length
+size_t CSSDescriptors::length() const
+{
+    // The length attribute must return the number of CSS declarations in the declarations.
+    return m_descriptors.size();
+}
+
+// https://drafts.csswg.org/cssom/#dom-cssstyledeclaration-item
+Utf16String CSSDescriptors::item(size_t index) const
+{
+    // The item(index) method must return the property name of the CSS declaration at position index.
+    // If there is no indexth object in the collection, then the method must return the empty string.
+    return m_descriptors.item(index);
+}
+
+// https://drafts.csswg.org/cssom/#set-a-css-declaration
+bool CSSDescriptors::set_a_css_declaration(DescriptorNameAndID const& descriptor_name_and_id, NonnullRefPtr<StyleValue const> value, Important)
+{
+    VERIFY(!is_computed());
+
+    prepare_to_update_style_attribute();
+    return m_descriptors.set(descriptor_name_and_id, *value);
+}
+
+// https://drafts.csswg.org/cssom/#dom-cssstyledeclaration-setproperty
+WebIDL::ExceptionOr<void> CSSDescriptors::set_property(Utf16FlyString const& property, Utf16View value, Utf16View priority)
+{
+    TRY(set_property_internal(property, value, priority));
+
+    if (m_at_rule_id == AtRuleID::FontFace && !value.is_empty()) {
+        if (auto* font_face_rule = as_if<CSSFontFaceRule>(parent_rule().ptr()))
+            font_face_rule->handle_descriptor_change(property);
+    }
+
+    return {};
+}
+
+// https://drafts.csswg.org/cssom/#dom-cssstyledeclaration-setproperty
+WebIDL::ExceptionOr<void> CSSDescriptors::set_property_internal(Utf16FlyString const& property, Utf16View value, Utf16View priority)
+{
+    // 1. If the readonly flag is set, then throw a NoModificationAllowedError exception.
+    if (is_readonly())
+        return WebIDL::NoModificationAllowedError::create("Cannot modify properties of readonly CSSStyleDeclaration"_utf16);
+
+    // 2. If property is not a custom property, follow these substeps:
+    Optional<DescriptorNameAndID> descriptor_name_and_id;
+    {
+        // 1. Let property be property converted to ASCII lowercase.
+        // 2. If property is not a case-sensitive match for a supported CSS property, then return.
+        descriptor_name_and_id = DescriptorNameAndID::from_name(m_at_rule_id, property);
+        if (!descriptor_name_and_id.has_value())
+            return {};
+    }
+
+    // 3. If value is the empty string, invoke removeProperty() with property as argument and return.
+    if (value.is_empty()) {
+        auto removed_value = MUST(remove_property(property));
+        (void)removed_value;
+        return {};
+    }
+
+    // 4. If priority is not the empty string and is not an ASCII case-insensitive match for the string "important", then return.
+    if (!priority.is_empty() && !priority.equals_ignoring_ascii_case(u"important"sv))
+        return {};
+
+    // 5. Let component value list be the result of parsing value for property property.
+    RefPtr<StyleValue const> component_value_list = parse_css_descriptor(Parser::ParsingParams {}, m_at_rule_id, *descriptor_name_and_id, value);
+
+    // 6. If component value list is null, then return.
+    if (!component_value_list)
+        return {};
+
+    // 7. Let updated be false.
+    auto updated = false;
+
+    // 8. If property is a shorthand property, then for each longhand property longhand that property maps to, in canonical order, follow these substeps:
+    if (is_shorthand(m_at_rule_id, *descriptor_name_and_id)) {
+        for_each_expanded_longhand(m_at_rule_id, *descriptor_name_and_id, component_value_list, [this, &updated, priority](DescriptorNameAndID const& longhand_name_and_id, auto longhand_value) {
+            VERIFY(longhand_value);
+
+            // 1. Let longhand result be the result of set the CSS declaration longhand with the appropriate value(s)
+            //    from component value list, with the important flag set if priority is not the empty string, and unset
+            //    otherwise, and with the list of declarations being the declarations.
+            auto longhand_result = set_a_css_declaration(longhand_name_and_id, longhand_value.release_nonnull(), priority.is_empty() ? Important::No : Important::Yes);
+
+            // 2. If longhand result is true, let updated be true.
+            if (longhand_result)
+                updated = true;
+        });
+    }
+    // 9. Otherwise, let updated be the result of set the CSS declaration property with value component value list,
+    //    with the important flag set if priority is not the empty string, and unset otherwise, and with the list of
+    //    declarations being the declarations.
+    else {
+        updated = set_a_css_declaration(*descriptor_name_and_id, *component_value_list, !priority.is_empty() ? Important::Yes : Important::No);
+    }
+
+    // 10. If updated is true, update style attribute for the CSS declaration block.
+    if (updated) {
+        update_style_attribute();
+        invalidate_owners();
+    }
+
+    return {};
+}
+
+// https://drafts.csswg.org/cssom/#dom-cssstyledeclaration-removeproperty
+WebIDL::ExceptionOr<Utf16String> CSSDescriptors::remove_property(Utf16FlyString const& property)
+{
+    // 1. If the readonly flag is set, then throw a NoModificationAllowedError exception.
+    if (is_readonly())
+        return WebIDL::NoModificationAllowedError::create("Cannot modify properties of readonly CSSStyleDeclaration"_utf16);
+
+    if (!property.is_ascii())
+        return Utf16String {};
+
+    // 2. If property is not a custom property, let property be property converted to ASCII lowercase.
+    // AD-HOC: We compare names case-insensitively instead.
+
+    // 3. Let value be the return value of invoking getPropertyValue() with property as argument.
+    auto value = get_property_value(property);
+
+    // 4. Let removed be false.
+    bool removed = false;
+    auto descriptor_name_and_id = DescriptorNameAndID::from_name(m_at_rule_id, property);
+    prepare_to_update_style_attribute();
+
+    // 5. If property is a shorthand property, for each longhand property longhand that property maps to:
+    if (descriptor_name_and_id.has_value() && is_shorthand(m_at_rule_id, *descriptor_name_and_id)) {
+        for_each_expanded_longhand(m_at_rule_id, *descriptor_name_and_id, nullptr, [this, &removed](DescriptorNameAndID const& longhand_name_and_id, auto const&) {
+            // 1. If longhand is not a property name of a CSS declaration in the declarations, continue.
+            // 2. Remove that CSS declaration and let removed be true.
+            if (m_descriptors.remove(longhand_name_and_id)) {
+                removed = true;
+            }
+        });
+    }
+    // 6. Otherwise, if property is a case-sensitive match for a property name of a CSS declaration in the
+    //    declarations, remove that CSS declaration and let removed be true.
+    else if (descriptor_name_and_id.has_value()) {
+        removed = m_descriptors.remove(*descriptor_name_and_id);
+    }
+
+    // 7. If removed is true, Update style attribute for the CSS declaration block.
+    if (removed) {
+        update_style_attribute();
+        invalidate_owners();
+    }
+
+    if (removed && m_at_rule_id == AtRuleID::FontFace) {
+        if (auto* font_face_rule = as_if<CSSFontFaceRule>(parent_rule().ptr()))
+            font_face_rule->handle_descriptor_change(property);
+    }
+
+    // 8. Return value.
+    return value;
+}
+
+// https://drafts.csswg.org/cssom/#dom-cssstyledeclaration-getpropertyvalue
+Utf16String CSSDescriptors::get_property_value(Utf16FlyString const& property) const
+{
+    // 1. If property is not a custom property, follow these substeps: ...
+    // NB: These substeps only apply to shorthands, and descriptors cannot be shorthands.
+
+    // 2. If property is a case-sensitive match for a property name of a CSS declaration in the declarations, then
+    //    return the result of invoking serialize a CSS value of that declaration.
+    auto descriptor_name_and_id = DescriptorNameAndID::from_name(m_at_rule_id, property);
+    if (descriptor_name_and_id.has_value())
+        return m_descriptors.property_value(*descriptor_name_and_id);
+
+    // 3. Return the empty string.
+    return {};
+}
+
+// https://drafts.csswg.org/cssom/#dom-cssstyledeclaration-getpropertypriority
+Utf16String CSSDescriptors::get_property_priority(Utf16FlyString const&) const
+{
+    // AD-HOC: It's not valid for descriptors to be !important.
+    return {};
+}
+
+// https://drafts.csswg.org/cssom/#serialize-a-css-declaration-block
+Utf16String CSSDescriptors::serialized() const
+{
+    return m_descriptors.serialized();
+}
+
+// https://drafts.csswg.org/cssom/#dom-cssstyledeclaration-csstext
+WebIDL::ExceptionOr<void> CSSDescriptors::set_css_text(Utf16View value)
+{
+    // 1. If the readonly flag is set, then throw a NoModificationAllowedError exception.
+    if (is_readonly())
+        return WebIDL::NoModificationAllowedError::create("Cannot modify properties of readonly CSSStyleDeclaration"_utf16);
+
+    auto previous_src = m_at_rule_id == AtRuleID::FontFace ? get_property_value("src"_utf16_fly_string) : Utf16String {};
+
+    // 2. Empty the declarations.
+    prepare_to_update_style_attribute();
+    m_descriptors.replace(RustDescriptorBlock { Vector<Descriptor> {} });
+
+    // 3. Parse the given value and, if the return value is not the empty list, insert the items in the list into the
+    //    declarations, in specified order.
+    auto descriptors = parse_css_descriptor_declaration_block(Parser::ParsingParams {}, m_at_rule_id, value);
+    if (descriptors.size() > 0)
+        m_descriptors.replace(descriptors);
+
+    // 4. Update style attribute for the CSS declaration block.
+    update_style_attribute();
+    invalidate_owners();
+    if (auto rule = parent_rule(); rule && rule->type() == CSSRule::Type::FontFace)
+        static_cast<CSSFontFaceRule&>(*rule).handle_descriptor_block_change(previous_src != get_property_value("src"_utf16_fly_string));
+
+    return {};
+}
+
+RefPtr<StyleValue const> CSSDescriptors::descriptor(DescriptorNameAndID const& descriptor_name_and_id) const
+{
+    return m_descriptors.descriptor(descriptor_name_and_id);
+}
+
+void CSSDescriptors::invalidate_owners()
+{
+    auto rule = parent_rule();
+    if (!rule || rule->type() != CSSRule::Type::FunctionDeclarations)
+        return;
+    if (auto* sheet = rule->parent_style_sheet()) {
+        record_style_rule_declarations_changed(*rule);
+        sheet->invalidate_owners();
+    }
+}
+
+RefPtr<StyleValue const> CSSDescriptors::descriptor_or_initial_value(DescriptorNameAndID const& descriptor_name_and_id) const
+{
+    return m_descriptors.descriptor_or_initial_value(m_at_rule_id, descriptor_name_and_id);
+}
+
+bool is_shorthand(AtRuleID at_rule, DescriptorNameAndID const& descriptor)
+{
+    if (at_rule == AtRuleID::Page && descriptor.id() == DescriptorID::Margin)
+        return true;
+
+    return false;
+}
+
+void for_each_expanded_longhand(AtRuleID at_rule, DescriptorNameAndID const& descriptor, RefPtr<StyleValue const> value, Function<void(DescriptorNameAndID const&, RefPtr<StyleValue const>)> callback)
+{
+    if (at_rule == AtRuleID::Page && descriptor.id() == DescriptorID::Margin) {
+        if (!value) {
+            callback(DescriptorNameAndID::from_id(DescriptorID::MarginTop), nullptr);
+            callback(DescriptorNameAndID::from_id(DescriptorID::MarginRight), nullptr);
+            callback(DescriptorNameAndID::from_id(DescriptorID::MarginBottom), nullptr);
+            callback(DescriptorNameAndID::from_id(DescriptorID::MarginLeft), nullptr);
+            return;
+        }
+
+        auto const& shorthand_value = value->as_shorthand();
+
+        callback(DescriptorNameAndID::from_id(DescriptorID::MarginTop), shorthand_value.longhand(PropertyID::MarginTop));
+        callback(DescriptorNameAndID::from_id(DescriptorID::MarginRight), shorthand_value.longhand(PropertyID::MarginRight));
+        callback(DescriptorNameAndID::from_id(DescriptorID::MarginBottom), shorthand_value.longhand(PropertyID::MarginBottom));
+        callback(DescriptorNameAndID::from_id(DescriptorID::MarginLeft), shorthand_value.longhand(PropertyID::MarginLeft));
+    }
+}
+
+}

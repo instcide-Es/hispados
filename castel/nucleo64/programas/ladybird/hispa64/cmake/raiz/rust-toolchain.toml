@@ -1,0 +1,5 @@
+# Hispa-64, etapa 10 g: la misma que terceros/ladybird/rust-toolchain.toml (la
+# pide rust_crate.cmake en la raíz del CMake: hispa64/cmake/raiz).
+[toolchain]
+channel = "1.98.0"
+components = ["rustfmt", "clippy"]

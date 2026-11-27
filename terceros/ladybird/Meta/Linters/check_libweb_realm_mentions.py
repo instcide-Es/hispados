@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+
+import collections
+import pathlib
+import re
+import subprocess
+import sys
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+LIBWEB_ROOT = pathlib.Path("Libraries/LibWeb")
+
+REALM_PATTERN = re.compile(r"JS::Realm|LibJS/Runtime/Realm\.h")
+
+# This check is intentionally coarse: component-level counts cannot see an
+# intra-component swap, and it counts JS::Realm spellings rather than realm
+# reasoning moved into function bodies. The latter is covered by the separate
+# conservative lexical audit metric in Documentation/Wrappers/28-...md.
+
+EXCLUDED_PATH_PARTS = {
+    "Bindings",
+    "WebIDL",
+}
+
+EXCLUDED_PREFIXES = (pathlib.Path("Libraries/LibWeb/HTML/Scripting"),)
+
+CHECKED_SUFFIXES = {
+    ".cpp",
+    ".h",
+    ".mm",
+}
+
+# Each entry is:
+#   component: (allowed file count, allowed mention count, reason)
+#
+# This is intentionally exact. If a component goes down, tighten the baseline in
+# the same change. If it goes up, justify the architecture change here.
+ALLOWED_REALM_MENTIONS = {
+    "Animations": (
+        2,
+        4,
+        "host callbacks of the Rust animation code take the realm it selects to read the current high resolution time, "
+        "find an animation's relevant global object and wrap elements",
+    ),
+    "CSS": (
+        7,
+        11,
+        "CSS Typed OM, parser-facing reification, style-value JS materialization, setlike/maplike glue, and wrappers of declaration blocks owned by Rust objects",
+    ),
+    "Clipboard": (4, 6, "the C++ facades create the Rust objects in a given realm"),
+    "ContentSecurityPolicy": (
+        6,
+        13,
+        "CSP violation/report objects and callbacks still materialize JS-facing values; "
+        "the C++ glue of the Rust SecurityPolicyViolationEvent creates it in a given realm",
+    ),
+    "CookieStore": (2, 3, "the C++ facade creates the Rust CookieStore in a given realm"),
+    "DOM": (
+        11,
+        35,
+        "The AbortSignal and AbortController facades and node helpers use callback/materialization realms; "
+        "the C++ glue of the Rust CustomEvent creates it in a given realm",
+    ),
+    "Fetch": (
+        22,
+        65,
+        "Fetch bodies, headers, requests, responses, response views, and controllers still materialize JS values/streams; "
+        "a fetch controller keeps the realm that started its fetch, in which its agent runs the rest of a response's "
+        "handover; BodyStreamPullSource creates body streams and materializes their pulls and errors on the consumer side, "
+        "each in its stream's realm; Body.textStream() creates its empty stream or streaming decoder in the receiver's "
+        "realm; the Rust XMLHttpRequest extracts bodies and aborts fetch controllers in its relevant realm",
+    ),
+    "FileAPI": (2, 9, "Blob glue still creates streams and buffers in selected realms"),
+    "HTML": (
+        86,
+        210,
+        "HTML algorithms still contain structured serialization, including canvas, navigation transfer/reconstruction, worker/worklet, and event realm use, and cross-origin Window/Location property functions are created in the current realm; window postMessage glue supplies principal realms and routes remote messages; "
+        "the C++ glue of the Rust structured serialization creates platform objects and SharedArrayBuffers in a given realm; "
+        "the C++ glue of the Rust Storage and of the Rust events creates them in a given realm, "
+        "and the C++ glue of the Rust DataTransfer wraps its item list in a given realm",
+    ),
+    "IndexedDB": (
+        4,
+        10,
+        "the C++ glue of the Rust IndexedDB creates the factory in a global's realm and wraps values in a given realm",
+    ),
+    "Infra": (2, 13, "JSON parse/serialization helpers still expose JS values in selected realms"),
+    "Internals": (1, 1, "test-only internals still expose JS-facing helper objects and promises"),
+    "MediaCapture": (
+        2,
+        5,
+        "the C++ glue of the Rust MediaStreamTrackEvent creates it and wraps tracks in a given realm",
+    ),
+    "MediaSession": (
+        4,
+        10,
+        "MediaMetadata and ChapterInformation build the frozen arrays their [SameObject] FrozenArray attributes return, "
+        "freezing the elements too, which the generated conversion doesn't do",
+    ),
+    "PictureInPicture": (
+        2,
+        5,
+        "the C++ glue of the Rust PictureInPictureEvent creates it and wraps windows in a given realm",
+    ),
+    "SVG": (
+        4,
+        11,
+        "SVG length objects still store/use realms for detached/reflected JS/CSS materialization; the C++ glue of the "
+        "Rust TimeEvent creates it in a given realm",
+    ),
+    "ServiceWorker": (
+        6,
+        41,
+        "service worker jobs, caches, and container promises still materialize results in selected realms",
+    ),
+    "StorageAPI": (2, 3, "the C++ glue of the Rust StorageManager creates one in a realm"),
+    "Streams": (7, 17, "the C++ facade of the Rust streams creates streams and promises in caller-selected realms"),
+    "TrustedTypes": (
+        4,
+        8,
+        "policy creation reports CSP violations in the caller's realm, and the Rust factory is created for its global's realm",
+    ),
+    "WebAssembly": (
+        2,
+        8,
+        "the C++ glue of the Rust WebAssembly JS API creates errors and module records in a given realm, and reads "
+        "the agent cluster of one",
+    ),
+    "WebAudio": (
+        7,
+        27,
+        "the Worklet, event loop, and media services still wrap C++ values or report exceptions in the caller's realm; "
+        "the port passes that realm explicitly across the Rust boundary",
+    ),
+    "WebDriver": (2, 7, "WebDriver execute/JSON conversion still materializes JS values for automation"),
+    "WebGL": (4, 8, "WebGL contexts are created in the realm of their canvas, and their events in it"),
+    "WebLocks": (2, 4, "the C++ glue creates a Rust LockManager and schedules Rust steps in selected realms"),
+    "WebRTC": (
+        13,
+        22,
+        "peer connections, data channels and senders resolve promises and fire events in their relevant realm, encoded "
+        "frames are constructed and deserialized in the worker's realm, and the stats report's maplike glue",
+    ),
+    "XHR": (
+        3,
+        7,
+        "XHR/FormData/FileReader-style paths still materialize JS values and events; the Rust XMLHttpRequest creates "
+        "its request, its body and its fetch in its relevant realm",
+    ),
+}
+
+
+def is_excluded(path):
+    if path.name.endswith("BindingsGlue.h"):
+        return True
+    if any(path.is_relative_to(prefix) for prefix in EXCLUDED_PREFIXES):
+        return True
+    relative_parts = path.relative_to(LIBWEB_ROOT).parts
+    return any(part in EXCLUDED_PATH_PARTS for part in relative_parts)
+
+
+def tracked_libweb_paths():
+    output = subprocess.check_output(
+        ["git", "ls-files", str(LIBWEB_ROOT)],
+        cwd=REPO_ROOT,
+        text=True,
+    )
+    for line in output.splitlines():
+        path = pathlib.Path(line)
+        if path.suffix in CHECKED_SUFFIXES:
+            yield path
+
+
+def main():
+    actual = collections.defaultdict(lambda: [0, 0])
+
+    for path in tracked_libweb_paths():
+        if is_excluded(path):
+            continue
+        text = (REPO_ROOT / path).read_text(encoding="utf-8", errors="ignore")
+        mention_count = len(REALM_PATTERN.findall(text))
+        if mention_count == 0:
+            continue
+
+        component = path.relative_to(LIBWEB_ROOT).parts[0]
+        actual[component][0] += 1
+        actual[component][1] += mention_count
+
+    failures = []
+
+    for component in sorted(set(actual) | set(ALLOWED_REALM_MENTIONS)):
+        actual_counts = tuple(actual.get(component, (0, 0)))
+        expected_files, expected_mentions, reason = ALLOWED_REALM_MENTIONS.get(component, (0, 0, "not allowlisted"))
+        expected_counts = (expected_files, expected_mentions)
+        if actual_counts == expected_counts:
+            continue
+        failures.append((component, actual_counts, expected_counts, reason))
+
+    if failures:
+        print("LibWeb implementation-side realm mention baseline changed.")
+        print("Excluded: Bindings/, HTML/Scripting/, WebIDL/, and *BindingsGlue.h.")
+        print("Checked pattern: JS::Realm or LibJS/Runtime/Realm.h")
+        print()
+        for component, actual_counts, expected_counts, reason in failures:
+            actual_files, actual_mentions = actual_counts
+            expected_files, expected_mentions = expected_counts
+            print(
+                f"{component}: actual {actual_files} files/{actual_mentions} mentions; "
+                f"expected {expected_files} files/{expected_mentions} mentions"
+            )
+            print(f"  allowlist reason: {reason}")
+        print()
+        print("If counts decreased, tighten ALLOWED_REALM_MENTIONS in this script.")
+        print("If counts increased, justify the new realm use in the allowlist reason.")
+    if failures:
+        return 1
+
+    print("LibWeb implementation-side realm mention baseline is unchanged.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

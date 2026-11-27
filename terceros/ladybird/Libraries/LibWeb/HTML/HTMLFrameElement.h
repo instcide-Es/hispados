@@ -1,0 +1,36 @@
+/*
+ * Copyright (c) 2020, the SerenityOS developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <LibWeb/Export.h>
+#include <LibWeb/HTML/NavigableContainer.h>
+
+namespace Web::HTML {
+
+// NOTE: This element is marked as obsolete, but is still listed as required by the specification.
+class WEB_API HTMLFrameElement final : public NavigableContainer {
+    WEB_WRAPPABLE(HTMLFrameElement, NavigableContainer);
+    GC_DECLARE_ALLOCATOR(HTMLFrameElement);
+
+public:
+    virtual ~HTMLFrameElement() override;
+
+    virtual CSS::ElementBoxKind box_kind() const override;
+
+private:
+    HTMLFrameElement(DOM::Document&, DOM::QualifiedName);
+
+    // ^DOM::Element
+    virtual void post_connection() override;
+    virtual bool has_post_connection_steps() const override { return true; }
+    virtual void removed_from(IsSubtreeRoot, Node* old_ancestor, Node& old_root) override;
+    virtual void attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_) override;
+    virtual i32 default_tab_index_value() const override;
+    void process_the_frame_attributes(InitialInsertion = InitialInsertion::No);
+};
+
+}

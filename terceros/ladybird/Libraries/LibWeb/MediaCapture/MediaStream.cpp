@@ -1,0 +1,221 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibGC/Heap.h>
+#include <LibWeb/Crypto/Crypto.h>
+#include <LibWeb/HTML/EventNames.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/MediaCapture/MediaStream.h>
+#include <LibWeb/MediaCapture/MediaStreamTrackEvent.h>
+
+namespace Web::MediaCapture {
+
+GC_DEFINE_ALLOCATOR(MediaStream);
+
+MediaStream::MediaStream()
+    : DOM::EventTarget()
+{
+}
+
+GC::Ref<MediaStream> MediaStream::create()
+{
+    auto stream = GC::Heap::the().allocate<MediaStream>();
+    // https://w3c.github.io/mediacapture-main/#dom-mediastream-id
+    stream->m_id = Utf16String::from_utf8(Crypto::generate_random_uuid());
+    return stream;
+}
+
+// Used when wrapping a remote stream-id from the WebRTC client (e.g. SFU-assigned msid)
+// so JS-side bookkeeping that maps stream.id -> user lines up with what the peer sent.
+GC::Ref<MediaStream> MediaStream::create_with_id(Utf16String id)
+{
+    auto stream = GC::Heap::the().allocate<MediaStream>();
+    stream->m_id = move(id);
+    return stream;
+}
+
+// https://w3c.github.io/mediacapture-main/#mediastream
+GC::Ref<MediaStream> MediaStream::create(ReadonlySpan<GC::Ref<MediaStreamTrack>> const& tracks)
+{
+    // 1. Let stream be a newly constructed MediaStream object.
+    // 2. Initialize stream.id attribute to a newly generated value.
+    auto stream = create();
+
+    // 3. If the constructor's argument is present, run the following steps:
+    // 3.1. Construct a set of tracks tracks based on the type of argument.
+    // 3.2. For each MediaStreamTrack, track, in tracks:
+    for (auto const& track : tracks) {
+        // 3.2.1. If track is already in stream's track set, skip track.
+        // 3.2.2. Otherwise, add track to stream's track set.
+        stream->add_track(*track);
+    }
+
+    // 4. Return stream.
+    return stream;
+}
+
+GC::Ref<MediaStream> MediaStream::create(GC::RootVector<GC::Ref<MediaStreamTrack>> const& tracks)
+{
+    return create(tracks.span());
+}
+
+void MediaStream::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    for (auto& track : m_tracks)
+        visitor.visit(track);
+}
+
+// https://w3c.github.io/mediacapture-main/#dom-mediastream-getaudiotracks
+GC::RootVector<GC::Ref<MediaStreamTrack>> MediaStream::get_audio_tracks() const
+{
+    // The getAudioTracks method MUST return a sequence that represents a snapshot of all the MediaStreamTrack objects in this stream's track set whose [[Kind]] is equal to "audio".
+    GC::RootVector<GC::Ref<MediaStreamTrack>> result;
+    for (auto const& track : m_tracks) {
+        if (track->is_audio())
+            result.append(track);
+    }
+    return result;
+}
+
+// https://w3c.github.io/mediacapture-main/#dom-mediastream-getvideotracks
+GC::RootVector<GC::Ref<MediaStreamTrack>> MediaStream::get_video_tracks() const
+{
+    // The getVideoTracks method MUST return a sequence that represents a snapshot of all the MediaStreamTrack objects in this stream's track set whose [[Kind]] is equal to "video".
+    GC::RootVector<GC::Ref<MediaStreamTrack>> result;
+    for (auto const& track : m_tracks) {
+        if (track->is_video())
+            result.append(track);
+    }
+    return result;
+}
+
+// https://w3c.github.io/mediacapture-main/#dom-mediastream-gettracks
+GC::RootVector<GC::Ref<MediaStreamTrack>> MediaStream::get_tracks() const
+{
+    // The getTracks method MUST return a sequence that represents a snapshot of all the MediaStreamTrack objects in this stream's track set, regardless of [[Kind]].
+    return GC::RootVector { m_tracks.span() };
+}
+
+// https://w3c.github.io/mediacapture-main/#dom-mediastream-gettrackbyid
+GC::Ptr<MediaStreamTrack> MediaStream::get_track_by_id(Utf16String const& track_id) const
+{
+    // The getTrackById method MUST return either a MediaStreamTrack object from this stream's track set whose [[Id]] is equal to trackId, or null.
+    for (auto const& track : m_tracks) {
+        if (track->id() == track_id)
+            return track;
+    }
+    return nullptr;
+}
+
+// https://w3c.github.io/mediacapture-main/#dom-mediastream-addtrack
+void MediaStream::add_track(GC::Ref<MediaStreamTrack> track)
+{
+    // 1. Let track be the methods argument and stream the MediaStream object on which the method was called.
+    // 2. If track is already in stream's track set, then abort these steps.
+    if (m_tracks.contains_slow(track))
+        return;
+
+    // 3. Add track to stream's track set.
+    // AD-HOC: The spec links this step to "add a track", which fires an addtrack event, but addtrack is not fired
+    //         when script modifies the tracks of a MediaStream.
+    m_tracks.append(track);
+}
+
+// https://w3c.github.io/mediacapture-main/#dfn-add-a-track
+void MediaStream::add_a_track(GC::Ref<MediaStreamTrack> track)
+{
+    // 1. If track is already in stream's track set, then abort these steps.
+    if (m_tracks.contains_slow(track))
+        return;
+
+    // 2. Add track to stream's track set.
+    m_tracks.append(track);
+
+    // 3. Fire a track event named addtrack with track at stream.
+    auto event = create_media_stream_track_event(HTML::relevant_realm(HTML::current_global_object()), HTML::EventNames::addtrack, {}, track);
+    dispatch_event(event);
+}
+
+// https://w3c.github.io/mediacapture-main/#dom-mediastream-removetrack
+void MediaStream::remove_track(GC::Ref<MediaStreamTrack> track)
+{
+    // 1. Let track be the methods argument and stream the MediaStream object on which the method was called.
+    // 2. If track is not in stream's track set, then abort these steps.
+    // 3. Remove track from stream's track set.
+    // AD-HOC: The spec links this step to "remove a track", which fires a removetrack event, but removetrack is not
+    //         fired when script modifies the tracks of a MediaStream.
+    m_tracks.remove_first_matching([&](auto const& existing_track) {
+        return existing_track.ptr() == track.ptr();
+    });
+}
+
+// https://w3c.github.io/mediacapture-main/#dfn-remove-a-track
+void MediaStream::remove_a_track(GC::Ref<MediaStreamTrack> track)
+{
+    // 1. If track is not in stream's track set, then abort these steps.
+    // 2. Remove track from stream's track set.
+    auto removed = m_tracks.remove_first_matching([&](auto const& existing_track) {
+        return existing_track.ptr() == track.ptr();
+    });
+    if (!removed)
+        return;
+
+    // 3. Fire a track event named removetrack with track at stream.
+    auto event = create_media_stream_track_event(HTML::relevant_realm(HTML::current_global_object()), HTML::EventNames::removetrack, {}, track);
+    dispatch_event(event);
+}
+
+// https://w3c.github.io/mediacapture-main/#dom-mediastream-clone
+GC::Ref<MediaStream> MediaStream::clone() const
+{
+    // 1. Let streamClone be a newly constructed MediaStream object.
+    auto stream_clone = create();
+
+    // 3. Clone each track in this MediaStream object and add the result to streamClone's track set.
+    for (auto const& track : m_tracks)
+        stream_clone->add_track(track->clone());
+
+    // 4. Return streamClone.
+    return stream_clone;
+}
+
+// https://w3c.github.io/mediacapture-main/#dom-mediastream-active
+bool MediaStream::active() const
+{
+    // The active attribute MUST return true if this MediaStream is active and false otherwise.
+    for (auto const& track : m_tracks) {
+        if (track->track_ready_state() != MediaStreamTrackState::Ended)
+            return true;
+    }
+    return false;
+}
+
+// https://w3c.github.io/mediacapture-main/#dom-mediastream-onaddtrack
+WebIDL::CallbackType* MediaStream::onaddtrack()
+{
+    return event_handler_attribute(HTML::EventNames::addtrack);
+}
+
+void MediaStream::set_onaddtrack(WebIDL::CallbackType* event_handler)
+{
+    // The event type of this event handler is addtrack.
+    set_event_handler_attribute(HTML::EventNames::addtrack, event_handler);
+}
+
+// https://w3c.github.io/mediacapture-main/#dom-mediastream-onremovetrack
+WebIDL::CallbackType* MediaStream::onremovetrack()
+{
+    return event_handler_attribute(HTML::EventNames::removetrack);
+}
+
+void MediaStream::set_onremovetrack(WebIDL::CallbackType* event_handler)
+{
+    // The event type of this event handler is removetrack.
+    set_event_handler_attribute(HTML::EventNames::removetrack, event_handler);
+}
+
+}

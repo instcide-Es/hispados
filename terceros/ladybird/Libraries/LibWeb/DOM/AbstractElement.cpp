@@ -1,0 +1,222 @@
+/*
+ * Copyright (c) 2024-2026, Sam Atkins <sam@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/Utf16StringBuilder.h>
+#include <LibWeb/CSS/ComputedValues.h>
+#include <LibWeb/CSS/CustomPropertyData.h>
+#include <LibWeb/DOM/AbstractElement.h>
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOM/Element.h>
+#include <LibWeb/DOM/PseudoElement.h>
+#include <LibWeb/DOM/ShadowRoot.h>
+#include <LibWeb/Layout/Node.h>
+
+namespace Web::DOM {
+
+AbstractElement::AbstractElement(GC::Ref<Element> element, Optional<CSS::PseudoElement> pseudo_element, Utf16FlyString highlight_name)
+    : m_element(element)
+    , m_pseudo_element(move(pseudo_element))
+    , m_highlight_name(move(highlight_name))
+{
+}
+
+AbstractElement::AbstractElement(Element const& element, Optional<CSS::PseudoElement> pseudo_element, Utf16FlyString highlight_name)
+    : m_element(const_cast<Element&>(element))
+    , m_pseudo_element(move(pseudo_element))
+    , m_highlight_name(move(highlight_name))
+{
+}
+
+void AbstractElement::visit(GC::Cell::Visitor& visitor) const
+{
+    visitor.visit(m_element);
+}
+
+void AbstractElement::visit_edges(GC::Cell::Visitor& visitor) const
+{
+    visitor.visit(m_element);
+}
+
+Document& AbstractElement::document() const
+{
+    return m_element->document();
+}
+
+AbstractElement::TreeCountingFunctionResolutionContext AbstractElement::tree_counting_function_resolution_context() const
+{
+    // FIXME: When used on an element-backed pseudo-element which is also a real element, the tree counting functions
+    //        resolve for that real element. For other pseudo elements, they resolve as if they were resolved against
+    //        the originating element. It follows that for nested pseudo elements the resolution will recursively walk
+    //        the originating elements until a real element is found.
+
+    // FIXME: A tree counting function is a tree-scoped reference where it references an implicit tree-scoped name for
+    //        the element it resolves against. This is done to not leak tree information to an outer tree. A tree
+    //        counting function that is scoped to an outer tree relative to the element it resolves against, will alway
+    //        resolve to 0.
+    auto const& element_to_resolve_tree_counting_function_against = element();
+
+    // The sibling-count() functional notation represents, as an <integer>, the total number of child elements in the
+    // parent of the element on which the notation is used.
+    auto const& parent = element_to_resolve_tree_counting_function_against.parent_element();
+
+    // If there is no parent we are the root node
+    if (!parent)
+        return { .sibling_count = 1, .sibling_index = 1 };
+
+    size_t count = 0;
+    size_t index = 0;
+
+    for (auto const* child = parent->first_child_of_type<DOM::Element>(); child; child = child->next_element_sibling()) {
+        ++count;
+        if (child == &element_to_resolve_tree_counting_function_against)
+            index = count;
+    }
+
+    return {
+        .sibling_count = count,
+        .sibling_index = index
+    };
+}
+
+Layout::NodeWithStyle* AbstractElement::layout_node(Layout::BegunRead const& read)
+{
+    if (m_pseudo_element.has_value())
+        return m_element->pseudo_element_layout_node(read, *m_pseudo_element);
+    return m_element->layout_node(read);
+}
+
+Layout::NodeWithStyle* AbstractElement::unsafe_layout_node(Layout::BegunRead const& read)
+{
+    if (m_pseudo_element.has_value())
+        return m_element->pseudo_element_unsafe_layout_node(read, *m_pseudo_element);
+    return m_element->unsafe_layout_node(read);
+}
+
+GC::Ptr<Element const> AbstractElement::parent_element() const
+{
+    if (m_pseudo_element.has_value())
+        return m_element.ptr();
+    return m_element->parent_element();
+}
+
+Element* AbstractElement::flat_tree_parent_element() const
+{
+    if (m_pseudo_element.has_value())
+        return m_element.ptr();
+    return m_element->flat_tree_parent_element();
+}
+
+Optional<AbstractElement> AbstractElement::element_to_inherit_style_from() const
+{
+    GC::Ptr<Element const> element = m_element->element_to_inherit_style_from(m_pseudo_element);
+
+    if (!element)
+        return OptionalNone {};
+
+    return AbstractElement { const_cast<DOM::Element&>(*element) };
+}
+
+GC::Ptr<Node> AbstractElement::root()
+{
+    if (m_pseudo_element.has_value()) {
+        if (auto pseudo_element = m_element->get_pseudo_element(*m_pseudo_element); pseudo_element.has_value())
+            return pseudo_element->root();
+
+        return nullptr;
+    }
+
+    return m_element->root();
+}
+
+CSS::ComputedStyleRecordView AbstractElement::computed_style() const
+{
+    return m_element->computed_style(m_pseudo_element);
+}
+
+CSS::StyleRecordID AbstractElement::style_record_identity() const
+{
+    return m_element->style_record_identity(m_pseudo_element);
+}
+
+CSS::InstalledStyle const& AbstractElement::installed_style() const
+{
+    return m_element->installed_style(m_pseudo_element);
+}
+
+CSS::ComputedValuesFFI::StyleRecordGroups const* AbstractElement::style_record_groups() const
+{
+    return m_element->style_record_groups(m_pseudo_element);
+}
+
+GC::Ptr<CSS::CSSStyleProperties const> AbstractElement::inline_style() const
+{
+    if (!m_pseudo_element.has_value())
+        return m_element->inline_style();
+
+    if (!CSS::is_element_reference_pseudo_element(*m_pseudo_element))
+        return nullptr;
+
+    auto pseudo_element = m_element->get_pseudo_element(*m_pseudo_element);
+
+    if (!pseudo_element.has_value())
+        return nullptr;
+
+    return as<ElementReferencePseudoElement>(*pseudo_element).referenced_element()->inline_style();
+}
+
+RefPtr<CSS::CustomPropertyData const> AbstractElement::custom_property_data() const
+{
+    return m_element->custom_property_data(m_pseudo_element);
+}
+
+void AbstractElement::set_custom_property_data(RefPtr<CSS::CustomPropertyData const> data)
+{
+    m_element->set_custom_property_data(m_pseudo_element, move(data));
+}
+
+void AbstractElement::replace_custom_property_data(Badge<CSS::StyleComputer>, RefPtr<CSS::CustomPropertyData const> data, CSS::IsAnimationOverlay is_animation_overlay)
+{
+    m_element->replace_custom_property_data(m_pseudo_element, move(data), is_animation_overlay);
+}
+
+bool AbstractElement::custom_property_data_is_animation_overlay() const
+{
+    return m_element->custom_property_data_is_animation_overlay(m_pseudo_element);
+}
+
+RefPtr<CSS::StyleValue const> AbstractElement::get_custom_property(Utf16FlyString const& name) const
+{
+    auto data = custom_property_data();
+    if (!data)
+        return nullptr;
+    if (auto property = data->get(name); property.has_value())
+        return property->value;
+    return nullptr;
+}
+
+Utf16String AbstractElement::debug_description() const
+{
+    if (m_pseudo_element.has_value()) {
+        Utf16StringBuilder builder;
+        builder.append(m_element->debug_description());
+        builder.append_ascii("::"sv);
+        builder.append_ascii(CSS::pseudo_element_name(*m_pseudo_element));
+        if (!m_highlight_name.is_empty()) {
+            builder.append_code_unit('(');
+            builder.append(m_highlight_name);
+            builder.append_code_unit(')');
+        }
+        return builder.to_string();
+    }
+    return m_element->debug_description();
+}
+
+CSS::StyleScope const& AbstractElement::style_scope() const
+{
+    return m_element->style_scope();
+}
+
+}

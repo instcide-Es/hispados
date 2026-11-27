@@ -1,0 +1,452 @@
+/*
+ * Copyright (c) 2023, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibGC/Heap.h>
+#include <LibGC/Weak.h>
+#include <LibGfx/Bitmap.h>
+#include <LibGfx/DecodedImageFrame.h>
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/Fetch/Fetching/Fetching.h>
+#include <LibWeb/Fetch/Infrastructure/FetchAlgorithms.h>
+#include <LibWeb/Fetch/Infrastructure/FetchController.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/Bodies.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/MIME.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/Requests.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/ResponseView.h>
+#include <LibWeb/HTML/AnimatedBitmapDecodedImageData.h>
+#include <LibWeb/HTML/BitmapDecodedImageData.h>
+#include <LibWeb/HTML/DecodedImageData.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HTML/SharedResourceRequest.h>
+#include <LibWeb/Loader/ResourceLoader.h>
+#include <LibWeb/Page/Page.h>
+#include <LibWeb/Page/RenderingStats.h>
+#include <LibWeb/Platform/ImageCodecPlugin.h>
+#include <LibWeb/SVG/SVGDecodedImageData.h>
+#include <LibWebCommon/Fetch/Infrastructure/HTTP/Statuses.h>
+#include <LibWebCommon/MimeSniff/Resource.h>
+
+namespace Web::HTML {
+
+GC_DEFINE_ALLOCATOR(SharedResourceRequest);
+
+static u64 s_next_memory_cache_touch_serial;
+
+GC::Ref<SharedResourceRequest> SharedResourceRequest::get_or_create(DOM::Document& document, URL::URL const& url, CORSSettingAttribute cors_setting)
+{
+    using Request = Fetch::Infrastructure::Request;
+    auto mode = cors_setting == CORSSettingAttribute::NoCORS ? Request::Mode::NoCORS : Request::Mode::CORS;
+    auto credentials_mode = cors_setting == CORSSettingAttribute::Anonymous ? Request::CredentialsMode::SameOrigin : Request::CredentialsMode::Include;
+    return get_or_create(document, { url, mode, credentials_mode, {}, ReferrerPolicy::ReferrerPolicy::EmptyString });
+}
+
+GC::Ref<SharedResourceRequest> SharedResourceRequest::get_or_create(DOM::Document& document, Key key)
+{
+    auto& shared_resource_requests = document.shared_resource_requests();
+    if (auto it = shared_resource_requests.find(key); it != shared_resource_requests.end()) {
+        it->value->touch_memory_cache_entry();
+        return *it->value;
+    }
+    auto request = GC::Heap::the().allocate<SharedResourceRequest>(document.page(), key, document);
+    shared_resource_requests.set(move(key), request);
+    return request;
+}
+
+GC::Ref<SharedResourceRequest> SharedResourceRequest::get_or_create(DOM::Document& document, Fetch::Infrastructure::Request const& request)
+{
+    return get_or_create(document, { request.url(), request.mode(), request.credentials_mode(), request.integrity_metadata(), request.referrer_policy() });
+}
+
+GC::Ref<SharedResourceRequest> SharedResourceRequest::create_from_image_response_body(DOM::Document& document, URL::URL const& url, Fetch::Infrastructure::Body const& body, bool is_cors_cross_origin, GC::Ptr<GC::Function<void()>> on_body_read)
+{
+    using Request = Fetch::Infrastructure::Request;
+    auto request = GC::Heap::the().allocate<SharedResourceRequest>(document.page(), Key { url, Request::Mode::NoCORS, Request::CredentialsMode::Include, {}, ReferrerPolicy::ReferrerPolicy::EmptyString }, document);
+    request->m_can_be_shared = false;
+    request->m_state = State::Fetching;
+    // NB: The element that presents the image may start to wait for it only after the body has been read.
+    request->m_load_event_delayer.emplace(document);
+
+    GC::Weak weak_request { *request };
+    auto process_body = GC::create_function(GC::Heap::the(), GC::captures(weak_request, on_body_read, is_cors_cross_origin), [](auto& weak_request, auto& on_body_read, auto is_cors_cross_origin, ByteBuffer data) {
+        // NB: A document for an SVG image is an XML document, so this is never an SVG image.
+        if (auto request = weak_request.ptr())
+            request->handle_successful_fetch(request->url(), IsSVGImage::No, move(data), is_cors_cross_origin);
+        if (on_body_read)
+            on_body_read->function()();
+    });
+    auto process_body_error = GC::create_function(GC::Heap::the(), GC::captures(weak_request, on_body_read), [](auto& weak_request, auto& on_body_read, JS::Value) {
+        if (auto request = weak_request.ptr())
+            request->handle_failed_fetch();
+        if (on_body_read)
+            on_body_read->function()();
+    });
+
+    auto& realm = HTML::relevant_realm(document);
+    body.fully_read(realm, process_body, process_body_error, GC::Ref { realm.global_object() });
+    return request;
+}
+
+SharedResourceRequest::SharedResourceRequest(GC::Ref<Page> page, Key key, GC::Ref<DOM::Document> document)
+    : m_page(page)
+    , m_key(move(key))
+    , m_document(document)
+{
+    touch_memory_cache_entry();
+}
+
+SharedResourceRequest::~SharedResourceRequest() = default;
+
+void SharedResourceRequest::finalize()
+{
+    end_rendering_pending_operation(this);
+    Base::finalize();
+
+    // Don't release m_load_event_delayer or touch m_document here. While we're in our document's shared resource
+    // requests, the document keeps us alive, so if we're being finalized, it is dying in this same collection and may
+    // already have been finalized itself. The delayer is released by our destructor, after the GC has cleared its weak
+    // pointer to a dead document.
+}
+
+void SharedResourceRequest::remove_from_document()
+{
+    auto& shared_resource_requests = m_document->shared_resource_requests();
+    if (auto it = shared_resource_requests.find(m_key); it != shared_resource_requests.end() && it->value.ptr() == this)
+        shared_resource_requests.remove(it);
+}
+
+void SharedResourceRequest::visit_edges(JS::Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_fetch_controller);
+    visitor.visit(m_document);
+    visitor.visit(m_page);
+    for (auto& callback : m_callbacks) {
+        visitor.visit(callback.on_finish);
+        visitor.visit(callback.on_fail);
+        visitor.visit(callback.on_stop);
+    }
+    visitor.visit(m_image_data);
+}
+
+GC::Ptr<DecodedImageData> SharedResourceRequest::image_data() const
+{
+    return m_image_data;
+}
+
+bool SharedResourceRequest::can_be_pruned_from_memory_cache() const
+{
+    // NB: Pruning an image that still has clients (e.g. a live element displaying it) frees no memory, since the
+    //     clients keep the decoded data alive, but it forces a refetch if script recreates an element with the
+    //     same URL, e.g. when a framework re-renders the page.
+    return m_image_data && !m_image_data->has_clients();
+}
+
+void SharedResourceRequest::touch_memory_cache_entry()
+{
+    m_cache_touch_serial = ++s_next_memory_cache_touch_serial;
+}
+
+GC::Ptr<Fetch::Infrastructure::FetchController> SharedResourceRequest::fetch_controller()
+{
+    return m_fetch_controller.ptr();
+}
+
+void SharedResourceRequest::set_fetch_controller(GC::Ptr<Fetch::Infrastructure::FetchController> fetch_controller)
+{
+    m_fetch_controller = move(fetch_controller);
+}
+
+void SharedResourceRequest::fetch_resource(NonnullRefPtr<Fetch::Infrastructure::Request> request)
+{
+    auto& realm = HTML::relevant_realm(*m_document);
+    VERIFY(needs_fetching());
+
+    if (!ResourceLoader::is_initialized()) {
+        handle_failed_fetch();
+        return;
+    }
+
+    GC::Weak weak_this { *this };
+    Fetch::Infrastructure::FetchAlgorithms::Input fetch_algorithms_input { Fetch::Engine::BodyIntent::DeliverStreamToConsumerAgent };
+    fetch_algorithms_input.process_response = GC::create_function<void(GC::Ref<Fetch::Infrastructure::ResponseView>)>(GC::Heap::the(), GC::captures(weak_this, realm, request), [](auto& weak_this, auto& realm, auto& request, GC::Ref<Fetch::Infrastructure::ResponseView> response) {
+        auto self = weak_this.ptr();
+        if (!self)
+            return;
+
+        auto image_data_is_cors_cross_origin = response->is_cors_cross_origin();
+
+        // FIXME: If the response is CORS cross-origin, we must use its internal response to query any of its data. See:
+        //        https://github.com/whatwg/html/issues/9355
+        response = response->unsafe_response();
+
+        auto process_body = GC::create_function(GC::Heap::the(), GC::captures(weak_this, request, response, image_data_is_cors_cross_origin), [](auto& weak_this, auto& request, auto& response, auto& image_data_is_cors_cross_origin, ByteBuffer data) {
+            auto self = weak_this.ptr();
+            if (!self)
+                return;
+
+            auto extracted_mime_type = Fetch::Infrastructure::extract_mime_type(response->header_list());
+            auto const is_svg_image = extracted_mime_type.has_value()
+                ? extracted_mime_type.value().essence() == "image/svg+xml"sv
+                : request->url().basename().ends_with(".svg"sv);
+            if (extracted_mime_type.has_value())
+                self->m_image_mime_type = extracted_mime_type->essence();
+            self->handle_successful_fetch(response->url().value_or(request->url()), is_svg_image ? IsSVGImage::Yes : IsSVGImage::No, move(data), image_data_is_cors_cross_origin);
+        });
+        auto process_body_error = GC::create_function(GC::Heap::the(), GC::captures(weak_this), [](auto& weak_this, JS::Value) {
+            auto self = weak_this.ptr();
+            if (!self)
+                return;
+
+            self->handle_failed_fetch();
+        });
+
+        // Check for failed fetch response
+        if (!response->body()) {
+            self->handle_failed_fetch();
+            return;
+        }
+
+        if (!Fetch::Infrastructure::is_ok_status(response->status())) {
+            // NB: Fetch only reports the response's timing once its body has been fully read, so read it without
+            //     holding back the failure.
+            auto ignore_chunk = GC::create_function(GC::Heap::the(), [](ByteBuffer) { });
+            auto ignore_end_of_body = GC::create_function(GC::Heap::the(), [] { });
+            auto ignore_body_error = GC::create_function(GC::Heap::the(), [](JS::Value) { });
+            (void)response->body()->incrementally_read(realm, ignore_chunk, ignore_end_of_body, ignore_body_error, GC::Ref { realm.global_object() });
+            self->handle_failed_fetch();
+            return;
+        }
+
+        response->body()->fully_read(realm, process_body, process_body_error, GC::Ref { realm.global_object() });
+    });
+
+    m_state = State::Fetching;
+    // NB: A user that waits for the fetch decides if the fetch delays the load event; a lazy image's callbacks don't.
+    auto some_waiter_delays = any_of(m_callbacks, [](auto const& callbacks) {
+        return callbacks.id != 0 && callbacks.delays_load_event == DelaysLoadEvent::Yes;
+    });
+    if (m_fetch_has_user_without_callbacks || some_waiter_delays)
+        m_load_event_delayer.emplace(*m_document);
+
+    auto fetch_controller = Fetch::Fetching::fetch(
+        realm,
+        request,
+        Fetch::Infrastructure::FetchAlgorithms::create(move(fetch_algorithms_input)));
+
+    fetch_controller->set_stop_steps(GC::create_function(GC::Heap::the(), GC::captures(weak_this), [](auto& weak_this) {
+        if (auto self = weak_this.ptr())
+            self->handle_stopped_fetch();
+    }));
+    set_fetch_controller(fetch_controller);
+}
+
+void SharedResourceRequest::wait_without_callbacks()
+{
+    m_fetch_has_user_without_callbacks = true;
+    if (m_state == State::Fetching && !m_load_event_delayer.has_value())
+        m_load_event_delayer.emplace(*m_document);
+}
+
+void SharedResourceRequest::add_callbacks(GC::Ptr<GC::Function<void()>> on_finish, GC::Ptr<GC::Function<void()>> on_fail, GC::Ptr<GC::Function<void()>> on_stop)
+{
+    (void)add_removable_callbacks(on_finish, on_fail, on_stop);
+}
+
+Optional<u64> SharedResourceRequest::add_removable_callbacks(GC::Ptr<GC::Function<void()>> on_finish, GC::Ptr<GC::Function<void()>> on_fail, GC::Ptr<GC::Function<void()>> on_stop, DelaysLoadEvent delays_load_event)
+{
+    if (m_state == State::Finished) {
+        if (on_finish)
+            on_finish->function()();
+        return {};
+    }
+
+    if (m_state == State::Failed) {
+        if (on_fail)
+            on_fail->function()();
+        return {};
+    }
+
+    if (m_state == State::Stopped) {
+        if (on_stop)
+            on_stop->function()();
+        return {};
+    }
+
+    Callbacks callbacks;
+    callbacks.id = m_next_callbacks_id++;
+    callbacks.delays_load_event = delays_load_event;
+    callbacks.on_finish = on_finish;
+    callbacks.on_fail = on_fail;
+    callbacks.on_stop = on_stop;
+
+    auto id = callbacks.id;
+    m_callbacks.append(move(callbacks));
+
+    // NB: The fetch may have stopped delaying the load event because nothing waited for it, but now something does.
+    if (m_state == State::Fetching && delays_load_event == DelaysLoadEvent::Yes && !m_load_event_delayer.has_value())
+        m_load_event_delayer.emplace(*m_document);
+    return id;
+}
+
+void SharedResourceRequest::remove_callbacks(u64 id)
+{
+    // NB: The callbacks are only invoked once the request is no longer new or fetching. A callback that is being
+    //     invoked can get here, and the invocation goes on over m_callbacks, so then only mark the entry as no longer
+    //     waiting, and skip it when invoking the callbacks.
+    if (m_state == State::New || m_state == State::Fetching) {
+        m_callbacks.remove_first_matching([id](auto const& callbacks) { return callbacks.id == id; });
+    } else {
+        for (auto& callbacks : m_callbacks) {
+            if (callbacks.id == id)
+                callbacks.id = 0;
+        }
+    }
+
+    // NB: The fetch keeps going so that its result can still be cached, but once nothing waits for it anymore, it
+    //     must not keep delaying the load event of the document.
+    auto nothing_waits = all_of(m_callbacks, [](auto const& callbacks) {
+        return callbacks.id == 0 || callbacks.delays_load_event == DelaysLoadEvent::No;
+    });
+    if (m_state == State::Fetching && nothing_waits && !m_fetch_has_user_without_callbacks)
+        m_load_event_delayer.clear();
+}
+
+void SharedResourceRequest::handle_successful_fetch(URL::URL const& url_string, IsSVGImage is_svg_image, ByteBuffer data, bool image_data_is_cors_cross_origin)
+{
+    begin_rendering_pending_operation(this, *m_document, RenderingPendingReason::ImageDecodes);
+    // AD-HOC: At this point, things gets very ad-hoc.
+    // FIXME: Bring this closer to spec.
+
+    if (is_svg_image == IsSVGImage::Yes) {
+        m_image_mime_type = "image/svg+xml"_string;
+
+        // NB: The decode waits for the image's document to load completely, which it may never do, and its promise keeps
+        //     both handlers. So they hold this request weakly: its document keeps it alive for as long as it is needed.
+        SVG::SVGDecodedImageData::decode(m_page, url_string, data)
+            ->when_resolved([weak_this = GC::Weak { *this }, image_data_is_cors_cross_origin](auto& image_data) {
+                auto self = weak_this.ptr();
+                if (!self)
+                    return;
+                self->m_image_data = image_data.ptr();
+                self->m_image_data->set_is_cors_cross_origin(image_data_is_cors_cross_origin);
+                self->handle_successful_resource_load();
+            })
+            .when_rejected([weak_this = GC::Weak { *this }](Error&) {
+                if (auto self = weak_this.ptr())
+                    self->handle_failed_fetch();
+            });
+        return;
+    }
+
+    // NB: The image's own bytes are a better source than the server's claim, which is often missing or wrong. Formats
+    //     that sniffing does not know keep the claimed type.
+    if (auto sniffed_type = MimeSniff::Resource::sniff(data, { .sniffing_context = MimeSniff::SniffingContext::Image }); sniffed_type.is_image())
+        m_image_mime_type = sniffed_type.essence();
+
+    // NB: Keeping the encoded data lets the decoded image data discard its frame while it is not in use. The decode
+    //     request copies the bytes before it returns, so the handler can own the buffer they are read from.
+    auto encoded_data = make<ByteBuffer>(move(data));
+    auto encoded_bytes = encoded_data->bytes();
+    auto handle_successful_bitmap_decode = [strong_this = GC::Root(*this), image_data_is_cors_cross_origin, encoded_data = move(encoded_data)](Web::Platform::DecodedImage& result) mutable -> ErrorOr<void> {
+        if (result.session_id != 0) {
+            // Streaming animated decode: create AnimatedBitmapDecodedImageData.
+            auto first_frame = Gfx::DecodedImageFrame::create(*result.frames.first().bitmap, result.color_space);
+            if (first_frame.is_error()) {
+                Web::Platform::ImageCodecPlugin::the().stop_animation_decode(result.session_id);
+                return first_frame.release_error();
+            }
+            strong_this->m_image_data = AnimatedBitmapDecodedImageData::create(
+                *strong_this->m_document,
+                result.session_id,
+                result.loop_count,
+                move(result.color_space),
+                move(result.all_durations),
+                first_frame.release_value());
+        } else {
+            // Single-shot decode: create BitmapDecodedImageData as before.
+            Vector<BitmapDecodedImageData::Frame> frames;
+            for (auto& frame : result.frames) {
+                frames.append(BitmapDecodedImageData::Frame {
+                    .frame = TRY(Gfx::DecodedImageFrame::create(*frame.bitmap, result.color_space)),
+                    .duration = static_cast<int>(frame.duration),
+                });
+            }
+            strong_this->m_image_data = BitmapDecodedImageData::create(move(frames), result.loop_count, result.is_animated, move(*encoded_data)).release_value_but_fixme_should_propagate_errors();
+        }
+        strong_this->m_image_data->set_is_cors_cross_origin(image_data_is_cors_cross_origin);
+        strong_this->handle_successful_resource_load();
+        return {};
+    };
+
+    auto handle_failed_decode = [strong_this = GC::Root(*this)](Error&) -> void {
+        strong_this->handle_failed_fetch();
+    };
+
+    (void)Web::Platform::ImageCodecPlugin::the().decode_image(encoded_bytes, move(handle_successful_bitmap_decode), move(handle_failed_decode));
+}
+
+void SharedResourceRequest::handle_failed_fetch()
+{
+    end_rendering_pending_operation(this);
+    m_state = State::Failed;
+    m_load_event_delayer.clear();
+    m_fetch_controller = nullptr;
+    for (auto& callback : m_callbacks) {
+        if (callback.id != 0 && callback.on_fail)
+            callback.on_fail->function()();
+    }
+    m_callbacks.clear();
+}
+
+// NB: A stopped fetch never responds, so nothing waits on it anymore, and a later request for the URL
+//     fetches it again.
+void SharedResourceRequest::response_body_fetch_was_stopped()
+{
+    handle_stopped_fetch();
+}
+
+void SharedResourceRequest::handle_stopped_fetch()
+{
+    if (m_state != State::Fetching)
+        return;
+
+    end_rendering_pending_operation(this);
+    m_state = State::Stopped;
+    remove_from_document();
+    m_load_event_delayer.clear();
+    m_fetch_controller = nullptr;
+    for (auto& callback : m_callbacks) {
+        if (callback.id != 0 && callback.on_stop)
+            callback.on_stop->function()();
+    }
+    m_callbacks.clear();
+}
+
+void SharedResourceRequest::handle_successful_resource_load()
+{
+    end_rendering_pending_operation(this);
+    m_state = State::Finished;
+    m_load_event_delayer.clear();
+    m_fetch_controller = nullptr;
+    for (auto& callback : m_callbacks) {
+        if (callback.id != 0 && callback.on_finish)
+            callback.on_finish->function()();
+    }
+    m_callbacks.clear();
+    m_document->prune_image_resource_caches();
+}
+
+bool SharedResourceRequest::needs_fetching() const
+{
+    return m_state == State::New;
+}
+
+bool SharedResourceRequest::is_fetching() const
+{
+    return m_state == State::Fetching;
+}
+
+}

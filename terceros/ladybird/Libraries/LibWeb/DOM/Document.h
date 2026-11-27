@@ -1,0 +1,2700 @@
+/*
+ * Copyright (c) 2018-2025, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2021-2023, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2021-2026, Sam Atkins <sam@ladybird.org>
+ * Copyright (c) 2023-2024, Shannon Booth <shannon@serenityos.org>
+ * Copyright (c) 2025, Jelle Raaijmakers <jelle@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Array.h>
+#include <AK/EnumBits.h>
+#include <AK/Function.h>
+#include <AK/HashMap.h>
+#include <AK/HashTable.h>
+#include <AK/NonnullRefPtr.h>
+#include <AK/Optional.h>
+#include <AK/OwnPtr.h>
+#include <AK/RefPtr.h>
+#include <AK/Utf16FlyString.h>
+#include <AK/Utf16String.h>
+#include <AK/Utf16View.h>
+#include <AK/Vector.h>
+#include <AK/WeakPtr.h>
+#include <LibCompositing/Scrolling/AsyncScrollingState.h>
+#include <LibCore/Forward.h>
+#include <LibCore/SharedVersion.h>
+#include <LibGC/Weak.h>
+#include <LibGC/WeakHashMap.h>
+#include <LibGC/WeakHashSet.h>
+#include <LibGfx/Point.h>
+#include <LibHTTP/Cache/CacheMode.h>
+#include <LibJS/Forward.h>
+#include <LibJS/SourceCode.h>
+#include <LibURL/Origin.h>
+#include <LibURL/URL.h>
+#include <LibUnicode/Forward.h>
+#include <LibWeb/Bindings/Document.h>
+#include <LibWeb/Bindings/NavigationType.h>
+#include <LibWeb/CSS/CustomPropertyRegistration.h>
+#include <LibWeb/CSS/ImageStyleValueResourceKey.h>
+#include <LibWeb/CSS/RustInlineStyleBlocks.h>
+#include <LibWeb/CSS/ScrollStateContainerQuery.h>
+#include <LibWeb/CSS/StyleScope.h>
+#include <LibWeb/CSS/StyleUpdateInputs.h>
+#include <LibWeb/DOM/AccessibilityChangeTracker.h>
+#include <LibWeb/DOM/AnchorNameMap.h>
+#include <LibWeb/DOM/HoverEventData.h>
+#include <LibWeb/DOM/ParentNode.h>
+#include <LibWeb/DOM/Range.h>
+#include <LibWeb/DOM/ShadowRoot.h>
+#include <LibWeb/DOM/ViewportClient.h>
+#include <LibWeb/Export.h>
+#include <LibWeb/Forward.h>
+#include <LibWeb/HTML/DocumentReadyState.h>
+#include <LibWeb/HTML/Focus.h>
+#include <LibWeb/HTML/GlobalEventHandlers.h>
+#include <LibWeb/HTML/PaintConfig.h>
+#include <LibWeb/HTML/Parser/HTMLParser.h>
+#include <LibWeb/HTML/PreloadEntry.h>
+#include <LibWeb/HTML/Scripting/ScriptRegistry.h>
+#include <LibWeb/HTML/SessionHistoryEntry.h>
+#include <LibWeb/HTML/SharedResourceRequest.h>
+#include <LibWeb/HTML/TextDirective.h>
+#include <LibWeb/Infra/SerializedURL.h>
+#include <LibWeb/InvalidateDisplayList.h>
+#include <LibWeb/Layout/LayoutRustFFI.h>
+#include <LibWeb/PaintTiming/DocumentPaintTimingState.h>
+#include <LibWeb/Painting/DisplayListRecording.h>
+#include <LibWeb/Painting/FlexboxInspectorOverlay.h>
+#include <LibWeb/Painting/Forward.h>
+#include <LibWeb/Painting/GridInspectorOverlay.h>
+#include <LibWeb/Painting/HitTestResult.h>
+#include <LibWeb/Painting/ScrollSnap.h>
+#include <LibWeb/ResizeObserver/ResizeObserver.h>
+#include <LibWeb/SVG/SVGPatternElement.h>
+#include <LibWeb/SVG/SVGUseElement.h>
+#include <LibWeb/TrustedTypes/TrustedHTML.h>
+#include <LibWeb/WebIDL/ExceptionOr.h>
+#include <LibWebCommon/CSS/PreferredColorScheme.h>
+#include <LibWebCommon/Fullscreen/FullscreenRequestType.h>
+#include <LibWebCommon/HTML/CrossOrigin/OpenerPolicy.h>
+#include <LibWebCommon/HTML/CrossProcessId.h>
+#include <LibWebCommon/HTML/SandboxingFlagSet.h>
+#include <LibWebCommon/HTML/UserNavigationInvolvement.h>
+#include <LibWebCommon/HTML/VisibilityState.h>
+#include <LibWebCommon/PermissionsPolicy/PermissionsPolicy.h>
+
+namespace Web {
+
+class HoverLinkReporter;
+struct RenderingStats;
+
+}
+
+namespace Web::Animations::RustFFI {
+
+struct DocumentAnimations;
+struct FfiNamedTimelinesHost;
+struct FfiPendingAnimationEvent;
+
+}
+
+namespace Web::Compositor {
+
+struct FlightPresentation;
+
+}
+
+namespace Web::CSS {
+
+class ImageStyleValueResource;
+
+}
+
+namespace Web::Painting {
+
+struct DisplayListDumpOptions;
+
+}
+
+namespace Web::DOM {
+
+struct MutationObserverOptions;
+
+enum class TemporaryDocumentForFragmentParsing : u8 {
+    No,
+    Yes,
+};
+
+struct AdoptedStyleSheetsAccess;
+struct CompositorAnimationUpdatePass;
+
+enum class QuirksMode {
+    No,
+    Limited,
+    Yes
+};
+
+// The parts of the document's environment a style change moves, as the style engine's StyleEnvironment bits. Each
+// restyles the elements whose computation read it.
+enum class StyleEnvironmentChange : u8 {
+    // The user's preferred color scheme or the schemes the document supports.
+    ColorScheme = 1 << 0,
+    DevicePixelRatio = 1 << 1,
+    // The media features a value's if() or custom function may test.
+    MediaFeatures = 1 << 2,
+    // The axes of the viewport, which viewport-relative lengths resolve against.
+    ViewportWidth = 1 << 3,
+    ViewportHeight = 1 << 4,
+    // What every element may compute from: the quirks mode, which only the parser and document.open() move, before
+    // the document holds an element.
+    Everything = 1 << 7,
+};
+AK_ENUM_BITWISE_OPERATORS(StyleEnvironmentChange);
+
+#define ENUMERATE_INVALIDATE_LAYOUT_TREE_REASONS(X) \
+    X(InternalsFullRebuildComparison)
+
+enum class InvalidateLayoutTreeReason {
+#define ENUMERATE_INVALIDATE_LAYOUT_TREE_REASON(e) e,
+    ENUMERATE_INVALIDATE_LAYOUT_TREE_REASONS(ENUMERATE_INVALIDATE_LAYOUT_TREE_REASON)
+#undef ENUMERATE_INVALIDATE_LAYOUT_TREE_REASON
+};
+
+[[nodiscard]] Utf16View to_string(InvalidateLayoutTreeReason);
+
+// The second argument says whether up-to-date layout geometry is all that a read naming the reason
+// needs, so that the read can be answered from what committed layout already holds. A read that
+// also consults computed style, paint state or the visual context tree is not one of these, even
+// when it reads geometry as well, and neither is anything that mutates. False is the conservative
+// answer, and is what every reason whose call sites have not been checked keeps.
+#define ENUMERATE_UPDATE_LAYOUT_REASONS(X)          \
+    X(AnimationCommitStyles, false)                 \
+    X(AutoScrollSelection, false)                   \
+    X(ChildDocumentStyleUpdate, false)              \
+    X(CursorLineNavigation, true)                   \
+    X(Debugging, false)                             \
+    X(DocumentElementFromPoint, false)              \
+    X(DocumentElementsFromPoint, false)             \
+    X(DocumentCaretPositionFromPoint, false)        \
+    X(DocumentFindMatchingText, false)              \
+    X(DocumentReadinessComplete, false)             \
+    X(DocumentSetDesignMode, false)                 \
+    X(DumpDisplayList, false)                       \
+    X(ElementCheckVisibility, false)                \
+    X(ElementClientHeight, true)                    \
+    X(ElementClientWidth, true)                     \
+    X(ElementGetClientRects, true)                  \
+    X(ElementIsPotentiallyScrollable, false)        \
+    X(ElementScroll, false)                         \
+    X(ElementScrollHeight, false)                   \
+    X(ElementScrollIntoView, false)                 \
+    X(ElementScrollLeft, true)                      \
+    X(ElementScrollTop, true)                       \
+    X(ElementScrollWidth, false)                    \
+    X(ElementSetScrollLeft, false)                  \
+    X(ElementSetScrollTop, false)                   \
+    X(EventHandlerDispatchChromeWidgetEvent, false) \
+    X(EventHandlerHandleDragAndDrop, false)         \
+    X(EventHandlerHandleKeyDown, false)             \
+    X(EventHandlerHandleMouseCancel, false)         \
+    X(EventHandlerHandleMouseDown, false)           \
+    X(EventHandlerHandleMouseMove, false)           \
+    X(EventHandlerHandleMouseUp, false)             \
+    X(EventHandlerHandleMouseWheel, false)          \
+    X(EventHandlerPointerCaptureEvents, false)      \
+    X(EventHandlerRunActivationBehavior, false)     \
+    X(EventHandlerShowContextMenu, false)           \
+    X(EventHandlerTargetNodeAtPosition, false)      \
+    X(FontFaceSetReady, false)                      \
+    X(HTMLEmbedElement, false)                      \
+    X(HTMLElementGetTheTextSteps, false)            \
+    X(HTMLElementOffsetHeight, true)                \
+    X(HTMLElementOffsetLeft, true)                  \
+    X(HTMLElementOffsetParent, true)                \
+    X(HTMLElementOffsetTop, true)                   \
+    X(HTMLElementOffsetWidth, true)                 \
+    X(HTMLElementScrollParent, true)                \
+    X(HTMLEventLoopRenderingUpdate, false)          \
+    X(HTMLImageElementHeight, true)                 \
+    X(HTMLImageElementWidth, true)                  \
+    X(HTMLImageElementX, true)                      \
+    X(HTMLImageElementY, true)                      \
+    X(HTMLInputElementHeight, true)                 \
+    X(HTMLInputElementWidth, true)                  \
+    X(HTMLLabelElementActivationBehavior, false)    \
+    X(HighlightRegistryHighlightsFromPoint, false)  \
+    X(InspectAccessibilityTree, false)              \
+    X(InspectDOMTree, false)                        \
+    X(InspectDevToolsLayoutData, false)             \
+    X(InputCaretRect, false)                        \
+    X(InternalsLayoutTest, false)                   \
+    X(InternalsHitTest, false)                      \
+    X(MediaQueryListMatches, false)                 \
+    X(NavigableSelectedText, false)                 \
+    X(NavigableViewportScroll, false)               \
+    X(NodeNameOrDescription, false)                 \
+    X(RangeGetClientRects, false)                   \
+    X(ResolvedCSSStyleDeclarationProperty, false)   \
+    X(SVGDecodedImageDataRender, false)             \
+    X(ScrollCursorIntoView, false)                  \
+    X(ScrollTimelineSource, false)                  \
+    X(ProcessScreenshot, false)                     \
+    X(SVGGraphicsElementGetBBox, true)              \
+    X(SVGGraphicsElementGetCTM, false)              \
+    X(SVGGraphicsElementGetScreenCTM, false)        \
+    X(SVGLengthValue, false)                        \
+    X(SVGPathLength, false)                         \
+    X(SVGTextContentElementTextQuery, true)         \
+    X(ViewTimelineSource, false)                    \
+    X(ViewTransitionCapture, false)                 \
+    X(ViewTransitionPseudoElementStyles, false)     \
+    X(WindowScroll, false)
+
+enum class UpdateLayoutReason {
+#define ENUMERATE_UPDATE_LAYOUT_REASON(e, reads_layout_geometry) e,
+    ENUMERATE_UPDATE_LAYOUT_REASONS(ENUMERATE_UPDATE_LAYOUT_REASON)
+#undef ENUMERATE_UPDATE_LAYOUT_REASON
+};
+
+[[nodiscard]] constexpr bool reason_reads_layout_geometry(UpdateLayoutReason reason)
+{
+    switch (reason) {
+#define ENUMERATE_UPDATE_LAYOUT_REASON(e, reads_layout_geometry) \
+    case UpdateLayoutReason::e:                                  \
+        return reads_layout_geometry;
+        ENUMERATE_UPDATE_LAYOUT_REASONS(ENUMERATE_UPDATE_LAYOUT_REASON)
+#undef ENUMERATE_UPDATE_LAYOUT_REASON
+    }
+    VERIFY_NOT_REACHED();
+}
+
+[[nodiscard]] Utf16View to_string(UpdateLayoutReason);
+
+#define ENUMERATE_PARTIAL_RELAYOUT_ESCAPE_REASONS(X) \
+    X(AnchorNamesUnregisteredByElementRemoval)       \
+    X(AnchorNamesUnregisteredByStyleChange)
+
+enum class PartialRelayoutEscapeReason {
+#define ENUMERATE_PARTIAL_RELAYOUT_ESCAPE_REASON(e) e,
+    ENUMERATE_PARTIAL_RELAYOUT_ESCAPE_REASONS(ENUMERATE_PARTIAL_RELAYOUT_ESCAPE_REASON)
+#undef ENUMERATE_PARTIAL_RELAYOUT_ESCAPE_REASON
+};
+
+[[nodiscard]] Utf16View to_string(PartialRelayoutEscapeReason);
+
+// https://html.spec.whatwg.org/multipage/dom.html#document-load-timing-info
+struct DocumentLoadTimingInfo {
+    // https://html.spec.whatwg.org/multipage/dom.html#navigation-start-time
+    double navigation_start_time { 0 };
+    // https://html.spec.whatwg.org/multipage/dom.html#dom-interactive-time
+    HighResolutionTime::DOMHighResTimeStamp dom_interactive_time { 0 };
+    // https://html.spec.whatwg.org/multipage/dom.html#dom-content-loaded-event-start-time
+    HighResolutionTime::DOMHighResTimeStamp dom_content_loaded_event_start_time { 0 };
+    // https://html.spec.whatwg.org/multipage/dom.html#dom-content-loaded-event-end-time
+    HighResolutionTime::DOMHighResTimeStamp dom_content_loaded_event_end_time { 0 };
+    // https://html.spec.whatwg.org/multipage/dom.html#dom-complete-time
+    HighResolutionTime::DOMHighResTimeStamp dom_complete_time { 0 };
+    // https://html.spec.whatwg.org/multipage/dom.html#load-event-start-time
+    HighResolutionTime::DOMHighResTimeStamp load_event_start_time { 0 };
+    // https://html.spec.whatwg.org/multipage/dom.html#load-event-end-time
+    HighResolutionTime::DOMHighResTimeStamp load_event_end_time { 0 };
+    // AD-HOC: When the current document readiness first became "loading", for PerformanceTiming's domLoading.
+    HighResolutionTime::DOMHighResTimeStamp dom_loading_time { 0 };
+};
+
+// https://html.spec.whatwg.org/multipage/dom.html#document-unload-timing-info
+struct DocumentUnloadTimingInfo {
+    // https://html.spec.whatwg.org/multipage/dom.html#unload-event-start-time
+    HighResolutionTime::DOMHighResTimeStamp unload_event_start_time { 0 };
+    // https://html.spec.whatwg.org/multipage/dom.html#unload-event-end-time
+    HighResolutionTime::DOMHighResTimeStamp unload_event_end_time { 0 };
+};
+
+// The times are unsafe shared current times, as the document they are relative to is created after the unload.
+struct UnloadOfReplacedDocument {
+    URL::Origin origin;
+    HTML::CanUseCrossOriginIsolatedAPIs cross_origin_isolated_capability { HTML::CanUseCrossOriginIsolatedAPIs::No };
+    HighResolutionTime::DOMHighResTimeStamp unload_event_start_time { 0 };
+    HighResolutionTime::DOMHighResTimeStamp unload_event_end_time { 0 };
+};
+
+using PolicyControlledFeature = PermissionsPolicy::PolicyControlledFeature;
+
+struct PendingFullscreenEvent {
+    enum class Type {
+        Change,
+        Error,
+    } type;
+    GC::Ref<Element> element;
+    Fullscreen::RequestType request_type;
+
+    void visit_edges(GC::Cell::Visitor&) const;
+};
+
+class WEB_API Document
+    : public ParentNode
+    , public HTML::GlobalEventHandlers {
+    WEB_WRAPPABLE(Document, ParentNode);
+    GC_DECLARE_ALLOCATOR(Document);
+
+public:
+    enum class Type {
+        XML,
+        HTML
+    };
+
+    static WebIDL::ExceptionOr<GC::Ref<Document>> create_and_initialize(Type, Utf16FlyString content_type, HTML::NavigationParams const&);
+
+    [[nodiscard]] static GC::Ref<Document> create(Page&, GC::Ref<EventTarget> relevant_global_event_target, URL::URL const& url = URL::about_blank());
+    [[nodiscard]] static GC::Ref<Document> create_for_constructor(JS::Object&);
+    [[nodiscard]] static GC::Ref<Document> create_for_fragment_parsing(Page&, GC::Ref<EventTarget> relevant_global_event_target);
+    // NB: The animations of the document die when it is swept, not when it is finalized, so that the finalizer of
+    //     another dead cell can still reach them.
+    GC_ALLOW_CELL_DESTRUCTOR virtual ~Document() override;
+
+    u64 form_controls_version() const { return m_form_controls_version; }
+    void bump_form_controls_version() { ++m_form_controls_version; }
+
+    u64 option_selectedness_version() const { return m_option_selectedness_version; }
+    void bump_option_selectedness_version() { ++m_option_selectedness_version; }
+
+    using HTMLCollectionAttributeInvalidationType = HTMLCollectionCacheRegistration::AttributeInvalidationType;
+    using HTMLCollectionAttributeInvalidationTypes = HTMLCollectionCacheRegistration::AttributeInvalidationTypes;
+
+    void register_valid_html_collection_cache(HTMLCollectionAttributeInvalidationType) const;
+    void unregister_valid_html_collection_cache(HTMLCollectionAttributeInvalidationType) const;
+    bool has_valid_html_collection_caches() const { return m_html_collection_attribute_invalidation_types != 0; }
+    HTMLCollectionAttributeInvalidationTypes html_collection_attribute_invalidation_types_for_attribute(Utf16FlyString const& local_name, Optional<Utf16FlyString> const& namespace_) const;
+
+    // The record types any observer registered in this document has ever asked for. A type stays set.
+    void add_mutation_observer_types(MutationObserverOptions const&);
+    bool has_mutation_observers_of_type(Utf16FlyString const& type) const;
+
+    // Everything a style input record cannot name by an identity of its own: the viewport moving,
+    // a counter style arriving, or another untracked environment input changing. A record taken under one version
+    // answers for nothing once it moves.
+    u64 style_environment_version() const { return m_style_environment_version; }
+    void bump_style_environment_version();
+    u64 next_counter_style_environment_identity()
+    {
+        auto identity = m_next_counter_style_environment_identity++;
+        VERIFY(identity != 0);
+        return identity;
+    }
+
+    bool preserve_selection_offsets_during_identical_character_data_replacement() const { return m_preserve_selection_offsets_during_identical_character_data_replacement; }
+
+    WebIDL::ExceptionOr<void> populate_with_html_head_and_body();
+
+    GC::Ptr<Selection::Selection> get_selection() const;
+    void set_needs_highlight_style_update(CSS::PseudoElement);
+    [[nodiscard]] bool needs_highlight_style_update() const;
+    void update_highlight_style_observability();
+
+    GC::Ptr<Range> find_in_page_active_match() const { return m_find_in_page_active_match; }
+    void set_find_in_page_active_match(GC::Ptr<Range>);
+    void collapse_find_in_page_active_match_if_its_text_changed();
+    Vector<GC::Ref<Range>> const& find_in_page_highlighted_matches() const { return m_find_in_page_highlighted_matches; }
+    void set_find_in_page_highlighted_matches(GC::RootVector<GC::Ref<Range>>);
+    void remove_find_in_page_highlighted_matches_whose_text_changed();
+
+    Editing::SpellingMarkers& spelling_markers();
+    Editing::SpellCheckController& spell_check_controller();
+    Editing::SpellCheckController* spell_check_controller_if_exists() { return m_spell_check_controller.ptr(); }
+
+    Translation::DocumentTranslator& document_translator();
+    Translation::DocumentTranslator* document_translator_if_exists() { return m_document_translator.ptr(); }
+    void forget_document_translator();
+    Editing::WritingSuggestionController& writing_suggestion_controller();
+    Editing::WritingSuggestionController* writing_suggestion_controller_if_exists() { return m_writing_suggestion_controller.ptr(); }
+    Editing::WritingSuggestionController const* writing_suggestion_controller_if_exists() const { return m_writing_suggestion_controller.ptr(); }
+    bool has_spelling_markers() const;
+    void recompute_search_text_paint_states(Layout::BegunRead const&);
+    void note_spelling_markers_changed();
+    void recompute_spelling_error_paint_states(Layout::BegunRead const&);
+    void recompute_custom_highlight_paint_states(Layout::BegunRead const&);
+    void invalidate_custom_highlights();
+    bool has_custom_highlights() const;
+
+    WebIDL::ExceptionOr<Utf16String> cookie();
+    WebIDL::ExceptionOr<void> set_cookie(Utf16View);
+    bool is_cookie_averse() const;
+
+    void set_cookie_version_index(Core::SharedVersionIndex cookie_version_index) { m_cookie_version_index = cookie_version_index; }
+    void reset_cookie_version() { m_cookie_version = Core::INVALID_SHARED_VERSION; }
+
+    Utf16String fg_color() const;
+    void set_fg_color(Utf16View);
+
+    Utf16String link_color() const;
+    void set_link_color(Utf16View);
+
+    Utf16String vlink_color() const;
+    void set_vlink_color(Utf16View);
+
+    Utf16String alink_color() const;
+    void set_alink_color(Utf16View);
+
+    Utf16String bg_color() const;
+    void set_bg_color(Utf16View);
+
+    Utf16String const& referrer() const { return m_referrer; }
+    void set_referrer(Utf16String);
+
+    void set_url(URL::URL const& url);
+    URL::URL const& url() const { return m_url; }
+    URL::URL fallback_base_url() const;
+    URL::URL base_url() const;
+    Optional<URL::URL> get_the_base_url() const;
+    String const& serialized_url() const;
+    String const& serialized_base_url() const;
+    // What a hover of the render clock tells the page the link it is over with.
+    HoverLinkReporter& hover_link_reporter();
+    void update_hover_link_base();
+
+    void update_base_element(Badge<HTML::HTMLBaseElement>);
+    void did_set_frozen_base_url(Badge<HTML::HTMLBaseElement>);
+    GC::Ptr<HTML::HTMLBaseElement> first_base_element_with_href_in_tree_order() const;
+    GC::Ptr<HTML::HTMLBaseElement> first_base_element_with_target_in_tree_order() const;
+    void respond_to_base_url_changes(URL::URL const& old_document_url, URL::URL const& old_base_url);
+
+    Utf16String url_string_for_bindings() const { return utf16_string_from_url_ascii(m_url.to_string()); }
+    Utf16String document_uri() const { return url_string_for_bindings(); }
+
+    URL::Origin const& origin() const;
+    void set_origin(URL::Origin const& origin);
+
+    HTML::OpenerPolicy const& opener_policy() const { return m_opener_policy; }
+    void set_opener_policy(HTML::OpenerPolicy policy) { m_opener_policy = move(policy); }
+
+    Optional<URL::URL> encoding_parse_url(Utf16View) const;
+    Optional<Utf16String> encoding_parse_and_serialize_url(Utf16View) const;
+
+    CSS::StyleComputer& style_computer()
+    {
+        if (!m_style_computer) [[unlikely]]
+            create_style_computer();
+        return *m_style_computer;
+    }
+    CSS::StyleComputer const& style_computer() const { return const_cast<Document&>(*this).style_computer(); }
+    // NB: The style computer is made when something first needs it, so a document that never styles anything, such as
+    //     one DOMParser creates, never makes one.
+    CSS::StyleComputer* style_computer_if_created() { return m_style_computer.ptr(); }
+
+    CSS::FontComputer& font_computer() { return *m_font_computer; }
+    CSS::FontComputer const& font_computer() const { return *m_font_computer; }
+
+    CSS::StyleSheetList& style_sheets();
+    CSS::StyleSheetList const& style_sheets() const;
+
+    void for_each_active_css_style_sheet(Function<void(CSS::StyleSheetState&)> const& callback) const;
+
+    Optional<Utf16String> get_style_sheet_source(CSS::StyleSheetIdentifier const&) const;
+
+    virtual Utf16FlyString node_name() const override { return "#document"_utf16_fly_string; }
+
+    enum class BoundaryEventTypes {
+        Pointer,
+        Mouse,
+        All,
+    };
+    void set_hovered_node(GC::Ptr<Node>, Optional<HoverEventData> = {});
+    void dispatch_boundary_events(GC::Ptr<Node> old_target, GC::Ptr<Node> target, Optional<HoverEventData>, BoundaryEventTypes);
+    Node* hovered_node() { return m_hovered_node.ptr(); }
+    Node const* hovered_node() const { return m_hovered_node.ptr(); }
+
+    void set_inspected_node(GC::Ptr<Node>);
+    GC::Ptr<Node const> inspected_node() const { return m_inspected_node; }
+
+    void set_highlighted_node(GC::Ptr<Node>, Optional<CSS::PseudoElement>);
+    Layout::Node* highlighted_layout_node(Layout::BegunRead const& read);
+    Layout::Node const* highlighted_layout_node(Layout::BegunRead const& read) const { return const_cast<Document*>(this)->highlighted_layout_node(read); }
+    void set_flexbox_highlighted_node(GC::Ptr<Node>, Painting::FlexboxInspectorOverlayOptions);
+    void clear_flexbox_highlighted_node(GC::Ptr<Node>);
+    void set_grid_highlighted_node(GC::Ptr<Node>, Painting::GridInspectorOverlayOptions);
+    void clear_grid_highlighted_node(GC::Ptr<Node>);
+
+    Element* document_element();
+    Element const* document_element() const;
+
+    // https://www.w3.org/TR/SVG2/struct.html#InterfaceDocumentExtensions
+    GC::Ptr<SVG::SVGSVGElement> root_element();
+
+    HTML::HTMLHtmlElement* html_element();
+    HTML::HTMLHeadElement* head();
+    GC::Ptr<HTML::HTMLTitleElement> title_element();
+
+    Utf16FlyString dir() const;
+    void set_dir(Utf16View);
+
+    HTML::HTMLElement* body();
+
+    HTML::HTMLHtmlElement const* html_element() const
+    {
+        return const_cast<Document*>(this)->html_element();
+    }
+
+    HTML::HTMLHeadElement const* head() const
+    {
+        return const_cast<Document*>(this)->head();
+    }
+
+    GC::Ptr<HTML::HTMLTitleElement const> title_element() const
+    {
+        return const_cast<Document*>(this)->title_element();
+    }
+
+    HTML::HTMLElement const* body() const
+    {
+        return const_cast<Document*>(this)->body();
+    }
+
+    WebIDL::ExceptionOr<void> set_body(HTML::HTMLElement* new_body);
+
+    Utf16String title() const;
+    WebIDL::ExceptionOr<void> set_title(Utf16View);
+
+    GC::Ptr<HTML::BrowsingContext> browsing_context() { return m_browsing_context; }
+    GC::Ptr<HTML::BrowsingContext const> browsing_context() const { return m_browsing_context; }
+
+    void set_browsing_context(GC::Ptr<HTML::BrowsingContext>);
+
+    bool style_engine_tracks_tree() const { return m_style_engine_tracks_tree; }
+    void ensure_style_engine_tracks_tree();
+
+    // The document's identity in the style mirror, which only names it as the root of the DOM child sequence.
+    [[nodiscard]] CSS::StyleNodeID style_node_id() const { return m_style_node_id; }
+    void set_style_node_id(CSS::StyleNodeID);
+
+    Page& page();
+    Page const& page() const;
+    GC::Ref<EventTarget> relevant_global_event_target() const { return m_relevant_global_event_target; }
+
+    Color background_color(Layout::BegunRead const& read) const;
+    Color canvas_background_color(Layout::BegunRead const& read) const;
+    CSS::PreferredColorScheme canvas_color_scheme(Layout::BegunRead const& read) const;
+
+    Optional<Color> normal_link_color() const;
+    void set_normal_link_color(Optional<Color>);
+
+    Optional<Color> active_link_color() const;
+    void set_active_link_color(Optional<Color>);
+
+    Optional<Color> visited_link_color() const;
+    void set_visited_link_color(Optional<Color>);
+
+    Optional<Vector<Utf16FlyString> const&> supported_color_schemes() const;
+    // 'only' is a modifier on the scheme list rather than a member of it, so it travels alongside; both setters
+    // take it so the two can't drift apart.
+    bool supported_color_schemes_are_only() const { return m_supported_color_schemes_are_only; }
+    void set_supported_color_schemes(Vector<Utf16FlyString>, bool only = false);
+    void set_supported_color_schemes(Optional<Vector<Utf16FlyString>>, bool only = false);
+    void obtain_supported_color_schemes();
+
+    void obtain_theme_color(Layout::BegunRead const& read);
+    Color theme_color(Layout::BegunRead const& read);
+
+    void update_style();
+    // update_style(), or a read of style or layout, joins the style update that flew beside the event loop first,
+    // and drains its reactions against the inputs it was sealed with: what was written beside it is the next
+    // transaction's. Where none flew, that is one test.
+    void drain_flown_style_update(Layout::BegunRead const& read)
+    {
+        if (m_flown_style_update_inputs.has_value()) [[unlikely]]
+            drain_style_update_that_flew(read);
+    }
+    // Whether a style update flew whose reactions have not been drained yet.
+    bool has_flown_style_update() const { return m_flown_style_update_inputs.has_value(); }
+    // Records what update_style() records before it runs the document's style update, and lets the update fly
+    // beside the event loop where `blocker` is none. The next update_style() takes its reactions in. Answers whether
+    // the update flies.
+    bool let_style_update_fly(Layout::RustFFI::FfiFlightBlocker blocker);
+    // Brings the style up to date, and lets the first round of the rendering update's layout fly beside the event loop
+    // where `blocker` is none and the layout is not up to date. The next layout update takes it in. Answers whether the
+    // round flies.
+    bool let_layout_fly(Layout::RustFFI::FfiFlightBlocker blocker);
+    // Takes in the layout round that flew, as the frame it flew in left the document, and answers whether that laid the
+    // document out: no other round runs, so what was written since the round flew is the next layout update's.
+    bool take_flown_layout_in();
+    // While one lives, the document reads as the layout that flew left it: the writes made since wait behind those made
+    // meanwhile, and its layout is up to date as of the frame.
+    class [[nodiscard]] LayoutAsItFlew {
+        AK_MAKE_NONCOPYABLE(LayoutAsItFlew);
+        AK_MAKE_NONMOVABLE(LayoutAsItFlew);
+
+    public:
+        explicit LayoutAsItFlew(Document&);
+        ~LayoutAsItFlew();
+
+    private:
+        GC::Ref<Document> m_document;
+    };
+    void note_throttled_animation_style_update() { m_has_throttled_animation_style_update = true; }
+    void note_animations_that_can_skip_per_frame_style_updates();
+    void flush_throttled_animation_style_update();
+    void flush_throttled_animation_style_update_for_node(Node const&);
+    void schedule_compositor_animation_wakeup(double delay_ms);
+    void stop_compositor_animation_timers();
+    void arm_compositor_animation_timers_for_testing(Badge<Internals::Internals>);
+    void fire_compositor_animation_wakeup_for_testing(Badge<Internals::Internals>, double frame_time_ms);
+    void force_visual_context_tree_rebuild_on_next_compositor_animation_update_for_testing(Badge<Internals::Internals>);
+    void request_reentrant_animation_style_flush_for_testing(Badge<Internals::Internals>, Node const&);
+    bool run_empty_animation_style_update_for_testing(Badge<Internals::Internals>);
+    bool compositor_animation_wakeup_timer_is_active() const;
+    bool compositor_animation_observation_timer_is_active() const;
+    void throttled_animation_visibility_changed();
+    // Restyle the elements whose style read an axis of the viewport that moved from previous_viewport_size.
+    void invalidate_style_for_viewport_change(CSSPixelSize previous_viewport_size);
+    // Restyle the elements whose style computed from what `changes` names of the document's environment.
+    void record_style_environment_change(StyleEnvironmentChange changes);
+    void add_element_with_viewport_dependent_style(Element& element) { m_elements_with_viewport_dependent_style.set(element); }
+    bool suppresses_attribute_style_invalidation() const { return m_suppresses_attribute_style_invalidation; }
+    void set_suppresses_attribute_style_invalidation(bool suppresses) { m_suppresses_attribute_style_invalidation = suppresses; }
+    enum class StyleUpdateMode : u8 {
+        Normal,
+        OnlyIfNeeded,
+        StopAtDisplayNone,
+    };
+    bool update_style_for_element(AbstractElement const&);
+    bool update_style_for_element(AbstractElement const&, StyleUpdateMode);
+    enum class ThrottledAnimationSamplingScope : u8 {
+        Document,
+        Element,
+    };
+    void update_layout(UpdateLayoutReason);
+    void update_layout(UpdateLayoutReason, ThrottledAnimationSamplingScope);
+    void update_style_and_layout_once(Layout::BegunRead const&, UpdateLayoutReason, ThrottledAnimationSamplingScope);
+    void update_layout_if_needed_for_node(Node const&, UpdateLayoutReason);
+    [[nodiscard]] bool layout_is_up_to_date() const;
+    // Whether anything the document's style depends on may have moved since its last style update.
+    [[nodiscard]] bool has_style_work(Layout::BegunRead const&) const;
+    [[nodiscard]] bool layout_is_known_stale() const;
+    void clear_devtools_layout_inspection_data();
+    void sample_animation_effects_needing_style_update();
+    void update_style_computer_viewport_rect();
+    bool needs_animated_style_update() const { return m_needs_animated_style_update; }
+    void clear_needs_animated_style_update();
+    void set_cursor_may_be_stale() { m_cursor_may_be_stale = true; }
+    [[nodiscard]] bool take_cursor_may_be_stale() { return exchange(m_cursor_may_be_stale, false); }
+    [[nodiscard]] bool is_running_update_layout() const;
+
+    // The selection changed, or lost its range, so the selection states of the boxes it paints through are stale. They
+    // are found again before the next recording: the selection may change beside a frame in flight, which holds the
+    // boxes.
+    void note_selection_changed();
+    // Writes the selection and find-in-page match states left stale to the paint state.
+    void update_highlight_states_if_needed(Layout::BegunRead const&);
+    // What layout has told this document and the document has not acted on yet.
+    [[nodiscard]] CommitMessages& commit_messages() { return *m_commit_messages; }
+
+    void invalidate_layout_tree(InvalidateLayoutTreeReason);
+
+    void tear_down_layout_tree_for_svg_image_document(Badge<SVG::SVGDecodedImageData>);
+
+    virtual bool is_child_allowed(Node const&) const override;
+    virtual WebIDL::ExceptionOr<void> cloned(Node&, bool) const override;
+
+    Layout::Viewport const* layout_node(Layout::BegunRead const& read) const;
+    Layout::Viewport* layout_node(Layout::BegunRead const& read);
+
+    Layout::Viewport const* unsafe_layout_node(Layout::BegunRead const& read) const;
+    Layout::Viewport* unsafe_layout_node(Layout::BegunRead const& read);
+    bool has_committed_viewport_box() const;
+
+    bool has_paint_state() const { return !!m_paint_state; }
+    Painting::DocumentPaintState& paint_state();
+    Painting::DocumentPaintState const& paint_state() const;
+    // Whether the last layout committed a box whose `content-visibility` is `auto`.
+    bool has_boxes_with_auto_content_visibility() const;
+
+    PaintTiming::DocumentPaintTimingState& paint_timing_state() { return m_paint_timing_state; }
+
+    GC::Ref<NodeList> get_elements_by_name(Utf16View);
+
+    GC::Ref<HTMLCollection> applets();
+    GC::Ref<HTMLCollection> anchors();
+    GC::Ref<HTMLCollection> images();
+    GC::Ref<HTMLCollection> embeds();
+    GC::Ref<HTMLCollection> plugins();
+    GC::Ref<HTMLCollection> links();
+    GC::Ref<HTMLCollection> forms();
+    GC::Ref<HTMLCollection> scripts();
+    GC::Ref<HTML::HTMLAllCollection> all();
+
+    // https://drafts.csswg.org/css-font-loading/#font-source
+    GC::Ref<CSS::FontFaceSet> fonts();
+    GC::Ref<CSS::HighlightRegistry> highlight_registry();
+    CSS::HighlightRegistry* highlight_registry_if_exists() const { return m_highlight_registry.ptr(); }
+
+    void clear();
+    void capture_events();
+    void release_events();
+
+    // NB: The source is kept as source code, which LibJS compresses while nothing reads it.
+    Utf16String source() const { return m_source ? m_source->code() : Utf16String {}; }
+    size_t source_length_in_code_units() const { return m_source ? m_source->length_in_code_units() : 0; }
+    void set_source(Utf16String);
+
+    HTML::EnvironmentSettingsObject& relevant_settings_object() const;
+
+    using ElementCreationOptions = Bindings::ElementCreationOptions;
+    WebIDL::ExceptionOr<GC::Ref<Element>> create_element(Utf16FlyString const& local_name, ElementCreationOptions const& options);
+    WebIDL::ExceptionOr<GC::Ref<Element>> create_element(Utf16FlyString const& local_name, Variant<Utf16String, ElementCreationOptions> const& options);
+    WebIDL::ExceptionOr<GC::Ref<Element>> create_element_ns(Optional<Utf16String> const& namespace_, Utf16String const& qualified_name, ElementCreationOptions const& options);
+    WebIDL::ExceptionOr<GC::Ref<Element>> create_element_ns(Optional<Utf16String> const& namespace_, Utf16String const& qualified_name, Variant<Utf16String, ElementCreationOptions> const& options);
+    WebIDL::ExceptionOr<GC::Ref<Element>> create_element_ns(Optional<Utf16FlyString> const& namespace_, Utf16String const& qualified_name, Variant<Utf16String, ElementCreationOptions> const& options);
+    GC::Ref<DocumentFragment> create_document_fragment();
+    GC::Ref<Text> create_text_node(Utf16String data);
+    WebIDL::ExceptionOr<GC::Ref<CDATASection>> create_cdata_section(Utf16String data);
+    GC::Ref<Comment> create_comment(Utf16String data);
+    WebIDL::ExceptionOr<GC::Ref<ProcessingInstruction>> create_processing_instruction(Utf16FlyString const& target, Utf16String data);
+
+    WebIDL::ExceptionOr<GC::Ref<Attr>> create_attribute(Utf16FlyString const& local_name);
+    WebIDL::ExceptionOr<GC::Ref<Attr>> create_attribute_ns(Optional<Utf16FlyString> namespace_, Utf16FlyString const& qualified_name);
+
+    WebIDL::ExceptionOr<GC::Ref<Event>> create_event(Utf16FlyString const& interface);
+    GC::Ref<Range> create_range();
+
+    void set_pending_parsing_blocking_script(HTML::HTMLOrSVGScriptElement*);
+    HTML::HTMLOrSVGScriptElement* pending_parsing_blocking_script();
+    HTML::HTMLOrSVGScriptElement& take_pending_parsing_blocking_script(Badge<HTML::HTMLParser>);
+    bool has_pending_parsing_blocking_script() const { return m_pending_parsing_blocking_script.ptr(); }
+
+    void add_script_to_execute_when_parsing_has_finished(Badge<HTML::HTMLOrSVGScriptElement>, HTML::HTMLOrSVGScriptElement&);
+    Vector<GC::Ref<Element>>& scripts_to_execute_when_parsing_has_finished() { return m_scripts_to_execute_when_parsing_has_finished; }
+
+    Vector<GC::Ref<Element>>& scripts_to_execute_as_soon_as_possible() { return m_scripts_to_execute_as_soon_as_possible; }
+
+    Vector<GC::Ref<Element>>& scripts_to_execute_in_order_as_soon_as_possible() { return m_scripts_to_execute_in_order_as_soon_as_possible; }
+
+    HTML::ScriptRegistry& script_registry() { return m_script_registry; }
+    HTML::ScriptRegistry const& script_registry() const { return m_script_registry; }
+
+    QuirksMode mode() const { return m_quirks_mode; }
+    bool in_quirks_mode() const { return m_quirks_mode == QuirksMode::Yes; }
+
+    CSS::RustInlineStyleBlocks& inline_style_blocks() { return m_inline_style_blocks; }
+    bool in_limited_quirks_mode() const { return m_quirks_mode == QuirksMode::Limited; }
+    void set_quirks_mode(QuirksMode);
+
+    // The used `color-scheme` of the element referencing this document, when it is an SVG being
+    // used as an image. `prefers-color-scheme` inside such a document answers with it rather than
+    // with the page's preference, and the same image can be referenced twice with different
+    // answers.
+    Optional<CSS::PreferredColorScheme> svg_image_color_scheme() const { return m_svg_image_color_scheme; }
+    void set_svg_image_color_scheme(CSS::PreferredColorScheme color_scheme) { m_svg_image_color_scheme = color_scheme; }
+
+    // Whether this document of an SVG image holds content that is not SVG, which only paints in full through the
+    // document's visual contexts. Such an image is drawn from a raster of the document instead of from its records.
+    bool decoded_svg_holds_foreign_content() const { return m_decoded_svg_holds_foreign_content; }
+    void set_decoded_svg_holds_foreign_content(bool holds_foreign_content) { m_decoded_svg_holds_foreign_content = holds_foreign_content; }
+
+    bool needs_mathml_and_svg_user_agent_style_sheets() const { return m_needs_mathml_and_svg_user_agent_style_sheets; }
+    void set_needs_mathml_and_svg_user_agent_style_sheets();
+
+    // Whether an element of the kind has ever connected. Neither is cleared, so a document that never
+    // held one can skip the removal-time bookkeeping that only such an element makes necessary.
+    bool has_element_with_auto_directionality() const { return m_has_element_with_auto_directionality; }
+    void set_has_element_with_auto_directionality() { m_has_element_with_auto_directionality = true; }
+    bool has_form_or_fieldset_element() const { return m_has_form_or_fieldset_element; }
+    void set_has_form_or_fieldset_element() { m_has_form_or_fieldset_element = true; }
+
+    SubtreeInsertionScope* subtree_insertion_scope() const { return m_subtree_insertion_scope; }
+    void set_subtree_insertion_scope(Badge<SubtreeInsertionScope>, SubtreeInsertionScope* scope) { m_subtree_insertion_scope = scope; }
+
+    bool parser_cannot_change_the_mode() const { return m_parser_cannot_change_the_mode; }
+    void set_parser_cannot_change_the_mode(bool parser_cannot_change_the_mode) { m_parser_cannot_change_the_mode = parser_cannot_change_the_mode; }
+
+    Type document_type() const { return m_type; }
+    void set_document_type(Type type) { m_type = type; }
+
+    // https://dom.spec.whatwg.org/#html-document
+    bool is_html_document() const { return m_type == Type::HTML; }
+
+    // https://dom.spec.whatwg.org/#xml-document
+    bool is_xml_document() const { return m_type == Type::XML; }
+
+    using ImportNodeOptions = Bindings::ImportNodeOptions;
+    WebIDL::ExceptionOr<GC::Ref<Node>> import_node(GC::Ref<Node> node, ImportNodeOptions const&);
+    WebIDL::ExceptionOr<GC::Ref<Node>> import_node(GC::Ref<Node> node, Variant<bool, ImportNodeOptions> const&);
+    void adopt_node_steps(Node&);
+    WebIDL::ExceptionOr<GC::Ref<Node>> adopt_node(GC::Ref<Node>);
+
+    DocumentType const* doctype() const;
+    Utf16FlyString compat_mode() const;
+
+    // https://html.spec.whatwg.org/multipage/interaction.html#focused-area-of-the-document
+    GC::Ptr<Node> focused_area() { return m_focused_area; }
+    GC::Ptr<Node const> focused_area() const { return m_focused_area; }
+    enum class InvalidateFocusPseudoClasses {
+        Yes,
+        No,
+    };
+    void set_focused_area(GC::Ptr<Node>, InvalidateFocusPseudoClasses = InvalidateFocusPseudoClasses::Yes);
+
+    bool focused_container_has_explicit_focus() const { return m_focused_container_has_explicit_focus; }
+    void set_focused_container_has_explicit_focus(bool value) { m_focused_container_has_explicit_focus = value; }
+
+    // https://html.spec.whatwg.org/multipage/interaction.html#sequential-focus-navigation-starting-point
+    GC::Ptr<Node> sequential_focus_navigation_starting_point() { return m_sequential_focus_navigation_starting_point; }
+    void move_sequential_focus_navigation_starting_point_to(GC::Ptr<Node> node) { m_sequential_focus_navigation_starting_point = node; }
+
+    HTML::FocusTrigger last_focus_trigger() const { return m_last_focus_trigger; }
+    void set_last_focus_trigger(HTML::FocusTrigger trigger) { m_last_focus_trigger = trigger; }
+
+    // Whether the user last moved focus with a pointing device and hasn't used the keyboard since. Focus that a script
+    // moves leaves this alone, since this decides whether that focus is indicated.
+    bool last_user_focus_was_by_pointer() const { return m_last_user_focus_was_by_pointer; }
+    void set_last_user_focus_was_by_pointer(bool value) { m_last_user_focus_was_by_pointer = value; }
+
+    // Using the keyboard clears last_user_focus_was_by_pointer(), which can change whether the focused element matches
+    // :focus-visible without focus moving.
+    void note_keyboard_interaction();
+
+    // The focusVisible option of the focus() call that last moved focus here, if it had one, for the element it focused.
+    // Any other focus move here clears it, and it never applies to another element this document's focus moves to.
+    Optional<bool> requested_focus_visibility_for(Node const& node) const
+    {
+        if (m_focus_visibility_request_target.ptr() != &node)
+            return {};
+        return m_requested_focus_visibility;
+    }
+    void set_requested_focus_visibility(GC::Ptr<Node> target, Optional<bool> value)
+    {
+        m_focus_visibility_request_target = value.has_value() ? target : nullptr;
+        m_requested_focus_visibility = value.value_or(false);
+    }
+
+    // A focus() call with a focusVisible option on the element that already has focus applies the option to it.
+    void request_focus_visibility_for_focused_element(bool focus_visible);
+
+    Element const* active_element() const;
+    void set_active_element(GC::Ptr<Element>);
+
+    Element const* target_element() const { return m_target_element.ptr(); }
+    void set_target_element(GC::Ptr<Element>);
+
+    Vector<GC::Ref<Element>>& autofocus_candidates() { return m_autofocus_candidates; }
+    bool autofocus_processed_flag() const { return m_autofocus_processed_flag; }
+    void set_autofocus_processed_flag(bool value) { m_autofocus_processed_flag = value; }
+    void flush_autofocus_candidates();
+
+    Element const* accessibility_focus_target() const { return m_accessibility_focus_target.ptr(); }
+    void set_accessibility_focus_target(GC::Ptr<Element>);
+
+    void try_to_scroll_to_the_fragment(bool allow_text_directive_scroll = false);
+    void schedule_text_fragment_search_after_parser_progress(Badge<HTML::HTMLParser>);
+    void scroll_to_the_fragment(bool allow_text_directive_scroll = false);
+    void scroll_to_the_beginning_of_the_document();
+
+    bool created_for_appropriate_template_contents() const { return m_created_for_appropriate_template_contents; }
+
+    GC::Ref<Document> appropriate_template_contents_owner_document();
+
+    HTML::DocumentReadyState readiness() const { return m_readiness; }
+    void update_readiness(HTML::DocumentReadyState);
+
+    Utf16String last_modified() const;
+
+    [[nodiscard]] GC::Ptr<HTML::Window> window() const { return m_window; }
+
+    void set_window(HTML::Window&);
+
+    WebIDL::ExceptionOr<void> write(Utf16View text);
+    WebIDL::ExceptionOr<void> writeln(Utf16View text);
+
+    WebIDL::ExceptionOr<Document*> open(Optional<Utf16String> const& = {}, Optional<Utf16String> const& = {});
+    WebIDL::ExceptionOr<GC::Ptr<HTML::WindowProxy>> open(Utf16View url, Utf16View name, Utf16View features);
+    WebIDL::ExceptionOr<void> close();
+
+    GC::Ptr<HTML::WindowProxy const> default_view() const;
+    GC::Ptr<HTML::WindowProxy> default_view();
+
+    Utf16FlyString const& content_type() const { return m_content_type; }
+    void set_content_type(Utf16FlyString content_type) { m_content_type = move(content_type); }
+
+    Optional<Utf16String> const& pragma_set_default_language() const { return m_pragma_set_default_language; }
+    void set_pragma_set_default_language(Utf16String language) { m_pragma_set_default_language = move(language); }
+    Optional<Utf16String> const& http_content_language() const { return m_http_content_language; }
+
+    bool has_encoding() const { return m_encoding.has_value(); }
+    Optional<Utf16String> const& encoding() const { return m_encoding; }
+    Utf16String encoding_or_default() const { return m_encoding.value_or("UTF-8"_utf16); }
+    void set_encoding(Optional<Utf16String> encoding) { m_encoding = move(encoding); }
+
+    // NOTE: These are intended for the JS bindings
+    Utf16String character_set() const { return encoding_or_default(); }
+    Utf16String charset() const { return encoding_or_default(); }
+    Utf16String input_encoding() const { return encoding_or_default(); }
+
+    bool ready_for_post_load_tasks() const { return m_ready_for_post_load_tasks; }
+    void set_ready_for_post_load_tasks(bool ready);
+
+    // NB: Whether this document has yet to fire its load event, including for contents written after document.open().
+    bool load_event_still_needed() const { return !m_ready_for_post_load_tasks || m_opened_contents_still_loading; }
+
+    // https://html.spec.whatwg.org/multipage/timers-and-user-prompts.html#print-when-loaded
+    bool print_when_loaded() const { return m_print_when_loaded; }
+    void set_print_when_loaded() { m_print_when_loaded = true; }
+
+    void run_the_printing_steps();
+
+    void completely_finish_loading();
+    bool completely_loaded_deferred() const { return m_completely_loaded_deferred; }
+    void queue_navigation_timing_entry();
+
+    DOMImplementation* implementation();
+
+    // https://wicg.github.io/scroll-to-text-fragment/#feature-detectability
+    GC::Ref<FragmentDirective> fragment_directive();
+    Optional<Vector<HTML::TextDirective>> const& pending_text_directives() const { return m_pending_text_directives; }
+    void clear_pending_text_directives();
+    ReadonlySpan<GC::Ref<Range>> text_fragment_ranges() const { return m_text_fragment_ranges; }
+    void dismiss_text_fragment_indication();
+    bool pending_text_directive_scroll_allowed() const { return m_pending_text_directive_scroll_allowed; }
+    bool check_if_a_text_directive_can_be_scrolled(Optional<URL::Origin> const&, Optional<HTML::UserNavigationInvolvement>);
+    bool text_directive_user_activation() const { return m_text_directive_user_activation; }
+    void set_text_directive_user_activation(bool value) { m_text_directive_user_activation = value; }
+    bool browsing_context_group_has_multiple_contexts() const;
+    bool browsing_context_group_has_remote_contexts() const { return m_browsing_context_group_has_remote_contexts; }
+
+    // AD-HOC: The cache mode of the navigation that created this document, if that was a navigation that bypassed the
+    //         HTTP cache ("reload") or one that used it without revalidation ("force-cache"): a reload that bypasses
+    //         the cache, a history traversal, or a child navigable's navigation while its container document loaded
+    //         that way. Until the document has completely loaded, the requests it makes without a cache mode of their
+    //         own use this cache mode too. Otherwise, this is "default".
+    HTTP::CacheMode cache_mode_while_loading() const { return is_completely_loaded() ? HTTP::CacheMode::Default : m_navigation_cache_mode; }
+
+    // Reports the state of the containers of this document's child navigables to the UI process, which forwards it to
+    // the processes that host child navigables whose documents are in another process.
+    void report_container_state_of_child_navigables();
+
+    GC::Ptr<Element> current_script() const { return m_current_script; }
+    Variant<GC::Ref<HTML::HTMLScriptElement>, GC::Ref<SVG::SVGScriptElement>, Empty> current_script_for_bindings() const;
+    void set_current_script(Badge<HTML::HTMLOrSVGScriptElement>, GC::Ptr<Element> script) { m_current_script = move(script); }
+    static constexpr size_t current_script_offset() { return offsetof(Document, m_current_script); }
+
+    void increment_ignore_destructive_writes_counter() { m_ignore_destructive_writes_counter++; }
+    void decrement_ignore_destructive_writes_counter() { m_ignore_destructive_writes_counter--; }
+
+    virtual EventTarget* get_parent(Event const&) override;
+
+    Utf16String dump_dom_tree_as_json() const;
+
+    [[nodiscard]] bool has_a_style_sheet_that_is_blocking_scripts() const;
+
+    bool is_fully_active() const
+    {
+        // Whether a document is fully active rarely changes, so the answer is kept until invalidate_full_activity().
+        if (m_full_activity_epoch == s_full_activity_epoch) [[likely]]
+            return m_is_fully_active;
+        return update_is_fully_active();
+    }
+    bool is_active() const;
+    bool observers_consider_fully_active() const { return m_observers_consider_document_fully_active; }
+
+    // To call whenever anything that decides if a document is fully active changes: a navigable's parent, its being
+    // destroyed, or its active document, or a document's navigable or unload counter.
+    static void invalidate_full_activity() { ++s_full_activity_epoch; }
+
+    [[nodiscard]] HTML::HTMLParser::AllowDeclarativeShadowRoots allow_declarative_shadow_roots() const;
+    void set_allow_declarative_shadow_roots(HTML::HTMLParser::AllowDeclarativeShadowRoots allow_declarative_shadow_roots);
+
+    GC::Ref<HTML::History> history();
+    GC::Ref<HTML::History> history() const;
+
+    [[nodiscard]] GC::Ptr<HTML::Location> location();
+
+    bool anything_is_delaying_the_load_event() const;
+    void increment_number_of_things_delaying_the_load_event(Badge<DocumentLoadEventDelayer>);
+    void decrement_number_of_things_delaying_the_load_event(Badge<DocumentLoadEventDelayer>);
+
+    void set_html_parser_end_state(GC::Ptr<HTML::HTMLParserEndState>);
+    void schedule_html_parser_end_check();
+    bool has_html_parser_end_state() const { return m_html_parser_end_state != nullptr; }
+
+    void add_pending_css_import_rule(Badge<CSS::StyleSheetImport>, NonnullRefPtr<CSS::StyleSheetImport>);
+    void remove_pending_css_import_rule(Badge<CSS::StyleSheetImport>, NonnullRefPtr<CSS::StyleSheetImport>);
+    bool has_pending_style_sheet_requests() const { return m_number_of_pending_style_sheet_requests > 0 || !m_pending_css_import_rules.is_empty(); }
+    void increment_number_of_pending_style_sheet_requests(Badge<DocumentLoadEventDelayer>);
+    void decrement_number_of_pending_style_sheet_requests(Badge<DocumentLoadEventDelayer>);
+
+    bool page_showing() const { return m_page_showing; }
+    void set_page_showing(bool);
+
+    bool hidden() const;
+    HTML::VisibilityState visibility_state() const { return m_visibility_state; }
+
+    // Whether a media element of this document is producing audible output (see HTMLMediaElement::update_audio_play_state()).
+    bool is_playing_audio() const;
+    void media_element_audio_play_state_changed(Badge<HTML::HTMLMediaElement>);
+
+    // https://html.spec.whatwg.org/multipage/interaction.html#update-the-visibility-state
+    void update_the_visibility_state(HTML::VisibilityState);
+
+    void run_the_resize_steps();
+    void run_the_scroll_steps(double frame_timestamp);
+
+    u32 increment_video_frame_request_callback_identifier() { return ++m_video_frame_request_callback_identifier; }
+    void run_the_video_frame_request_callbacks(double now);
+    void release_video_frames_held_for_callbacks();
+
+    void evaluate_media_queries_and_report_changes();
+    bool needs_media_query_list_evaluation() const { return m_needs_media_query_list_evaluation; }
+    bool needs_media_rule_evaluation() const { return m_needs_media_rule_evaluation; }
+    void evaluate_media_rules_for_style_update() { evaluate_media_rules(); }
+    void set_needs_media_query_evaluation()
+    {
+        m_needs_media_query_list_evaluation = true;
+        m_needs_media_rule_evaluation = true;
+    }
+    void add_media_query_list(GC::Ref<CSS::MediaQueryList>);
+
+    GC::Ref<CSS::VisualViewport> visual_viewport();
+    [[nodiscard]] CSSPixelRect viewport_rect() const;
+
+    void register_viewport_client(ViewportClient&);
+    void unregister_viewport_client(ViewportClient&);
+    void inform_all_viewport_clients_about_the_current_viewport_rect();
+
+    bool has_focus_for_bindings() const;
+    bool has_focus() const;
+
+    bool is_fully_active_descendant_of_a_top_level_traversable_with_user_attention() const;
+
+    bool allow_focus() const;
+
+    void set_parser(Badge<HTML::HTMLParser>, HTML::HTMLParser&);
+    void detach_parser();
+    GC::Ptr<HTML::HTMLParser> parser() const { return m_parser; }
+    u64 parser_generation() const { return m_parser_generation; }
+
+    [[nodiscard]] bool is_temporary_document_for_fragment_parsing() const { return m_temporary_document_for_fragment_parsing; }
+
+    static bool is_valid_name(Utf16View const&);
+
+    GC::Ref<NodeIterator> create_node_iterator(Node& root, unsigned what_to_show, GC::Ptr<NodeFilter>);
+    GC::Ref<TreeWalker> create_tree_walker(Node& root, unsigned what_to_show, GC::Ptr<NodeFilter>);
+
+    void register_node_iterator(Badge<NodeIterator>, NodeIterator&);
+    void unregister_node_iterator(Badge<NodeIterator>, NodeIterator&);
+
+    void attach_range(Badge<Range>, Range&);
+    void detach_range(Badge<Range>, Range&);
+
+    Range::DocumentLiveRangeList& live_ranges() { return m_live_ranges; }
+
+    void register_document_observer(Badge<DocumentObserver>, DocumentObserver&);
+    void unregister_document_observer(Badge<DocumentObserver>, DocumentObserver&);
+
+    void register_svg_use_element(Badge<SVG::SVGUseElement>, SVG::SVGUseElement&);
+    void unregister_svg_use_element(Badge<SVG::SVGUseElement>, SVG::SVGUseElement&);
+    SVG::SVGUseElement::DocumentUseElementList& svg_use_elements() { return m_svg_use_elements; }
+
+    template<typename Callback>
+    void for_each_node_iterator(Callback callback)
+    {
+        for (auto& node_iterator : m_node_iterators)
+            callback(*node_iterator);
+    }
+
+    bool has_completed_style_update() const { return m_has_completed_style_update; }
+    bool has_dirty_style_attributes() const { return !m_elements_with_dirty_style_attributes.is_empty(); }
+    // Whether a style update would report the style attributes it left out while nothing read them.
+    bool has_unreported_style_attributes_to_report() const;
+    // Whether a tree scope's counter styles may have moved since a style update last settled every scope's.
+    bool counter_style_scopes_need_update() const { return m_counter_style_scopes_need_update; }
+    void set_counter_style_scopes_need_update(bool value) { m_counter_style_scopes_need_update = value; }
+    void note_counter_style_scope_to_settle(ShadowRoot&);
+    void settle_counter_style_scopes(Layout::BegunRead const&);
+
+    // Where a slottable's slot leaves or takes it out of a `display: none` subtree, its animations terminate or resume.
+    // That is decided at the next style update, as an assignment can go through no slot on its way to another.
+    void note_element_assigned_slot_changed(Element&);
+    void forget_assigned_slot_change_note(Element&);
+    bool has_assigned_slot_change_notes() const { return !m_elements_whose_assigned_slot_changed.is_empty(); }
+    // What a style update that flies knows of is settled as it lands. What comes beside it is the next update's.
+    void note_style_update_flew_past_assigned_slot_changes();
+    enum class AssignedSlotChanges : u8 {
+        Recorded,
+        FlewPast,
+    };
+    void settle_elements_whose_assigned_slot_changed(AssignedSlotChanges, Layout::BegunRead const&, Function<void(Element&)> const& compose_element);
+    void set_has_completed_style_update() { m_has_completed_style_update = true; }
+    void mark_style_attribute_dirty(Element&);
+    void synchronize_dirty_style_attributes();
+    void flush_deferred_style_change_event();
+    // Once the registrations changed, name again to the style engine what every environment an
+    // element holds hands down, before the transaction that derives records under them.
+    void republish_custom_property_environments_for_style_update(Layout::BegunRead const&);
+    // The style engine resolves substitutions against the Rust registry, whose parse context is
+    // set up by the first sync; a document without registrations syncs once for it.
+    void build_registered_properties_cache_for_style_update()
+    {
+        build_registered_properties_cache();
+        if (!m_rust_custom_property_registry_synced)
+            sync_custom_property_registrations_to_rust();
+    }
+    void set_needs_registered_properties_cache_update() { m_needs_registered_properties_cache_update = true; }
+    void set_needs_container_query_evaluation_after_layout(Element const& query_container);
+    [[nodiscard]] bool has_size_containers_needing_evaluation_after_layout(Layout::BegunRead const& read) const;
+
+    void set_needs_full_layout_tree_update();
+
+    CSS::ScrollStateQueryContainers& scroll_state_query_containers() { return m_scroll_state_query_containers; }
+
+    [[nodiscard]] Layout::NodeArena& layout_node_arena();
+    [[nodiscard]] Layout::NodeArena* layout_node_arena_if_created() { return m_layout_node_arena; }
+    [[nodiscard]] Layout::NodeArena const* layout_node_arena_if_created() const { return m_layout_node_arena; }
+    Painting::ChromeWidgetRegistry& chrome_widget_registry() { return *m_chrome_widget_registry; }
+    Painting::ChromeWidgetRegistry const& chrome_widget_registry() const { return *m_chrome_widget_registry; }
+
+    // Records that a pending update cannot be attributed to any boundary in the partial relayout
+    // root set; the layout node arena keeps the escape bit next to those roots.
+    void record_partial_relayout_escape(PartialRelayoutEscapeReason);
+
+    bool has_active_favicon() const { return !!m_active_favicon; }
+    void check_favicon_after_loading_link_resource();
+
+    void increment_throw_on_dynamic_markup_insertion_counter(Badge<HTML::HTMLParser>);
+    void decrement_throw_on_dynamic_markup_insertion_counter(Badge<HTML::HTMLParser>);
+
+    // https://html.spec.whatwg.org/multipage/dom.html#is-initial-about:blank
+    bool is_initial_about_blank() const { return m_is_initial_about_blank; }
+
+    // https://html.spec.whatwg.org/multipage/dom.html#concept-document-navigation-id
+    Optional<Utf16String> const& during_loading_navigation_id_for_webdriver_bidi() const { return m_navigation_id; }
+    void set_during_loading_navigation_id_for_webdriver_bidi(Optional<Utf16String> navigation_id) { m_navigation_id = move(navigation_id); }
+    void set_is_initial_about_blank(bool b) { m_is_initial_about_blank = b; }
+
+    bool iframe_load_in_progress() const { return m_iframe_load_in_progress; }
+    void set_iframe_load_in_progress(bool value) { m_iframe_load_in_progress = value; }
+
+    bool mute_iframe_load() const { return m_mute_iframe_load; }
+    void set_mute_iframe_load(bool value) { m_mute_iframe_load = value; }
+
+    HTML::CrossProcessId id() const { return m_id.value(); }
+    void set_id(HTML::CrossProcessId);
+
+    // https://html.spec.whatwg.org/multipage/dom.html#concept-document-about-base-url
+    Optional<URL::URL> about_base_url() const { return m_about_base_url; }
+    void set_about_base_url(Optional<URL::URL> url)
+    {
+        m_about_base_url = move(url);
+        m_serialized_base_url.clear();
+    }
+
+    // https://dom.spec.whatwg.org/#document-base-url-override
+    void set_base_url_override(Optional<URL::URL> url)
+    {
+        m_base_url_override = move(url);
+        m_serialized_base_url.clear();
+    }
+
+    Utf16String domain() const;
+    WebIDL::ExceptionOr<void> set_domain(Utf16View);
+
+    struct PendingScrollEvent {
+        GC::Ref<EventTarget> event_target;
+        Utf16FlyString event_type;
+        bool operator==(PendingScrollEvent const&) const = default;
+
+        void visit_edges(GC::Cell::Visitor&) const;
+    };
+    bool append_pending_scroll_event(PendingScrollEvent);
+    Vector<PendingScrollEvent>& pending_scroll_events() { return m_pending_scroll_events; }
+
+    // https://html.spec.whatwg.org/multipage/document-lifecycle.html#completely-loaded
+    bool is_completely_loaded() const;
+
+    // https://html.spec.whatwg.org/multipage/origin.html#active-sandboxing-flag-set
+    HTML::SandboxingFlagSet active_sandboxing_flag_set() const;
+    void set_active_sandboxing_flag_set(HTML::SandboxingFlagSet);
+
+    // https://html.spec.whatwg.org/multipage/dom.html#concept-document-permissions-policy
+    PermissionsPolicy::PermissionsPolicy const& permissions_policy() const { return m_permissions_policy; }
+    void set_permissions_policy(PermissionsPolicy::PermissionsPolicy policy) { m_permissions_policy = move(policy); }
+
+    // https://html.spec.whatwg.org/multipage/dom.html#concept-document-policy-container
+    NonnullRefPtr<HTML::PolicyContainer> policy_container() const;
+    void set_policy_container(NonnullRefPtr<HTML::PolicyContainer>);
+
+    Vector<GC::Root<HTML::Navigable>> descendant_navigables();
+    Vector<GC::Root<HTML::Navigable>> const descendant_navigables() const;
+    Vector<GC::Root<HTML::Navigable>> inclusive_descendant_navigables();
+    GC::RootVector<GC::Ref<HTML::Navigable>> ancestor_navigables();
+    GC::RootVector<GC::Ref<HTML::Navigable>> const ancestor_navigables() const;
+    GC::RootVector<GC::Ref<HTML::Navigable>> inclusive_ancestor_navigables();
+    Vector<GC::Root<HTML::Navigable>> document_tree_child_navigables();
+
+    [[nodiscard]] bool has_been_destroyed() const { return m_has_been_destroyed; }
+
+    // https://html.spec.whatwg.org/multipage/document-lifecycle.html#destroy-a-document
+    void destroy();
+    // https://html.spec.whatwg.org/multipage/document-lifecycle.html#destroy-a-document-and-its-descendants
+    void destroy_a_document_and_its_descendants(GC::Ptr<GC::Function<void()>> after_all_destruction = {});
+
+    // https://html.spec.whatwg.org/multipage/document-lifecycle.html#abort-a-document
+    void abort();
+    // https://html.spec.whatwg.org/multipage/document-lifecycle.html#abort-a-document-and-its-descendants
+    void abort_a_document_and_its_descendants();
+
+    // https://html.spec.whatwg.org/multipage/document-lifecycle.html#unload-a-document
+    void unload(GC::Ptr<Document> new_document = nullptr, Optional<UnloadOfReplacedDocument>* unload_of_replaced_document = nullptr);
+    void take_unload_timing_of_replaced_document(UnloadOfReplacedDocument const&);
+    void set_window_is_taken_over_after_unload() { m_window_is_taken_over_after_unload = true; }
+
+    // https://html.spec.whatwg.org/multipage/dom.html#active-parser
+    GC::Ptr<HTML::HTMLParser> active_parser() const;
+
+    // https://html.spec.whatwg.org/multipage/dom.html#load-timing-info
+    DocumentLoadTimingInfo& load_timing_info() { return m_load_timing_info; }
+    DocumentLoadTimingInfo const& load_timing_info() const { return m_load_timing_info; }
+    void set_load_timing_info(DocumentLoadTimingInfo const& load_timing_info) { m_load_timing_info = load_timing_info; }
+
+    // https://html.spec.whatwg.org/multipage/dom.html#previous-document-unload-timing
+    DocumentUnloadTimingInfo& previous_document_unload_timing() { return m_previous_document_unload_timing; }
+    DocumentUnloadTimingInfo const& previous_document_unload_timing() const { return m_previous_document_unload_timing; }
+    void set_previous_document_unload_timing(DocumentUnloadTimingInfo const& previous_document_unload_timing) { m_previous_document_unload_timing = previous_document_unload_timing; }
+
+    GC::Ptr<NavigationTiming::PerformanceNavigationTiming> navigation_timing_entry() const { return m_navigation_timing_entry; }
+    void set_navigation_timing_entry(GC::Ref<NavigationTiming::PerformanceNavigationTiming> entry) { m_navigation_timing_entry = entry; }
+
+    // https://w3c.github.io/editing/docs/execCommand/
+    enum class DispatchInputEvent {
+        No,
+        Yes,
+    };
+    WebIDL::ExceptionOr<bool> exec_command(Utf16FlyString const& command, bool show_ui, TrustedTypes::TrustedHTMLOrString const& value);
+
+    // Whether the user changed the value of a text control or the content of an editing host in this document, which
+    // they would lose if the document were unloaded without asking them.
+    bool had_user_edits() const { return m_had_user_edits; }
+    void did_make_user_edit();
+    WebIDL::ExceptionOr<bool> exec_command_internal(Utf16FlyString const& command, bool show_ui, Utf16View value, DispatchInputEvent, Optional<Utf16FlyString> const& user_input_type = {}, GC::Ptr<StaticRange> deletion_range = nullptr, GC::Ptr<DocumentFragment> pasted_fragment = nullptr);
+    WebIDL::ExceptionOr<bool> query_command_enabled(Utf16FlyString const& command);
+    WebIDL::ExceptionOr<bool> query_command_indeterm(Utf16FlyString const& command);
+    WebIDL::ExceptionOr<bool> query_command_state(Utf16FlyString const& command);
+    WebIDL::ExceptionOr<bool> query_command_supported(Utf16FlyString const& command);
+    WebIDL::ExceptionOr<Utf16String> query_command_value(Utf16FlyString const& command);
+
+    WebIDL::ExceptionOr<GC::Ref<XPath::XPathExpression>> create_expression(Utf16String const& expression, GC::Ptr<XPath::XPathNSResolver> resolver = nullptr);
+    WebIDL::ExceptionOr<GC::Ref<XPath::XPathResult>> evaluate(Utf16String const& expression, DOM::Node const& context_node, GC::Ptr<XPath::XPathNSResolver> resolver = nullptr, WebIDL::UnsignedShort type = 0, GC::Ptr<XPath::XPathResult> result = nullptr);
+    GC::Ref<DOM::Node> create_ns_resolver(GC::Ref<DOM::Node> node_resolver); // legacy
+
+    // https://w3c.github.io/selection-api/#dfn-has-scheduled-selectionchange-event
+    bool has_scheduled_selectionchange_event() const { return m_has_scheduled_selectionchange_event; }
+    void set_scheduled_selectionchange_event(bool value) { m_has_scheduled_selectionchange_event = value; }
+
+    bool is_allowed_to_use_feature(PolicyControlledFeature) const;
+
+    void did_stop_being_active_document_in_navigable();
+
+    Utf16String dump_accessibility_tree_as_json();
+    Vector<WebView::AccessibilityNodeData> build_accessibility_node_data();
+    // Builds the tree and hands over what changed in it since the tracker's last build: every node whose data changed,
+    // and the IDs of the nodes that are gone. Hands over the whole tree when asked to, and for the tracker's first build
+    // of this document.
+    AccessibilityChangeTracker::Change build_accessibility_tree_change(AccessibilityChangeTracker&, bool whole_tree);
+
+    // The accessible name and description that the accessibility tree reports for an element, kept from one build of
+    // the tree to the next while an assistive technology consumes it, and dropped whenever a change could alter them.
+    struct CachedAccessibleText {
+        String name;
+        String description;
+    };
+    CachedAccessibleText const* cached_accessible_text(Element const&) const;
+    void cache_accessible_text(Element const&, CachedAccessibleText) const;
+    void invalidate_cached_accessibility_data(Node const&, Optional<Utf16FlyString> const& attribute_name = {}, ReadonlySpan<GC::Ref<Node>> added_nodes = {}, ReadonlySpan<GC::Ref<Node>> removed_nodes = {});
+
+    // A kept record, with the version it got when it was kept: Every record and geometry kept gets a new version, so
+    // the same version means the same data.
+    struct KeptAccessibilityRecord {
+        WebView::AccessibilityNodeData const* data { nullptr };
+        u64 version { 0 };
+    };
+    KeptAccessibilityRecord kept_accessibility_record(Node const&) const;
+    // Returns the version the record gets, or 0 when it isn't kept.
+    u64 cache_accessibility_record(Node const&, WebView::AccessibilityNodeData const&) const;
+    void invalidate_cached_accessibility_records_after_style_change(Element const&);
+
+    // A text node's character geometry, kept with its record from one build to the next along with what layout
+    // computed it from: The same line content at the same positions gives the same geometry, so it's computed again
+    // only when one of them changes.
+    struct CachedTextGeometry {
+        AK_MAKE_NONCOPYABLE(CachedTextGeometry);
+
+    public:
+        CachedTextGeometry() = default;
+        CachedTextGeometry(CachedTextGeometry&&) = default;
+        // Releases the references this held, before taking the other's.
+        CachedTextGeometry& operator=(CachedTextGeometry&&);
+        ~CachedTextGeometry();
+
+        // A containing block's line content, which each source holds a reference to, and that block's raw
+        // document-absolute position.
+        struct Source {
+            Layout::RustFFI::InlineContent const* line_content { nullptr };
+            i32 x { 0 };
+            i32 y { 0 };
+            bool operator==(Source const&) const = default;
+        };
+        Vector<Source> sources;
+        u64 version { 0 };
+        Vector<Gfx::IntPoint> character_offsets;
+        Vector<i32> line_break_character_offsets;
+        Vector<i32> line_heights;
+    };
+    CachedTextGeometry const* cached_text_geometry(Node const&) const;
+    // Returns the version the geometry gets, or 0 when it isn't kept.
+    u64 cache_text_geometry(Node const&, CachedTextGeometry) const;
+    // For tests: each text node whose kept geometry differs from what computing it again gives.
+    Vector<String> cached_text_geometry_mismatches();
+
+    // For tests: builds that compute every node's data again, without what earlier builds kept.
+    bool accessibility_caches_bypassed() const { return m_accessibility_caches_bypassed; }
+    // For tests: each node whose kept data differs from what computing it again gives.
+    Vector<String> cached_accessibility_record_mismatches();
+    // For tests: each cached name or description that differs from what computing it again gives.
+    Vector<String> cached_accessible_text_mismatches();
+
+    void make_active();
+
+    // https://html.spec.whatwg.org/multipage/interaction.html#set-the-initial-visibility-state
+    void set_initial_visibility_state(HTML::VisibilityState);
+
+    void set_salvageable(bool value) { m_salvageable = value; }
+
+    void make_unsalvageable(Utf16View reason);
+
+    HTML::ListOfAvailableImages& list_of_available_images();
+    HTML::ListOfAvailableImages const& list_of_available_images() const;
+
+    // https://html.spec.whatwg.org/multipage/links.html#map-of-preloaded-resources
+    HashMap<HTML::PreloadKey, GC::Ref<HTML::PreloadEntry>>& map_of_preloaded_resources() { return m_map_of_preloaded_resources; }
+    HashMap<HTML::PreloadKey, GC::Ref<HTML::PreloadEntry>> const& map_of_preloaded_resources() const { return m_map_of_preloaded_resources; }
+
+    // https://html.spec.whatwg.org/multipage/parsing.html#list-of-speculative-fetch-urls
+    bool has_speculative_fetch_url(URL::URL const& url) const { return m_list_of_speculative_fetch_urls.contains(url); }
+    void add_speculative_fetch_url(URL::URL url) { m_list_of_speculative_fetch_urls.set(move(url)); }
+
+    void register_intersection_observer(Badge<IntersectionObserver::IntersectionObserver>, IntersectionObserver::IntersectionObserver&);
+    bool has_intersection_observation_targets() const;
+
+    void register_resize_observer(Badge<ResizeObserver::ResizeObserver>, ResizeObserver::ResizeObserver&);
+    bool has_resize_observers() const { return !m_resize_observers.is_empty(); }
+    bool has_intersection_observers() const { return !m_intersection_observers.is_empty(); }
+    void unregister_resize_observer(Badge<ResizeObserver::ResizeObserver>, ResizeObserver::ResizeObserver&);
+
+    void add_shadow_root_needing_slot_assignment(Badge<ShadowRoot>, ShadowRoot&);
+    void remove_shadow_root_needing_slot_assignment(Badge<ShadowRoot>, ShadowRoot&);
+    void assign_slottables_if_needed();
+
+    void run_the_update_intersection_observations_steps(HighResolutionTime::DOMHighResTimeStamp time);
+
+    void start_intersection_observing_a_lazy_loading_element(Element&);
+    void stop_intersection_observing_a_lazy_loading_element(Element&);
+    void process_lazy_load_intersection_observer_entries(ReadonlySpan<GC::Ref<IntersectionObserver::IntersectionObserverEntry>>);
+
+    void start_observing_video_viewport_intersection(HTML::HTMLVideoElement&);
+    void stop_observing_video_viewport_intersection(HTML::HTMLVideoElement&);
+    // Whether the last update of intersection observations found the video near enough to the viewport to be shown.
+    bool video_intersects_viewport(HTML::HTMLVideoElement const&) const;
+
+    void shared_declarative_refresh_steps(Utf16View input, GC::Ptr<HTML::HTMLMetaElement const> meta_element = nullptr);
+
+    struct TopOfTheDocument { };
+    using IndicatedPart = Variant<Element*, GC::Ptr<Range>, TopOfTheDocument>;
+    IndicatedPart determine_the_indicated_part();
+    void update_text_fragment_indication_visibility(bool visible);
+
+    u32 unload_counter() const { return m_unload_counter; }
+
+    void update_for_history_step_application(NonnullRefPtr<HTML::SessionHistoryEntry>, bool do_not_reactivate, size_t script_history_length, size_t script_history_index, Optional<HTML::NavigationType> navigation_type, Optional<Vector<NonnullRefPtr<HTML::SessionHistoryEntry>>> entries_for_navigation_api = {}, RefPtr<HTML::SessionHistoryEntry> previous_entry_for_activation = {}, bool previous_entry_for_activation_document_is_initial_about_blank = false, bool allow_text_directive_scroll = false, Optional<URL::Origin> initiator_origin = {}, Optional<HTML::UserNavigationInvolvement> user_involvement = {});
+
+    HashMap<HTML::SharedResourceRequest::Key, GC::Ptr<HTML::SharedResourceRequest>>& shared_resource_requests();
+    HashMap<HTML::SharedResourceRequest::Key, GC::Ptr<HTML::SharedResourceRequest>> const& shared_resource_requests() const;
+    HashMap<URL::URL, GC::Ref<SVG::SVGResourceDocument>>& svg_resource_documents() { return m_svg_resource_documents; }
+    GC::Ptr<Document> svg_resource_document_owner() const { return m_svg_resource_document_owner; }
+    void set_svg_resource_document_owner(GC::Ref<Document> owner) { m_svg_resource_document_owner = owner; }
+    CSS::ImageStyleValueResource* css_image_resource(URL::URL const&);
+    CSS::ImageStyleValueResource& create_css_image_resource(CSS::ImageStyleValueResourceKey, GC::Ref<HTML::SharedResourceRequest>);
+    void remove_css_image_resource_if_unused(CSS::ImageStyleValueResourceKey const&);
+    CSS::ImageStyleValueResource* css_image_resource(CSS::ImageStyleValueResourceKey const&);
+    void prune_image_resource_caches();
+
+    void restore_the_history_object_state(NonnullRefPtr<HTML::SessionHistoryEntry> entry);
+
+    // https://www.w3.org/TR/web-animations-1/#dom-document-timeline
+    Animations::TimelineView timeline();
+
+    // The scroll progress timelines and view progress timelines the elements of the document declare by name.
+    Animations::NamedTimelines& named_timelines();
+    // Looks the named timeline each CSS animation that follows one looks up again, answering whether that changed the
+    // timeline of any.
+    bool update_named_timelines_of_animations(Animations::RustFFI::FfiNamedTimelinesHost const&);
+    bool has_named_timelines() const { return m_named_timelines != nullptr; }
+    // Moves on whenever the timelines an element declares by name, or the timeline names it scopes, may have changed.
+    u64 timeline_declarations_generation() const { return m_timeline_declarations_generation; }
+    void did_change_timeline_declarations() { ++m_timeline_declarations_generation; }
+    auto const& last_animation_frame_timestamp() const { return m_last_animation_frame_timestamp; }
+
+    // What the document knows of the animations associated with its elements.
+    Animations::RustFFI::DocumentAnimations& document_animations() const { return *m_animations; }
+    bool has_associated_animations() const;
+    // Negative where `first` comes before `second` in tree order and positive where it comes after, for sorting
+    // animations by composite order. Two distinct elements of this document take no walk of their siblings once a tree
+    // has been asked about often enough, so that sorting many sibling elements is not quadratic in them per comparison.
+    int compare_elements_in_tree_order_for_composite_order(Element& first, Element& second);
+    // An attribute moves the DOM tree version, from `version_before`, but no element: the tree positions held at that
+    // version stand.
+    void keep_element_tree_positions_across_attribute_change(u64 version_before);
+
+    // https://www.w3.org/TR/web-animations-1/#pending-animation-event-queue
+    // Appends an event of `animation` to the document's pending animation event queue, which holds what the event is
+    // and creates it only as the document dispatches it.
+    void append_pending_animation_event(Animations::AnimationRef const& animation, Animations::RustFFI::FfiPendingAnimationEvent const&);
+    void update_animations_and_send_events(double timestamp);
+    void prepare_to_observe_css_animation_events();
+    void update_compositor_animations(Layout::BegunRead const& read);
+    void remove_replaced_animations();
+
+    // https://www.w3.org/TR/web-animations-1/#timeline-associated-with-a-document
+    Vector<Animations::TimelineView> associated_animation_timelines() const;
+    void begin_smil_time_container_once_loaded(SVG::SMILTimeContainer&);
+    void schedule_svg_referenced_motion_path_update(SVG::SVGAnimateMotionElement&);
+
+    bool ready_to_run_scripts() const { return m_ready_to_run_scripts; }
+    void set_ready_to_run_scripts();
+    void set_deferred_parser_start(GC::Ref<GC::Function<void()>>);
+    bool has_deferred_parser_start() const { return !!m_deferred_parser_start; }
+
+    RefPtr<HTML::SessionHistoryEntry> latest_entry() const { return m_latest_entry; }
+    void set_latest_entry(RefPtr<HTML::SessionHistoryEntry>);
+
+    void subtree_was_moved(Badge<DOM::Node>, DOM::Node& subtree, DOM::Node& old_root);
+    void element_id_changed(Badge<DOM::Element>, GC::Ref<DOM::Element> element, Optional<Utf16FlyString> old_id);
+    void element_with_id_was_added(Badge<DOM::Element>, GC::Ref<DOM::Element> element);
+    void element_with_id_was_removed(Badge<DOM::Element>, GC::Ref<DOM::Element> element);
+    void element_name_changed(Badge<DOM::Element>, GC::Ref<DOM::Element> element);
+    void element_with_name_was_added(Badge<DOM::Element>, GC::Ref<DOM::Element> element);
+    void element_with_name_was_removed(Badge<DOM::Element>, GC::Ref<DOM::Element> element);
+
+    // https://drafts.csswg.org/css-anchor-position-1/#determining
+    AnchorNameMap& anchor_name_map() { return m_anchor_name_map; }
+
+    void add_form_associated_element_with_form_attribute(HTML::FormAssociatedElement&);
+    void remove_form_associated_element_with_form_attribute(HTML::FormAssociatedElement&);
+
+    HTML::RadioButtonGroupRegistry& ensure_radio_button_group_registry();
+
+    bool design_mode_enabled_state() const { return m_design_mode_enabled; }
+    void set_design_mode_enabled_state(bool);
+    Utf16FlyString design_mode() const;
+    WebIDL::ExceptionOr<void> set_design_mode(Utf16View);
+
+    Element const* element_from_point(double x, double y);
+    GC::RootVector<GC::Ref<Element>> elements_from_point(double x, double y);
+    GC::Ptr<Element const> scrolling_element() const;
+
+    void set_needs_animated_style_update(Animations::EffectRef const&);
+
+    // What the style updates of the document measured, for the style update capture tools, and how often a style
+    // update stopped at its pass guard.
+    struct StyleUpdateStatistics {
+        // A run consumes one non-empty semantic reaction batch. The element count includes derived
+        // inheritance reactions; the published count names reactions emitted at the transaction
+        // boundary before that propagation.
+        u64 style_engine_reaction_batch_runs { 0 };
+        u64 style_engine_reaction_elements { 0 };
+        u64 style_engine_published_reactions { 0 };
+        u64 style_update_pass_guard_hits { 0 };
+        u64 style_engine_transaction_setups { 0 };
+        u64 style_engine_transaction_setup_microseconds { 0 };
+        // Exclusive intervals within style_update_microseconds. Rust phases subdivide bridge.
+        u64 style_update_submission_microseconds { 0 };
+        u64 style_update_bridge_microseconds { 0 };
+        u64 style_update_apply_microseconds { 0 };
+        u64 style_update_remainder_microseconds { 0 };
+        u64 style_update_microseconds { 0 };
+    };
+    StyleUpdateStatistics& style_update_statistics() const { return m_style_update_statistics; }
+
+    enum class AccumulatedVisualContextUpdateScope : u8 {
+        Values,
+        Structure,
+    };
+    void set_needs_accumulated_visual_contexts_update();
+    void set_image_map_areas_need_publication() { m_image_map_areas_need_publication = true; }
+    [[nodiscard]] bool take_image_map_areas_need_publication() { return exchange(m_image_map_areas_need_publication, false); }
+    void note_svg_paint_resources_changed();
+    void register_svg_pattern_element(Badge<SVG::SVGPatternElement>, SVG::SVGPatternElement&);
+    void unregister_svg_pattern_element(Badge<SVG::SVGPatternElement>, SVG::SVGPatternElement&);
+    void republish_svg_patterns_inheriting_from(Utf16FlyString const& id);
+    void schedule_full_accumulated_visual_context_rebuild(Layout::RustFFI::VisualContextUpdateScope);
+    bool can_compute_client_rects_without_accumulated_visual_contexts_update(Layout::Node const&) const;
+    void schedule_accumulated_visual_context_update(Layout::BegunRead const& read, Element&, AccumulatedVisualContextUpdateScope);
+    void schedule_accumulated_visual_context_update(Layout::Node const&, AccumulatedVisualContextUpdateScope);
+
+    Compositing::SnappedAreas const& snapped_areas_of_scroll_container(Web::AsyncScrollNodeStableID const&) const;
+    void set_snapped_areas_of_scroll_container(Web::AsyncScrollNodeStableID const&, Compositing::SnappedAreas);
+    void forget_snapped_areas_of_scroll_container(Layout::Node const&);
+
+    void schedule_list_item_renumber(Element& list_owner);
+    void did_render_list_item_counter_value(Element&);
+
+    void schedule_scroll_container_resnap() { m_needs_scroll_container_resnap = true; }
+    void cancel_scheduled_scroll_container_resnap() { m_needs_scroll_container_resnap = false; }
+    [[nodiscard]] bool needs_scroll_container_resnap() const { return m_needs_scroll_container_resnap; }
+    // A re-snap is scheduled after every layout change, but only one with snap areas to re-snap can move a scroll offset.
+    [[nodiscard]] bool has_pending_scroll_container_resnap() const { return m_needs_scroll_container_resnap && m_may_have_scroll_snap_areas; }
+    void set_may_have_scroll_snap_areas() { m_may_have_scroll_snap_areas = true; }
+    [[nodiscard]] bool may_have_scroll_snap_areas() const { return m_may_have_scroll_snap_areas; }
+
+    // Whether a node in this document has ever carried a blocking wheel event listener. It never
+    // goes back to false: a node that stopped carrying one still has descendants whose inherited
+    // state has to be derived when they move.
+    void set_may_have_blocking_wheel_event_listener() { m_may_have_blocking_wheel_event_listener = true; }
+    [[nodiscard]] bool may_have_blocking_wheel_event_listener() const { return m_may_have_blocking_wheel_event_listener; }
+    // The page's wheel event listener state generation at the newest change to this document's blocking listeners.
+    u64 wheel_event_listener_state_generation() const { return m_wheel_event_listener_state_generation; }
+    void set_wheel_event_listener_state_generation(u64 generation) { m_wheel_event_listener_state_generation = generation; }
+
+    // Whether a node in this document has ever published a paint fact. It never goes back to false:
+    // a node that lost its last fact still has to publish that it did.
+    void set_may_have_dom_paint_facts() { m_may_have_dom_paint_facts = true; }
+    [[nodiscard]] bool may_have_dom_paint_facts() const { return m_may_have_dom_paint_facts; }
+
+    void register_scroll_snap_container(Layout::Node const&);
+    [[nodiscard]] Vector<Compositing::RustFFI::NodeSlotId> collect_scroll_snap_containers(Layout::BegunRead const& read);
+
+    virtual Vector<Utf16FlyString> supported_property_names() const override;
+    Vector<GC::Ref<DOM::Element>> const& potentially_named_elements() const { return m_potentially_named_elements; }
+    GC::RootVector<GC::Ref<DOM::Element>> named_elements_with_name(Utf16FlyString const&) const;
+    static bool is_named_element_with_name(Element const&, Utf16FlyString const&);
+
+    void gather_active_observations_at_depth(size_t depth, u64 rendering_update_serial);
+    [[nodiscard]] size_t broadcast_active_resize_observations(Layout::BegunRead const& read);
+    [[nodiscard]] bool has_active_resize_observations();
+    [[nodiscard]] bool has_skipped_resize_observations();
+
+    // Moves on whenever a style sheet may have come or gone for the document or one of its shadow roots, as with a
+    // scope's rule cache or the document's shadow roots.
+    u64 style_sheet_set_generation() const { return m_style_sheet_set_generation; }
+    void note_style_sheet_set_change() { ++m_style_sheet_set_generation; }
+
+    void register_shadow_root(Badge<DOM::ShadowRoot>, DOM::ShadowRoot&);
+    void unregister_shadow_root(Badge<DOM::ShadowRoot>, DOM::ShadowRoot&);
+    void publish_animation_keyframes_for_style_update();
+    template<typename Callback>
+    void for_each_shadow_root(Callback&& callback)
+    {
+        for (auto& shadow_root : m_shadow_roots)
+            callback(shadow_root);
+    }
+
+    template<typename Callback>
+    void for_each_shadow_root(Callback&& callback) const
+    {
+        for (auto& shadow_root : m_shadow_roots)
+            callback(const_cast<ShadowRoot&>(shadow_root));
+    }
+
+    void add_an_element_to_the_top_layer(GC::Ref<Element>);
+    void request_an_element_to_be_remove_from_the_top_layer(GC::Ref<Element>);
+    void remove_an_element_from_the_top_layer_immediately(GC::Ref<Element>);
+    void process_top_layer_removals();
+
+    OrderedHashTable<GC::Ref<Element>> const& top_layer_elements() const { return m_top_layer_elements; }
+    bool top_layer_pending_removals_contains(GC::Ref<Element> element) const { return m_top_layer_pending_removals.contains(element); }
+
+    // AD-HOC: These lists are managed dynamically instead of being generated as needed.
+    // Spec issue: https://github.com/whatwg/html/issues/11007
+    Vector<GC::Ref<HTML::HTMLElement>>& showing_auto_popover_list() { return m_showing_auto_popover_list; }
+    Vector<GC::Ref<HTML::HTMLElement>>& showing_hint_popover_list() { return m_showing_hint_popover_list; }
+    Vector<GC::Ref<HTML::HTMLElement>> const& showing_auto_popover_list() const { return m_showing_auto_popover_list; }
+    Vector<GC::Ref<HTML::HTMLElement>> const& showing_hint_popover_list() const { return m_showing_hint_popover_list; }
+
+    GC::Ptr<HTML::HTMLElement> topmost_auto_or_hint_popover();
+
+    void set_popover_pointerdown_target(GC::Ptr<HTML::HTMLElement> target) { m_popover_pointerdown_target = target; }
+    GC::Ptr<HTML::HTMLElement> popover_pointerdown_target() { return m_popover_pointerdown_target; }
+
+    Vector<GC::Ref<HTML::HTMLDialogElement>>& open_dialogs_list() { return m_open_dialogs_list; }
+
+    void set_dialog_pointerdown_target(GC::Ptr<HTML::HTMLDialogElement> target) { m_dialog_pointerdown_target = target; }
+    GC::Ptr<HTML::HTMLDialogElement> dialog_pointerdown_target() { return m_dialog_pointerdown_target; }
+
+    size_t transition_generation() const { return m_transition_generation; }
+    void begin_style_stabilization_epoch();
+    void record_style_stabilization_pass(Layout::BegunRead const& read);
+    [[nodiscard]] bool is_at_style_stabilization_bound(Layout::BegunRead const& read) const;
+    // How many times an element's animated custom properties moved in this style stabilization epoch, counting this one.
+    [[nodiscard]] u64 note_animated_custom_properties_moved_in_stabilization_epoch(CSS::StyleNodeID);
+    // Whether the dependents of a size container whose box moved are computed again, as they are for its first few
+    // moves in a style stabilization epoch.
+    [[nodiscard]] bool note_size_container_moved_in_stabilization_epoch(CSS::StyleNodeID);
+    void end_style_stabilization_epoch();
+    void note_style_stabilization_has_style_reactions()
+    {
+        VERIFY(is_in_style_stabilization_epoch());
+        m_style_stabilization_has_style_reactions = true;
+    }
+    bool is_in_style_stabilization_epoch() const { return m_style_stabilization_epoch_depth > 0; }
+    bool is_in_style_stabilization_feedback_epoch() const { return is_in_style_stabilization_epoch() && m_style_stabilization_pass_count > 1; }
+    bool style_stabilization_has_style_reactions() const { return is_in_style_stabilization_epoch() && m_style_stabilization_has_style_reactions; }
+
+    // Does document represent an embedded svg img
+    [[nodiscard]] bool is_decoded_svg() const { return m_is_decoded_svg; }
+
+    Vector<GC::Root<Range>> find_matching_text(Utf16View, CaseSensitivity);
+
+    void parse_html_from_a_string(Utf16View, HTML::SanitizerConfiguration const* = nullptr);
+
+    void set_console_client(GC::Ptr<JS::ConsoleClient> console_client) { m_console_client = console_client; }
+    GC::Ptr<JS::ConsoleClient> console_client() const { return m_console_client; }
+
+    InputEventsTarget* active_input_events_target(DOM::Node const* for_node = nullptr);
+    GC::Ptr<DOM::Position> cursor_position() const;
+    void set_cursor_position_needs_repaint();
+    Optional<CSSPixelRect> current_caret_rect();
+
+    i64 cursor_blink_cycle_start_time_ns() const { return m_cursor_blink_cycle_start_time_ns; }
+
+    URL::Origin site_for_cookies() const;
+
+    // Back-pointer to the navigable whose active document is this document.
+    // Maintained by LocalNavigable when it sets/clears its active document.
+    GC::Ptr<HTML::LocalNavigable> navigable() const;
+    void set_navigable(GC::Ptr<HTML::LocalNavigable>);
+
+    // The navigable whose active document this document, created for a navigation, is to become, until it does.
+    GC::Ptr<HTML::LocalNavigable> navigable_awaiting_activation() const { return m_navigable_awaiting_activation.ptr(); }
+
+    void set_needs_repaint(Badge<Node, Painting::BoxViewRepaintAccess, HTML::LocalNavigable, CSS::VisualViewport, Web::EventHandler>, InvalidateDisplayList should_invalidate_display_list = InvalidateDisplayList::PaintCommandsAndHitTestList)
+    {
+        set_needs_repaint(should_invalidate_display_list);
+    }
+
+    // Records the document's display list in step with the host, once a recording in flight has been taken in, and
+    // answers whether it had a box to record.
+    bool record_display_list(Layout::BegunRead const& read, HTML::PaintConfig, Painting::PaintCommandCacheMode);
+    // Starts recording the document's display list as the document is now, beside the event loop where `blocker` is
+    // none, taking `flight`, if any, to present its frame with, and makes the display list of a recording that has
+    // landed.
+    Optional<Painting::DisplayListRecording> start_display_list_recording(Layout::BegunRead const& read, HTML::PaintConfig, Painting::PaintCommandCacheMode);
+    // Commits the navigable's next frame, a recording of the document, to the render owner, which presents it with
+    // `presentation` beside the event loop.
+    Painting::DisplayListRecording commit_display_list_recording(Layout::BegunRead const& read, HTML::PaintConfig, Compositor::FlightPresentation&& presentation);
+    void finish_display_list_recording(Layout::BegunRead const& read, Painting::DisplayListRecording const&, Painting::HitTestItemsStand = Painting::HitTestItemsStand::Yes);
+    // Takes note of the hit-test items of the frame `recording` made, where they still stand for the document's boxes.
+    Painting::HitTestItemsAdoption adopt_published_recording(Painting::HitTestItemsStand, Painting::DisplayListRecording const&);
+    // Whether the frame the document adopted last still places what can be hit as the document's rows do.
+    [[nodiscard]] bool hit_test_items_on_screen_are_current(Layout::BegunRead const& read);
+    // Where a visual animation sample time is given, the hit test reads the compositor's animations at that time, as a
+    // frame of the compositor's shows them.
+    Optional<Painting::HitTestQuery> prepare_hit_test_query(Layout::BegunRead const& read, Optional<i64> visual_animation_sample_time_nanoseconds = {});
+    Optional<Painting::HitTestResult> hit_test(Layout::BegunRead const& read, CSSPixelPoint, Optional<i64> visual_animation_sample_time_nanoseconds = {});
+    Optional<Painting::CaretPosition> caret_position_from_point(Layout::BegunRead const& read, CSSPixelPoint, GC::Ptr<Node const> constraint_scope = nullptr);
+    using CaretPositionFromPointOptions = Bindings::CaretPositionFromPointOptions;
+    GC::Ptr<CaretPosition> caret_position_from_point(double x, double y, CaretPositionFromPointOptions const&);
+    TraversalDecision hit_test_all(Layout::BegunRead const& read, CSSPixelPoint, Function<TraversalDecision(Painting::HitTestResult)> const&);
+
+    void set_caret_hit_test_debug_rect(Optional<CSSPixelRect>);
+
+    RenderingStats* rendering_stats() const { return m_rendering_stats.ptr(); }
+    RenderingStats& ensure_rendering_stats() const;
+
+    void set_needs_to_record_display_list();
+    void set_needs_to_record_display_list_keeping_hit_test_items_on_screen();
+
+    Unicode::Segmenter& grapheme_segmenter() const;
+    Unicode::Segmenter& line_segmenter() const;
+    Unicode::Segmenter& word_segmenter() const;
+
+    struct StepsToFireBeforeunloadResult {
+        bool unload_prompt_shown { false };
+        bool unload_prompt_canceled { false };
+    };
+    StepsToFireBeforeunloadResult steps_to_fire_beforeunload(bool unload_prompt_shown);
+
+    [[nodiscard]] WebIDL::CallbackType* onreadystatechange();
+    void set_onreadystatechange(WebIDL::CallbackType*);
+
+    [[nodiscard]] WebIDL::CallbackType* onvisibilitychange();
+    void set_onvisibilitychange(WebIDL::CallbackType*);
+
+    // https://fullscreen.spec.whatwg.org/#api
+    [[nodiscard]] WebIDL::CallbackType* onfullscreenchange();
+    void set_onfullscreenchange(WebIDL::CallbackType*);
+    [[nodiscard]] WebIDL::CallbackType* onfullscreenerror();
+    void set_onfullscreenerror(WebIDL::CallbackType*);
+    [[nodiscard]] WebIDL::CallbackType* onwebkitfullscreenchange();
+    void set_onwebkitfullscreenchange(WebIDL::CallbackType*);
+    [[nodiscard]] WebIDL::CallbackType* onwebkitfullscreenerror();
+    void set_onwebkitfullscreenerror(WebIDL::CallbackType*);
+
+    // https://drafts.csswg.org/css-view-transitions-1/#dom-document-startviewtransition
+    GC::Ptr<ViewTransition::ViewTransition> start_view_transition(GC::Ptr<WebIDL::CallbackType> update_callback, GC::Ref<WebIDL::Promise> ready_promise, GC::Ref<WebIDL::Promise> update_callback_done_promise, GC::Ref<WebIDL::Promise> finished_promise);
+    // https://drafts.csswg.org/css-view-transitions-1/#perform-pending-transition-operations
+    void perform_pending_transition_operations();
+    // https://drafts.csswg.org/css-view-transitions-1/#flush-the-update-callback-queue
+    void flush_the_update_callback_queue();
+    // https://drafts.csswg.org/css-view-transitions-1/#view-transition-page-visibility-change-steps
+    void view_transition_page_visibility_change_steps();
+
+    GC::Ptr<ViewTransition::ViewTransition> active_view_transition() const { return m_active_view_transition; }
+    bool has_active_view_transition() const { return !!m_active_view_transition; }
+    void set_active_view_transition(GC::Ptr<ViewTransition::ViewTransition> view_transition) { m_active_view_transition = view_transition; }
+    static constexpr size_t active_view_transition_offset() { return offsetof(Document, m_active_view_transition); }
+    bool rendering_suppression_for_view_transitions() const { return m_rendering_suppression_for_view_transitions; }
+    void set_rendering_suppression_for_view_transitions(bool);
+    CSS::StyleSheetState* dynamic_view_transition_style_sheet() const { return m_dynamic_view_transition_style_sheet.ptr(); }
+    void set_show_view_transition_tree(bool value) { m_show_view_transition_tree = value; }
+    Vector<GC::Ptr<ViewTransition::ViewTransition>>& update_callback_queue() { return m_update_callback_queue; }
+
+    void reset_cursor_blink_cycle();
+
+    GC::Ref<EditingHostManager> editing_host_manager() const { return *m_editing_host_manager; }
+
+    // AD-HOC: Whether a platform input-method composition is in progress in this document. Any input event fired for an
+    //         edit made with this set has isComposing=true — whichever path fires it: editing commands for an editing
+    //         host, or a text control's own value change. LocalNavigable sets+clears it around the composition session.
+    bool is_input_method_composing() const { return m_is_input_method_composing; }
+    void set_is_input_method_composing(bool is_composing) { m_is_input_method_composing = is_composing; }
+
+    // The history of user editing actions in this document, created lazily by the first
+    // recorded editing command.
+    GC::Ptr<Editing::EditingHistory> editing_history_if_exists() const { return m_editing_history; }
+    GC::Ref<Editing::EditingHistory> editing_history();
+
+    // https://w3c.github.io/editing/docs/execCommand/#default-single-line-container-name
+    Utf16FlyString const& default_single_line_container_name() const { return m_default_single_line_container_name; }
+    void set_default_single_line_container_name(Utf16FlyString const& name) { m_default_single_line_container_name = name; }
+
+    // https://w3c.github.io/editing/docs/execCommand/#css-styling-flag
+    bool css_styling_flag() const { return m_css_styling_flag; }
+    void set_css_styling_flag(bool flag) { m_css_styling_flag = flag; }
+
+    // https://w3c.github.io/editing/docs/execCommand/#state-override
+    Optional<bool> command_state_override(Utf16FlyString const& command) const { return m_command_state_override.get(command); }
+    OrderedHashMap<Utf16FlyString, bool> const& command_state_overrides() const { return m_command_state_override; }
+    void set_command_state_override(Utf16FlyString const& command, bool state)
+    {
+        m_command_state_override.remove(command);
+        m_command_state_override.set(command, state);
+    }
+    void clear_command_state_override(Utf16FlyString const& command) { m_command_state_override.remove(command); }
+    void reset_command_state_overrides() { m_command_state_override.clear(); }
+
+    // https://w3c.github.io/editing/docs/execCommand/#value-override
+    Optional<Utf16View> command_value_override(Utf16FlyString const& command) const
+    {
+        auto value = m_command_value_override.get(command);
+        if (!value.has_value())
+            return {};
+        return value->utf16_view();
+    }
+    void set_command_value_override(Utf16FlyString const& command, Utf16View value);
+    void clear_command_value_override(Utf16FlyString const& command);
+    void reset_command_value_overrides() { m_command_value_override.clear(); }
+
+    GC::Ptr<DOM::Document> container_document() const;
+
+    GC::Ptr<HTML::Storage> session_storage_holder() { return m_session_storage_holder; }
+    void set_session_storage_holder(GC::Ptr<HTML::Storage> storage) { m_session_storage_holder = storage; }
+
+    GC::Ptr<HTML::Storage> local_storage_holder() { return m_local_storage_holder; }
+    void set_local_storage_holder(GC::Ptr<HTML::Storage> storage) { m_local_storage_holder = storage; }
+
+    // https:// html.spec.whatwg.org/multipage/dom.html#render-blocked
+    [[nodiscard]] bool is_render_blocked() const;
+    // https://html.spec.whatwg.org/multipage/dom.html#allows-adding-render-blocking-elements
+    [[nodiscard]] bool allows_adding_render_blocking_elements() const;
+
+    [[nodiscard]] bool is_render_blocking_element(GC::Ref<Element>) const;
+
+    void add_render_blocking_element(GC::Ref<Element>);
+    void remove_render_blocking_element(GC::Ref<Element>);
+
+    ElementByIdMap& element_by_id() const;
+
+    // https://fullscreen.spec.whatwg.org/#run-the-fullscreen-steps
+    void run_fullscreen_steps();
+    void append_pending_fullscreen_change(PendingFullscreenEvent::Type type, GC::Ref<Element> element, Fullscreen::RequestType request_type);
+
+    void fullscreen_element_within_doc(GC::Ref<Element> element, Fullscreen::RequestType request_type);
+    GC::Ptr<Element> fullscreen_element() const;
+    GC::Ptr<Element> retargeted_fullscreen_element() const;
+
+    bool fullscreen() const;
+    bool fullscreen_enabled() const;
+
+    void fully_exit_fullscreen();
+    void exit_fullscreen(GC::Ptr<WebIDL::Promise>, Optional<HTML::CrossProcessId> requesting_navigable_id = {});
+    void webkit_exit_fullscreen();
+
+    void unfullscreen_element(GC::Ref<Element> element);
+    void unfullscreen();
+    bool is_simple_fullscreen_document() const;
+    GC::Ref<GC::HeapVector<GC::Ref<Document>>> collect_documents_to_unfullscreen();
+
+    GC::Ptr<Element> picture_in_picture_element() const { return m_picture_in_picture_element; }
+    void set_picture_in_picture_element(GC::Ptr<Element>);
+    GC::Ptr<Element> retargeted_picture_in_picture_element() const;
+    bool picture_in_picture_enabled() const;
+    GC::Ref<WebIDL::Promise> exit_picture_in_picture();
+
+    auto& script_blocking_style_sheet_set() { return m_script_blocking_style_sheet_set; }
+    auto const& script_blocking_style_sheet_set() const { return m_script_blocking_style_sheet_set; }
+    void remove_from_script_blocking_style_sheet_set(Element&);
+
+    Utf16String dump_display_list(Painting::DisplayListDumpOptions const&);
+    Utf16String dump_stacking_context_tree();
+
+    // https://www.w3.org/TR/css-properties-values-api-1/#dom-window-registeredpropertyset-slot
+    HashMap<Utf16FlyString, CSS::CustomPropertyRegistration>& registered_property_set();
+    Optional<CSS::CustomPropertyRegistration const&> get_registered_custom_property(Utf16FlyString const& name) const;
+    void for_each_registered_custom_property(Function<void(CSS::CustomPropertyRegistration const&)> const&) const;
+    size_t custom_property_registration_generation() const { return m_custom_property_registration_generation; }
+    void const* rust_custom_property_registry() const { return m_rust_custom_property_registry; }
+    void did_change_custom_property_registrations();
+
+    CSS::StyleScope const& style_scope() const { return m_style_scope; }
+    CSS::StyleScope& style_scope() { return m_style_scope; }
+
+    bool content_blocking_enabled() const;
+    Utf16String const& content_blocker_style_sheet();
+    void invalidate_content_blocker_style_sheet();
+    bool content_blocker_style_sheet_may_need_refresh_for_class_or_id(Utf16FlyString const* id, ReadonlySpan<Utf16FlyString> class_names);
+
+    void exit_pointer_lock();
+
+    RefPtr<SelectorQuery const> selector_query_for(Utf16String const&) const;
+    QuerySelectorResultCache& query_selector_result_cache();
+
+    // Whether the aria-labelledby or aria-describedby of an element in the tree of root references id.
+    bool tree_references_id_from_aria(Node const& root, Utf16FlyString const& id) const;
+
+    GC::Ptr<HTML::CustomElementRegistry> custom_element_registry() const;
+    void set_custom_element_registry(GC::Ptr<HTML::CustomElementRegistry> custom_element_registry) { m_custom_element_registry = custom_element_registry; }
+    GC::Ptr<HTML::CustomElementRegistry> effective_global_custom_element_registry() const;
+
+    void upgrade_particular_elements(GC::Ref<HTML::CustomElementRegistry>, GC::Ref<HTML::CustomElementDefinition>, Utf16FlyString local_name, Optional<Utf16FlyString> name = {});
+
+    Vector<URL::Origin> internal_ancestor_origin_objects_list_creation_steps(ReferrerPolicy::ReferrerPolicy) const;
+    Optional<Vector<URL::Origin>>& internal_ancestor_origin_objects_list() { return m_internal_ancestor_origin_objects_list; }
+    void set_internal_ancestor_origin_objects_list(Optional<Vector<URL::Origin>>&& list) { m_internal_ancestor_origin_objects_list = move(list); }
+
+    GC::Ref<HTML::DOMStringList> ancestor_origins_list_creation_steps() const;
+    GC::Ptr<HTML::DOMStringList> ancestor_origins_list() { return m_ancestor_origins_list; }
+    void set_ancestor_origins_list(GC::Ptr<HTML::DOMStringList> list) { m_ancestor_origins_list = move(list); }
+
+protected:
+    virtual void visit_edges(Cell::Visitor&) override;
+
+    Document(Page&, GC::Ref<EventTarget> relevant_global_event_target, URL::URL const&, TemporaryDocumentForFragmentParsing = TemporaryDocumentForFragmentParsing::No);
+    void initialize_document();
+
+private:
+    bool script_edits_for_the_user() const;
+
+    bool update_is_fully_active() const;
+    bool compute_is_fully_active() const;
+
+    void queue_a_new_visibility_state_entry(HTML::VisibilityState, HighResolutionTime::DOMHighResTimeStamp timestamp);
+
+    // Records the document's viewport for the host to publish, or, given `committed`, commits the recording.
+    Optional<Painting::DisplayListRecording> start_recording(Layout::BegunRead const&, HTML::PaintConfig, Painting::PaintCommandCacheMode, Optional<Compositor::FlightPresentation>&& committed);
+
+    // Whether the first round of a rendering update's layout may be sealed: list items that wait to be renumbered and top
+    // layer work are the layout update's to do first.
+    Layout::RustFFI::FfiLayoutUpdateInputs first_layout_round_inputs() const;
+    // Whether nothing this document has pending could change layout geometry: style, layout and every input
+    // that feeds them are settled.
+    [[nodiscard]] bool is_clean_for_layout_geometry_read(Layout::BegunRead const& read) const;
+
+    void did_add_supported_property_name();
+    friend struct AdoptedStyleSheetsAccess;
+    friend struct CompositorAnimationUpdatePass;
+
+    void republish_svg_patterns_inheriting_from(Utf16FlyString const& id, HashTable<SVG::SVGPatternElement const*>& republished);
+
+    void finish_animated_style_update();
+    void service_compositor_animation_wakeup(double timestamp);
+
+    void drain_style_update_that_flew(Layout::BegunRead const&);
+    // Sets the effects whose animated style the next animated style update samples aside, and back again.
+    void set_aside_effects_needing_animated_style_update();
+    void restore_effects_needing_animated_style_update();
+
+    GC::Ref<WebIDL::ObservableArray> adopted_style_sheets() const;
+
+    void set_needs_repaint(InvalidateDisplayList = InvalidateDisplayList::PaintCommandsAndHitTestList);
+    void request_frame_for_pending_repaint();
+
+    // ^HTML::GlobalEventHandlers
+    virtual GC::Ptr<EventTarget> global_event_handlers_to_event_target(Utf16FlyString const&) final { return *this; }
+
+    virtual void finalize() override final;
+
+    // The row the document's layout tree is rooted at. The tree build records it in the arena, so
+    // the document keeps no copy of its own.
+    [[nodiscard]] Compositing::RustFFI::NodeSlotId layout_root_slot(Layout::BegunRead const& read) const;
+    // The layout node arena reports the presence of the viewport's box, the layout tree's root, as it builds it.
+    [[nodiscard]] bool has_layout_root() const { return has_layout_box(); }
+    [[nodiscard]] Layout::Node* layout_root_if_live(Layout::BegunRead const& read) const;
+    void tear_down_layout_tree();
+    void process_pending_top_layer_layout_changes(Layout::BegunRead const& read);
+
+    void update_active_element();
+    void collect_boxes_with_auto_content_visibility(Layout::BegunRead const& read);
+    bool needs_style_update_after_layout(Layout::BegunRead const& read);
+    Layout::RustFFI::FfiLayoutUpdateHostCallbacks layout_update_host_callbacks();
+    Layout::RustFFI::FfiPaintPreparationHostCallbacks paint_preparation_host_callbacks();
+
+    void process_pending_list_item_renumbers();
+    bool reconcile_stale_list_item_counters_after_tree_build(ReadonlySpan<Layout::RustFFI::FfiNodeIdentity> rebuilt_roots);
+    enum class LayoutTreeChanged : u8 {
+        No,
+        Yes,
+    };
+    void after_layout_commit(Layout::BegunRead const& read, LayoutTreeChanged);
+
+    void run_unloading_cleanup_steps();
+    bool showing_an_unload_prompt_is_unlikely_to_be_annoying_deceptive_or_pointless() const;
+
+    void evaluate_media_rules();
+
+    enum class AddLineFeed {
+        Yes,
+        No,
+    };
+    WebIDL::ExceptionOr<void> run_the_document_write_steps(Utf16View text, AddLineFeed line_feed);
+
+    void queue_intersection_observer_task();
+    void queue_an_intersection_observer_entry(IntersectionObserver::IntersectionObserver&, HighResolutionTime::DOMHighResTimeStamp time, GC::Ref<Geometry::DOMRectReadOnly> root_bounds, GC::Ref<Geometry::DOMRectReadOnly> bounding_client_rect, GC::Ref<Geometry::DOMRectReadOnly> intersection_rect, bool is_intersecting, double intersection_ratio, GC::Ref<Element> target);
+
+    Element* find_a_potential_indicated_element(Utf16View fragment) const;
+
+    template<typename GetNotifier, typename... Args>
+    void notify_each_document_observer(GetNotifier&& get_notifier, Args&&... args)
+    {
+        GC::RootVector<GC::Ref<DocumentObserver>> document_observers;
+        for (auto& observer : m_document_observers)
+            document_observers.append(observer);
+
+        for (auto document_observer : document_observers) {
+            if (auto notifier = get_notifier(*document_observer))
+                notifier->function()(forward<Args>(args)...);
+        }
+    }
+
+    void run_csp_initialization() const;
+
+    void build_registered_properties_cache();
+    void sync_custom_property_registrations_to_rust();
+
+    void ensure_cookie_version_index(URL::URL const& new_url, URL::URL const& old_url = {});
+
+    struct RegistryAndIs {
+        GC::Ptr<HTML::CustomElementRegistry> registry;
+        Optional<Utf16FlyString> is;
+    };
+    WebIDL::ExceptionOr<RegistryAndIs> flatten_element_creation_options(ElementCreationOptions const&) const;
+
+    void create_style_computer();
+
+    GC::Ref<Page> m_page;
+    GC::Ptr<CSS::StyleComputer> m_style_computer;
+    GC::Ptr<CSS::FontComputer> m_font_computer;
+    GC::Ptr<CSS::StyleSheetList> m_style_sheets;
+    GC::Ptr<Node> m_active_favicon;
+    GC::Ptr<HTML::BrowsingContext> m_browsing_context;
+    URL::URL m_url;
+    mutable Optional<String> m_serialized_url;
+    mutable Optional<String> m_serialized_base_url;
+    mutable OwnPtr<ElementByIdMap> m_element_by_id;
+
+    GC::Ptr<HTML::Window> m_window;
+    GC::Ref<DOM::EventTarget> m_relevant_global_event_target;
+
+    RefPtr<Layout::NodeArena> m_layout_node_arena;
+    NonnullOwnPtr<CommitMessages> m_commit_messages;
+    OwnPtr<Painting::DocumentPaintState> m_paint_state;
+    mutable OwnPtr<RenderingStats> m_rendering_stats;
+    NonnullRefPtr<Painting::ChromeWidgetRegistry> m_chrome_widget_registry;
+
+    GC::Ptr<Node> m_hovered_node;
+    GC::Ptr<Node> m_inspected_node;
+    GC::Ptr<Node> m_highlighted_node;
+    Optional<CSS::PseudoElement> m_highlighted_pseudo_element;
+
+    struct GridHighlight {
+        GC::Ptr<Node> node;
+        Painting::GridInspectorOverlayOptions options;
+    };
+
+    struct FlexboxHighlight {
+        GC::Ptr<Node> node;
+        Painting::FlexboxInspectorOverlayOptions options;
+    };
+
+    Vector<FlexboxHighlight> m_flexbox_highlights;
+    Vector<GridHighlight> m_grid_highlights;
+
+    Optional<Color> m_normal_link_color;
+    Optional<Color> m_active_link_color;
+    Optional<Color> m_visited_link_color;
+
+    Optional<Vector<Utf16FlyString>> m_supported_color_schemes;
+    bool m_supported_color_schemes_are_only { false };
+
+    GC::Ptr<HTML::HTMLParser> m_parser;
+    u64 m_parser_generation { 0 };
+
+    // https://wicg.github.io/video-rvfc/#video-frame-request-callback-identifier
+    u32 m_video_frame_request_callback_identifier { 0 };
+    bool m_active_parser_was_aborted { false };
+
+    bool m_has_been_destroyed { false };
+    bool m_observers_consider_document_fully_active { false };
+
+    RefPtr<JS::SourceCode const> m_source;
+
+    GC::Ptr<Element> m_pending_parsing_blocking_script;
+
+    Vector<GC::Ref<Element>> m_scripts_to_execute_when_parsing_has_finished;
+
+    // https://html.spec.whatwg.org/multipage/scripting.html#list-of-scripts-that-will-execute-in-order-as-soon-as-possible
+    Vector<GC::Ref<Element>> m_scripts_to_execute_in_order_as_soon_as_possible;
+
+    // https://html.spec.whatwg.org/multipage/scripting.html#set-of-scripts-that-will-execute-as-soon-as-possible
+    Vector<GC::Ref<Element>> m_scripts_to_execute_as_soon_as_possible;
+
+    HTML::ScriptRegistry m_script_registry;
+
+    QuirksMode m_quirks_mode { QuirksMode::No };
+
+    // The declaration blocks of the document's style attributes, by their text.
+    CSS::RustInlineStyleBlocks m_inline_style_blocks;
+
+    // The MathML and SVG user-agent sheets decide nothing until the document holds an element in one
+    // of those namespaces, so they are attached the first time one arrives. Once attached they stay:
+    // a document that held one is likely to again, and every element pays for the flip.
+    Optional<CSS::PreferredColorScheme> m_svg_image_color_scheme;
+    bool m_decoded_svg_holds_foreign_content { false };
+
+    bool m_needs_mathml_and_svg_user_agent_style_sheets { false };
+    bool m_has_element_with_auto_directionality { false };
+    bool m_has_form_or_fieldset_element { false };
+    SubtreeInsertionScope* m_subtree_insertion_scope { nullptr };
+
+    bool m_parser_cannot_change_the_mode { false };
+
+    // https://dom.spec.whatwg.org/#concept-document-type
+    Type m_type { Type::XML };
+
+    // https://html.spec.whatwg.org/multipage/interaction.html#focused-area-of-the-document
+    GC::Ptr<Node> m_focused_area;
+    bool m_focused_container_has_explicit_focus { false };
+
+    // https://html.spec.whatwg.org/multipage/interaction.html#sequential-focus-navigation-starting-point
+    GC::Ptr<Node> m_sequential_focus_navigation_starting_point;
+
+    HTML::FocusTrigger m_last_focus_trigger { HTML::FocusTrigger::Other };
+    bool m_last_user_focus_was_by_pointer { false };
+    GC::Ptr<Node> m_focus_visibility_request_target;
+    bool m_requested_focus_visibility { false };
+
+    bool focused_element_indicates_focus() const;
+    void publish_focus_visibility_change(bool indicated_focus_before);
+
+    GC::Ptr<Element> m_active_element;
+    GC::Ptr<Element> m_target_element;
+    GC::Ptr<Element> m_accessibility_focus_target;
+    mutable HashMap<UniqueNodeID, CachedAccessibleText> m_cached_accessible_text;
+    // The elements whose cached text can depend on nodes other than their inclusive ancestors and descendants: on
+    // label elements, on the elements whose IDs m_ids_referenced_by_cached_accessible_text holds, or on any node.
+    mutable HashTable<UniqueNodeID> m_cached_accessible_text_depending_on_labels;
+    mutable HashTable<UniqueNodeID> m_cached_accessible_text_depending_on_referenced_ids;
+    mutable HashTable<UniqueNodeID> m_cached_accessible_text_depending_on_any_node;
+    mutable HashTable<Utf16FlyString> m_ids_referenced_by_cached_accessible_text;
+    struct AccessibilityRecordCache;
+    mutable OwnPtr<AccessibilityRecordCache> m_accessibility_record_cache;
+    bool m_accessibility_caches_bypassed { false };
+
+    // https://html.spec.whatwg.org/multipage/interaction.html#autofocus-candidates
+    Vector<GC::Ref<Element>> m_autofocus_candidates;
+
+    // https://html.spec.whatwg.org/multipage/interaction.html#autofocus-processed-flag
+    bool m_autofocus_processed_flag { false };
+
+    HashMap<CSS::StyleNodeID, u64> m_animated_custom_property_changes_in_stabilization_epoch;
+    u64 m_animated_custom_property_moves_in_stabilization_epoch { 0 };
+    HashMap<CSS::StyleNodeID, u64> m_size_container_moves_in_stabilization_epoch;
+    bool m_created_for_appropriate_template_contents { false };
+    GC::Ptr<Document> m_associated_inert_template_document;
+    GC::Ptr<Document> m_appropriate_template_contents_owner_document;
+
+    // https://html.spec.whatwg.org/multipage/dom.html#current-document-readiness
+    // Each Document has a current document readiness, a string, initially "complete".
+    // Spec Note: For Document objects created via the create and initialize a Document object algorithm, this will be
+    //            immediately reset to "loading" before any script can observe the value of document.readyState.
+    //            This default applies to other cases such as initial about:blank Documents or Documents without a
+    //            browsing context.
+    HTML::DocumentReadyState m_readiness { HTML::DocumentReadyState::Complete };
+    Utf16FlyString m_content_type { "application/xml"_utf16_fly_string };
+    Optional<Utf16String> m_pragma_set_default_language;
+    Optional<Utf16String> m_http_content_language;
+    Optional<Utf16String> m_encoding;
+
+    bool m_ready_for_post_load_tasks { false };
+    bool m_opened_contents_still_loading { false };
+    bool m_print_when_loaded { false };
+
+    GC::Ptr<DOMImplementation> m_implementation;
+    GC::Ptr<FragmentDirective> m_fragment_directive;
+    Optional<Vector<HTML::TextDirective>> m_pending_text_directives;
+    Vector<GC::Ref<Range>> m_text_fragment_ranges;
+    bool m_pending_text_directive_scroll_allowed { false };
+    bool m_text_fragment_parser_progress_search_pending { false };
+
+    // https://wicg.github.io/scroll-to-text-fragment/#restricting-the-text-fragment
+    // Each Document has a text directive user activation, which is a boolean, initially false.
+    bool m_text_directive_user_activation { false };
+    bool m_browsing_context_group_has_remote_contexts { false };
+    HTTP::CacheMode m_navigation_cache_mode { HTTP::CacheMode::Default };
+    GC::Ptr<Element> m_current_script;
+
+    u32 m_ignore_destructive_writes_counter { 0 };
+    size_t m_document_write_depth { 0 };
+    bool m_document_write_limit_reached { false };
+
+    // https://html.spec.whatwg.org/multipage/browsing-the-web.html#unload-counter
+    u32 m_unload_counter { 0 };
+
+    // The answer is_fully_active() last gave, and the value of s_full_activity_epoch it's valid for.
+    mutable bool m_is_fully_active { false };
+    mutable u64 m_full_activity_epoch { 0 };
+    static u64 s_full_activity_epoch;
+
+    // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#throw-on-dynamic-markup-insertion-counter
+    u32 m_throw_on_dynamic_markup_insertion_counter { 0 };
+
+    // https://html.spec.whatwg.org/multipage/semantics.html#script-blocking-style-sheet-set
+    HashTable<GC::Ref<DOM::Element>> m_script_blocking_style_sheet_set;
+
+    HashTable<NonnullRefPtr<CSS::StyleSheetImport>> m_pending_css_import_rules;
+    size_t m_number_of_pending_style_sheet_requests { 0 };
+
+    GC::Ptr<HTML::History> m_history;
+
+    size_t m_number_of_things_delaying_the_load_event { 0 };
+    GC::Ptr<HTML::HTMLParserEndState> m_html_parser_end_state;
+
+    // https://html.spec.whatwg.org/multipage/browsing-the-web.html#concept-document-salvageable
+    bool m_salvageable { true };
+
+    bool m_window_is_taken_over_after_unload { false };
+
+    // https://html.spec.whatwg.org/multipage/document-lifecycle.html#page-showing
+    bool m_page_showing { false };
+
+    // Used by run_the_resize_steps().
+    Optional<Gfx::IntSize> m_last_viewport_size;
+    struct VisualViewportState {
+        double scale { 1.0 };
+        CSSPixelSize size;
+
+        bool operator==(VisualViewportState const& other) const = default;
+    };
+    Optional<VisualViewportState> m_last_visual_viewport_state;
+
+    HashTable<ViewportClient*> m_viewport_clients;
+
+    // https://drafts.csswg.org/cssom-view-1/#document-pending-scroll-events
+    // Each Document has an associated list of pending scroll events, which stores pairs of (EventTarget, DOMString), initially empty.
+    Vector<PendingScrollEvent> m_pending_scroll_events;
+
+    // Used by evaluate_media_queries_and_report_changes().
+    bool m_needs_media_query_list_evaluation { false };
+    bool m_needs_media_rule_evaluation { false };
+    Vector<GC::Weak<CSS::MediaQueryList>> m_media_query_lists;
+
+    bool m_has_completed_style_update { false };
+    bool m_counter_style_scopes_need_update { true };
+    bool m_style_engine_tracks_tree { false };
+    CSS::StyleNodeID m_style_node_id;
+    GC::WeakHashSet<Element> m_elements_with_dirty_style_attributes;
+    // Elements whose style attribute a style update left out of sync with their inline style, as nothing of the style
+    // engine read it then.
+    GC::WeakHashSet<Element> m_elements_with_unreported_style_attributes;
+    GC::WeakHashSet<Element> m_elements_with_viewport_dependent_style;
+    bool m_suppresses_attribute_style_invalidation { false };
+    CSS::ScrollStateQueryContainers m_scroll_state_query_containers;
+
+    bool m_is_decoded_svg { false };
+
+    bool m_needs_animated_style_update { false };
+    bool m_cursor_may_be_stale { false };
+    bool m_reads_layout_as_it_flew { false };
+    bool m_is_updating_animated_style { false };
+    bool m_has_throttled_animation_style_update { false };
+    bool m_needs_throttled_animation_style_update_check { false };
+    bool m_force_throttled_animation_style_update { false };
+    Optional<u64> m_last_forced_throttled_animation_style_update_task_generation;
+    // The inputs the style update that flew was sealed with, which its drain takes its reactions in against.
+    Optional<CSS::StyleUpdateInputs> m_flown_style_update_inputs;
+
+    HashTable<GC::Ptr<NodeIterator>> m_node_iterators;
+
+    // A live Range keeps its owner document alive and removes itself from this list when finalized.
+    Range::DocumentLiveRangeList m_live_ranges;
+
+    // Document should not visit DocumentObserver to avoid leaks.
+    // It's responsibility of object that requires DocumentObserver to keep it alive.
+    GC::WeakHashSet<DocumentObserver> m_document_observers;
+
+    // Every SVG use element connected to this document's node tree, maintained by SVGUseElement on insertion and
+    // removal. This lets SVG elements notify interested use elements about mutations without traversing the entire
+    // document. Not visited: registered elements are connected and thus kept alive by the tree.
+    SVG::SVGUseElement::DocumentUseElementList m_svg_use_elements;
+
+    // https://html.spec.whatwg.org/multipage/dom.html#is-initial-about:blank
+    bool m_is_initial_about_blank { false };
+
+    // https://html.spec.whatwg.org/multipage/iframe-embed-object.html#iframe-load-in-progress
+    bool m_iframe_load_in_progress { false };
+
+    // https://html.spec.whatwg.org/multipage/iframe-embed-object.html#mute-iframe-load
+    bool m_mute_iframe_load { false };
+
+    Optional<HTML::CrossProcessId> m_id;
+
+    // https://html.spec.whatwg.org/multipage/dom.html#concept-document-about-base-url
+    Optional<URL::URL> m_about_base_url;
+
+    RefPtr<HoverLinkReporter> m_hover_link_reporter;
+
+    // https://dom.spec.whatwg.org/#document-base-url-override
+    Optional<URL::URL> m_base_url_override;
+
+    // https://html.spec.whatwg.org/multipage/dom.html#concept-document-coop
+    HTML::OpenerPolicy m_opener_policy;
+
+    // https://html.spec.whatwg.org/multipage/dom.html#the-document's-referrer
+    Utf16String m_referrer;
+
+    // https://dom.spec.whatwg.org/#concept-document-origin
+    URL::Origin m_origin { URL::Origin::create_opaque() };
+
+    GC::Ptr<HTMLCollection> m_applets;
+    GC::Ptr<HTMLCollection> m_anchors;
+    GC::Ptr<HTMLCollection> m_images;
+    GC::Ptr<HTMLCollection> m_embeds;
+    GC::Ptr<HTMLCollection> m_links;
+    GC::Ptr<HTMLCollection> m_forms;
+    GC::Ptr<HTMLCollection> m_scripts;
+    GC::Ptr<HTML::HTMLAllCollection> m_all;
+
+    // https://drafts.csswg.org/css-font-loading/#font-source
+    GC::Ref<CSS::FontFaceSet> m_fonts;
+
+    // https://drafts.csswg.org/css-highlight-api-1/#highlight-registry
+    GC::Ptr<CSS::HighlightRegistry> m_highlight_registry;
+
+    // https://html.spec.whatwg.org/multipage/document-lifecycle.html#completely-loaded-time
+    Optional<AK::UnixDateTime> m_completely_loaded_time;
+    bool m_completely_loaded_deferred { false };
+
+    // https://html.spec.whatwg.org/multipage/dom.html#concept-document-navigation-id
+    Optional<Utf16String> m_navigation_id;
+
+    // AD-HOC: The main resource fetch is not part of the document's subresource fetch group, so retain its controller,
+    //         or the network transport of a body adopted without one, separately while the navigation fetch is ongoing.
+    Variant<Empty, GC::Ref<Fetch::Infrastructure::FetchController>, NonnullRefPtr<Fetch::Engine::NetworkTransportHandle>> m_ongoing_navigation_fetch;
+
+    // https://html.spec.whatwg.org/multipage/origin.html#active-sandboxing-flag-set
+    HTML::SandboxingFlagSet m_active_sandboxing_flag_set;
+
+    // https://html.spec.whatwg.org/multipage/dom.html#concept-document-permissions-policy
+    PermissionsPolicy::PermissionsPolicy m_permissions_policy { PermissionsPolicy::PermissionsPolicy::empty_permissions_policy() };
+
+    // https://html.spec.whatwg.org/multipage/dom.html#concept-document-policy-container
+    mutable RefPtr<HTML::PolicyContainer> m_policy_container;
+
+    // https://html.spec.whatwg.org/multipage/interaction.html#visibility-state
+    HTML::VisibilityState m_visibility_state { HTML::VisibilityState::Hidden };
+
+    // https://html.spec.whatwg.org/multipage/dom.html#load-timing-info
+    DocumentLoadTimingInfo m_load_timing_info;
+
+    // https://html.spec.whatwg.org/multipage/dom.html#previous-document-unload-timing
+    DocumentUnloadTimingInfo m_previous_document_unload_timing;
+
+    // https://html.spec.whatwg.org/multipage/dom.html#was-created-via-cross-origin-redirects
+    bool m_was_created_via_cross_origin_redirects { false };
+
+    // https://w3c.github.io/navigation-timing/#dfn-navigation-timing-entry
+    GC::Ptr<NavigationTiming::PerformanceNavigationTiming> m_navigation_timing_entry;
+
+    // https://w3c.github.io/selection-api/#dfn-selection
+    GC::Ptr<Selection::Selection> m_selection;
+
+    // https://html.spec.whatwg.org/multipage/interaction.html#fip-active-match
+    GC::Ptr<Range> m_find_in_page_active_match;
+    bool m_selection_states_are_stale { false };
+    bool m_search_text_states_are_stale { false };
+    bool m_spelling_error_states_are_stale { false };
+    bool m_custom_highlight_states_are_stale { false };
+    bool m_has_registered_custom_highlight_ranges { false };
+    u64 m_custom_highlight_states_dom_tree_version { 0 };
+    u64 m_custom_highlight_states_character_data_version { 0 };
+    u64 m_custom_highlight_states_row_generation { 0 };
+    Utf16String m_find_in_page_active_match_text;
+    Vector<GC::Ref<Range>> m_find_in_page_highlighted_matches;
+    OwnPtr<Editing::SpellingMarkers> m_spelling_markers;
+    OwnPtr<Editing::SpellCheckController> m_spell_check_controller;
+    OwnPtr<Translation::DocumentTranslator> m_document_translator;
+    OwnPtr<Editing::WritingSuggestionController> m_writing_suggestion_controller;
+    Vector<Utf16String> m_find_in_page_highlighted_match_texts;
+    u64 m_find_in_page_highlighted_matches_dom_tree_version { 0 };
+    u64 m_find_in_page_highlighted_matches_character_data_version { 0 };
+
+    struct HighlightStyleObservability {
+        bool observable { false };
+        bool needs_update { true };
+    };
+    Array<HighlightStyleObservability, 4> m_highlight_style_observability;
+    HighlightStyleObservability& highlight_style_observability(CSS::PseudoElement);
+    void update_highlight_style_observability(CSS::PseudoElement);
+    bool custom_highlight_static_ranges_may_have_changed() const;
+    bool m_custom_highlight_observers_read_static_ranges { false };
+    u64 m_custom_highlight_observers_character_data_version { 0 };
+
+    // NOTE: This is a cache to make finding the first <base href> or <base target> element O(1).
+    GC::Ptr<HTML::HTMLBaseElement> m_first_base_element_with_href_in_tree_order;
+    GC::Ptr<HTML::HTMLBaseElement> m_first_base_element_with_target_in_tree_order;
+
+    // https://html.spec.whatwg.org/multipage/images.html#list-of-available-images
+    GC::Ptr<HTML::ListOfAvailableImages> m_list_of_available_images;
+
+    // https://html.spec.whatwg.org/multipage/links.html#map-of-preloaded-resources
+    // FIXME: Entries leak until document destruction if a <link rel=preload> is never consumed.
+    HashMap<HTML::PreloadKey, GC::Ref<HTML::PreloadEntry>> m_map_of_preloaded_resources;
+
+    // https://html.spec.whatwg.org/multipage/parsing.html#list-of-speculative-fetch-urls
+    HashTable<URL::URL> m_list_of_speculative_fetch_urls;
+
+    GC::Ptr<CSS::VisualViewport> m_visual_viewport;
+
+    PaintTiming::DocumentPaintTimingState m_paint_timing_state;
+
+    // NOTE: Not in the spec per se, but Document must be able to access all IntersectionObservers whose root is in the document.
+    GC::WeakHashSet<IntersectionObserver::IntersectionObserver> m_intersection_observers;
+
+    // https://www.w3.org/TR/intersection-observer/#document-intersectionobservertaskqueued
+    // Each document has an IntersectionObserverTaskQueued flag which is initialized to false.
+    bool m_intersection_observer_task_queued { false };
+
+    // https://html.spec.whatwg.org/multipage/urls-and-fetching.html#lazy-load-intersection-observer
+    // Each Document has a lazy load intersection observer, initially set to null but can be set to an IntersectionObserver instance.
+    GC::Ptr<IntersectionObserver::IntersectionObserver> m_lazy_load_intersection_observer;
+
+    GC::Ptr<IntersectionObserver::IntersectionObserver> m_video_viewport_intersection_observer;
+
+    Vector<GC::Weak<ResizeObserver::ResizeObserver>> m_resize_observers;
+
+    ShadowRoot::DocumentSlotAssignmentList m_shadow_roots_needing_slot_assignment;
+
+    // https://html.spec.whatwg.org/multipage/semantics.html#will-declaratively-refresh
+    // A Document object has an associated will declaratively refresh (a boolean). It is initially false.
+    bool m_will_declaratively_refresh { false };
+
+    RefPtr<Core::Timer> m_active_refresh_timer;
+    RefPtr<Core::Timer> m_compositor_animation_wakeup_timer;
+    Optional<MonotonicTime> m_compositor_animation_wakeup_deadline;
+    RefPtr<Core::Timer> m_compositor_animation_observation_timer;
+    bool m_force_visual_context_tree_rebuild_on_next_compositor_animation_update_for_testing { false };
+    Vector<Compositing::RustFFI::NodeSlotId> m_layout_nodes_with_forced_compositor_effects_layer;
+    Vector<Compositing::RustFFI::NodeSlotId> m_layout_nodes_with_forced_compositor_background_color_frame;
+
+    bool m_temporary_document_for_fragment_parsing { false };
+
+    // https://html.spec.whatwg.org/multipage/browsing-the-web.html#latest-entry
+    RefPtr<HTML::SessionHistoryEntry> m_latest_entry;
+
+    HashMap<HTML::SharedResourceRequest::Key, GC::Ptr<HTML::SharedResourceRequest>> m_shared_resource_requests;
+
+    // The documents that use elements of this document refer to, by URL.
+    HashMap<URL::URL, GC::Ref<SVG::SVGResourceDocument>> m_svg_resource_documents;
+
+    // For a document that a use element's reference loaded, the document whose resource documents it shares.
+    GC::Ptr<Document> m_svg_resource_document_owner;
+    HashMap<URL::URL, OwnPtr<CSS::ImageStyleValueResource>> m_css_image_resources;
+    // NB: The resources of url() values with request modifiers. m_css_image_resources holds those without any, which
+    //     most url() values are.
+    HashMap<CSS::ImageStyleValueResourceKey, OwnPtr<CSS::ImageStyleValueResource>> m_css_image_resources_with_request_url_modifiers;
+
+    Vector<GC::Ref<SVG::SMILTimeContainer>> m_smil_time_containers_to_begin;
+    Vector<GC::Ref<SVG::SVGAnimateMotionElement>> m_animate_motion_elements_to_update;
+
+    // The animations associated with the document's elements, and those associated with it during the current style
+    // stabilization epoch, none of which the document keeps alive.
+    // NB: The associated animations include those associated with elements in shadow trees, so they differ from
+    //     getAnimations().
+    Animations::RustFFI::DocumentAnimations* m_animations { nullptr };
+    // The tree position of every element of the document by its unique ID, valid for one DOM tree version. Sorting
+    // animations fills it once it asked the tree enough at that version.
+    HashMap<UniqueNodeID, u32> m_element_tree_positions;
+    u64 m_element_tree_positions_dom_tree_version { 0 };
+    u32 m_tree_order_compares_at_dom_tree_version { 0 };
+    u32 m_element_count_at_last_tree_positions_walk { 0 };
+
+    GC::Ptr<Animations::NamedTimelines> m_named_timelines;
+    u64 m_timeline_declarations_generation { 0 };
+    Optional<double> m_last_animation_frame_timestamp;
+
+    // https://drafts.csswg.org/css-transitions-2/#current-transition-generation
+    size_t m_transition_generation { 0 };
+    u64 m_style_stabilization_epoch_depth { 0 };
+    u64 m_style_stabilization_pass_count { 0 };
+    bool m_style_stabilization_has_style_reactions { false };
+
+    bool m_needs_to_call_page_did_load { false };
+
+    // https://html.spec.whatwg.org/multipage/browsing-the-web.html#scripts-may-run-for-the-newly-created-document
+    bool m_ready_to_run_scripts { false };
+    GC::Ptr<GC::Function<void()>> m_deferred_parser_start;
+
+    Vector<HTML::FormAssociatedElement*> m_form_associated_elements_with_form_attribute;
+
+    GC::Ptr<HTML::RadioButtonGroupRegistry> m_radio_button_group_registry;
+
+    Vector<GC::Ref<DOM::Element>> m_potentially_named_elements;
+
+    // Every connected <pattern>, which is what lets a pattern that inherits attributes from the pattern its `href` names
+    // be republished when the chain changes.
+    SVG::SVGPatternElement::DocumentPatternElementList m_svg_pattern_elements;
+
+    AnchorNameMap m_anchor_name_map;
+
+    bool m_design_mode_enabled { false };
+
+    bool m_image_map_areas_need_publication { false };
+
+    HashMap<Web::AsyncScrollNodeStableID, Compositing::SnappedAreas> m_scroll_container_snapped_areas;
+    Vector<Compositing::RustFFI::NodeSlotId> m_scroll_snap_containers;
+    bool m_needs_scroll_container_resnap { false };
+    // Whether an image box handed the provider it owns after a layout update found its image already there, so it lays
+    // out again with it.
+    bool m_owed_image_provider_arrived_with_image { false };
+    // Whether a layout update requested web faces its layout wanted, which may have resolved at once.
+    bool m_requested_wanted_font_faces { false };
+    bool m_may_have_scroll_snap_areas { false };
+    bool m_may_have_blocking_wheel_event_listener { false };
+    u64 m_wheel_event_listener_state_generation { 0 };
+    bool m_may_have_dom_paint_facts { false };
+
+    HashTable<GC::Ref<Element>> m_list_owners_pending_item_renumber;
+    HashTable<GC::Ref<Element>> m_list_owners_with_stale_item_counters;
+    bool m_stale_list_item_counter_rendered { false };
+    // The hit-test items of the frame the document adopted last: their generation as the frame landed, and the
+    // structural epoch of the visual context tree the frame was recorded against. None once something that can be hit
+    // changed, or where the boxes of the frame may be gone.
+    struct HitTestItemsOnScreen {
+        u64 generation { 0 };
+        u64 visual_context_tree_structural_epoch { 0 };
+    };
+    Optional<HitTestItemsOnScreen> m_hit_test_items_on_screen;
+    [[nodiscard]] bool hit_test_items_on_screen_are_as_adopted() const;
+    Optional<CSSPixelRect> m_caret_hit_test_debug_rect;
+
+    mutable StyleUpdateStatistics m_style_update_statistics;
+
+    mutable GC::Ptr<WebIDL::ObservableArray> m_adopted_style_sheets;
+
+    // Document should not visit ShadowRoot list to avoid leaks.
+    // It's responsibility of object that allocated ShadowRoot to keep it alive.
+    ShadowRoot::DocumentShadowRootList m_shadow_roots;
+    // The shadow roots whose counter style registry may resolve or publish differently since the last style update.
+    ShadowRoot::DocumentCounterStyleSettleList m_shadow_roots_with_counter_styles_to_settle;
+    Vector<GC::Ref<Element>> m_elements_whose_assigned_slot_changed;
+    Vector<GC::Ref<Element>> m_elements_whose_assigned_slot_change_flew_past;
+    u64 m_style_sheet_set_generation { 0 };
+    // The `@keyframes` rows the style engine still holds for shadow roots that left this document.
+    Vector<CSS::StyleScope::DepartedAnimationKeyframes> m_departed_animation_keyframes;
+    // The style sheet set generation the `@keyframes` rows were last brought up to date at.
+    Optional<u64> m_animation_keyframes_published_generation;
+
+    Optional<Utf16String> m_content_blocker_style_sheet;
+    // Class/id tokens already covered by the cached content blocker stylesheet.
+    HashTable<Utf16FlyString> m_content_blocker_style_sheet_checked_classes;
+    HashTable<Utf16FlyString> m_content_blocker_style_sheet_checked_ids;
+
+    Optional<AK::UnixDateTime> m_last_modified;
+
+    u64 m_form_controls_version { 0 };
+    u64 m_option_selectedness_version { 0 };
+    mutable Array<u64, to_underlying(HTMLCollectionAttributeInvalidationType::Count)> m_html_collection_attribute_invalidation_type_counts {};
+    mutable HTMLCollectionAttributeInvalidationTypes m_html_collection_attribute_invalidation_types { 0 };
+
+    enum class MutationObserverType : u8 {
+        ChildList = 1 << 0,
+        Attributes = 1 << 1,
+        CharacterData = 1 << 2,
+    };
+    u8 m_mutation_observer_types { 0 };
+    u64 m_style_environment_version { 0 };
+    u64 m_next_counter_style_environment_identity { 1 };
+
+    // https://drafts.csswg.org/css-position-4/#document-top-layer
+    // Documents have a top layer, an ordered set containing elements from the document.
+    // Elements in the top layer do not lay out normally based on their position in the document;
+    // instead they generate boxes as if they were siblings of the root element.
+    OrderedHashTable<GC::Ref<Element>> m_top_layer_elements;
+    OrderedHashTable<GC::Ref<Element>> m_top_layer_pending_removals;
+    Vector<GC::Ref<Element>> m_elements_with_pending_top_layer_membership_change;
+
+    Vector<GC::Ref<HTML::HTMLElement>> m_showing_auto_popover_list;
+    Vector<GC::Ref<HTML::HTMLElement>> m_showing_hint_popover_list;
+
+    GC::Ptr<HTML::HTMLElement> m_popover_pointerdown_target;
+
+    Vector<GC::Ref<HTML::HTMLDialogElement>> m_open_dialogs_list;
+    GC::Ptr<HTML::HTMLDialogElement> m_dialog_pointerdown_target;
+
+    // https://dom.spec.whatwg.org/#document-allow-declarative-shadow-roots
+    HTML::HTMLParser::AllowDeclarativeShadowRoots m_allow_declarative_shadow_roots { HTML::HTMLParser::AllowDeclarativeShadowRoots::No };
+
+    // https://w3c.github.io/selection-api/#dfn-has-scheduled-selectionchange-event
+    bool m_has_scheduled_selectionchange_event { false };
+
+    GC::Ptr<JS::ConsoleClient> m_console_client;
+
+    i64 m_cursor_blink_cycle_start_time_ns { 0 };
+
+    // The cursor position most recently invalidated for caret painting, so that moving the caret to another node
+    // also repaints the node it moved away from.
+    GC::Ptr<DOM::Position> m_previously_repainted_cursor_position;
+
+    // NOTE: This is GC::Weak, not GC::Ptr, on purpose. We don't want the document to keep some old detached navigable alive.
+    GC::Weak<HTML::LocalNavigable> m_navigable;
+    GC::Weak<HTML::LocalNavigable> m_navigable_awaiting_activation;
+
+    Core::SharedVersion m_cookie_version { Core::INVALID_SHARED_VERSION };
+    Optional<Core::SharedVersionIndex> m_cookie_version_index;
+    Utf16String m_cookie;
+
+    mutable OwnPtr<Unicode::Segmenter> m_grapheme_segmenter;
+    mutable OwnPtr<Unicode::Segmenter> m_line_segmenter;
+    mutable OwnPtr<Unicode::Segmenter> m_word_segmenter;
+
+    GC::Ref<EditingHostManager> m_editing_host_manager;
+    bool m_is_input_method_composing { false };
+
+    GC::Ptr<Editing::EditingHistory> m_editing_history;
+
+    bool m_inside_exec_command { false };
+    bool m_inside_script_edit_on_its_own { false };
+    bool m_had_user_edits { false };
+    bool m_inside_clipboard_exec_command { false };
+    bool m_running_editing_command_action { false };
+    bool m_preserve_selection_offsets_during_identical_character_data_replacement { false };
+
+    // https://w3c.github.io/editing/docs/execCommand/#default-single-line-container-name
+    Utf16FlyString m_default_single_line_container_name { HTML::TagNames::div };
+
+    // https://w3c.github.io/editing/docs/execCommand/#css-styling-flag
+    bool m_css_styling_flag { false };
+
+    // https://w3c.github.io/editing/docs/execCommand/#state-override
+    OrderedHashMap<Utf16FlyString, bool> m_command_state_override;
+
+    // https://w3c.github.io/editing/docs/execCommand/#value-override
+    HashMap<Utf16FlyString, Utf16String> m_command_value_override;
+
+    // https://html.spec.whatwg.org/multipage/webstorage.html#session-storage-holder
+    // A Document object has an associated session storage holder, which is null or a Storage object. It is initially null.
+    GC::Ptr<HTML::Storage> m_session_storage_holder;
+
+    // https://html.spec.whatwg.org/multipage/webstorage.html#local-storage-holder
+    // A Document object has an associated local storage holder, which is null or a Storage object. It is initially null.
+    GC::Ptr<HTML::Storage> m_local_storage_holder;
+
+    // https://html.spec.whatwg.org/multipage/dom.html#render-blocking-element-set
+    HashTable<GC::Ref<Element>> m_render_blocking_elements;
+
+    // https://drafts.csswg.org/css-view-transitions-1/#document-active-view-transition
+    GC::Ptr<ViewTransition::ViewTransition> m_active_view_transition;
+
+    // https://drafts.csswg.org/css-view-transitions-1/#document-rendering-suppression-for-view-transitions
+    bool m_rendering_suppression_for_view_transitions { false };
+
+    // https://drafts.csswg.org/css-view-transitions-1/#document-dynamic-view-transition-style-sheet
+    RefPtr<CSS::StyleSheetState> m_dynamic_view_transition_style_sheet;
+
+    // https://drafts.csswg.org/css-view-transitions-1/#document-show-view-transition-tree
+    bool m_show_view_transition_tree { false };
+
+    // https://drafts.csswg.org/css-view-transitions-1/#document-update-callback-queue
+    Vector<GC::Ptr<ViewTransition::ViewTransition>> m_update_callback_queue = {};
+
+    // https://www.w3.org/TR/css-properties-values-api-1/#dom-window-registeredpropertyset-slot
+    HashMap<Utf16FlyString, CSS::CustomPropertyRegistration> m_registered_property_set;
+    HashMap<Utf16FlyString, CSS::CustomPropertyRegistration> m_cached_registered_properties_from_css_property_rules;
+    bool m_needs_registered_properties_cache_update { true };
+    size_t m_custom_property_registration_generation { 0 };
+    void const* m_rust_custom_property_registry { nullptr };
+    bool m_rust_custom_property_registry_synced { false };
+    bool m_custom_property_environments_need_republishing { false };
+
+    CSS::StyleScope m_style_scope;
+
+    // Cache of parsed selector queries for querySelectorAll/querySelector/matches/closest.
+    // A null value means the selector string failed to parse.
+    mutable OrderedHashMap<Utf16String, RefPtr<SelectorQuery const>> m_selector_query_cache;
+    // The text and the query of the cache entry that the last lookup found, until the cache next changes.
+    mutable Utf16String const* m_last_selector_query_text { nullptr };
+    mutable SelectorQuery const* m_last_selector_query { nullptr };
+
+    // Cache of querySelectorAll results, validated lazily against the query root's dom_tree_version/character_data_version.
+    GC::Ptr<QuerySelectorResultCache> m_query_selector_result_cache;
+
+    // The ids that aria-labelledby and aria-describedby reference in a tree, validated lazily against the tree's
+    // dom_tree_version. Computing accessible names asks this for the parent and the ancestors of every text node.
+    struct IdsReferencedFromAria {
+        u64 dom_tree_version { 0 };
+        HashTable<Utf16FlyString> ids;
+    };
+    mutable GC::WeakHashMap<Node, IdsReferencedFromAria> m_ids_referenced_from_aria;
+
+    // https://fullscreen.spec.whatwg.org/#list-of-pending-fullscreen-events
+    Vector<PendingFullscreenEvent> m_pending_fullscreen_events;
+
+    // https://w3c.github.io/picture-in-picture/#picture-in-picture-element
+    GC::Ptr<Element> m_picture_in_picture_element;
+
+    // https://dom.spec.whatwg.org/#document-custom-element-registry
+    GC::Ptr<HTML::CustomElementRegistry> m_custom_element_registry;
+
+    // https://html.spec.whatwg.org/multipage/dom.html#concept-document-internal-ancestor-origin-objects-list
+    Optional<Vector<URL::Origin>> m_internal_ancestor_origin_objects_list;
+
+    // https://html.spec.whatwg.org/multipage/dom.html#concept-document-ancestor-origins-list
+    GC::Ptr<HTML::DOMStringList> m_ancestor_origins_list;
+};
+
+template<>
+inline bool Node::fast_is<Document>() const { return is_document(); }
+
+bool is_a_registrable_domain_suffix_of_or_is_equal_to(Utf16View host_suffix_string, URL::Host const& original_host);
+bool is_a_registrable_domain_suffix_of_or_is_equal_to(URL::Host const& host_suffix, URL::Host const& original_host);
+
+}

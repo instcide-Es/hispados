@@ -1,0 +1,16 @@
+// https://drafts.css-houdini.org/css-typed-om-1/#cssmathvalue
+[Exposed=(Window, Worker, PaintWorklet, LayoutWorklet), ImplementedIn=Rust]
+interface CSSMathValue : CSSNumericValue {
+    readonly attribute CSSMathOperator operator;
+};
+
+// https://drafts.css-houdini.org/css-typed-om-1/#enumdef-cssmathoperator
+enum CSSMathOperator {
+    "sum",
+    "product",
+    "negate",
+    "invert",
+    "min",
+    "max",
+    "clamp",
+};

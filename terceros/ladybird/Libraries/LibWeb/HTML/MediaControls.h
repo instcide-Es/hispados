@@ -1,0 +1,147 @@
+/*
+ * Copyright (c) 2026, Gregory Bertilson <gregory@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Optional.h>
+#include <AK/Utf16FlyString.h>
+#include <AK/Vector.h>
+#include <AK/Weakable.h>
+#include <LibCore/Timer.h>
+#include <LibGC/Cell.h>
+#include <LibGC/Weak.h>
+#include <LibWeb/Forward.h>
+#include <LibWeb/HTML/MediaControlsDOM.h>
+
+namespace Web::HTML {
+
+class HTMLMediaElement;
+
+class MediaControls : public Weakable<MediaControls> {
+public:
+    MediaControls(HTMLMediaElement& host, HTMLMediaElement& media_element);
+    ~MediaControls();
+
+    void visit_edges(GC::Cell::Visitor&);
+
+    void update_visibility();
+    void set_picture_in_picture_window_controls_in_use(bool);
+    // No event announces a change of the seekable ranges alone, so whoever changes them says so.
+    void seekable_ranges_changed() { update_timeline(); }
+
+private:
+    void create_shadow_tree();
+
+    enum class ListenOnce : bool {
+        No,
+        Yes,
+    };
+
+    template<typename T, CallableAs<bool, MediaControls&, T&> Handler>
+    GC::Ref<DOM::IDLEventListener> add_event_listener(JS::Realm&, DOM::EventTarget&, Utf16FlyString const& event_name, ListenOnce, Handler);
+    template<CallableAs<bool, MediaControls&> Handler>
+    GC::Ref<DOM::IDLEventListener> add_event_listener(JS::Realm&, DOM::EventTarget&, Utf16FlyString const& event_name, Handler);
+    template<CallableAs<bool, MediaControls&, UIEvents::MouseEvent const&> Handler>
+    GC::Ref<DOM::IDLEventListener> add_event_listener(JS::Realm&, DOM::EventTarget&, Utf16FlyString const& event_name, Handler);
+    template<CallableAs<bool, MediaControls&, UIEvents::MouseEvent const&> Handler>
+    GC::Ref<DOM::IDLEventListener> add_event_listener(JS::Realm&, DOM::EventTarget&, Utf16FlyString const& event_name, ListenOnce, Handler);
+    template<CallableAs<bool, MediaControls&, UIEvents::KeyboardEvent const&> Handler>
+    GC::Ref<DOM::IDLEventListener> add_event_listener(JS::Realm&, DOM::EventTarget&, Utf16FlyString const& event_name, Handler);
+
+    void remove_event_listeners();
+    void remove_scrubbing_mousemove_listener();
+    void set_up_event_listeners();
+
+    void toggle_playback();
+    void set_current_time(double);
+    void seek_while_scrubbing(double);
+    void submit_pending_scrub_seek();
+    void set_volume(double);
+    void toggle_mute();
+    void toggle_fullscreen();
+
+    struct TimelineRange {
+        double start { 0 };
+        double end { 0 };
+
+        double span() const { return end - start; }
+        double time_at(double progress) const { return start + (progress * span()); }
+        double progress_at(double time) const { return (time - start) / span(); }
+    };
+    Optional<TimelineRange> timeline_range() const;
+
+    void update_play_pause_icon();
+    void update_timeline();
+    void set_timeline_progress(double);
+    void update_timestamp();
+    void set_timestamp(double time, double duration);
+    void request_timeline_update();
+    bool timeline_is_shown() const;
+    void update_volume_and_mute_indicator();
+    void update_fullscreen_icon();
+    void update_placeholder_visibility();
+
+    bool should_show_placeholder() const;
+
+    void show_controls();
+    void hide_controls();
+    bool is_picture_in_picture_player() const;
+    void control_bar_visibility_did_change();
+
+    // The controls live in the shadow tree of their host, and play the media of their media element. The two are one
+    // element unless the host shows another element's media.
+    GC::Weak<HTMLMediaElement> m_host;
+    GC::Weak<HTMLMediaElement> m_media_element;
+
+    Optional<MediaControlsDOM> m_dom;
+
+    struct RegisteredEventListener {
+        GC::Weak<DOM::EventTarget> target;
+        Utf16FlyString event_name;
+        GC::Weak<DOM::IDLEventListener> listener;
+    };
+    Vector<RegisteredEventListener> m_registered_event_listeners;
+    GC::Weak<DOM::IDLEventListener> m_scrubbing_mousemove_listener;
+    GC::Weak<Window> m_animation_frame_window;
+    u32 m_request_animation_frame_id { 0 };
+
+    enum class Scrubbing : u8 {
+        No,
+        WhilePaused,
+        WhilePlaying,
+    };
+    Scrubbing m_scrubbing_timeline { Scrubbing::No };
+    Optional<double> m_pending_scrub_seek_time;
+    RefPtr<Core::Timer> m_scrub_seek_preemption_timer;
+    bool m_scrubbing_volume { false };
+    bool m_hovering_controls { false };
+    bool m_picture_in_picture_window_controls_in_use { false };
+    bool m_control_bar_is_shown { false };
+
+    RefPtr<Core::Timer> m_hover_timer;
+
+    bool m_had_audio { true };
+    bool m_was_muted { false };
+    enum class MuteIconState : u8 {
+        Empty,
+        Low,
+        High,
+    };
+    MuteIconState m_mute_icon_state { MuteIconState::Empty };
+
+    double m_last_timeline_progress { 0.0 };
+    i64 m_last_timestamp_time { -1 };
+    Optional<i64> m_last_timestamp_duration;
+
+    struct BufferedRange {
+        GC::Weak<DOM::Element> element;
+        double left { 0 };
+        double width { 0 };
+    };
+    Vector<BufferedRange> m_buffered_ranges;
+};
+
+}

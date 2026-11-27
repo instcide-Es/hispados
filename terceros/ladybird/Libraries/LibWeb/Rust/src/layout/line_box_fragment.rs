@@ -1,0 +1,410 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+use super::*;
+
+pub(crate) const GLYPH_TEXT_TYPE_COMMON: u8 = 0;
+pub(crate) const GLYPH_TEXT_TYPE_CONTEXT_DEPENDENT: u8 = 1;
+pub(crate) const GLYPH_TEXT_TYPE_END_PADDING: u8 = 2;
+pub(crate) const GLYPH_TEXT_TYPE_LTR: u8 = 3;
+pub(crate) const GLYPH_TEXT_TYPE_RTL: u8 = 4;
+
+pub(crate) fn is_ascii_space(code_unit: u16) -> bool {
+    matches!(code_unit, 0x09..=0x0d | 0x20)
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct GlyphData {
+    pub(crate) glyphs: libgfx_rust::text_layout::GlyphBuffer,
+    pub(crate) font: libgfx_rust::font::FontHandle,
+    pub(crate) text_type: u8,
+    // GlyphRun::width is not updated by the C++ fragment merge machine.
+    pub(crate) width: f32,
+    /// Whether the glyphs are set upright in vertical text, one em apart along the inline axis.
+    pub(crate) is_upright: bool,
+    /// Where merging more glyphs into the run last left it.
+    pub(crate) derived_placements_end: Option<libgfx_rust::text_layout::DerivedPlacementsEnd>,
+}
+
+/// The glyphs of a text item and the font they are set in, which a line merges into a fragment or makes one of.
+pub(crate) struct ItemGlyphRun<'run> {
+    pub(crate) glyphs: std::borrow::Cow<'run, libgfx_rust::text_layout::GlyphBuffer>,
+    pub(crate) font: &'run libgfx_rust::font::FontHandle,
+    pub(crate) text_type: u8,
+    pub(crate) width: f32,
+    pub(crate) is_upright: bool,
+}
+
+impl ItemGlyphRun<'_> {
+    /// The glyph run of a fragment made of these glyphs alone, which shares them with the shape they came from until
+    /// merging more into it changes them.
+    pub(crate) fn into_glyph_data(self) -> GlyphData {
+        GlyphData {
+            glyphs: self.glyphs.into_owned(),
+            font: self.font.clone(),
+            text_type: self.text_type,
+            width: self.width,
+            is_upright: self.is_upright,
+            derived_placements_end: None,
+        }
+    }
+}
+
+// The advance of a run's trailing whitespace, recorded at shaping time so that trimming it subtracts exactly what
+// shaping added.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct TrailingWhitespace {
+    pub(crate) length_in_code_units: usize,
+    pub(crate) inline_size: CssPixels,
+    /// The inline size of the ASCII white space at the very end alone, which is what intrinsic sizing takes off: An
+    /// ideographic space that hangs at the end of a line still counts toward the intrinsic sizes.
+    pub(crate) ascii_inline_size: CssPixels,
+}
+
+impl std::ops::AddAssign for TrailingWhitespace {
+    fn add_assign(&mut self, other: Self) {
+        self.length_in_code_units += other.length_in_code_units;
+        self.inline_size += other.inline_size;
+        self.ascii_inline_size += other.ascii_inline_size;
+    }
+}
+
+#[derive(Clone, Default, PartialEq)]
+pub(crate) struct BlockEllipsisText {
+    pub(crate) soft_wrap_offsets: Vec<usize>,
+    /// Shaping run ends as UTF-16 offsets in the text node, paired with their original text types.
+    pub(crate) runs: Vec<(usize, u8)>,
+}
+
+#[derive(Clone, PartialEq)]
+pub(crate) struct LineBoxFragmentData {
+    pub(crate) record: inline_content::FragmentRecord,
+    pub(crate) glyphs: Option<GlyphData>,
+    pub(crate) insert_position: f32,
+    pub(crate) current_insert_direction: u8,
+    pub(crate) has_text_overflow_ellipsis: bool,
+    pub(crate) has_soft_wrap_opportunity_after: bool,
+    /// Shaping boundaries and internal soft wraps needed to shorten text for a standard block ellipsis.
+    pub(crate) block_ellipsis_text: Option<Box<BlockEllipsisText>>,
+    pub(crate) is_fully_truncated: bool,
+    /// Whether the fragment is fully truncated because a text-overflow ellipsis took its place. Such a fragment only
+    /// paints nothing: It's still on its line, so it still counts toward the line's height and baseline.
+    pub(crate) is_hidden_by_text_overflow: bool,
+    pub(crate) trailing_whitespace: TrailingWhitespace,
+    pub(crate) text_utf16: *const u16,
+    pub(crate) text_length_in_code_units: usize,
+    /// For the fragment of an element item, the sizes and box sides of its box, as the item carries them.
+    pub(crate) box_cells: Option<used_values::RootInputCells>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct FragmentBuildFacts {
+    pub(crate) style_source: Node,
+    pub(crate) is_atomic_inline: bool,
+    pub(crate) white_space_collapse: u8,
+    pub(crate) text_utf16: *const u16,
+    pub(crate) text_length_in_code_units: usize,
+}
+
+impl std::ops::Deref for LineBoxFragmentData {
+    type Target = inline_content::FragmentRecord;
+    fn deref(&self) -> &Self::Target {
+        &self.record
+    }
+}
+
+impl std::ops::DerefMut for LineBoxFragmentData {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.record
+    }
+}
+
+impl LineBoxFragmentData {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(
+        layout_node: Node,
+        start: usize,
+        length_in_code_units: usize,
+        inline_offset: CssPixels,
+        block_offset: CssPixels,
+        inline_length: CssPixels,
+        block_length: CssPixels,
+        border_box_block_start: CssPixels,
+        direction: u8,
+        writing_mode: u8,
+        glyphs: Option<GlyphData>,
+        facts: FragmentBuildFacts,
+    ) -> Self {
+        let record = inline_content::FragmentRecord {
+            layout_node,
+            style_source: facts.style_source,
+            start,
+            length_in_code_units,
+            inline_offset,
+            block_offset,
+            relpos_delta: FfiCssPixelPoint::default(),
+            inline_length,
+            block_length,
+            border_box_block_start,
+            baseline: CssPixels::default(),
+            accumulated_vertical_shift: CssPixels::default(),
+            direction,
+            writing_mode,
+            is_block_ellipsis: false,
+            is_text_overflow_ellipsis: false,
+            is_atomic_inline: facts.is_atomic_inline,
+            white_space_collapse: facts.white_space_collapse,
+            content_baselines: None,
+            line_index: 0,
+            dom_start_offset_in_node: 0,
+            dom_end_offset_in_node: 0,
+            dom_end_offset_with_trailing_whitespace: 0,
+            trimmed_trailing_whitespace: TrailingWhitespace::default(),
+            glyph_run: None,
+        };
+        let mut fragment = Self::with_record(record, glyphs);
+        fragment.text_utf16 = facts.text_utf16;
+        fragment.text_length_in_code_units = facts.text_length_in_code_units;
+        fragment
+    }
+
+    pub(crate) fn with_record(record: inline_content::FragmentRecord, glyphs: Option<GlyphData>) -> Self {
+        let mut fragment = Self {
+            record,
+            glyphs,
+            insert_position: 0.0,
+            current_insert_direction: direction::LTR,
+            has_text_overflow_ellipsis: false,
+            has_soft_wrap_opportunity_after: false,
+            block_ellipsis_text: None,
+            is_fully_truncated: false,
+            is_hidden_by_text_overflow: false,
+            trailing_whitespace: TrailingWhitespace::default(),
+            text_utf16: std::ptr::null(),
+            text_length_in_code_units: 0,
+            box_cells: None,
+        };
+        if let Some(glyphs) = &fragment.glyphs {
+            fragment.current_insert_direction = fragment.resolve_glyph_run_direction(glyphs.text_type);
+            if fragment.direction == direction::RTL {
+                fragment.insert_position = fragment.inline_length.to_double() as f32;
+            }
+        }
+        fragment
+    }
+
+    /// The sizes and box sides of the box of the fragment of an element item.
+    #[track_caller]
+    pub(crate) fn box_cells(&self) -> used_values::RootInputCells {
+        self.box_cells
+            .expect("the fragment of an element item carries the cells of its box")
+    }
+
+    pub(crate) fn text(&self) -> &[u16] {
+        if self.length_in_code_units == 0 || self.is_block_ellipsis || self.is_text_overflow_ellipsis {
+            return &[];
+        }
+        assert!(!self.text_utf16.is_null());
+        assert!(self.start + self.length_in_code_units <= self.text_length_in_code_units);
+        // SAFETY: The text snapshot owns this buffer for the layout-state
+        // lifetime, and the asserted range comes from its chunk snapshot.
+        unsafe { ak::slice_from_raw_parts(self.text_utf16.add(self.start), self.length_in_code_units) }
+    }
+
+    pub(crate) fn reshape_prefix_for_block_ellipsis(
+        &self,
+        full_text: &[u16],
+        end: usize,
+        letter_spacing: f32,
+        word_spacing: f32,
+    ) -> (CssPixels, GlyphData) {
+        let glyphs = self.glyphs.as_ref().expect("a text prefix has glyphs");
+        let text = self
+            .block_ellipsis_text
+            .as_ref()
+            .expect("a text prefix has shaping boundaries");
+        let mut prefix: Option<Self> = None;
+        let mut start = self.start;
+        for &(run_end, text_type) in &text.runs {
+            let run_end = run_end.min(end);
+            if run_end <= start {
+                continue;
+            }
+            let shape = libgfx_rust::text_layout::shape_text_shared(
+                &glyphs.font,
+                &full_text[start..run_end],
+                libgfx_rust::text_layout::TextType::try_from(text_type).expect("invalid Gfx::GlyphRun::TextType"),
+                letter_spacing,
+                word_spacing,
+                text_chunker::joining_context(full_text, start..run_end),
+                glyphs.is_upright,
+            );
+            let inline_size = CssPixels::nearest_value_for_f32(shape.width());
+            let run = ItemGlyphRun {
+                glyphs: std::borrow::Cow::Borrowed(shape.glyphs()),
+                font: &glyphs.font,
+                text_type,
+                width: shape.width(),
+                is_upright: glyphs.is_upright,
+            };
+            if let Some(prefix) = &mut prefix {
+                prefix.append_glyph_run(&run, inline_size, start - self.start);
+            } else {
+                let mut record = self.record.clone();
+                record.inline_length = inline_size;
+                prefix = Some(Self::with_record(record, Some(run.into_glyph_data())));
+            }
+            start = run_end;
+            if start == end {
+                break;
+            }
+        }
+        let prefix = prefix.expect("a soft wrap retains a nonempty text prefix");
+        let inline_size = prefix.inline_length;
+        let mut glyphs = prefix.glyphs.unwrap();
+        glyphs.width = inline_size.to_double() as f32;
+        (inline_size, glyphs)
+    }
+
+    /// Whether the fragment counts toward the height and baseline of its line: Content that a block overflow ellipsis
+    /// displaced doesn't, but content that a text-overflow ellipsis hides does.
+    pub(crate) fn takes_part_in_line_alignment(&self) -> bool {
+        !self.is_fully_truncated || self.is_hidden_by_text_overflow
+    }
+
+    pub(crate) fn ends_in_whitespace(&self) -> bool {
+        self.text().last().is_some_and(|code_unit| is_ascii_space(*code_unit))
+    }
+
+    pub(crate) fn is_justifiable_whitespace(&self) -> bool {
+        self.text() == [b' ' as u16]
+    }
+
+    fn resolve_glyph_run_direction(&self, text_type: u8) -> u8 {
+        match text_type {
+            GLYPH_TEXT_TYPE_COMMON | GLYPH_TEXT_TYPE_CONTEXT_DEPENDENT | GLYPH_TEXT_TYPE_END_PADDING => self.direction,
+            GLYPH_TEXT_TYPE_LTR => direction::LTR,
+            GLYPH_TEXT_TYPE_RTL => direction::RTL,
+            _ => panic!("invalid glyph text type"),
+        }
+    }
+
+    pub(crate) fn append_glyph_run(&mut self, run: &ItemGlyphRun<'_>, run_inline_size: CssPixels, text_offset: usize) {
+        let text_offset = u32::try_from(text_offset).expect("text offset fits a shaping cluster index");
+        match self.direction {
+            direction::LTR => self.append_glyph_run_ltr(run, run_inline_size, text_offset),
+            direction::RTL => self.append_glyph_run_rtl(run, run_inline_size, text_offset),
+            _ => panic!("invalid direction"),
+        }
+    }
+
+    fn append_glyph_run_ltr(&mut self, run: &ItemGlyphRun<'_>, run_inline_size: CssPixels, text_offset: u32) {
+        let run_direction = self.resolve_glyph_run_direction(run.text_type);
+        let inline_offset = self.inline_length.to_double() as f32;
+
+        if self.current_insert_direction != run_direction {
+            if run_direction == direction::RTL {
+                self.insert_position = inline_offset;
+            }
+            self.current_insert_direction = run_direction;
+        }
+
+        let insert_position = self.insert_position;
+        let glyph_data = self.glyphs.as_mut().expect("merged fragment must have a glyph run");
+        if run_direction == direction::LTR
+            && glyph_data.glyphs.append_keeping_placements_derived(
+                &mut glyph_data.derived_placements_end,
+                &run.glyphs,
+                inline_offset,
+                text_offset,
+            )
+        {
+            self.inline_length += run_inline_size;
+            return;
+        }
+        let existing = &mut glyph_data.glyphs;
+        existing.reserve(run.glyphs.len());
+        match run_direction {
+            direction::LTR => {
+                for placed in run.glyphs.placed() {
+                    existing.push_placed(libgfx_rust::text_layout::PlacedGlyph {
+                        x: placed.x + inline_offset,
+                        cluster_start: placed.cluster_start + text_offset,
+                        ..placed
+                    });
+                }
+            }
+            direction::RTL => {
+                let run_offset = run_inline_size.to_double() as f32;
+                existing.update_positions(|_, x, _| {
+                    if *x >= insert_position {
+                        *x += run_offset;
+                    }
+                });
+                for placed in run.glyphs.placed() {
+                    existing.push_placed(libgfx_rust::text_layout::PlacedGlyph {
+                        x: placed.x + insert_position,
+                        cluster_start: placed.cluster_start + text_offset,
+                        ..placed
+                    });
+                }
+            }
+            _ => unreachable!(),
+        }
+        self.inline_length += run_inline_size;
+    }
+
+    fn append_glyph_run_rtl(&mut self, run: &ItemGlyphRun<'_>, run_inline_size: CssPixels, text_offset: u32) {
+        let run_direction = self.resolve_glyph_run_direction(run.text_type);
+        let run_offset = run_inline_size.to_double() as f32;
+
+        if self.current_insert_direction != run_direction {
+            if run_direction == direction::LTR {
+                self.insert_position = 0.0;
+            }
+            self.current_insert_direction = run_direction;
+        }
+
+        let insert_position = self.insert_position;
+        let existing = &mut self
+            .glyphs
+            .as_mut()
+            .expect("merged fragment must have a glyph run")
+            .glyphs;
+        existing.reserve(run.glyphs.len());
+        match run_direction {
+            direction::LTR => {
+                existing.update_positions(|_, x, _| {
+                    if *x >= insert_position {
+                        *x += run_offset;
+                    }
+                });
+                for placed in run.glyphs.placed() {
+                    existing.push_placed(libgfx_rust::text_layout::PlacedGlyph {
+                        x: placed.x + insert_position,
+                        cluster_start: placed.cluster_start + text_offset,
+                        ..placed
+                    });
+                }
+            }
+            direction::RTL => {
+                if run.text_type != GLYPH_TEXT_TYPE_END_PADDING {
+                    existing.update_positions(|_, x, _| *x += run_offset);
+                }
+                for placed in run.glyphs.placed() {
+                    existing.push_placed(libgfx_rust::text_layout::PlacedGlyph {
+                        cluster_start: placed.cluster_start + text_offset,
+                        ..placed
+                    });
+                }
+            }
+            _ => unreachable!(),
+        }
+
+        self.inline_length += run_inline_size;
+        self.insert_position += run_offset;
+    }
+}

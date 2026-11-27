@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="color-scheme" content="light dark" />
+        <title>About URLs</title>
+        <link rel="icon" type="image/png" href="resource://icons/48x48/app-browser.png" />
+        <link rel="stylesheet" type="text/css" href="resource://ladybird/ladybird.css" />
+        <style>
+            body {
+                max-width: 640px;
+                margin: 0 auto;
+                padding: 30px 24px;
+            }
+
+            h1 {
+                margin-bottom: 18px;
+                font-size: 22px;
+                font-weight: 600;
+            }
+
+            ul {
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                list-style: none;
+            }
+
+            a {
+                color: var(--link);
+                text-decoration: none;
+                border-radius: 4px;
+            }
+
+            a:hover {
+                text-decoration: underline;
+            }
+
+            .page-title {
+                margin-left: 8px;
+                color: var(--secondary-text-color);
+            }
+        </style>
+    </head>
+    <body>
+        <h1>List of About URLs</h1>
+        <ul id="page-list"></ul>
+
+        <script>
+            const pageList = document.querySelector("#page-list");
+
+            document.addEventListener("WebUIMessage", event => {
+                if (event.detail.name !== "loadPages") return;
+
+                const pages = event.detail.data.toSorted((a, b) => a.host.localeCompare(b.host));
+
+                pageList.replaceChildren(
+                    ...pages.map(page => {
+                        const url = `about:${page.host}`;
+
+                        const link = document.createElement("a");
+                        link.href = url;
+                        link.textContent = url;
+
+                        const title = document.createElement("span");
+                        title.className = "page-title";
+                        title.textContent = page.title;
+
+                        const item = document.createElement("li");
+                        item.append(link, title);
+                        return item;
+                    })
+                );
+            });
+
+            document.addEventListener("WebUILoaded", () => ladybird.sendMessage("loadPages"));
+        </script>
+    </body>
+</html>

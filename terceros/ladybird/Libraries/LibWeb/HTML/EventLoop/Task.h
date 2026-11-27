@@ -1,0 +1,173 @@
+/*
+ * Copyright (c) 2021-2024, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/DistinctNumeric.h>
+#include <AK/IntrusiveList.h>
+#include <AK/RefCounted.h>
+#include <AK/kmalloc.h>
+#include <LibGC/CellAllocator.h>
+#include <LibJS/Heap/Cell.h>
+#include <LibWeb/Export.h>
+#include <LibWeb/Forward.h>
+
+namespace Web::HTML {
+
+struct UniqueTaskSource;
+
+AK_TYPEDEF_DISTINCT_NUMERIC_GENERAL(u64, TaskID, Comparison);
+
+class Task final : public JS::Cell {
+    GC_CELL(Task, JS::Cell);
+    GC_DECLARE_ALLOCATOR(Task);
+
+public:
+    enum class Priority {
+        Normal,
+        Idle,
+    };
+
+    // https://html.spec.whatwg.org/multipage/webappapis.html#generic-task-sources
+    enum class Source {
+        Unspecified,
+        DOMManipulation,
+        UserInteraction,
+        Networking,
+        HistoryTraversal,
+        IdleTask,
+        PostedMessage,
+        Microtask,
+        TimerTask,
+        JavaScriptEngine,
+
+        // https://w3c.github.io/geolocation/#dfn-geolocation-task-source
+        Geolocation,
+
+        // https://html.spec.whatwg.org/multipage/imagebitmap-and-animations.html#bitmap-task-source
+        BitmapTask,
+
+        // https://html.spec.whatwg.org/multipage/webappapis.html#navigation-and-traversal-task-source
+        NavigationAndTraversal,
+
+        // https://w3c.github.io/FileAPI/#fileReadingTaskSource
+        FileReading,
+
+        // https://www.w3.org/TR/intersection-observer/#intersectionobserver-task-source
+        IntersectionObserver,
+
+        // https://w3c.github.io/performance-timeline/#dfn-performance-timeline-task-source
+        PerformanceTimeline,
+
+        // https://html.spec.whatwg.org/multipage/canvas.html#canvas-blob-serialisation-task-source
+        CanvasBlobSerializationTask,
+
+        // https://w3c.github.io/clipboard-apis/#clipboard-task-source
+        Clipboard,
+
+        // https://w3c.github.io/permissions/#permissions-task-source
+        Permissions,
+
+        // https://drafts.csswg.org/css-font-loading/#task-source
+        FontLoading,
+
+        // https://html.spec.whatwg.org/multipage/server-sent-events.html#remote-event-task-source
+        RemoteEvent,
+
+        // https://html.spec.whatwg.org/multipage/webappapis.html#rendering-task-source
+        Rendering,
+
+        // https://w3c.github.io/IndexedDB/#database-access-task-source
+        DatabaseAccess,
+
+        // https://websockets.spec.whatwg.org/#websocket-task-source
+        WebSocket,
+
+        // https://w3c.github.io/media-capabilities/#media-capabilities-task-source
+        MediaCapabilities,
+
+        // https://w3c.github.io/gamepad/#dfn-gamepad-task-source
+        Gamepad,
+
+        // https://registry.khronos.org/webgl/specs/latest/1.0/#5.15
+        WebGL,
+
+        // https://www.w3.org/TR/webcrypto-2/#dfn-crypto-task-source
+        Crypto,
+
+        // https://w3c.github.io/web-locks/#web-locks-tasks-source
+        WebLocks,
+
+        // https://storage.spec.whatwg.org/#task-source
+        Storage,
+
+        // https://html.spec.whatwg.org/multipage/iframe-embed-object.html#embed-task-source
+        Embed,
+
+        // !!! IMPORTANT: Keep this field last!
+        // This serves as the base value of all unique task sources.
+        // Some elements, such as the HTMLMediaElement, must have a unique task source per instance.
+        UniqueTaskSourceStart
+    };
+
+    static GC::Ref<Task> create(Source, GC::Ptr<DOM::Document const>, GC::Ref<GC::Function<void()>> steps, Priority = Priority::Normal, GC::Ptr<GC::Function<void()>> discard_steps = {});
+
+    virtual ~Task() override;
+
+    [[nodiscard]] TaskID id() const { return m_id; }
+    Source source() const { return m_source; }
+    Priority priority() const { return m_priority; }
+
+    // https://html.spec.whatwg.org/multipage/timers-and-user-prompts.html#timer-nesting-level
+    u32 timer_nesting_level() const { return m_timer_nesting_level; }
+    void set_timer_nesting_level(u32 nesting_level) { m_timer_nesting_level = nesting_level; }
+
+    void execute();
+    void discard();
+
+    DOM::Document const* document() const;
+
+    bool is_runnable() const;
+    bool is_permanently_unrunnable() const;
+
+private:
+    Task(Source, GC::Ptr<DOM::Document const>, GC::Ref<GC::Function<void()>> steps, Priority, GC::Ptr<GC::Function<void()>> discard_steps);
+
+    virtual void visit_edges(Visitor&) override;
+
+    TaskID m_id {};
+    Source m_source { Source::Unspecified };
+    Priority m_priority { Priority::Normal };
+    u32 m_timer_nesting_level { 0 };
+    GC::Ref<GC::Function<void()>> m_steps;
+    GC::Ptr<GC::Function<void()>> m_discard_steps;
+    GC::Ptr<DOM::Document const> m_document;
+
+    IntrusiveListNode<Task> m_task_queue_node;
+
+public:
+    using Queue = IntrusiveList<&Task::m_task_queue_node>;
+};
+
+struct WEB_API UniqueTaskSource {
+    AK_ALLOC_WITH_KMALLOC;
+
+    UniqueTaskSource();
+    ~UniqueTaskSource();
+
+    Task::Source const source;
+};
+
+class WEB_API ParallelQueue : public RefCounted<ParallelQueue> {
+public:
+    static NonnullRefPtr<ParallelQueue> create();
+    TaskID enqueue(GC::Ref<GC::Function<void()>>);
+
+private:
+    UniqueTaskSource m_task_source;
+};
+
+}

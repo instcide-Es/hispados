@@ -1,0 +1,8 @@
+// https://drafts.css-houdini.org/css-typed-om-1/#csskeywordvalue
+[Exposed=(Window, Worker, PaintWorklet, LayoutWorklet), ImplementedIn=Rust]
+interface CSSKeywordValue : CSSStyleValue {
+    constructor(USVString value);
+    attribute USVString value;
+};
+
+typedef (DOMString or CSSKeywordValue) CSSKeywordish;

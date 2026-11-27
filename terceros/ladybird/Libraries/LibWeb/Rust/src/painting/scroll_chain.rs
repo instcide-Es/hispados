@@ -1,0 +1,165 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+use crate::css::css_enums::writing_mode;
+use crate::css::css_pixels::{CssPixelPoint, CssPixelRect, CssPixels};
+use crate::layout::node_data::{NodeFlag, NodeKind, NodeSlotId};
+use crate::layout::query::inline_cursor::{CaretPosition, InlineCursor};
+use crate::painting::paintable_geometry::{absolute_padding_box_rect, has_scrollable_overflow};
+use crate::painting::paintable_rows::PaintableRowsRead;
+use crate::painting::{chrome_geometry, scroll_snap, style_queries};
+
+/// The nearest box, `start` included, that keeps a scroll step by the delta to itself: neither it nor a box inside it
+/// passes the step on to a scroller around it. A step belongs to one scroller, and a touchpad rarely moves along one
+/// axis exactly, so it is the main axis of the step that decides.
+pub(crate) fn box_ending_scroll_chain(
+    arena: &impl PaintableRowsRead,
+    start: NodeSlotId,
+    delta_x: f64,
+    delta_y: f64,
+) -> NodeSlotId {
+    let step_is_mainly_vertical = delta_y.abs() >= delta_x.abs();
+    let mut node = start;
+    while arena.node_data_if_live(node).is_some() {
+        let chains_to_ancestors = chrome_geometry::scroll_boundary_behavior(arena, node).chains_to_ancestors;
+        let passes_the_step_on = if step_is_mainly_vertical {
+            chains_to_ancestors.vertical
+        } else {
+            chains_to_ancestors.horizontal
+        };
+        if !passes_the_step_on {
+            return node;
+        }
+        node = arena.containing_block_by_walking_ancestors(node);
+    }
+    NodeSlotId::INVALID
+}
+
+pub(crate) fn first_wheel_scrollable_box_in_containing_block_chain(
+    arena: &impl PaintableRowsRead,
+    start: NodeSlotId,
+) -> NodeSlotId {
+    let mut node = start;
+    while let Some(data) = arena.node_data_if_live(node) {
+        let backed_by_element_or_viewport = data.kind.get() == NodeKind::Viewport || arena.node_is_element_backed(node);
+        if backed_by_element_or_viewport && arena.paintable_row_is_populated(node) {
+            let axes = chrome_geometry::wheel_scrollable_axes(arena, node);
+            if axes.horizontal || axes.vertical {
+                return node;
+            }
+        }
+        node = arena.containing_block_by_walking_ancestors(node);
+    }
+    NodeSlotId::INVALID
+}
+
+/// The box a scroll brings a text position's caret into view in, and the offset it scrolls that box to: the nearest box
+/// with scrollable overflow in the containing block chain of the caret's box. Where `scroll_block_axis` is false, the
+/// box keeps its block axis offset.
+pub(crate) fn scroll_target_for_text_position(
+    arena: &impl PaintableRowsRead,
+    text: NodeSlotId,
+    offset: usize,
+    affinity_is_downstream: bool,
+    scroll_block_axis: bool,
+) -> Option<(NodeSlotId, CssPixelPoint)> {
+    let caret = InlineCursor::new(arena).caret_rect(CaretPosition::Text {
+        text,
+        offset,
+        downstream: affinity_is_downstream,
+    })?;
+    let style = arena.node_style_if_live(caret.style_source)?;
+    let horizontal = style.writing_mode() == writing_mode::HORIZONTAL_TB;
+    let one = CssPixels::from_integer(1);
+
+    let mut rect = caret.rect;
+    if horizontal {
+        if style.inline_axis_is_reverse() {
+            rect.x -= one;
+        }
+        rect.width = one;
+    } else {
+        if style.inline_axis_is_reverse() {
+            rect.y -= one;
+        }
+        rect.height = one;
+    }
+
+    let mut container = caret.owner;
+    let mut axes_fixed_to_the_viewport = (false, false);
+    while !has_scrollable_overflow(arena, container) {
+        let containing_block = arena
+            .node_containing_block_if_live(container)
+            .filter(|&containing_block| arena.paintable_row_is_populated(containing_block))?;
+        // INTEROP: Scrolling the viewport cannot move a box that is fixed to it, so other engines do not scroll it to
+        //          bring a caret in such a box into view. A fixed box that compensates for the scroll of its default
+        //          anchor in an axis moves with that scroll, so it is not fixed to the viewport in that axis.
+        if let Some(axes) = axes_fixed_to_the_viewport_of(arena, container, containing_block) {
+            if axes == (true, true) {
+                return None;
+            }
+            axes_fixed_to_the_viewport = axes;
+        }
+        container = containing_block;
+    }
+    let snapport = scroll_snap::scroll_snapport_rect(arena, container, absolute_padding_box_rect(arena, container));
+    let current_offset = arena.row_scroll_offset(container);
+    if !scroll_block_axis {
+        if horizontal {
+            rect.y = snapport.y + current_offset.y;
+            rect.height = snapport.height;
+        } else {
+            rect.x = snapport.x + current_offset.x;
+            rect.width = snapport.width;
+        }
+    }
+    let mut new_offset = offset_showing_rect(rect, snapport, current_offset);
+    if axes_fixed_to_the_viewport.0 {
+        new_offset.x = current_offset.x;
+    }
+    if axes_fixed_to_the_viewport.1 {
+        new_offset.y = current_offset.y;
+    }
+    Some((container, new_offset))
+}
+
+// The horizontal and vertical axes in which `node` is fixed to the viewport, if `node` is a fixed box whose containing
+// block is the viewport.
+fn axes_fixed_to_the_viewport_of(
+    arena: &impl PaintableRowsRead,
+    node: NodeSlotId,
+    containing_block: NodeSlotId,
+) -> Option<(bool, bool)> {
+    let containing_block_is_viewport = arena
+        .node_data_if_live(containing_block)
+        .is_some_and(|data| data.kind.get() == NodeKind::Viewport);
+    if !style_queries::is_fixed_position(arena, node) || !containing_block_is_viewport {
+        return None;
+    }
+    let flags = arena.node_flags_if_live(node);
+    Some((
+        flags & NodeFlag::CompensatesForHorizontalScroll as u32 == 0,
+        flags & NodeFlag::CompensatesForVerticalScroll as u32 == 0,
+    ))
+}
+
+// The nearest offset to `current_offset` at which `rect`, in the same space as `snapport`, lies inside the snapport.
+fn offset_showing_rect(rect: CssPixelRect, snapport: CssPixelRect, current_offset: CssPixelPoint) -> CssPixelPoint {
+    let axis = |start: CssPixels, end: CssPixels, size: CssPixels, current: CssPixels| {
+        if end > current + size {
+            end - size
+        } else if start < current {
+            start
+        } else {
+            current
+        }
+    };
+    let rect = rect.translated(-snapport.x, -snapport.y);
+    CssPixelPoint::new(
+        axis(rect.left(), rect.right(), snapport.width, current_offset.x),
+        axis(rect.top(), rect.bottom(), snapport.height, current_offset.y),
+    )
+}

@@ -1,0 +1,4 @@
+// https://html.spec.whatwg.org/multipage/webstorage.html#windowlocalstorage
+interface mixin WindowLocalStorage {
+    readonly attribute Storage localStorage;
+};

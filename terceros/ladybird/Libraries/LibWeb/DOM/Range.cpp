@@ -1,0 +1,1519 @@
+/*
+ * Copyright (c) 2020, the SerenityOS developers.
+ * Copyright (c) 2022, Luke Wilde <lukew@serenityos.org>
+ * Copyright (c) 2022-2023, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2024-2025, Jelle Raaijmakers <jelle@ladybird.org>
+ * Copyright (c) 2024-2025, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/AllOf.h>
+#include <LibGC/Heap.h>
+#include <LibWeb/CSS/HighlightRegistry.h>
+#include <LibWeb/DOM/Comment.h>
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOM/DocumentFragment.h>
+#include <LibWeb/DOM/DocumentType.h>
+#include <LibWeb/DOM/ElementFactory.h>
+#include <LibWeb/DOM/Event.h>
+#include <LibWeb/DOM/Node.h>
+#include <LibWeb/DOM/ProcessingInstruction.h>
+#include <LibWeb/DOM/Range.h>
+#include <LibWeb/DOM/SelectionchangeEventDispatching.h>
+#include <LibWeb/DOM/ShadowRoot.h>
+#include <LibWeb/DOM/Slottable.h>
+#include <LibWeb/DOM/Text.h>
+#include <LibWeb/Editing/EditingHistory.h>
+#include <LibWeb/Geometry/DOMRect.h>
+#include <LibWeb/Geometry/DOMRectList.h>
+#include <LibWeb/HTML/HTMLHtmlElement.h>
+#include <LibWeb/HTML/HTMLInsertion.h>
+#include <LibWeb/HTML/HTMLScriptElement.h>
+#include <LibWeb/HTML/HTMLSlotElement.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HTML/Window.h>
+#include <LibWeb/Layout/TextNode.h>
+#include <LibWeb/Layout/Viewport.h>
+#include <LibWeb/Namespace.h>
+#include <LibWeb/Painting/BoxViews.h>
+#include <LibWeb/Painting/DocumentPaintState.h>
+#include <LibWeb/Painting/PaintingRustBridge.h>
+#include <LibWeb/TrustedTypes/RequireTrustedTypesForDirective.h>
+#include <LibWeb/TrustedTypes/TrustedTypePolicy.h>
+
+namespace Web::DOM {
+
+GC_DEFINE_ALLOCATOR(Range);
+
+GC::Ref<Range> Range::create(Document& document)
+{
+    return GC::Heap::the().allocate<Range>(document);
+}
+
+WebIDL::ExceptionOr<GC::Ref<Range>> Range::create_for_constructor(JS::Object& relevant_global_object)
+{
+    return Range::create(HTML::relevant_window(relevant_global_object).associated_document());
+}
+
+GC::Ref<Range> Range::create(GC::Ref<Node> start_container, WebIDL::UnsignedLong start_offset, GC::Ref<Node> end_container, WebIDL::UnsignedLong end_offset)
+{
+    return GC::Heap::the().allocate<Range>(start_container, start_offset, end_container, end_offset);
+}
+
+Range::Range(Document& document)
+    : Range(document, 0, document, 0)
+{
+}
+
+Range::Range(GC::Ref<Node> start_container, WebIDL::UnsignedLong start_offset, GC::Ref<Node> end_container, WebIDL::UnsignedLong end_offset)
+    : AbstractRange(start_container, start_offset, end_container, end_offset)
+{
+    VERIFY(start_offset <= start_container->length());
+    VERIFY(end_offset <= end_container->length());
+
+    update_owner_document();
+}
+
+Range::~Range() = default;
+
+void Range::finalize()
+{
+    Base::finalize();
+    if (m_owner_document)
+        m_owner_document->detach_range({}, *this);
+}
+
+void Range::visit_edges(GC::Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_associated_selection);
+    visitor.visit(m_owner_document);
+}
+
+void Range::update_owner_document()
+{
+    auto& document = m_start_container->document();
+    if (&document == m_owner_document.ptr())
+        return;
+    if (m_owner_document)
+        m_owner_document->detach_range({}, *this);
+    m_owner_document = document;
+    document.attach_range({}, *this);
+}
+
+void Range::update_associated_highlights(GC::Ptr<Document> previous_owner_document)
+{
+    auto invalidate_if_registered_in = [&](GC::Ptr<Document> document) {
+        auto* registry = document ? document->highlight_registry_if_exists() : nullptr;
+        if (registry && registry->contains_range(*this))
+            document->invalidate_custom_highlights();
+    };
+    invalidate_if_registered_in(previous_owner_document);
+    if (m_owner_document != previous_owner_document)
+        invalidate_if_registered_in(m_owner_document);
+}
+
+void Range::set_associated_selection(Badge<Selection::Selection>, GC::Ptr<Selection::Selection> selection)
+{
+    auto had_selection = m_associated_selection != nullptr;
+    m_associated_selection = selection;
+    if (m_associated_selection) {
+        update_associated_selection();
+    } else if (had_selection) {
+        // The range this selection painted through is no longer its range; take the highlight back.
+        auto& document = m_start_container->document();
+        document.note_selection_changed();
+
+        // https://w3c.github.io/selection-api/#selectionchange-event
+        // When the selection is dissociated with its range, the user agent must schedule a selectionchange event on
+        // document. Association with a new range schedules it through that range's update.
+        schedule_a_selectionchange_event(document, document);
+    }
+}
+
+void Range::update_associated_selection()
+{
+    // A range no selection paints through must not touch the viewport's selection states:
+    // mutating a free-standing range would wipe the highlight the real selection owns.
+    if (!m_associated_selection)
+        return;
+
+    auto& document = m_start_container->document();
+
+    document.note_selection_changed();
+
+    document.reset_cursor_blink_cycle();
+    document.set_cursor_position_needs_repaint();
+
+    // https://w3c.github.io/selection-api/#selectionchange-event
+    // When the selection is dissociated with its range, associated with a new range, or the associated range's boundary
+    // point is mutated either by the user or the content script, the user agent must schedule a selectionchange event
+    // on document.
+    schedule_a_selectionchange_event(document, document);
+
+    // NB: A selection change ends typing coalescence in the editing history, like Blink closing its open typing
+    //     command whenever the frame selection is set.
+    if (auto history = document.editing_history_if_exists())
+        history->selection_changed();
+}
+
+// https://dom.spec.whatwg.org/#concept-range-root
+GC::Ref<Node> Range::root() const
+{
+    // The root of a live range is the root of its start node.
+    return m_start_container->root();
+}
+
+// https://dom.spec.whatwg.org/#concept-range-bp-position
+RelativeBoundaryPointPosition position_of_boundary_point_relative_to_other_boundary_point(BoundaryPoint a, BoundaryPoint b)
+{
+    // 1. Assert: nodeA and nodeB have the same root.
+    //    NOTE: Nodes may not share the same root if they belong to different shadow trees,
+    //          so we assert that they share the same shadow-including root instead.
+    VERIFY(&a.node->shadow_including_root() == &b.node->shadow_including_root());
+
+    // 2. If nodeA is nodeB, then return equal if offsetA is offsetB, before if offsetA is less than offsetB, and after if offsetA is greater than offsetB.
+    if (a.node == b.node) {
+        if (a.offset == b.offset)
+            return RelativeBoundaryPointPosition::Equal;
+
+        if (a.offset < b.offset)
+            return RelativeBoundaryPointPosition::Before;
+
+        return RelativeBoundaryPointPosition::After;
+    }
+
+    // 3. If nodeA is following nodeB, then if the position of (nodeB, offsetB) relative to (nodeA, offsetA) is before, return after, and if it is after, return before.
+    if (a.node->is_following(b.node)) {
+        auto relative_position = position_of_boundary_point_relative_to_other_boundary_point(b, a);
+
+        if (relative_position == RelativeBoundaryPointPosition::Before)
+            return RelativeBoundaryPointPosition::After;
+
+        if (relative_position == RelativeBoundaryPointPosition::After)
+            return RelativeBoundaryPointPosition::Before;
+    }
+
+    // 4. If nodeA is an ancestor of nodeB:
+    if (a.node->is_ancestor_of(b.node)) {
+        // 1. Let child be nodeB.
+        GC::Ref<Node const> child = b.node;
+
+        // 2. While child is not a child of nodeA, set child to its parent.
+        while (!a.node->is_parent_of(child)) {
+            auto* parent = child->parent();
+            VERIFY(parent);
+            child = *parent;
+        }
+
+        // 3. If child’s index is less than offsetA, then return after.
+        if (child->index() < a.offset)
+            return RelativeBoundaryPointPosition::After;
+    }
+
+    // 5. Return before.
+    return RelativeBoundaryPointPosition::Before;
+}
+
+static bool children_are_outside_flat_tree(Node const& node)
+{
+    if (auto const* element = as_if<Element>(node); element && element->is_shadow_host())
+        return true;
+    auto const* slot = as_if<HTML::HTMLSlotElement>(node);
+    return slot && !slot->assigned_nodes_internal().is_empty();
+}
+
+static size_t flat_tree_child_count_of_host_or_slot(Node const& node)
+{
+    if (auto const* slot = as_if<HTML::HTMLSlotElement>(node))
+        return slot->assigned_nodes_internal().size();
+    return as<Element>(node).shadow_root()->child_count();
+}
+
+static Optional<size_t> index_in_flat_tree(Node& node)
+{
+    if (auto slot = assigned_slot_for_node(node)) {
+        auto assigned_nodes = slot->assigned_nodes_internal();
+        auto index = find_index(assigned_nodes.begin(), assigned_nodes.end(), node.as_slottable());
+        if (index == assigned_nodes.size())
+            return {};
+        return index;
+    }
+    if (auto const* parent = node.parent(); parent && children_are_outside_flat_tree(*parent))
+        return {};
+    return node.index();
+}
+
+struct FlatTreePosition {
+    GC::Ref<Node> root;
+    Vector<size_t, 32> indices;
+};
+
+static Optional<FlatTreePosition> flat_tree_position(BoundaryPoint point)
+{
+    Vector<size_t, 32> indices;
+    auto node = point.node;
+    if (!children_are_outside_flat_tree(*node)) {
+        indices.append(point.offset);
+    } else if (point.offset == 0) {
+        indices.append(0);
+    } else if (auto* child = node->child_at_index(point.offset); child && index_in_flat_tree(*child).has_value()) {
+        node = *child;
+    } else {
+        indices.append(flat_tree_child_count_of_host_or_slot(*node));
+    }
+
+    while (auto* parent = node->flat_tree_parent()) {
+        if (!is<ShadowRoot>(*node)) {
+            auto index = index_in_flat_tree(*node);
+            if (!index.has_value())
+                return {};
+            indices.append(*index);
+        }
+        node = *parent;
+    }
+    indices.reverse();
+    return FlatTreePosition { node, move(indices) };
+}
+
+Optional<RelativeBoundaryPointPosition> position_of_boundary_point_relative_to_other_boundary_point_in_flat_tree(BoundaryPoint a, BoundaryPoint b)
+{
+    a.node->document().assign_slottables_if_needed();
+    auto a_position = flat_tree_position(a);
+    auto b_position = flat_tree_position(b);
+    if (!a_position.has_value() || !b_position.has_value() || a_position->root != b_position->root)
+        return {};
+
+    auto const& a_indices = a_position->indices;
+    auto const& b_indices = b_position->indices;
+    for (size_t i = 0; i < min(a_indices.size(), b_indices.size()); ++i) {
+        if (a_indices[i] != b_indices[i])
+            return a_indices[i] < b_indices[i] ? RelativeBoundaryPointPosition::Before : RelativeBoundaryPointPosition::After;
+    }
+    if (a_indices.size() == b_indices.size())
+        return RelativeBoundaryPointPosition::Equal;
+    return a_indices.size() < b_indices.size() ? RelativeBoundaryPointPosition::Before : RelativeBoundaryPointPosition::After;
+}
+
+// https://dom.spec.whatwg.org/#concept-range-bp-set
+WebIDL::ExceptionOr<void> Range::set_start_or_end(GC::Ref<Node> node, u32 offset, StartOrEnd start_or_end)
+{
+    // To set the start or end of a range to a boundary point (node, offset), run these steps:
+
+    // 1. If node is a doctype, then throw an "InvalidNodeTypeError" DOMException.
+    if (is<DocumentType>(*node))
+        return WebIDL::InvalidNodeTypeError::create("Node cannot be a DocumentType."_utf16);
+
+    // 2. If offset is greater than node’s length, then throw an "IndexSizeError" DOMException.
+    if (offset > node->length())
+        return WebIDL::IndexSizeError::create(Utf16String::formatted("Node does not contain a child at offset {}", offset));
+
+    // 3. Let bp be the boundary point (node, offset).
+    GC::Ptr<Document> previous_owner_document = m_owner_document;
+
+    if (start_or_end == StartOrEnd::Start) {
+        // -> If these steps were invoked as "set the start"
+
+        // 1. If range’s root is not equal to node’s root, or if bp is after the range’s end, set range’s end to bp.
+        if (root().ptr() != &node->root() || position_of_boundary_point_relative_to_other_boundary_point({ node, offset }, end()) == RelativeBoundaryPointPosition::After) {
+            m_end_container = node;
+            m_end_offset = offset;
+        }
+
+        // 2. Set range’s start to bp.
+        m_start_container = node;
+        m_start_offset = offset;
+    } else {
+        // -> If these steps were invoked as "set the end"
+        VERIFY(start_or_end == StartOrEnd::End);
+
+        // 1. If range’s root is not equal to node’s root, or if bp is before the range’s start, set range’s start to bp.
+        if (root().ptr() != &node->root() || position_of_boundary_point_relative_to_other_boundary_point({ node, offset }, start()) == RelativeBoundaryPointPosition::Before) {
+            m_start_container = node;
+            m_start_offset = offset;
+        }
+
+        // 2. Set range’s end to bp.
+        m_end_container = node;
+        m_end_offset = offset;
+    }
+
+    update_owner_document();
+    update_associated_selection();
+    update_associated_highlights(previous_owner_document);
+    return {};
+}
+
+// https://dom.spec.whatwg.org/#dom-range-setstart
+WebIDL::ExceptionOr<void> Range::set_start(GC::Ref<Node> node, WebIDL::UnsignedLong offset)
+{
+    // The setStart(node, offset) method steps are to set the start of this to boundary point (node, offset).
+    return set_start_or_end(node, offset, StartOrEnd::Start);
+}
+
+// https://dom.spec.whatwg.org/#dom-range-setend
+WebIDL::ExceptionOr<void> Range::set_end(GC::Ref<Node> node, WebIDL::UnsignedLong offset)
+{
+    // The setEnd(node, offset) method steps are to set the end of this to boundary point (node, offset).
+    return set_start_or_end(node, offset, StartOrEnd::End);
+}
+
+// https://dom.spec.whatwg.org/#dom-range-setstartbefore
+WebIDL::ExceptionOr<void> Range::set_start_before(GC::Ref<Node> node)
+{
+    // 1. Let parent be node’s parent.
+    auto* parent = node->parent();
+
+    // 2. If parent is null, then throw an "InvalidNodeTypeError" DOMException.
+    if (!parent)
+        return WebIDL::InvalidNodeTypeError::create("Given node has no parent."_utf16);
+
+    // 3. Set the start of this to boundary point (parent, node’s index).
+    return set_start_or_end(*parent, node->index(), StartOrEnd::Start);
+}
+
+// https://dom.spec.whatwg.org/#dom-range-setstartafter
+WebIDL::ExceptionOr<void> Range::set_start_after(GC::Ref<Node> node)
+{
+    // 1. Let parent be node’s parent.
+    auto* parent = node->parent();
+
+    // 2. If parent is null, then throw an "InvalidNodeTypeError" DOMException.
+    if (!parent)
+        return WebIDL::InvalidNodeTypeError::create("Given node has no parent."_utf16);
+
+    // 3. Set the start of this to boundary point (parent, node’s index plus 1).
+    return set_start_or_end(*parent, node->index() + 1, StartOrEnd::Start);
+}
+
+// https://dom.spec.whatwg.org/#dom-range-setendbefore
+WebIDL::ExceptionOr<void> Range::set_end_before(GC::Ref<Node> node)
+{
+    // 1. Let parent be node’s parent.
+    auto* parent = node->parent();
+
+    // 2. If parent is null, then throw an "InvalidNodeTypeError" DOMException.
+    if (!parent)
+        return WebIDL::InvalidNodeTypeError::create("Given node has no parent."_utf16);
+
+    // 3. Set the end of this to boundary point (parent, node’s index).
+    return set_start_or_end(*parent, node->index(), StartOrEnd::End);
+}
+
+// https://dom.spec.whatwg.org/#dom-range-setendafter
+WebIDL::ExceptionOr<void> Range::set_end_after(GC::Ref<Node> node)
+{
+    // 1. Let parent be node’s parent.
+    auto* parent = node->parent();
+
+    // 2. If parent is null, then throw an "InvalidNodeTypeError" DOMException.
+    if (!parent)
+        return WebIDL::InvalidNodeTypeError::create("Given node has no parent."_utf16);
+
+    // 3. Set the end of this to boundary point (parent, node’s index plus 1).
+    return set_start_or_end(*parent, node->index() + 1, StartOrEnd::End);
+}
+
+// https://dom.spec.whatwg.org/#dom-range-compareboundarypoints
+WebIDL::ExceptionOr<WebIDL::Short> Range::compare_boundary_points(WebIDL::UnsignedShort how, Range const& source_range) const
+{
+    // 1. If how is not one of
+    //      - START_TO_START,
+    //      - START_TO_END,
+    //      - END_TO_END, and
+    //      - END_TO_START,
+    //    then throw a "NotSupportedError" DOMException.
+    if (how != HowToCompareBoundaryPoints::START_TO_START && how != HowToCompareBoundaryPoints::START_TO_END && how != HowToCompareBoundaryPoints::END_TO_END && how != HowToCompareBoundaryPoints::END_TO_START)
+        return WebIDL::NotSupportedError::create(Utf16String::formatted("Expected 'how' to be one of START_TO_START (0), START_TO_END (1), END_TO_END (2) or END_TO_START (3), got {}", how));
+
+    // 2. If this’s root is not the same as sourceRange’s root, then throw a "WrongDocumentError" DOMException.
+    if (root() != source_range.root())
+        return WebIDL::WrongDocumentError::create("This range is not in the same tree as the source range."_utf16);
+
+    GC::Ptr<Node> this_point_node;
+    u32 this_point_offset = 0;
+
+    GC::Ptr<Node> other_point_node;
+    u32 other_point_offset = 0;
+
+    // 3. If how is:
+    switch (how) {
+    case HowToCompareBoundaryPoints::START_TO_START:
+        // -> START_TO_START:
+        //    Let this point be this’s start. Let other point be sourceRange’s start.
+        this_point_node = m_start_container;
+        this_point_offset = m_start_offset;
+
+        other_point_node = source_range.m_start_container;
+        other_point_offset = source_range.m_start_offset;
+        break;
+    case HowToCompareBoundaryPoints::START_TO_END:
+        // -> START_TO_END:
+        //    Let this point be this’s end. Let other point be sourceRange’s start.
+        this_point_node = m_end_container;
+        this_point_offset = m_end_offset;
+
+        other_point_node = source_range.m_start_container;
+        other_point_offset = source_range.m_start_offset;
+        break;
+    case HowToCompareBoundaryPoints::END_TO_END:
+        // -> END_TO_END:
+        //    Let this point be this’s end. Let other point be sourceRange’s end.
+        this_point_node = m_end_container;
+        this_point_offset = m_end_offset;
+
+        other_point_node = source_range.m_end_container;
+        other_point_offset = source_range.m_end_offset;
+        break;
+    case HowToCompareBoundaryPoints::END_TO_START:
+        // -> END_TO_START:
+        //    Let this point be this’s start. Let other point be sourceRange’s end.
+        this_point_node = m_start_container;
+        this_point_offset = m_start_offset;
+
+        other_point_node = source_range.m_end_container;
+        other_point_offset = source_range.m_end_offset;
+        break;
+    default:
+        VERIFY_NOT_REACHED();
+    }
+
+    VERIFY(this_point_node);
+    VERIFY(other_point_node);
+
+    // 4. If the position of this point relative to other point is
+    auto relative_position = position_of_boundary_point_relative_to_other_boundary_point({ *this_point_node, this_point_offset }, { *other_point_node, other_point_offset });
+    switch (relative_position) {
+    case RelativeBoundaryPointPosition::Before:
+        // -> before
+        //    Return −1.
+        return -1;
+    case RelativeBoundaryPointPosition::Equal:
+        // -> equal
+        //    Return 0.
+        return 0;
+    case RelativeBoundaryPointPosition::After:
+        // -> after
+        //    Return 1.
+        return 1;
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
+// https://dom.spec.whatwg.org/#concept-range-select
+WebIDL::ExceptionOr<void> Range::select(GC::Ref<Node> node)
+{
+    // 1. Let parent be node’s parent.
+    auto* parent = node->parent();
+
+    // 2. If parent is null, then throw an "InvalidNodeTypeError" DOMException.
+    if (!parent)
+        return WebIDL::InvalidNodeTypeError::create("Given node has no parent."_utf16);
+
+    // 3. Let index be node’s index.
+    auto index = node->index();
+    GC::Ptr<Document> previous_owner_document = m_owner_document;
+
+    // 4. Set range’s start to boundary point (parent, index).
+    m_start_container = *parent;
+    m_start_offset = index;
+
+    // 5. Set range’s end to boundary point (parent, index plus 1).
+    m_end_container = *parent;
+    m_end_offset = index + 1;
+
+    update_owner_document();
+    update_associated_selection();
+    update_associated_highlights(previous_owner_document);
+    return {};
+}
+
+// https://dom.spec.whatwg.org/#dom-range-selectnode
+WebIDL::ExceptionOr<void> Range::select_node(GC::Ref<Node> node)
+{
+    // The selectNode(node) method steps are to select node within this.
+    return select(node);
+}
+
+// https://dom.spec.whatwg.org/#dom-range-collapse
+void Range::collapse(bool to_start)
+{
+    // The collapse(toStart) method steps are to, if toStart is true, set end to start; otherwise set start to end.
+    if (to_start) {
+        m_end_container = m_start_container;
+        m_end_offset = m_start_offset;
+    } else {
+        m_start_container = m_end_container;
+        m_start_offset = m_end_offset;
+    }
+    update_associated_selection();
+    update_associated_highlights(m_owner_document);
+}
+
+// https://dom.spec.whatwg.org/#dom-range-selectnodecontents
+WebIDL::ExceptionOr<void> Range::select_node_contents(GC::Ref<Node> node)
+{
+    // 1. If node is a doctype, throw an "InvalidNodeTypeError" DOMException.
+    if (is<DocumentType>(*node))
+        return WebIDL::InvalidNodeTypeError::create("Node cannot be a DocumentType."_utf16);
+
+    // 2. Let length be the length of node.
+    auto length = node->length();
+    GC::Ptr<Document> previous_owner_document = m_owner_document;
+
+    // 3. Set start to the boundary point (node, 0).
+    m_start_container = node;
+    m_start_offset = 0;
+
+    // 4. Set end to the boundary point (node, length).
+    m_end_container = node;
+    m_end_offset = length;
+
+    update_owner_document();
+    update_associated_selection();
+    update_associated_highlights(previous_owner_document);
+    return {};
+}
+
+GC::Ref<Range> Range::clone_range() const
+{
+    return Range::create(const_cast<Node&>(*m_start_container), m_start_offset, const_cast<Node&>(*m_end_container), m_end_offset);
+}
+
+// https://dom.spec.whatwg.org/#dom-range-commonancestorcontainer
+GC::Ref<Node> Range::common_ancestor_container() const
+{
+    // 1. Let container be start node.
+    GC::Ref<Node> container = m_start_container;
+
+    // 2. While container is not an inclusive ancestor of end node, let container be container’s parent.
+    while (!container->is_inclusive_ancestor_of(m_end_container)) {
+        VERIFY(container->parent());
+        container = *container->parent();
+    }
+
+    // 3. Return container.
+    return container;
+}
+
+// https://dom.spec.whatwg.org/#dom-range-intersectsnode
+bool Range::intersects_node(GC::Ref<Node> node) const
+{
+    // 1. If node’s root is different from this’s root, return false.
+    if (&node->root() != root().ptr())
+        return false;
+
+    // 2. Let parent be node’s parent.
+    auto* parent = node->parent();
+
+    // 3. If parent is null, return true.
+    if (!parent)
+        return true;
+
+    // 4. Let offset be node’s index.
+    WebIDL::UnsignedLong offset = node->index();
+
+    // 5. If (parent, offset) is before end and (parent, offset plus 1) is after start, return true
+    auto relative_position_to_end = position_of_boundary_point_relative_to_other_boundary_point({ *parent, offset }, end());
+    auto relative_position_to_start = position_of_boundary_point_relative_to_other_boundary_point({ *parent, offset + 1 }, start());
+    if (relative_position_to_end == RelativeBoundaryPointPosition::Before && relative_position_to_start == RelativeBoundaryPointPosition::After)
+        return true;
+
+    // 6. Return false.
+    return false;
+}
+
+// https://dom.spec.whatwg.org/#dom-range-ispointinrange
+WebIDL::ExceptionOr<bool> Range::is_point_in_range(GC::Ref<Node> node, WebIDL::UnsignedLong offset) const
+{
+    // 1. If node’s root is different from this’s root, return false.
+    if (&node->root() != root().ptr())
+        return false;
+
+    // 2. If node is a doctype, then throw an "InvalidNodeTypeError" DOMException.
+    if (is<DocumentType>(*node))
+        return WebIDL::InvalidNodeTypeError::create("Node cannot be a DocumentType."_utf16);
+
+    // 3. If offset is greater than node’s length, then throw an "IndexSizeError" DOMException.
+    if (offset > node->length())
+        return WebIDL::IndexSizeError::create(Utf16String::formatted("Node does not contain a child at offset {}", offset));
+
+    // 4. If (node, offset) is before start or after end, return false.
+    auto relative_position_to_start = position_of_boundary_point_relative_to_other_boundary_point({ node, offset }, start());
+    auto relative_position_to_end = position_of_boundary_point_relative_to_other_boundary_point({ node, offset }, end());
+    if (relative_position_to_start == RelativeBoundaryPointPosition::Before || relative_position_to_end == RelativeBoundaryPointPosition::After)
+        return false;
+
+    // 5. Return true.
+    return true;
+}
+
+// https://dom.spec.whatwg.org/#dom-range-comparepoint
+WebIDL::ExceptionOr<WebIDL::Short> Range::compare_point(GC::Ref<Node> node, WebIDL::UnsignedLong offset) const
+{
+    // 1. If node’s root is different from this’s root, then throw a "WrongDocumentError" DOMException.
+    if (&node->root() != root().ptr())
+        return WebIDL::WrongDocumentError::create("Given node is not in the same document as the range."_utf16);
+
+    // 2. If node is a doctype, then throw an "InvalidNodeTypeError" DOMException.
+    if (is<DocumentType>(*node))
+        return WebIDL::InvalidNodeTypeError::create("Node cannot be a DocumentType."_utf16);
+
+    // 3. If offset is greater than node’s length, then throw an "IndexSizeError" DOMException.
+    if (offset > node->length())
+        return WebIDL::IndexSizeError::create(Utf16String::formatted("Node does not contain a child at offset {}", offset));
+
+    // 4. If (node, offset) is before start, return −1.
+    auto relative_position_to_start = position_of_boundary_point_relative_to_other_boundary_point({ node, offset }, start());
+    if (relative_position_to_start == RelativeBoundaryPointPosition::Before)
+        return -1;
+
+    // 5. If (node, offset) is after end, return 1.
+    auto relative_position_to_end = position_of_boundary_point_relative_to_other_boundary_point({ node, offset }, end());
+    if (relative_position_to_end == RelativeBoundaryPointPosition::After)
+        return 1;
+
+    // 6. Return 0.
+    return 0;
+}
+
+// https://dom.spec.whatwg.org/#dom-range-stringifier
+Utf16String Range::to_string() const
+{
+    // 1. Let s be the empty string.
+    Utf16StringBuilder builder;
+
+    // 2. If this’s start node is this’s end node and it is a Text node,
+    //    then return the substring of that Text node’s data beginning at this’s start offset and ending at this’s end offset.
+    auto* start_text = as_if<Text>(*start_container());
+    if (start_text && start_container() == end_container())
+        return MUST(start_text->substring_data(start_offset(), end_offset() - start_offset()));
+
+    auto next_after_subtree = [](GC::Ptr<Node> node) -> GC::Ptr<Node> {
+        while (node) {
+            if (auto* next_sibling = node->next_sibling())
+                return *next_sibling;
+            node = node->parent_node();
+        }
+        return nullptr;
+    };
+
+    GC::Ptr<Node> first_node = start_container();
+    if (!is<CharacterData>(*first_node)) {
+        if (auto* child = first_node->child_at_index(start_offset()))
+            first_node = *child;
+        else if (start_offset() != 0)
+            first_node = next_after_subtree(first_node);
+    }
+
+    GC::Ptr<Node> past_last_node = end_container();
+    if (is<CharacterData>(*past_last_node)) {
+        past_last_node = next_after_subtree(past_last_node);
+    } else if (auto* child = past_last_node->child_at_index(end_offset())) {
+        past_last_node = *child;
+    } else {
+        past_last_node = next_after_subtree(past_last_node);
+    }
+
+    // 3. If this’s start node is a Text node, then append the substring of that node’s data from this’s start offset until the end to s.
+    // 4. Append the concatenation of the data of all Text nodes that are contained in this, in tree order, to s.
+    // 5. If this’s end node is a Text node, then append the substring of that node’s data from its start until this’s end offset to s.
+    // OPTIMIZATION: Perform these steps in one tree-order traversal instead of testing every candidate node for
+    //               containment, which would repeatedly compare its boundaries with the range boundaries.
+    for (auto node = first_node; node != past_last_node; node = node->next_in_pre_order()) {
+        auto* text_node = as_if<Text>(*node);
+        if (!text_node)
+            continue;
+
+        if (node == start_container())
+            builder.append(MUST(text_node->substring_data(start_offset(), text_node->length_in_utf16_code_units() - start_offset())));
+        else if (node == end_container())
+            builder.append(MUST(text_node->substring_data(0, end_offset())));
+        else
+            builder.append(text_node->data());
+    }
+
+    // 6. Return s.
+    return builder.to_string();
+}
+
+// https://dom.spec.whatwg.org/#dom-range-extractcontents
+WebIDL::ExceptionOr<GC::Ref<DocumentFragment>> Range::extract_contents()
+{
+    return extract();
+}
+
+// https://dom.spec.whatwg.org/#concept-range-extract
+WebIDL::ExceptionOr<GC::Ref<DocumentFragment>> Range::extract()
+{
+    // 1. Let fragment be a new DocumentFragment node whose node document is range’s start node’s node document.
+    auto fragment = DOM::DocumentFragment::create(const_cast<Document&>(start_container()->document()));
+
+    // 2. If range is collapsed, then return fragment.
+    if (collapsed())
+        return fragment;
+
+    // 3. Let originalStartNode, originalStartOffset, originalEndNode, and originalEndOffset be range’s start node,
+    //    start offset, end node, and end offset, respectively.
+    GC::Ref<Node> original_start_node = m_start_container;
+    auto original_start_offset = m_start_offset;
+    GC::Ref<Node> original_end_node = m_end_container;
+    auto original_end_offset = m_end_offset;
+
+    // 4. If originalStartNode is originalEndNode and it is a CharacterData node:
+    if (original_start_node.ptr() == original_end_node.ptr() && is<CharacterData>(*original_start_node)) {
+        // 1. Let clone be a clone of originalStartNode.
+        auto clone = TRY(original_start_node->clone_node());
+
+        // 2. Set clone’s data to the result of substringing data of originalStartNode with originalStartOffset and
+        //    originalEndOffset − originalStartOffset.
+        auto result = TRY(static_cast<CharacterData const&>(*original_start_node).substring_data(original_start_offset, original_end_offset - original_start_offset));
+        as<CharacterData>(*clone).set_data(move(result));
+
+        // 3. Append clone to fragment.
+        TRY(fragment->append_child(clone));
+
+        // 4. Replace data of originalStartNode with originalStartOffset, originalEndOffset − originalStartOffset, and
+        //    the empty string.
+        TRY(static_cast<CharacterData&>(*original_start_node).replace_data(original_start_offset, original_end_offset - original_start_offset, {}));
+
+        // 5. Return fragment.
+        return fragment;
+    }
+
+    // 5. Let commonAncestor be originalStartNode.
+    GC::Ref<Node> common_ancestor = original_start_node;
+
+    // 6. While commonAncestor is not an inclusive ancestor of originalEndNode: set commonAncestor to its own parent.
+    while (!common_ancestor->is_inclusive_ancestor_of(original_end_node))
+        common_ancestor = *common_ancestor->parent_node();
+
+    // 7. Let firstPartiallyContainedChild be null.
+    GC::Ptr<Node> first_partially_contained_child;
+
+    // 8. If originalStartNode is not an inclusive ancestor of originalEndNode, then set firstPartiallyContainedChild
+    //    to the first child of commonAncestor that is partially contained in range.
+    if (!original_start_node->is_inclusive_ancestor_of(original_end_node)) {
+        for (auto* child = common_ancestor->first_child(); child; child = child->next_sibling()) {
+            if (partially_contains_node(*child)) {
+                first_partially_contained_child = child;
+                break;
+            }
+        }
+    }
+
+    // 9. Let lastPartiallyContainedChild be null.
+    GC::Ptr<Node> last_partially_contained_child;
+
+    // 10. If originalEndNode is not an inclusive ancestor of originalStartNode, then set lastPartiallyContainedChild
+    //     to the last child of commonAncestor that is partially contained in range.
+    if (!original_end_node->is_inclusive_ancestor_of(original_start_node)) {
+        for (auto* child = common_ancestor->last_child(); child; child = child->previous_sibling()) {
+            if (partially_contains_node(*child)) {
+                last_partially_contained_child = child;
+                break;
+            }
+        }
+    }
+
+    // 11. Let containedChildren be a list of all children of commonAncestor that are contained in range, in tree order.
+    GC::RootVector<GC::Ref<Node>> contained_children;
+    for (Node* node = common_ancestor->first_child(); node; node = node->next_sibling()) {
+        if (contains_node(*node))
+            contained_children.append(*node);
+    }
+
+    // 12. If any member of containedChildren is a doctype, then throw a "HierarchyRequestError" DOMException.
+    for (auto const& child : contained_children) {
+        if (is<DocumentType>(*child))
+            return WebIDL::HierarchyRequestError::create("Contained child is a DocumentType"_utf16);
+    }
+
+    // 13. Let newNode and newOffset be null.
+    GC::Ptr<Node> new_node;
+    size_t new_offset = 0;
+
+    // 14. If originalStartNode is an inclusive ancestor of originalEndNode, then set newNode to originalStartNode and
+    //     newOffset to originalStartOffset.
+    if (original_start_node->is_inclusive_ancestor_of(original_end_node)) {
+        new_node = original_start_node;
+        new_offset = original_start_offset;
+    }
+    // 15. Otherwise:
+    else {
+        // 1. Let referenceNode be originalStartNode.
+        GC::Ptr<Node> reference_node = original_start_node;
+
+        // 2. While referenceNode’s parent is non-null and is not an inclusive ancestor of originalEndNode:
+        //    set referenceNode to its parent.
+        while (reference_node->parent_node() && !reference_node->parent_node()->is_inclusive_ancestor_of(original_end_node))
+            reference_node = reference_node->parent_node();
+
+        // 3. Set newNode to the parent of referenceNode, and newOffset to referenceNode’s index + 1.
+        new_node = reference_node->parent_node();
+        new_offset = reference_node->index() + 1;
+    }
+
+    // 16. Set range’s start and end to (newNode, newOffset).
+    TRY(set_start(*new_node, new_offset));
+    TRY(set_end(*new_node, new_offset));
+
+    // 17. If firstPartiallyContainedChild is a CharacterData node:
+    if (first_partially_contained_child && is<CharacterData>(*first_partially_contained_child)) {
+        // 1. Let clone be a clone of originalStartNode.
+        auto clone = TRY(original_start_node->clone_node());
+
+        // 2. Set the data of clone to the result of substringing data of originalStartNode with originalStartOffset
+        //    and originalStartNode’s length − originalStartOffset.
+        auto result = TRY(static_cast<CharacterData const&>(*original_start_node).substring_data(original_start_offset, original_start_node->length() - original_start_offset));
+        as<CharacterData>(*clone).set_data(move(result));
+
+        // 3. Append clone to fragment.
+        TRY(fragment->append_child(clone));
+
+        // 4. Replace data of originalStartNode with originalStartOffset, originalStartNode’s length −
+        //    originalStartOffset, and the empty string.
+        TRY(static_cast<CharacterData&>(*original_start_node).replace_data(original_start_offset, original_start_node->length() - original_start_offset, {}));
+    }
+    // 18. Otherwise, if firstPartiallyContainedChild is non-null:
+    else if (first_partially_contained_child) {
+        // 1. Let clone be a clone of firstPartiallyContainedChild.
+        auto clone = TRY(first_partially_contained_child->clone_node());
+
+        // 2. Append clone to fragment.
+        TRY(fragment->append_child(clone));
+
+        // 3. Let subrange be a new live range whose start is (originalStartNode, originalStartOffset) and whose end is
+        //    (firstPartiallyContainedChild, firstPartiallyContainedChild’s length).
+        auto subrange = Range::create(original_start_node, original_start_offset, *first_partially_contained_child, first_partially_contained_child->length());
+
+        // 4. Let subfragment be the result of extracting subrange.
+        auto subfragment = TRY(subrange->extract());
+
+        // 5. Append subfragment to clone.
+        TRY(clone->append_child(subfragment));
+    }
+
+    // 19. For each contained child of containedChildren: append contained child to fragment.
+    for (auto& contained_child : contained_children) {
+        TRY(fragment->append_child(contained_child));
+    }
+
+    // 20. If lastPartiallyContainedChild is a CharacterData node:
+    if (last_partially_contained_child && is<CharacterData>(*last_partially_contained_child)) {
+        // 1. Let clone be a clone of originalEndNode.
+        auto clone = TRY(original_end_node->clone_node());
+
+        // 2. Set clone’s data to the result of substringing data of originalEndNode with 0 and originalEndOffset.
+        auto result = TRY(static_cast<CharacterData const&>(*original_end_node).substring_data(0, original_end_offset));
+        as<CharacterData>(*clone).set_data(move(result));
+
+        // 3. Append clone to fragment.
+        TRY(fragment->append_child(clone));
+
+        // 4. Replace data of originalEndNode with 0, originalEndOffset, and the empty string.
+        TRY(as<CharacterData>(*original_end_node).replace_data(0, original_end_offset, {}));
+    }
+    // 21. Otherwise, if lastPartiallyContainedChild is non-null:
+    else if (last_partially_contained_child) {
+        // 1. Let clone be a clone of lastPartiallyContainedChild.
+        auto clone = TRY(last_partially_contained_child->clone_node());
+
+        // 2. Append clone to fragment.
+        TRY(fragment->append_child(clone));
+
+        // 3. Let subrange be a new live range whose start is (lastPartiallyContainedChild, 0) and whose end is
+        //    (originalEndNode, originalEndOffset).
+        auto subrange = Range::create(*last_partially_contained_child, 0, original_end_node, original_end_offset);
+
+        // 4. Let subfragment be the result of extracting subrange.
+        auto subfragment = TRY(subrange->extract());
+
+        // 5. Append subfragment to clone.
+        TRY(clone->append_child(subfragment));
+    }
+
+    // 22. Return fragment.
+    return fragment;
+}
+
+// https://dom.spec.whatwg.org/#contained
+bool Range::contains_node(GC::Ref<Node> node) const
+{
+    // A node node is contained in a live range range if node’s root is range’s root,
+    if (&node->root() != root().ptr())
+        return false;
+
+    // and (node, 0) is after range’s start,
+    if (position_of_boundary_point_relative_to_other_boundary_point({ node, 0 }, start()) != RelativeBoundaryPointPosition::After)
+        return false;
+
+    // and (node, node’s length) is before range’s end.
+    if (position_of_boundary_point_relative_to_other_boundary_point({ node, static_cast<WebIDL::UnsignedLong>(node->length()) }, end()) != RelativeBoundaryPointPosition::Before)
+        return false;
+
+    return true;
+}
+
+// https://dom.spec.whatwg.org/#partially-contained
+bool Range::partially_contains_node(GC::Ref<Node> node) const
+{
+    // A node is partially contained in a live range if it’s an inclusive ancestor of the live range’s start node but
+    // not its end node, or vice versa.
+    return node->is_inclusive_ancestor_of(m_start_container) != node->is_inclusive_ancestor_of(m_end_container);
+}
+
+// https://dom.spec.whatwg.org/#dom-range-insertnode
+WebIDL::ExceptionOr<void> Range::insert_node(GC::Ref<Node> node)
+{
+    return insert(node);
+}
+
+// https://dom.spec.whatwg.org/#concept-range-insert
+WebIDL::ExceptionOr<void> Range::insert(GC::Ref<Node> node)
+{
+    // 1. If range’s start node is a ProcessingInstruction or Comment node, is a Text node whose parent is null, or is node, then throw a "HierarchyRequestError" DOMException.
+    if ((is<ProcessingInstruction>(*m_start_container) || is<Comment>(*m_start_container))
+        || (is<Text>(*m_start_container) && !m_start_container->parent_node())
+        || m_start_container.ptr() == node.ptr()) {
+        return WebIDL::HierarchyRequestError::create("Range has inappropriate start node for insertion"_utf16);
+    }
+
+    // 2. Let referenceNode be null.
+    GC::Ptr<Node> reference_node;
+
+    // 3. If range’s start node is a Text node, set referenceNode to that Text node.
+    if (is<Text>(*m_start_container)) {
+        reference_node = m_start_container;
+    }
+    // 4. Otherwise, set referenceNode to the child of start node whose index is start offset, and null if there is no such child.
+    else {
+        reference_node = m_start_container->child_at_index(m_start_offset);
+    }
+
+    // 5. Let parent be range’s start node if referenceNode is null, and referenceNode’s parent otherwise.
+    GC::Ptr<Node> parent;
+    if (!reference_node)
+        parent = m_start_container;
+    else
+        parent = reference_node->parent();
+
+    // 6. Ensure pre-insertion validity of node into parent before referenceNode.
+    TRY(parent->ensure_pre_insertion_validity(node, reference_node));
+
+    // 7. If range’s start node is a Text node, set referenceNode to the result of splitting it with offset range’s start offset.
+    if (is<Text>(*m_start_container))
+        reference_node = TRY(static_cast<Text&>(*m_start_container).split_text(m_start_offset));
+
+    // 8. If node is referenceNode, set referenceNode to its next sibling.
+    if (node == reference_node)
+        reference_node = reference_node->next_sibling();
+
+    // 9. If node’s parent is non-null, then remove node.
+    if (node->parent())
+        node->remove();
+
+    // 10. Let newOffset be parent’s length if referenceNode is null, and referenceNode’s index otherwise.
+    size_t new_offset = 0;
+    if (!reference_node)
+        new_offset = parent->length();
+    else
+        new_offset = reference_node->index();
+
+    // 11. Increase newOffset by node’s length if node is a DocumentFragment node, and one otherwise.
+    if (is<DocumentFragment>(*node))
+        new_offset += node->length();
+    else
+        new_offset += 1;
+
+    // 12. Pre-insert node into parent before referenceNode.
+    (void)TRY(parent->pre_insert(node, reference_node));
+
+    // 13. If range is collapsed, then set range’s end to (parent, newOffset).
+    if (collapsed())
+        TRY(set_end(*parent, new_offset));
+
+    return {};
+}
+
+// https://dom.spec.whatwg.org/#dom-range-surroundcontents
+WebIDL::ExceptionOr<void> Range::surround_contents(GC::Ref<Node> new_parent)
+{
+    // 1. If a non-Text node is partially contained in this, then throw an "InvalidStateError" DOMException.
+    GC::Ptr<Node> start_non_text_node = start_container();
+    if (is<Text>(*start_non_text_node))
+        start_non_text_node = start_non_text_node->parent_node();
+    GC::Ptr<Node> end_non_text_node = end_container();
+    if (is<Text>(*end_non_text_node))
+        end_non_text_node = end_non_text_node->parent_node();
+    if (start_non_text_node != end_non_text_node)
+        return WebIDL::InvalidStateError::create("Non-Text node is partially contained in range."_utf16);
+
+    // 2. If newParent is a Document, DocumentType, or DocumentFragment node, then throw an "InvalidNodeTypeError" DOMException.
+    if (is<Document>(*new_parent) || is<DocumentType>(*new_parent) || is<DocumentFragment>(*new_parent))
+        return WebIDL::InvalidNodeTypeError::create("Invalid parent node type"_utf16);
+
+    // 3. Let fragment be the result of extracting this.
+    auto fragment = TRY(extract());
+
+    // 4. If newParent has children, then replace all with null within newParent.
+    if (new_parent->has_children())
+        new_parent->replace_all(nullptr);
+
+    // 5. Insert newParent into this.
+    TRY(insert(new_parent));
+
+    // 6. Append fragment to newParent.
+    (void)TRY(new_parent->append_child(fragment));
+
+    // 7. Select newParent within this.
+    return select(*new_parent);
+}
+
+// https://dom.spec.whatwg.org/#dom-range-clonecontents
+WebIDL::ExceptionOr<GC::Ref<DocumentFragment>> Range::clone_contents()
+{
+    return clone_the_contents();
+}
+
+// https://dom.spec.whatwg.org/#concept-range-clone
+WebIDL::ExceptionOr<GC::Ref<DocumentFragment>> Range::clone_the_contents()
+{
+    // 1. Let fragment be a new DocumentFragment node whose node document is range’s start node’s node document.
+    auto fragment = DOM::DocumentFragment::create(const_cast<Document&>(start_container()->document()));
+
+    // 2. If range is collapsed, then return fragment.
+    if (collapsed())
+        return fragment;
+
+    // 3. Let original start node, original start offset, original end node, and original end offset
+    //    be range’s start node, start offset, end node, and end offset, respectively.
+    GC::Ref<Node> original_start_node = m_start_container;
+    auto original_start_offset = m_start_offset;
+    GC::Ref<Node> original_end_node = m_end_container;
+    auto original_end_offset = m_end_offset;
+
+    // 4. If original start node is original end node and it is a CharacterData node, then:
+    if (original_start_node.ptr() == original_end_node.ptr() && is<CharacterData>(*original_start_node)) {
+        // 1. Let clone be a clone of original start node.
+        auto clone = TRY(original_start_node->clone_node());
+
+        // 2. Set the data of clone to the result of substringing data with node original start node,
+        //    offset original start offset, and count original end offset minus original start offset.
+        auto result = TRY(static_cast<CharacterData const&>(*original_start_node).substring_data(original_start_offset, original_end_offset - original_start_offset));
+        as<CharacterData>(*clone).set_data(move(result));
+
+        // 3. Append clone to fragment.
+        TRY(fragment->append_child(clone));
+
+        // 4. Return fragment.
+        return fragment;
+    }
+
+    // 5. Let common ancestor be original start node.
+    GC::Ref<Node> common_ancestor = original_start_node;
+
+    // 6. While common ancestor is not an inclusive ancestor of original end node, set common ancestor to its own parent.
+    while (!common_ancestor->is_inclusive_ancestor_of(original_end_node))
+        common_ancestor = *common_ancestor->parent_node();
+
+    // 7. Let first partially contained child be null.
+    GC::Ptr<Node> first_partially_contained_child;
+
+    // 8. If original start node is not an inclusive ancestor of original end node,
+    //    set first partially contained child to the first child of common ancestor that is partially contained in range.
+    if (!original_start_node->is_inclusive_ancestor_of(original_end_node)) {
+        for (auto* child = common_ancestor->first_child(); child; child = child->next_sibling()) {
+            if (partially_contains_node(*child)) {
+                first_partially_contained_child = child;
+                break;
+            }
+        }
+    }
+
+    // 9. Let last partially contained child be null.
+    GC::Ptr<Node> last_partially_contained_child;
+
+    // 10. If original end node is not an inclusive ancestor of original start node,
+    //     set last partially contained child to the last child of common ancestor that is partially contained in range.
+    if (!original_end_node->is_inclusive_ancestor_of(original_start_node)) {
+        for (auto* child = common_ancestor->last_child(); child; child = child->previous_sibling()) {
+            if (partially_contains_node(*child)) {
+                last_partially_contained_child = child;
+                break;
+            }
+        }
+    }
+
+    // 11. Let contained children be a list of all children of common ancestor that are contained in range, in tree order.
+    GC::RootVector<GC::Ref<Node>> contained_children;
+    for (Node* node = common_ancestor->first_child(); node; node = node->next_sibling()) {
+        if (contains_node(*node))
+            contained_children.append(*node);
+    }
+
+    // 12. If any member of contained children is a doctype, then throw a "HierarchyRequestError" DOMException.
+    for (auto const& child : contained_children) {
+        if (is<DocumentType>(*child))
+            return WebIDL::HierarchyRequestError::create("Contained child is a DocumentType"_utf16);
+    }
+
+    // 13. If first partially contained child is a CharacterData node, then:
+    if (first_partially_contained_child && is<CharacterData>(*first_partially_contained_child)) {
+        // 1. Let clone be a clone of original start node.
+        auto clone = TRY(original_start_node->clone_node());
+
+        // 2. Set the data of clone to the result of substringing data with node original start node, offset original start offset,
+        //    and count original start node’s length minus original start offset.
+        auto result = TRY(static_cast<CharacterData const&>(*original_start_node).substring_data(original_start_offset, original_start_node->length() - original_start_offset));
+        as<CharacterData>(*clone).set_data(move(result));
+
+        // 3. Append clone to fragment.
+        TRY(fragment->append_child(clone));
+    }
+    // 14. Otherwise, if first partially contained child is not null:
+    else if (first_partially_contained_child) {
+        // 1. Let clone be a clone of first partially contained child.
+        auto clone = TRY(first_partially_contained_child->clone_node());
+
+        // 2. Append clone to fragment.
+        TRY(fragment->append_child(clone));
+
+        // 3. Let subrange be a new live range whose start is (original start node, original start offset) and whose end is (first partially contained child, first partially contained child’s length).
+        auto subrange = Range::create(original_start_node, original_start_offset, *first_partially_contained_child, first_partially_contained_child->length());
+
+        // 4. Let subfragment be the result of cloning the contents of subrange.
+        auto subfragment = TRY(subrange->clone_the_contents());
+
+        // 5. Append subfragment to clone.
+        TRY(clone->append_child(subfragment));
+    }
+
+    // 15. For each contained child in contained children.
+    for (auto& contained_child : contained_children) {
+        // 1. Let clone be a clone of contained child with the clone children flag set.
+        auto clone = TRY(contained_child->clone_node(nullptr, true));
+
+        // 2. Append clone to fragment.
+        TRY(fragment->append_child(move(clone)));
+    }
+
+    // 16. If last partially contained child is a CharacterData node, then:
+    if (last_partially_contained_child && is<CharacterData>(*last_partially_contained_child)) {
+        // 1. Let clone be a clone of original end node.
+        auto clone = TRY(original_end_node->clone_node());
+
+        // 2. Set the data of clone to the result of substringing data with node original end node, offset 0, and count original end offset.
+        auto result = TRY(static_cast<CharacterData const&>(*original_end_node).substring_data(0, original_end_offset));
+        as<CharacterData>(*clone).set_data(move(result));
+
+        // 3. Append clone to fragment.
+        TRY(fragment->append_child(clone));
+    }
+    // 17. Otherwise, if last partially contained child is not null:
+    else if (last_partially_contained_child) {
+        // 1. Let clone be a clone of last partially contained child.
+        auto clone = TRY(last_partially_contained_child->clone_node());
+
+        // 2. Append clone to fragment.
+        TRY(fragment->append_child(clone));
+
+        // 3. Let subrange be a new live range whose start is (last partially contained child, 0) and whose end is (original end node, original end offset).
+        auto subrange = Range::create(*last_partially_contained_child, 0, original_end_node, original_end_offset);
+
+        // 4. Let subfragment be the result of cloning the contents of subrange.
+        auto subfragment = TRY(subrange->clone_the_contents());
+
+        // 5. Append subfragment to clone.
+        TRY(clone->append_child(subfragment));
+    }
+
+    // 18. Return fragment.
+    return fragment;
+}
+
+// https://dom.spec.whatwg.org/#dom-range-deletecontents
+WebIDL::ExceptionOr<void> Range::delete_contents()
+{
+    // 1. If this is collapsed, then return.
+    if (collapsed())
+        return {};
+
+    // 2. Let originalStartNode, originalStartOffset, originalEndNode, and originalEndOffset be this’s start node,
+    //    start offset, end node, and end offset, respectively.
+    GC::Ref<Node> original_start_node = m_start_container;
+    auto original_start_offset = m_start_offset;
+    GC::Ref<Node> original_end_node = m_end_container;
+    auto original_end_offset = m_end_offset;
+
+    // 3. If originalStartNode is originalEndNode and it is a CharacterData node:
+    if (original_start_node.ptr() == original_end_node.ptr() && is<CharacterData>(*original_start_node)) {
+        // 1. Replace data of originalStartNode with originalStartOffset, originalEndOffset − originalStartOffset, and
+        //    the empty string.
+        TRY(static_cast<CharacterData&>(*original_start_node).replace_data(original_start_offset, original_end_offset - original_start_offset, {}));
+        // 2. Return.
+        return {};
+    }
+
+    // 4. Let nodesToRemove be a list of all the nodes that are contained in this, in tree order, omitting any node
+    //    whose parent is also contained in this.
+    GC::RootVector<GC::Ref<Node>> nodes_to_remove;
+    for (GC::Ptr<Node> node = start_container(); node.ptr() != end_container()->next_sibling(); node = node->next_in_pre_order()) {
+        if (contains_node(*node) && (!node->parent_node() || !contains_node(*node->parent_node())))
+            nodes_to_remove.append(node.as_nonnull());
+    }
+
+    // 5. Let newNode and newOffset be null.
+    GC::Ptr<Node> new_node;
+    size_t new_offset = 0;
+
+    // 6. If originalStartNode is an inclusive ancestor of originalEndNode, then set newNode to originalStartNode and
+    //    newOffset to originalStartOffset.
+    if (original_start_node->is_inclusive_ancestor_of(original_end_node)) {
+        new_node = original_start_node;
+        new_offset = original_start_offset;
+    }
+    // 7. Otherwise
+    else {
+        // 1. Let referenceNode be originalStartNode.
+        auto reference_node = original_start_node;
+
+        // 2. While referenceNode’s parent is non-null and is not an inclusive ancestor of originalEndNode:
+        //    set referenceNode to its parent.
+        while (reference_node->parent_node() && !reference_node->parent_node()->is_inclusive_ancestor_of(original_end_node))
+            reference_node = *reference_node->parent_node();
+
+        // 3. Set newNode to referenceNode’s parent and newOffset to referenceNode’s index + 1.
+        new_node = reference_node->parent_node();
+        new_offset = reference_node->index() + 1;
+    }
+
+    // 8. Set this’s start and end to (newNode, newOffset).
+    TRY(set_start(*new_node, new_offset));
+    TRY(set_end(*new_node, new_offset));
+
+    // 9. If originalStartNode is a CharacterData node, then replace data of originalStartNode with
+    //    originalStartOffset, originalStartNode’s length − originalStartOffset, and the empty string.
+    if (is<CharacterData>(*original_start_node))
+        TRY(static_cast<CharacterData&>(*original_start_node).replace_data(original_start_offset, original_start_node->length() - original_start_offset, {}));
+
+    // 10. For each node of nodesToRemove, in tree order: remove node.
+    for (auto& node : nodes_to_remove)
+        node->remove();
+
+    // 11. If originalEndNode is a CharacterData node, then replace data of originalEndNode with 0, originalEndOffset,
+    //     and the empty string.
+    if (is<CharacterData>(*original_end_node))
+        TRY(static_cast<CharacterData&>(*original_end_node).replace_data(0, original_end_offset, {}));
+
+    return {};
+}
+
+// https://drafts.csswg.org/cssom-view/#dom-element-getclientrects
+// https://drafts.csswg.org/cssom-view/#extensions-to-the-range-interface
+GC::Ref<Geometry::DOMRectList> Range::get_client_rects()
+{
+    return Geometry::DOMRectList::create(client_rects());
+}
+
+Vector<Gfx::DoubleRect> Range::client_rects()
+{
+    // 1. return an empty DOMRectList object if the range is not in the document
+    if (!start_container()->document().navigable())
+        return {};
+
+    auto& document = start_container()->document();
+    document.update_layout(DOM::UpdateLayoutReason::RangeGetClientRects);
+    Layout::ForcedReadScope read { document };
+    Vector<Gfx::DoubleRect> rects;
+    Optional<Layout::RustFFI::FfiViewportMapping> viewport_mapping;
+
+    // 2. Iterate the node included in Range
+    auto next_after_subtree = [](Node& node) -> GC::Ptr<Node> {
+        for (auto* current = &node; current; current = current->parent_node()) {
+            if (auto* next = current->next_sibling())
+                return next;
+        }
+        return nullptr;
+    };
+
+    GC::Ptr<Node> start_node = start_container();
+    if (!is<DOM::Text>(*start_node)) {
+        auto* start_child = start_node->child_at_index(m_start_offset);
+        if (start_child) {
+            start_node = *start_child;
+        } else if (start_node->last_child()) {
+            start_node = next_after_subtree(*start_node);
+        } else {
+            start_node = start_node->next_in_pre_order();
+        }
+    }
+
+    // The first node in tree order that follows the range. An element end offset counts children, so every
+    // descendant of the children before it is inside the range.
+    GC::Ptr<Node> stop_node;
+    if (is<CharacterData>(*m_end_container)) {
+        stop_node = m_end_container->next_in_pre_order();
+    } else if (auto* end_child = m_end_container->child_at_index(m_end_offset)) {
+        stop_node = end_child;
+    } else {
+        stop_node = next_after_subtree(*m_end_container);
+    }
+
+    for (GC::Ptr<Node> node = start_node; node && node != stop_node; node = node->next_in_pre_order()) {
+        // NB: Only a boundary point's own container is partially selected. The offsets of an element container
+        //     count children, so the child nodes they select are selected in full.
+        auto const is_start_container = node.ptr() == m_start_container.ptr();
+        auto const is_end_container = node.ptr() == m_end_container.ptr();
+        auto selection_state = Painting::SelectionState::Full;
+        if (is_start_container && is_end_container) {
+            selection_state = Painting::SelectionState::StartAndEnd;
+        } else if (is_start_container) {
+            selection_state = Painting::SelectionState::Start;
+        } else if (is_end_container) {
+            selection_state = Painting::SelectionState::End;
+        }
+
+        auto node_type = static_cast<NodeType>(node->node_type());
+        if (node_type == NodeType::ELEMENT_NODE) {
+            // 1. For each element selected by the range, whose parent is not selected by the range, include the border
+            // areas returned by invoking getClientRects() on the element.
+            if (contains_node(*node) && (!node->parent() || !contains_node(*node->parent()))) {
+                auto const& element = static_cast<DOM::Element const&>(*node);
+                auto const element_rects = element.get_client_rects();
+                for (auto& rect : element_rects)
+                    rects.append(rect.to_type<double>());
+            }
+        } else if (node_type == NodeType::TEXT_NODE) {
+            // 2. For each Text node selected or partially selected by the range (including when the boundary-points
+            // are identical), include scaled DOMRect object (for the part that is selected, not the whole line box).
+            auto const& text = static_cast<DOM::Text const&>(*node);
+
+            // A text node without a box renders nothing, so it has no rects.
+            auto const* layout_node = text.layout_node(read);
+            if (!layout_node)
+                continue;
+
+            if (!viewport_mapping.has_value() && !document.can_compute_client_rects_without_accumulated_visual_contexts_update(*layout_node))
+                viewport_mapping = Painting::viewport_mapping(document);
+
+            size_t filter_dom_start = 0;
+            size_t filter_dom_end = NumericLimits<size_t>::max();
+            switch (selection_state) {
+            case Painting::SelectionState::Full:
+                break;
+            case Painting::SelectionState::StartAndEnd:
+                filter_dom_start = start_offset();
+                filter_dom_end = end_offset();
+                break;
+            case Painting::SelectionState::Start:
+                filter_dom_start = start_offset();
+                break;
+            case Painting::SelectionState::End:
+                filter_dom_end = end_offset();
+                break;
+            case Painting::SelectionState::None:
+                VERIFY_NOT_REACHED();
+            }
+
+            Layout::RustFFI::layout_script_text_range_rects(
+                layout_node->document_host(), Layout::Node::slot_id(layout_node),
+                to_underlying(selection_state), start_offset(), end_offset(), filter_dom_start, filter_dom_end,
+                viewport_mapping.value_or(Layout::RustFFI::FfiViewportMapping {}), &rects, [](void* context, CSSPixelRect rect) {
+                    static_cast<Vector<Gfx::DoubleRect>*>(context)->append(rect.to_type<float>().to_type<double>());
+                });
+        }
+    }
+    return rects;
+}
+
+// https://w3c.github.io/csswg-drafts/cssom-view/#dom-range-getboundingclientrect
+GC::Ref<Geometry::DOMRect> Range::get_bounding_client_rect()
+{
+    auto rect = bounding_client_rect();
+    return Geometry::DOMRect::create(rect.x(), rect.y(), rect.width(), rect.height());
+}
+
+Gfx::DoubleRect Range::bounding_client_rect()
+{
+    // 1. Let list be the result of invoking getClientRects() on element.
+    auto list = client_rects();
+
+    // 2. If the list is empty return a DOMRect object whose x, y, width and height members are zero.
+    if (list.is_empty())
+        return {};
+
+    // 3. If all rectangles in list have zero width or height, return the first rectangle in list.
+    auto all_rectangle_has_zero_width_or_height = all_of(list, [](auto const& rect) { return rect.width() == 0 || rect.height() == 0; });
+    if (all_rectangle_has_zero_width_or_height)
+        return list[0];
+
+    // 4. Otherwise, return a DOMRect object describing the smallest rectangle that includes all of the rectangles in
+    //    list of which the height or width is not zero.
+    auto bounding_rect = list[0];
+    for (auto const& rect : list.span().slice(1)) {
+        if (rect.width() == 0 || rect.height() == 0)
+            continue;
+        bounding_rect.unite(rect);
+    }
+    return bounding_rect.to_type<float>().to_type<double>();
+}
+
+// https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#dom-range-createcontextualfragment
+// NB: The steps after node, compliantString and compliantOptions have been determined.
+static WebIDL::ExceptionOr<GC::Ref<DocumentFragment>> create_contextual_fragment_for_node(GC::Ref<Node> node, StringView string, GC::Ptr<TrustedTypes::TrustedHTMLParserOptions> trusted_options, HTML::ParserScriptingMode scripting_mode)
+{
+    // 3. Let element be null.
+    GC::Ptr<Element> element = nullptr;
+
+    auto node_type = static_cast<NodeType>(node->node_type());
+    // 4. If node implements Element, set element to node.
+    if (node_type == NodeType::ELEMENT_NODE)
+        element = static_cast<DOM::Element&>(*node);
+    // 5. Otherwise, if node implements Text or Comment node, set element to node's parent element.
+    else if (first_is_one_of(node_type, NodeType::TEXT_NODE, NodeType::COMMENT_NODE))
+        element = node->parent_element();
+
+    // 6. If either element is null or all of the following are true:
+    //    - element's node document is an HTML document,
+    //    - element's local name is "html"; and
+    //    - element's namespace is the HTML namespace;
+    if (!element || is<HTML::HTMLHtmlElement>(*element)) {
+        // then set element to the result of creating an element given node's node document,
+        // "body", and the HTML namespace.
+        element = TRY(DOM::create_element(node->document(), HTML::TagNames::body, Namespace::HTML));
+    }
+
+    // 7. Return the result of invoking the fragment parsing algorithm steps given element, compliantString,
+    //    compliantOptions, and Legacy.
+    auto markup = Utf16String::from_utf8(string);
+    return Element::parse_fragment(Variant<GC::Ref<Element>, GC::Ref<DocumentFragment>> { *element }, markup.utf16_view(), scripting_mode, HTML::FragmentFastPath::Allow, trusted_options);
+}
+
+// https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#dom-range-createcontextualfragment
+WebIDL::ExceptionOr<GC::Ref<DocumentFragment>> Range::create_contextual_fragment(TrustedTypes::TrustedHTMLOrString const& string)
+{
+    // 1. Let node be this's start node.
+    GC::Ref<Node> node = *start_container();
+
+    // 2. Let (compliantString, compliantOptions) be the result of invoking the get trusted type compliant input
+    //    algorithm with this's relevant global object, string, a new SetHTMLUnsafeOptions dictionary whose runScripts
+    //    member is set to true and whose other members are set to their default values, "Range
+    //    createContextualFragment", node's node document's type, and false.
+    // NOTE: A Trusted Types default policy can override the options, for example by setting runScripts to false to
+    //       prevent scripts from executing when inserting the returned fragment.
+    auto const [compliant_string, trusted_options] = TRY(HTML::get_trusted_type_compliant_input_for_legacy_sink(node, string, TrustedTypes::InjectionSink::Range_createContextualFragment, HTML::LegacySinkRunScripts::Yes));
+
+    return create_contextual_fragment_for_node(node, compliant_string.to_utf8_but_should_be_ported_to_utf16(), trusted_options, HTML::ParserScriptingMode::Fragment);
+}
+
+// https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#dom-range-createcontextualfragment
+WebIDL::ExceptionOr<GC::Ref<DocumentFragment>> Range::create_contextual_fragment(StringView string, HTML::ParserScriptingMode scripting_mode)
+{
+    // 1. Let node be this's start node.
+    return create_contextual_fragment_for_node(*start_container(), string, nullptr, scripting_mode);
+}
+
+}

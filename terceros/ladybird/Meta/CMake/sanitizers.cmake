@@ -1,0 +1,56 @@
+if ((ENABLE_ADDRESS_SANITIZER AND ENABLE_MEMORY_SANITIZER)
+    OR (ENABLE_ADDRESS_SANITIZER AND ENABLE_THREAD_SANITIZER)
+    OR (ENABLE_MEMORY_SANITIZER AND ENABLE_THREAD_SANITIZER))
+    message(FATAL_ERROR "AddressSanitizer, MemorySanitizer, and ThreadSanitizer cannot be enabled together")
+endif()
+
+function(get_clang_resource_dir result_dir)
+    execute_process(COMMAND ${CMAKE_CXX_COMPILER} -print-resource-dir
+        OUTPUT_VARIABLE CLANG_RESOURCE_DIR OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    file(TO_CMAKE_PATH "${CLANG_RESOURCE_DIR}" CLANG_RESOURCE_DIR)
+    set(${result_dir} "${CLANG_RESOURCE_DIR}" PARENT_SCOPE)
+endfunction()
+
+if (ENABLE_ADDRESS_SANITIZER)
+    if (WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang$")
+        add_cxx_compile_options(-fsanitize=address /clang:-fno-omit-frame-pointer)
+        # FIXME: Windows on ARM
+        link_libraries(clang_rt.asan_dynamic-x86_64.lib -wholearchive:clang_rt.asan_dynamic_runtime_thunk-x86_64.lib)
+        get_clang_resource_dir(CLANG_RESOURCE_DIR)
+        file(COPY "${CLANG_RESOURCE_DIR}/lib/windows/clang_rt.asan_dynamic-x86_64.dll" DESTINATION "${CMAKE_BINARY_DIR}/bin")
+    else()
+        add_cxx_compile_options(-fsanitize=address -fno-omit-frame-pointer)
+        add_cxx_link_options(-fsanitize=address)
+    endif()
+endif()
+
+if (ENABLE_MEMORY_SANITIZER)
+    add_cxx_compile_options(-fsanitize=memory -fsanitize-memory-track-origins -fno-omit-frame-pointer)
+    add_cxx_link_options(-fsanitize=memory -fsanitize-memory-track-origins)
+endif()
+
+if (ENABLE_THREAD_SANITIZER)
+    add_cxx_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
+    add_cxx_link_options(-fsanitize=thread)
+endif()
+
+if (ENABLE_UNDEFINED_SANITIZER)
+    if (WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang$")
+        add_cxx_compile_options(-fsanitize=undefined)
+        # FIXME: Windows on ARM
+        link_libraries(clang_rt.ubsan_standalone-x86_64.lib clang_rt.ubsan_standalone_cxx-x86_64.lib)
+    else()
+        add_cxx_compile_options(-fsanitize=undefined -fno-omit-frame-pointer)
+        if (UNDEFINED_BEHAVIOR_IS_FATAL)
+            add_cxx_compile_options(-fno-sanitize-recover=undefined)
+        endif()
+        if (APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang$")
+            add_cxx_compile_options(-fno-sanitize=function)
+        endif()
+        # The LibJS runtime keeps its own class pointer where a C++ cell has its vtable pointer, so vptr checks misfire
+        # wherever one of its cells is handled as a GC::Cell.
+        add_cxx_compile_options(-fno-sanitize=vptr)
+        add_cxx_link_options(-fsanitize=undefined)
+    endif()
+endif()

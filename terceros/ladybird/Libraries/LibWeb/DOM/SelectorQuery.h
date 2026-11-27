@@ -1,0 +1,133 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/HashMap.h>
+#include <AK/RefCounted.h>
+#include <AK/Vector.h>
+#include <LibGC/Cell.h>
+#include <LibGC/CellAllocator.h>
+#include <LibGC/Ptr.h>
+#include <LibGC/Weak.h>
+#include <LibGC/WeakContainer.h>
+#include <LibGC/WeakVector.h>
+#include <LibWeb/CSS/Selector.h>
+#include <LibWeb/Forward.h>
+
+namespace Web::CSS::SelectorFFI {
+
+struct DomSelectorProgram;
+
+}
+
+namespace Web::DOM {
+
+// A selectors string parsed for use by querySelector(All), matches() and closest().
+// Documents cache these per selector string, so one SelectorQuery may be reused by many queries.
+class SelectorQuery : public RefCounted<SelectorQuery> {
+public:
+    static NonnullRefPtr<SelectorQuery> create(CSS::SelectorList&& selectors)
+    {
+        return adopt_ref(*new SelectorQuery(move(selectors)));
+    }
+
+    ~SelectorQuery();
+
+    CSS::SelectorList const& selectors() const { return m_selectors; }
+
+    bool depends_on_character_data() const { return m_depends_on_character_data; }
+
+    // Marked by the document's selector query cache each time it hands out the query again, so that a full cache can
+    // give a query in use another turn as it looks for one to evict.
+    void mark_used() const { m_used_mark = true; }
+    bool take_used_mark() const { return exchange(m_used_mark, false); }
+
+    GC::Ptr<Element> query_first(ParentNode&) const;
+    GC::Ref<NodeList> query_all(ParentNode&) const;
+    bool matches(Element const&, ParentNode const& scope) const;
+    GC::Ptr<Element const> closest(Element const&) const;
+
+private:
+    explicit SelectorQuery(CSS::SelectorList&&);
+
+    CSS::SelectorFFI::DomSelectorProgram const& program(Document const&) const;
+
+    CSS::SelectorList m_selectors;
+    // The selectors compiled for the DOM matcher, when a query first needs them, for an HTML document or not.
+    mutable CSS::SelectorFFI::DomSelectorProgram* m_program { nullptr };
+    mutable bool m_program_is_for_html_document { false };
+    mutable bool m_used_mark { false };
+
+    // Whether the selector is a lone `*`, which every element matches: a query then collects the
+    // subtree's elements without matching any of them.
+    bool m_matches_every_element { false };
+
+    // Whether matching can only change when the dom_tree_version (plus character_data_version, see below) of the
+    // tree the element is in changes. Queries with selectors that depend on other state (:hover, :checked, :target,
+    // etc) are not cacheable.
+    bool m_is_result_cacheable { false };
+
+    // Whether matching also depends on character data (only :empty), so cached results must additionally be
+    // validated against the tree's character_data_version.
+    bool m_depends_on_character_data { false };
+};
+
+// Caches querySelector first matches and querySelectorAll element lists per (query root, selector query), allowing
+// repeated queries against an unchanged tree to skip the subtree walk. Entries are validated lazily against the
+// mutation version counters of the tree the query root is in, so no notification on DOM mutation is needed.
+class QuerySelectorResultCache final
+    : public GC::Cell
+    , public GC::WeakContainer {
+    GC_CELL(QuerySelectorResultCache, GC::Cell);
+    GC_DECLARE_ALLOCATOR(QuerySelectorResultCache);
+
+public:
+    enum class ResultType {
+        FirstOnly,
+        All,
+    };
+
+    GC::WeakVector<Element> const* get(ParentNode const& root, SelectorQuery const&, ResultType);
+    void set(ParentNode const& root, SelectorQuery const&, ResultType, ReadonlySpan<GC::Ref<Node>>);
+    void clear() { m_entries.clear(); }
+
+private:
+    QuerySelectorResultCache();
+
+    virtual GC::Cell const& owner_cell(Badge<GC::Heap>) const override { return *this; }
+    virtual void remove_dead_cells(Badge<GC::Heap>) override;
+
+    struct Key {
+        FlatPtr root { 0 };
+        SelectorQuery const* query { nullptr };
+        bool operator==(Key const&) const = default;
+    };
+
+    struct KeyTraits : public DefaultTraits<Key> {
+        static unsigned hash(Key const& key) { return pair_int_hash(ptr_hash(key.root), ptr_hash(key.query)); }
+    };
+
+    struct Entry {
+        // Weak so the cache never keeps a disconnected query root alive, and so that a dead root can never be
+        // confused with a new node allocated at the same address.
+        GC::Weak<ParentNode> root;
+
+        // Keeps the query alive (and its address unique) even if the document's selector query cache evicts it.
+        NonnullRefPtr<SelectorQuery const> query;
+
+        u64 dom_tree_version { 0 };
+        u64 character_data_version { 0 };
+        ResultType result_type { ResultType::FirstOnly };
+
+        // Descendants of root while its dom_tree_version is unchanged.
+        GC::WeakVector<Element> elements;
+    };
+
+    HashMap<Key, Entry, KeyTraits> m_entries;
+};
+
+}

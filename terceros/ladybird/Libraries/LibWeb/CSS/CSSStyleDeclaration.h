@@ -1,0 +1,126 @@
+/*
+ * Copyright (c) 2018-2023, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2024-2025, Sam Atkins <sam@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/String.h>
+#include <AK/Utf16String.h>
+#include <AK/Utf16View.h>
+#include <LibWeb/Bindings/PlatformObject.h>
+#include <LibWeb/Bindings/RustInterface.h>
+#include <LibWeb/CSS/CSSRule.h>
+#include <LibWeb/CSS/StyleProperty.h>
+#include <LibWeb/CSS/StyleValues/StyleValue.h>
+#include <LibWeb/DOM/AbstractElement.h>
+#include <LibWeb/WebIDL/ExceptionOr.h>
+
+namespace Web::CSS {
+
+// https://drafts.csswg.org/cssom/#css-declaration-blocks
+class CSSStyleDeclaration
+    : public Bindings::GCAllocatedWrappable {
+    WEB_NON_IDL_WRAPPABLE(CSSStyleDeclaration, Bindings::GCAllocatedWrappable);
+    GC_DECLARE_ALLOCATOR(CSSStyleDeclaration);
+
+public:
+    virtual ~CSSStyleDeclaration() = default;
+
+    virtual size_t length() const = 0;
+    virtual Utf16String item(size_t index) const = 0;
+
+    virtual WebIDL::ExceptionOr<void> set_property(Utf16FlyString const& property_name, Utf16View css_text, Utf16View priority) = 0;
+    virtual WebIDL::ExceptionOr<Utf16String> remove_property(Utf16FlyString const& property_name) = 0;
+
+    virtual Utf16String get_property_value(Utf16FlyString const& property_name) const = 0;
+    virtual Utf16String get_property_priority(Utf16FlyString const& property_name) const = 0;
+
+    Utf16String css_text() const;
+    virtual WebIDL::ExceptionOr<void> set_css_text(Utf16View) = 0;
+
+    virtual Utf16String serialized() const = 0;
+
+    // https://drafts.csswg.org/cssom/#cssstyledeclaration-computed-flag
+    [[nodiscard]] bool is_computed() const { return m_computed; }
+
+    // https://drafts.csswg.org/cssom/#cssstyledeclaration-readonly-flag
+    [[nodiscard]] bool is_readonly() const { return m_readonly; }
+
+    // https://drafts.csswg.org/cssom/#cssstyledeclaration-parent-css-rule
+    GC::Ptr<CSSRule> parent_rule() const { return m_parent_rule; }
+    void set_parent_rule(GC::Ptr<CSSRule> parent) { m_parent_rule = parent; }
+
+    // https://drafts.csswg.org/cssom/#cssstyledeclaration-owner-node
+    Optional<DOM::AbstractElement> owner_node() const
+    {
+        if (!m_owner_element)
+            return {};
+        return DOM::AbstractElement { m_owner_element.as_nonnull(), m_owner_pseudo_element, owner_highlight_name() };
+    }
+    void set_owner_node(Optional<DOM::AbstractElement>);
+
+    // https://drafts.csswg.org/cssom/#cssstyledeclaration-updating-flag
+    [[nodiscard]] bool is_updating() const { return m_updating; }
+    void set_is_updating(bool value) { m_updating = value; }
+
+    virtual Utf16FlyString owner_highlight_name() const { return {}; }
+
+    virtual bool has_property(PropertyNameAndID const&) const { VERIFY_NOT_REACHED(); }
+    virtual RefPtr<StyleValue const> get_property_style_value(PropertyNameAndID const&) const { VERIFY_NOT_REACHED(); }
+    virtual WebIDL::ExceptionOr<void> set_property_style_value(PropertyNameAndID const&, NonnullRefPtr<StyleValue const>) { VERIFY_NOT_REACHED(); }
+
+    // The object of an interface implemented in Rust that owns this declaration block, whose wrappers are this block's.
+    void set_owner(Bindings::InterfaceName, Bindings::RustInterfaceCell&);
+    Bindings::RustInterfaceCell& ensure_owner();
+
+protected:
+    enum class Computed : u8 {
+        No,
+        Yes,
+    };
+    enum class Readonly : u8 {
+        No,
+        Yes,
+    };
+    explicit CSSStyleDeclaration(Computed, Readonly);
+
+    virtual void visit_edges(GC::Cell::Visitor&) override;
+
+    // Creates the object that owns this block, for a block whose owner is created on first use.
+    virtual void create_owner() { VERIFY_NOT_REACHED(); }
+
+    void prepare_to_update_style_attribute();
+    void update_style_attribute();
+
+private:
+    virtual bool is_owned_by_rust_interface_object() const override { return true; }
+    virtual GC::Ref<JS::HostObject> create_wrapper(JS::Realm&) override;
+
+    // NB: The flags come first, so that they fill the padding at the end of the wrappable's fields.
+
+    // https://drafts.csswg.org/cssom/#cssstyledeclaration-computed-flag
+    bool m_computed { false };
+
+    // https://drafts.csswg.org/cssom/#cssstyledeclaration-readonly-flag
+    bool m_readonly { false };
+
+    // https://drafts.csswg.org/cssom/#cssstyledeclaration-updating-flag
+    bool m_updating { false };
+
+    // https://drafts.csswg.org/cssom/#cssstyledeclaration-parent-css-rule
+    GC::Member<CSSRule> m_parent_rule;
+
+    // https://drafts.csswg.org/cssom/#cssstyledeclaration-owner-node
+    // NB: The owner node is stored as the parts of an AbstractElement, with a null element for none, which keeps the
+    //     element compressed.
+    GC::Member<DOM::Element> m_owner_element;
+    Optional<PseudoElement> m_owner_pseudo_element;
+
+    Bindings::InterfaceName m_rust_owner_interface_name { Bindings::InterfaceName::Unknown };
+    GC::Member<Bindings::RustInterfaceCell> m_rust_owner;
+};
+
+}

@@ -1,0 +1,23 @@
+/*
+ * Copyright (c) 2024-2025, Sam Atkins <sam@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Utf16FlyString.h>
+#include <AK/Vector.h>
+#include <LibWeb/DOM/AbstractElement.h>
+#include <LibWeb/Forward.h>
+
+namespace Web::CSS {
+
+// NB: The CSS counters sets live in the layout node arena, which resolves them during the layout tree build from the
+//     style each element installed, so whether an element's innermost list-item counter is its own forward one is
+//     read from that style.
+bool innermost_list_item_counter_is_own_forward_counter(DOM::Element const&);
+
+Utf16FlyString const& list_item_counter_name();
+
+}

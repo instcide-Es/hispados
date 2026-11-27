@@ -1,0 +1,10 @@
+// https://registry.khronos.org/webgl/specs/latest/1.0/#5.15
+[Exposed=(Window,Worker), ImplementedIn=Rust]
+interface WebGLContextEvent : Event {
+    constructor(DOMString type, optional WebGLContextEventInit eventInit = {});
+    readonly attribute DOMString statusMessage;
+};
+
+dictionary WebGLContextEventInit : EventInit {
+    DOMString statusMessage = "";
+};

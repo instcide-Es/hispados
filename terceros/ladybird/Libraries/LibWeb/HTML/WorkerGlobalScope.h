@@ -1,0 +1,215 @@
+/*
+ * Copyright (c) 2022, Andrew Kaster <akaster@serenityos.org>
+ * Copyright (c) 2025, Luke Wilde <luke@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Optional.h>
+#include <AK/RefCounted.h>
+#include <AK/Utf16String.h>
+#include <LibCore/Socket.h>
+#include <LibJS/Forward.h>
+#include <LibURL/URL.h>
+#include <LibWeb/ContentSecurityPolicy/Directives/Directive.h>
+#include <LibWeb/DOM/EventTarget.h>
+#include <LibWeb/Export.h>
+#include <LibWeb/Forward.h>
+#include <LibWeb/HTML/Scripting/Fetching.h>
+#include <LibWeb/HTML/WindowOrWorkerGlobalScope.h>
+#include <LibWeb/HTML/WorkerLocation.h>
+#include <LibWeb/HTML/WorkerNavigator.h>
+#include <LibWeb/WebIDL/ExceptionOr.h>
+#include <LibWebCommon/HTML/Scripting/SerializedEnvironmentSettingsObject.h>
+#include <LibWebCommon/HTML/WorkerTypes.h>
+
+namespace Web::HTML {
+
+class WorkerGlobalScope;
+
+}
+
+namespace Web::Bindings {
+
+WEB_API HTML::WorkerGlobalScope* worker_global_scope_from_global_object(JS::Object&);
+WEB_API HTML::WorkerGlobalScope const* worker_global_scope_from_global_object(JS::Object const&);
+WEB_API JS::Realm& main_world_realm(HTML::WorkerGlobalScope const&);
+WEB_API void initialize_worker_web_interfaces(HTML::WorkerGlobalScope&);
+
+}
+
+namespace Web::ServiceWorker {
+
+class ServiceWorkerGlobalScope;
+
+}
+
+namespace Web::Bindings {
+
+WEB_API ServiceWorker::ServiceWorkerGlobalScope* service_worker_global_scope_from_global_object(JS::Object&);
+
+}
+
+#define ENUMERATE_WORKER_GLOBAL_SCOPE_EVENT_HANDLERS(E)       \
+    E(onerror, HTML::EventNames::error)                       \
+    E(onlanguagechange, HTML::EventNames::languagechange)     \
+    E(ononline, HTML::EventNames::online)                     \
+    E(onoffline, HTML::EventNames::offline)                   \
+    E(onrejectionhandled, HTML::EventNames::rejectionhandled) \
+    E(onunhandledrejection, HTML::EventNames::unhandledrejection)
+
+namespace Web::HTML {
+
+// https://html.spec.whatwg.org/multipage/workers.html#the-workerglobalscope-common-interface
+// WorkerGlobalScope is the base class of each real WorkerGlobalScope that will be created when the
+// user agent runs the run a worker algorithm.
+class WEB_API WorkerGlobalScope
+    : public DOM::EventTarget
+    , public WindowOrWorkerGlobalScopeMixin {
+    WEB_WRAPPABLE(WorkerGlobalScope, DOM::EventTarget);
+    GC_DECLARE_ALLOCATOR(WorkerGlobalScope);
+
+    friend JS::Realm& Bindings::main_world_realm(WorkerGlobalScope const&);
+    friend void Bindings::initialize_worker_web_interfaces(WorkerGlobalScope&);
+
+public:
+    using Owner = Variant<SerializedDocument, SerializedWorkerGlobalScope>;
+
+    virtual ~WorkerGlobalScope() override;
+
+    JS::Realm& realm() const;
+
+    // ^WindowOrWorkerGlobalScopeMixin
+    virtual DOM::EventTarget& this_impl() override { return *this; }
+    virtual DOM::EventTarget const& this_impl() const override { return *this; }
+
+    // Following methods are from the WorkerGlobalScope IDL definition
+    // https://html.spec.whatwg.org/multipage/workers.html#the-workerglobalscope-common-interface
+
+    // https://html.spec.whatwg.org/multipage/workers.html#dom-workerglobalscope-self
+    GC::Ref<WorkerGlobalScope const> self() const { return *this; }
+
+    virtual Optional<URL::Origin> extract_an_origin() const override { return window_or_worker_global_scope_extract_an_origin(); }
+
+    GC::Ref<WorkerLocation> location() const;
+    GC::Ref<WorkerNavigator> navigator() const;
+    WebIDL::ExceptionOr<void> import_scripts(Vector<Utf16String> const& urls, PerformTheFetchHook = nullptr);
+
+#undef __ENUMERATE
+#define __ENUMERATE(attribute_name, event_name)       \
+    void set_##attribute_name(WebIDL::CallbackType*); \
+    WebIDL::CallbackType* attribute_name();
+    ENUMERATE_WORKER_GLOBAL_SCOPE_EVENT_HANDLERS(__ENUMERATE)
+#undef __ENUMERATE
+
+    GC::Ref<CSS::FontFaceSet> fonts();
+
+    // Non-IDL public methods
+
+    CSS::FontComputer& font_computer();
+
+    URL::URL const& url() const { return m_url.value(); }
+    void set_url(URL::URL const& url) { m_url = url; }
+
+    // https://html.spec.whatwg.org/multipage/workers.html#concept-workerglobalscope-cross-origin-isolated-capability
+    bool cross_origin_isolated_capability() const { return m_cross_origin_isolated_capability; }
+    void set_cross_origin_isolated_capability(bool value) { m_cross_origin_isolated_capability = value; }
+
+    Utf16String const& name() const { return m_name; }
+    void set_name(Utf16String name) { m_name = move(name); }
+
+    WorkerType type() const { return m_type; }
+    void set_type(WorkerType type) { m_type = type; }
+
+    // Spec note: While the WorkerLocation object is created after the WorkerGlobalScope object,
+    //            this is not problematic as it cannot be observed from script.
+    void set_location(GC::Ref<WorkerLocation> loc) { m_location = move(loc); }
+
+    void set_internal_port(GC::Ref<MessagePort> port);
+
+    Web::Page* page() { return m_page.ptr(); }
+
+    NonnullRefPtr<PolicyContainer> policy_container() const;
+
+    bool is_closing() const { return m_closing; }
+
+    void terminate_a_worker();
+
+    void initialize_policy_container(GC::Ref<Fetch::Infrastructure::ResponseView const> response, GC::Ref<EnvironmentSettingsObject> environment);
+    [[nodiscard]] bool check_embedder_policy(EmbedderPolicy const& owner_policy) const;
+    [[nodiscard]] ContentSecurityPolicy::Directives::Directive::Result run_csp_initialization() const;
+
+    URL::Origin site_for_cookies() const;
+
+    auto& owner_set() { return m_owner_set; }
+    auto const& owner_set() const { return m_owner_set; }
+
+protected:
+    explicit WorkerGlobalScope(GC::Ref<Web::Page>);
+
+    virtual void visit_edges(Cell::Visitor&) override;
+
+    virtual void initialize_web_interfaces_impl();
+
+    void close_a_worker();
+
+    virtual void finalize() override;
+
+    GC::Ptr<MessagePort> m_internal_port;
+
+private:
+    GC::Ptr<WorkerLocation> m_location;
+    GC::Ptr<WorkerNavigator> m_navigator;
+
+    GC::Ref<Web::Page> m_page;
+
+    // https://html.spec.whatwg.org/multipage/workers.html#concept-WorkerGlobalScope-owner-set
+    // FIXME: A WorkerGlobalScope object has an associated owner set (a set of Document and WorkerGlobalScope objects). It is initially empty and populated when the worker is created or obtained.
+    //     Note: It is a set, instead of a single owner, to accommodate SharedWorkerGlobalScope objects.
+
+    // https://html.spec.whatwg.org/multipage/workers.html#concept-workerglobalscope-type
+    // A WorkerGlobalScope object has an associated type ("classic" or "module"). It is set during creation.
+    WorkerType m_type { WorkerType::Classic };
+
+    // https://html.spec.whatwg.org/multipage/workers.html#concept-workerglobalscope-url
+    // A WorkerGlobalScope object has an associated url (null or a URL). It is initially null.
+    Optional<URL::URL> m_url;
+
+    // https://html.spec.whatwg.org/multipage/workers.html#concept-workerglobalscope-name
+    // A WorkerGlobalScope object has an associated name (a string). It is set during creation.
+    //  Note: The name can have different semantics for each subclass of WorkerGlobalScope.
+    //        For DedicatedWorkerGlobalScope instances, it is simply a developer-supplied name, useful mostly for debugging purposes.
+    //        For SharedWorkerGlobalScope instances, it allows obtaining a reference to a common shared worker via the SharedWorker() constructor.
+    //        For ServiceWorkerGlobalScope objects, it doesn't make sense (and as such isn't exposed through the JavaScript API at all).
+    Utf16String m_name;
+
+    // https://html.spec.whatwg.org/multipage/workers.html#concept-workerglobalscope-policy-container
+    // A WorkerGlobalScope object has an associated policy container (a policy container). It is initially a new policy container.
+    mutable RefPtr<PolicyContainer> m_policy_container;
+
+    // https://html.spec.whatwg.org/multipage/workers.html#concept-workerglobalscope-embedder-policy
+    // A WorkerGlobalScope object has an associated embedder policy (an embedder policy).
+    // FIXME: Should be removed, https://github.com/whatwg/html/issues/11316
+
+    // https://html.spec.whatwg.org/multipage/workers.html#concept-workerglobalscope-module-map
+    // FIXME: A WorkerGlobalScope object has an associated module map. It is a module map, initially empty.
+
+    // https://html.spec.whatwg.org/multipage/workers.html#concept-workerglobalscope-cross-origin-isolated-capability
+    bool m_cross_origin_isolated_capability { false };
+
+    // https://html.spec.whatwg.org/multipage/workers.html#dom-workerglobalscope-closing
+    bool m_closing { false };
+
+    // https://drafts.csswg.org/css-font-loading/#font-source
+    GC::Ptr<CSS::FontFaceSet> m_fonts;
+
+    GC::Ptr<CSS::FontComputer> m_font_computer;
+
+    // https://html.spec.whatwg.org/multipage/workers.html#concept-WorkerGlobalScope-owner-set
+    // A WorkerGlobalScope object has an associated owner set (a set of Document and WorkerGlobalScope objects). It is initially empty and populated when the worker is created or obtained.
+    Vector<Owner> m_owner_set;
+};
+
+}

@@ -1,0 +1,842 @@
+/*
+ * Copyright (c) 2022-2023, Linus Groh <linusg@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibGC/Heap.h>
+#include <LibHTTP/Method.h>
+#include <LibJS/Runtime/Completion.h>
+#include <LibWeb/DOM/AbortSignal.h>
+#include <LibWeb/DOMURL/DOMURL.h>
+#include <LibWeb/Fetch/Headers.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/Bodies.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/MIME.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/Requests.h>
+#include <LibWeb/Fetch/Request.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/Streams/ReadableStream.h>
+#include <LibWeb/Streams/TransformStream.h>
+#include <LibWeb/WebIDL/Promise.h>
+#include <LibWebCommon/ReferrerPolicy/ReferrerPolicy.h>
+
+namespace Web::Fetch {
+
+// https://streams.spec.whatwg.org/#create-an-identity-transformstream
+static GC::Ref<Streams::TransformStream> create_an_identity_transform_stream(HTML::EnvironmentSettingsObject& settings_object)
+{
+    auto& realm = settings_object.realm();
+
+    // 1. Let transformStream be a new TransformStream.
+    auto transform_stream = Streams::TransformStream::create(realm);
+
+    // 2. Set up transformStream with transformAlgorithm set to an algorithm which, given chunk, enqueues chunk in
+    //    transformStream.
+    auto transform_algorithm = GC::create_function(GC::Heap::the(), GC::captures(realm, transform_stream), [](auto& realm, auto& transform_stream, JS::Value chunk) -> GC::Ref<WebIDL::Promise> {
+        if (auto result = transform_stream->enqueue(chunk); result.is_error())
+            return WebIDL::create_rejected_promise_from_exception(realm, result.release_error());
+        return WebIDL::create_resolved_promise(realm, JS::js_undefined());
+    });
+    transform_stream->set_up(realm, transform_algorithm);
+
+    // 3. Return transformStream.
+    return transform_stream;
+}
+
+// https://streams.spec.whatwg.org/#readablestream-create-a-proxy
+static GC::Ref<Streams::ReadableStream> create_a_proxy(HTML::EnvironmentSettingsObject& settings_object, GC::Ref<Streams::ReadableStream> stream)
+{
+    // 1. Let identityTransform be the result of creating an identity TransformStream.
+    auto identity_transform = create_an_identity_transform_stream(settings_object);
+
+    // 2. Return the result of stream piped through identityTransform.
+    return stream->piped_through(identity_transform);
+}
+
+static Bindings::ReferrerPolicy referrer_policy_to_bindings(ReferrerPolicy::ReferrerPolicy referrer_policy)
+{
+    return static_cast<Bindings::ReferrerPolicy>(referrer_policy);
+}
+
+static Bindings::RequestDestination request_destination_to_bindings(Optional<Infrastructure::Request::Destination> const& destination)
+{
+    if (!destination.has_value())
+        return Bindings::RequestDestination::Empty;
+
+    switch (*destination) {
+    case Infrastructure::Request::Destination::Audio:
+        return Bindings::RequestDestination::Audio;
+    case Infrastructure::Request::Destination::AudioWorklet:
+        return Bindings::RequestDestination::Audioworklet;
+    case Infrastructure::Request::Destination::Document:
+        return Bindings::RequestDestination::Document;
+    case Infrastructure::Request::Destination::Embed:
+        return Bindings::RequestDestination::Embed;
+    case Infrastructure::Request::Destination::Font:
+        return Bindings::RequestDestination::Font;
+    case Infrastructure::Request::Destination::Frame:
+        return Bindings::RequestDestination::Frame;
+    case Infrastructure::Request::Destination::IFrame:
+        return Bindings::RequestDestination::Iframe;
+    case Infrastructure::Request::Destination::Image:
+        return Bindings::RequestDestination::Image;
+    case Infrastructure::Request::Destination::JSON:
+        return Bindings::RequestDestination::Json;
+    case Infrastructure::Request::Destination::Manifest:
+        return Bindings::RequestDestination::Manifest;
+    case Infrastructure::Request::Destination::Object:
+        return Bindings::RequestDestination::Object;
+    case Infrastructure::Request::Destination::PaintWorklet:
+        return Bindings::RequestDestination::Paintworklet;
+    case Infrastructure::Request::Destination::Report:
+        return Bindings::RequestDestination::Report;
+    case Infrastructure::Request::Destination::Script:
+        return Bindings::RequestDestination::Script;
+    case Infrastructure::Request::Destination::SharedWorker:
+        return Bindings::RequestDestination::Sharedworker;
+    case Infrastructure::Request::Destination::Style:
+        return Bindings::RequestDestination::Style;
+    case Infrastructure::Request::Destination::Text:
+        return Bindings::RequestDestination::Text;
+    case Infrastructure::Request::Destination::Track:
+        return Bindings::RequestDestination::Track;
+    case Infrastructure::Request::Destination::Video:
+        return Bindings::RequestDestination::Video;
+    case Infrastructure::Request::Destination::Worker:
+        return Bindings::RequestDestination::Worker;
+    case Infrastructure::Request::Destination::XSLT:
+        return Bindings::RequestDestination::Xslt;
+    case Infrastructure::Request::Destination::ServiceWorker:
+    case Infrastructure::Request::Destination::WebIdentity:
+        VERIFY_NOT_REACHED();
+    }
+    VERIFY_NOT_REACHED();
+}
+
+static Bindings::RequestMode request_mode_to_bindings(Infrastructure::Request::Mode mode)
+{
+    switch (mode) {
+    case Infrastructure::Request::Mode::SameOrigin:
+        return Bindings::RequestMode::SameOrigin;
+    case Infrastructure::Request::Mode::CORS:
+        return Bindings::RequestMode::Cors;
+    case Infrastructure::Request::Mode::NoCORS:
+        return Bindings::RequestMode::NoCors;
+    case Infrastructure::Request::Mode::Navigate:
+        return Bindings::RequestMode::Navigate;
+    case Infrastructure::Request::Mode::WebSocket:
+        VERIFY_NOT_REACHED();
+    }
+    VERIFY_NOT_REACHED();
+}
+
+static Bindings::RequestCredentials request_credentials_to_bindings(Infrastructure::Request::CredentialsMode credentials_mode)
+{
+    return static_cast<Bindings::RequestCredentials>(credentials_mode);
+}
+
+static Bindings::RequestCache request_cache_to_bindings(HTTP::CacheMode cache_mode)
+{
+    return static_cast<Bindings::RequestCache>(cache_mode);
+}
+
+static Bindings::RequestRedirect request_redirect_to_bindings(Infrastructure::Request::RedirectMode redirect_mode)
+{
+    return static_cast<Bindings::RequestRedirect>(redirect_mode);
+}
+
+static ReferrerPolicy::ReferrerPolicy referrer_policy_from_bindings(Bindings::ReferrerPolicy referrer_policy)
+{
+    return static_cast<ReferrerPolicy::ReferrerPolicy>(referrer_policy);
+}
+
+static Infrastructure::Request::Mode request_mode_from_bindings(Bindings::RequestMode mode)
+{
+    switch (mode) {
+    case Bindings::RequestMode::SameOrigin:
+        return Infrastructure::Request::Mode::SameOrigin;
+    case Bindings::RequestMode::Cors:
+        return Infrastructure::Request::Mode::CORS;
+    case Bindings::RequestMode::NoCors:
+        return Infrastructure::Request::Mode::NoCORS;
+    case Bindings::RequestMode::Navigate:
+        return Infrastructure::Request::Mode::Navigate;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+static Infrastructure::Request::CredentialsMode request_credentials_from_bindings(Bindings::RequestCredentials request_credentials)
+{
+    return static_cast<Infrastructure::Request::CredentialsMode>(request_credentials);
+}
+
+static HTTP::CacheMode request_cache_from_bindings(Bindings::RequestCache request_cache)
+{
+    return static_cast<HTTP::CacheMode>(request_cache);
+}
+
+static Infrastructure::Request::RedirectMode request_redirect_from_bindings(Bindings::RequestRedirect request_redirect)
+{
+    return static_cast<Infrastructure::Request::RedirectMode>(request_redirect);
+}
+
+static Infrastructure::Request::Priority request_priority_from_bindings(Bindings::RequestPriority request_priority)
+{
+    return static_cast<Infrastructure::Request::Priority>(request_priority);
+}
+
+static bool is_empty(Bindings::RequestInit const& request_init)
+{
+    return !(request_init.method.has_value()
+        || request_init.headers.has_value()
+        || request_init.body.has_value()
+        || request_init.referrer.has_value()
+        || request_init.referrer_policy.has_value()
+        || request_init.mode.has_value()
+        || request_init.credentials.has_value()
+        || request_init.cache.has_value()
+        || request_init.redirect.has_value()
+        || request_init.integrity.has_value()
+        || request_init.keepalive.has_value()
+        || request_init.signal.has_value()
+        || request_init.duplex.has_value()
+        || request_init.priority.has_value()
+        || request_init.window.has_value());
+}
+
+GC_DEFINE_ALLOCATOR(Request);
+
+Request::Request(NonnullRefPtr<Infrastructure::Request> request)
+    : m_request(request)
+{
+}
+
+Request::~Request() = default;
+
+void Request::visit_edges(GC::Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_body);
+    visitor.visit(m_headers);
+    visitor.visit(m_signal);
+}
+
+// https://fetch.spec.whatwg.org/#concept-body-mime-type
+// https://fetch.spec.whatwg.org/#ref-for-concept-body-mime-type%E2%91%A0
+Optional<MimeSniff::MimeType> Request::mime_type_impl() const
+{
+    // Objects including the Body interface mixin need to define an associated MIME type algorithm which takes no arguments and returns failure or a MIME type.
+    // A Request object’s MIME type is to return the result of extracting a MIME type from its request’s header list.
+    return Infrastructure::extract_mime_type(m_request->header_list());
+}
+
+// https://fetch.spec.whatwg.org/#concept-body-body
+// https://fetch.spec.whatwg.org/#ref-for-concept-body-body%E2%91%A7
+GC::Ptr<Infrastructure::Body const> Request::body_impl() const
+{
+    // Objects including the Body interface mixin have an associated body (null or a body).
+    // A Request object’s body is its request’s body.
+    // NB: A body that fetching extracts again from the same source keeps this object's stream.
+    if (m_request->body().has<Empty>())
+        return nullptr;
+    return m_body;
+}
+
+// https://fetch.spec.whatwg.org/#concept-body-body
+// https://fetch.spec.whatwg.org/#ref-for-concept-body-body%E2%91%A7
+GC::Ptr<Infrastructure::Body> Request::body_impl()
+{
+    // Objects including the Body interface mixin have an associated body (null or a body).
+    // A Request object’s body is its request’s body.
+    // NB: A body that fetching extracts again from the same source keeps this object's stream.
+    if (m_request->body().has<Empty>())
+        return nullptr;
+    return m_body;
+}
+
+// https://fetch.spec.whatwg.org/#request-create
+GC::Ref<Request> Request::create(NonnullRefPtr<Infrastructure::Request> request)
+{
+    return GC::Heap::the().allocate<Request>(request);
+}
+
+GC::Ref<Request> Request::create(NonnullRefPtr<Infrastructure::Request> request, Headers::Guard guard, GC::Ref<DOM::AbortSignal> signal)
+{
+    // 1. Let requestObject be a new Request object with realm.
+    // 2. Set requestObject’s request to request.
+    auto request_object = create(request);
+
+    // 3. Set requestObject’s headers to a new Headers object with realm, whose headers list is request’s headers list and guard is guard.
+    request_object->m_headers = Headers::create(request->header_list());
+    request_object->m_headers->set_guard(guard);
+
+    // 4. Set requestObject’s signal to signal.
+    request_object->m_signal = signal;
+
+    // 5. Return requestObject.
+    return request_object;
+}
+
+WebIDL::ExceptionOr<GC::Ref<Request>> Request::create_for_constructor(JS::Object& relevant_global_object, RequestInfo const& input, Bindings::RequestInit const& init)
+{
+    return create_with_settings(HTML::relevant_settings_object(relevant_global_object), input, init);
+}
+
+WebIDL::ExceptionOr<GC::Ref<Request>> Request::create_with_settings(HTML::EnvironmentSettingsObject& relevant_settings_object, RequestInfo const& input, Bindings::RequestInit const& init)
+{
+    auto& realm = relevant_settings_object.realm();
+
+    // Referred to as 'this' in the spec.
+    auto request_object = create(Infrastructure::Request::create());
+
+    // 1. Let request be null.
+    RefPtr<Infrastructure::Request> input_request;
+
+    // 2. Let fallbackMode be null.
+    Optional<Infrastructure::Request::Mode> fallback_mode;
+
+    // 3. Let baseURL be this’s relevant settings object’s API base URL.
+    auto base_url = relevant_settings_object.api_base_url();
+
+    // 4. Let signal be null.
+    GC::Ptr<DOM::AbortSignal> input_signal;
+
+    // 5. If input is a string, then:
+    if (input.has<Utf16String>()) {
+        // 1. Let parsedURL be the result of parsing input with baseURL.
+        auto parsed_url = DOMURL::parse(input.get<Utf16String>().utf16_view(), base_url);
+
+        // 2. If parsedURL is failure, then throw a TypeError.
+        if (!parsed_url.has_value())
+            return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Input URL is not valid"_utf16 };
+
+        // 3. If parsedURL includes credentials, then throw a TypeError.
+        if (parsed_url->includes_credentials())
+            return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Input URL must not include credentials"_utf16 };
+
+        // 4. Set request to a new request whose URL is parsedURL.
+        input_request = Infrastructure::Request::create();
+        input_request->set_url(parsed_url.release_value());
+
+        // 5. Set fallbackMode to "cors".
+        fallback_mode = Infrastructure::Request::Mode::CORS;
+    }
+    // 6. Otherwise:
+    else {
+        // 1. Assert: input is a Request object.
+        VERIFY(input.has<GC::Ref<Request>>());
+
+        // 2. Set request to input’s request.
+        input_request = input.get<GC::Ref<Request>>()->request();
+
+        // 3. Set signal to input’s signal.
+        input_signal = input.get<GC::Ref<Request>>()->signal();
+    }
+
+    // 7. Let origin be this’s relevant settings object’s origin.
+    auto const& origin = relevant_settings_object.origin();
+
+    // 8. Let traversableForUserPrompts be "client".
+    auto traversable_for_user_prompts = Infrastructure::Request::TraversableForUserPromptsType { Infrastructure::Request::TraversableForUserPrompts::Client };
+
+    // 9. If request’s traversable for user prompts is an environment settings object and its origin is same origin with
+    //    origin, then set traversableForUserPrompts to request’s traversable for user prompts.
+    // NB: A request's traversable for user prompts is never an environment settings object.
+
+    // 11. If init["window"] exists, then set traversableForUserPrompts to "no-traversable".
+    if (init.window.has_value()) {
+        // https://fetch.spec.whatwg.org/#dom-request
+        // If init["window"] exists and is non-null, then throw a TypeError.
+        if (!init.window->is_null())
+            return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "The 'window' property must be omitted or null"_utf16 };
+        traversable_for_user_prompts = Infrastructure::Request::TraversableForUserPrompts::NoTraversable;
+    }
+
+    // 12. Set request to a new request with the following properties:
+    // NOTE: This is done at the beginning as the 'this' value Request object
+    //       cannot exist with a null Infrastructure::Request.
+    auto request = request_object->request();
+
+    // URL
+    //     request’s URL.
+    request->set_url(input_request->url());
+
+    // method
+    //     request’s method.
+    request->set_method(input_request->method());
+
+    // header list
+    //     A copy of request’s header list.
+    auto header_list_copy = HTTP::HeaderList::create();
+    for (auto& header : *input_request->header_list())
+        header_list_copy->append(header);
+    request->set_header_list(header_list_copy);
+
+    // unsafe-request flag
+    //     Set.
+    request->set_unsafe_request(true);
+
+    // client
+    //     This’s relevant settings object.
+    request->set_client(relevant_settings_object.address());
+
+    // traversable for user prompts
+    //     traversableForUserPrompts.
+    request->set_traversable_for_user_prompts(traversable_for_user_prompts);
+
+    // priority
+    //     request’s priority.
+    request->set_priority(input_request->priority());
+
+    // origin
+    //     request’s origin. The propagation of the origin is only significant for navigation requests being handled by a service worker. In this scenario a request can have an origin that is different from the current client.
+    request->set_origin(input_request->origin());
+
+    // referrer
+    //     request’s referrer.
+    request->set_referrer(input_request->referrer());
+
+    // referrer policy
+    //     request’s referrer policy.
+    request->set_referrer_policy(input_request->referrer_policy());
+
+    // mode
+    //     request’s mode.
+    request->set_mode(input_request->mode());
+
+    // credentials mode
+    //     request’s credentials mode.
+    request->set_credentials_mode(input_request->credentials_mode());
+
+    // cache mode
+    //     request’s cache mode.
+    request->set_cache_mode(input_request->cache_mode());
+
+    // redirect mode
+    //     request’s redirect mode.
+    request->set_redirect_mode(input_request->redirect_mode());
+
+    // integrity metadata
+    //     request’s integrity metadata.
+    request->set_integrity_metadata(input_request->integrity_metadata());
+
+    // keepalive
+    //     request’s keepalive.
+    request->set_keepalive(input_request->keepalive());
+
+    // reload-navigation flag
+    //     request’s reload-navigation flag.
+    request->set_reload_navigation(input_request->reload_navigation());
+
+    // history-navigation flag
+    //     request’s history-navigation flag.
+    request->set_history_navigation(input_request->history_navigation());
+
+    // URL list
+    //     A clone of request’s URL list.
+    request->set_url_list(input_request->url_list());
+
+    // initiator type
+    //     "fetch".
+    request->set_initiator_type(Infrastructure::Request::InitiatorType::Fetch);
+
+    // 13. If init is not empty, then:
+    if (!is_empty(init)) {
+        // 1. If request’s mode is "navigate", then set it to "same-origin".
+        if (request->mode() == Infrastructure::Request::Mode::Navigate)
+            request->set_mode(Infrastructure::Request::Mode::SameOrigin);
+
+        // 2. Unset request’s reload-navigation flag.
+        request->set_reload_navigation(false);
+
+        // 3. Unset request’s history-navigation flag.
+        request->set_history_navigation(false);
+
+        // 4. Set request’s origin to "client".
+        request->set_origin(Infrastructure::Request::Origin::Client);
+
+        // 5. Set request’s referrer to "client".
+        request->set_referrer(Infrastructure::Request::Referrer::Client);
+
+        // 6. Set request’s referrer policy to the empty string.
+        request->set_referrer_policy({});
+
+        // 7. Set request’s URL to request’s current URL.
+        request->set_url(request->current_url());
+
+        // 8. Set request’s URL list to « request’s URL ».
+        // NOTE: This is done implicitly by assigning the initial URL above.
+    }
+
+    // 14. If init["referrer"] exists, then:
+    if (init.referrer.has_value()) {
+        // 1. Let referrer be init["referrer"].
+        auto const& referrer = *init.referrer;
+
+        // 2. If referrer is the empty string, then set request’s referrer to "no-referrer".
+        if (referrer.is_empty()) {
+            request->set_referrer(Infrastructure::Request::Referrer::NoReferrer);
+        }
+        // 3. Otherwise:
+        else {
+            // 1. Let parsedReferrer be the result of parsing referrer with baseURL.
+            auto parsed_referrer = DOMURL::parse(referrer.utf16_view(), base_url);
+
+            // 2. If parsedReferrer is failure, then throw a TypeError.
+            if (!parsed_referrer.has_value())
+                return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Referrer must be a valid URL"_utf16 };
+
+            // 3. If one of the following is true
+            // - parsedReferrer’s scheme is "about" and path is the string "client"
+            // - parsedReferrer’s origin is not same origin with origin
+            // then set request’s referrer to "client".
+            auto parsed_referrer_origin = parsed_referrer->origin();
+            if ((parsed_referrer->scheme() == "about"sv && parsed_referrer->path_segment_count() == 1 && parsed_referrer->path_segments().first() == "client"sv)
+                || !parsed_referrer_origin.is_same_origin(origin)) {
+                request->set_referrer(Infrastructure::Request::Referrer::Client);
+            }
+            // 4. Otherwise, set request’s referrer to parsedReferrer.
+            else {
+                request->set_referrer(parsed_referrer.release_value());
+            }
+        }
+    }
+
+    // 15. If init["referrerPolicy"] exists, then set request’s referrer policy to it.
+    if (init.referrer_policy.has_value())
+        request->set_referrer_policy(referrer_policy_from_bindings(*init.referrer_policy));
+
+    // 16. Let mode be init["mode"] if it exists, and fallbackMode otherwise.
+    auto mode = init.mode.has_value()
+        ? Optional<Infrastructure::Request::Mode> { request_mode_from_bindings(*init.mode) }
+        : fallback_mode;
+
+    // 17. If mode is "navigate", then throw a TypeError.
+    if (mode == Infrastructure::Request::Mode::Navigate)
+        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Mode must not be 'navigate'"_utf16 };
+
+    // 18. If mode is non-null, set request’s mode to mode.
+    if (mode.has_value())
+        request->set_mode(*mode);
+
+    // 19. If init["credentials"] exists, then set request’s credentials mode to it.
+    if (init.credentials.has_value())
+        request->set_credentials_mode(request_credentials_from_bindings(*init.credentials));
+
+    // 20. If init["cache"] exists, then set request’s cache mode to it.
+    if (init.cache.has_value())
+        request->set_cache_mode(request_cache_from_bindings(*init.cache));
+
+    // 21. If request’s cache mode is "only-if-cached" and request’s mode is not "same-origin", then throw a TypeError.
+    if (request->cache_mode() == HTTP::CacheMode::OnlyIfCached && request->mode() != Infrastructure::Request::Mode::SameOrigin)
+        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Mode must be 'same-origin' when cache mode is 'only-if-cached'"_utf16 };
+
+    // 22. If init["redirect"] exists, then set request’s redirect mode to it.
+    if (init.redirect.has_value())
+        request->set_redirect_mode(request_redirect_from_bindings(*init.redirect));
+
+    // 23. If init["integrity"] exists, then set request’s integrity metadata to it.
+    if (init.integrity.has_value())
+        request->set_integrity_metadata(*init.integrity);
+
+    // 24. If init["keepalive"] exists, then set request’s keepalive to it.
+    if (init.keepalive.has_value())
+        request->set_keepalive(*init.keepalive);
+
+    // 25. If init["method"] exists, then:
+    if (init.method.has_value()) {
+        // 1. Let method be init["method"].
+        auto method = *init.method;
+
+        // 2. If method is not a method or method is a forbidden method, then throw a TypeError.
+        if (!HTTP::is_method(method))
+            return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Method has invalid value"_utf16 };
+        if (HTTP::is_forbidden_method(method))
+            return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Method must not be one of CONNECT, TRACE, or TRACK"_utf16 };
+
+        // 3. Normalize method.
+        auto normalized_method = HTTP::normalize_method(method);
+
+        // 4. Set request’s method to method.
+        request->set_method(move(normalized_method));
+    }
+
+    // 26. If init["signal"] exists, then set signal to it.
+    if (init.signal.has_value())
+        input_signal = init.signal->ptr();
+
+    // 27. If init["priority"] exists, then:
+    if (init.priority.has_value())
+        request->set_priority(request_priority_from_bindings(*init.priority));
+
+    // 28. Set this’s request to request.
+    // NOTE: This is done at the beginning as the 'this' value Request object
+    //       cannot exist with a null Infrastructure::Request.
+
+    // 29. Let signals be « signal » if signal is non-null; otherwise « ».
+    GC::RootVector<GC::Ref<DOM::AbortSignal>> signals;
+    if (input_signal != nullptr)
+        signals.append(*input_signal);
+
+    // 30. Set this’s signal to the result of creating a dependent abort signal from signals, using AbortSignal and this’s relevant realm.
+    request_object->m_signal = TRY(DOM::AbortSignal::create_dependent_abort_signal(signals));
+
+    // 31. Set this’s headers to a new Headers object with this’s relevant Realm, whose header list is request’s header list and guard is "request".
+    request_object->m_headers = Headers::create(request->header_list());
+    request_object->m_headers->set_guard(Headers::Guard::Request);
+
+    // 32. If this’s request’s mode is "no-cors", then:
+    if (request_object->request()->mode() == Infrastructure::Request::Mode::NoCORS) {
+        // 1. If this’s request’s method is not a CORS-safelisted method, then throw a TypeError.
+        if (!HTTP::is_cors_safelisted_method(request_object->request()->method()))
+            return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Method must be one of GET, HEAD, or POST"_utf16 };
+
+        // 2. Set this’s headers’s guard to "request-no-cors".
+        request_object->headers()->set_guard(Headers::Guard::RequestNoCORS);
+    }
+
+    // 33. If init is not empty, then:
+    if (!is_empty(init)) {
+        // 1. Let headers be a copy of this’s headers and its associated header list.
+        // 2. If init["headers"] exists, then set headers to init["headers"].
+        auto headers = [&]() -> Variant<HeadersInit, NonnullRefPtr<HTTP::HeaderList>> {
+            if (init.headers.has_value())
+                return init.headers.value();
+            return HTTP::HeaderList::create(request_object->headers()->header_list()->headers());
+        }();
+
+        // 3. Empty this’s headers’s header list.
+        request_object->headers()->header_list()->clear();
+
+        TRY(headers.visit(
+            // 4. If headers is a Headers object, then for each header of its header list, append header to this’s headers.
+            [&](NonnullRefPtr<HTTP::HeaderList> const& headers) -> WebIDL::ExceptionOr<void> {
+                for (auto const& header : *headers)
+                    TRY(request_object->headers()->append(header));
+                return {};
+            },
+            // 5. Otherwise, fill this’s headers with headers.
+            [&](HeadersInit const& headers) -> WebIDL::ExceptionOr<void> {
+                TRY(request_object->headers()->fill(headers));
+                return {};
+            }));
+    }
+
+    // 34. Let inputBody be input’s request’s body if input is a Request object; otherwise null.
+    GC::Ptr<Infrastructure::Body> input_body;
+    if (input.has<GC::Ref<Request>>())
+        input_body = input.get<GC::Ref<Request>>()->body_impl();
+
+    // 35. If either init["body"] exists and is non-null or inputBody is non-null, and request’s method is `GET` or `HEAD`, then throw a TypeError.
+    if (((init.body.has_value() && !init.body->has<Empty>()) || input_body) && request->method().is_one_of("GET"sv, "HEAD"sv))
+        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Method must not be GET or HEAD when body is provided"_utf16 };
+
+    // 36. Let initBody be null.
+    GC::Ptr<Infrastructure::Body> init_body;
+
+    // 37. If init["body"] exists and is non-null, then:
+    if (init.body.has_value() && !init.body->has<Empty>()) {
+        // 1. Let bodyWithType be the result of extracting init["body"], with keepalive set to request's keepalive.
+        auto body_with_type = TRY(extract_body(realm, init.body->downcast<BodyInit>(), request->keepalive()));
+
+        // 2. Set initBody to bodyWithType’s body.
+        init_body = body_with_type.body;
+
+        // 3. Let type be bodyWithType’s type.
+        auto const& type = body_with_type.type;
+
+        // 4. If type is non-null and this’s headers’s header list does not contain `Content-Type`, then append (`Content-Type`, type) to this’s headers.
+        if (type.has_value() && !request_object->headers()->header_list()->contains("Content-Type"sv))
+            TRY(request_object->headers()->append(HTTP::Header::isomorphic_encode("Content-Type"sv, *type)));
+    }
+
+    // 38. Let inputOrInitBody be initBody if it is non-null; otherwise inputBody.
+    auto input_or_init_body = init_body ? init_body : input_body;
+
+    // 39. If inputOrInitBody is non-null and inputOrInitBody’s source is null, then:
+    if (input_or_init_body && !input_or_init_body->source().has_value()) {
+        // 1. If initBody is non-null and init["duplex"] does not exist, then throw a TypeError.
+        if (init_body && !init.duplex.has_value())
+            return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Body without source requires 'duplex' value to be set"_utf16 };
+
+        // 2. If this’s request’s mode is neither "same-origin" nor "cors", then throw a TypeError.
+        if (request_object->request()->mode() != Infrastructure::Request::Mode::SameOrigin && request_object->request()->mode() != Infrastructure::Request::Mode::CORS)
+            return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Request mode must be 'same-origin' or 'cors'"_utf16 };
+
+        // 3. Set this’s request’s use-CORS-preflight flag.
+        request_object->request()->set_use_cors_preflight(true);
+    }
+
+    // 40. Let finalBody be inputOrInitBody.
+    auto final_body = input_or_init_body;
+
+    // 41. If initBody is null and inputBody is non-null, then:
+    if (!init_body && input_body) {
+        // 1. If inputBody is unusable, then throw a TypeError.
+        if (input.has<GC::Ref<Request>>() && input.get<GC::Ref<Request>>()->is_unusable())
+            return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Request is unusable"_utf16 };
+
+        // 2. Set finalBody to the result of creating a proxy for inputBody.
+        // NB: The proxy is a new body whose stream is the proxy of inputBody's stream. It keeps inputBody's source and
+        //     length, so that it can still be transmitted and recreated like inputBody.
+        final_body = Infrastructure::Body::create(create_a_proxy(relevant_settings_object, input_body->stream()), input_body->fetch_body());
+    }
+
+    // 42. Set this’s request’s body to finalBody.
+    if (final_body) {
+        request_object->request()->set_body(final_body->fetch_body());
+        request_object->m_body = final_body;
+    }
+
+    return GC::Ref { *request_object };
+}
+
+// https://fetch.spec.whatwg.org/#dom-request-method
+String Request::method() const
+{
+    // The method getter steps are to return this’s request’s method.
+    return MUST(String::from_byte_string(m_request->method()));
+}
+
+// https://fetch.spec.whatwg.org/#dom-request-url
+Utf16String Request::url() const
+{
+    // The url getter steps are to return this’s request’s URL, serialized.
+    auto serialized_url = m_request->url().serialize();
+    return Utf16String::from_ascii_without_validation(serialized_url.bytes());
+}
+
+// https://fetch.spec.whatwg.org/#dom-request-headers
+GC::Ref<Headers> Request::headers() const
+{
+    // The headers getter steps are to return this’s headers.
+    return *m_headers;
+}
+
+Bindings::RequestDestination Request::destination() const
+{
+    // The destination getter steps are to return this’s request’s destination.
+    return request_destination_to_bindings(m_request->destination());
+}
+
+// https://fetch.spec.whatwg.org/#dom-request-referrer
+Utf16String Request::referrer() const
+{
+    return m_request->referrer().visit(
+        [&](Infrastructure::Request::Referrer const& referrer) {
+            switch (referrer) {
+            // 1. If this’s request’s referrer is "no-referrer", then return the empty string.
+            case Infrastructure::Request::Referrer::NoReferrer:
+                return Utf16String {};
+            // 2. If this’s request’s referrer is "client", then return "about:client".
+            case Infrastructure::Request::Referrer::Client:
+                return "about:client"_utf16;
+            default:
+                VERIFY_NOT_REACHED();
+            }
+        },
+        [&](URL::URL const& url) {
+            // 3. Return this’s request’s referrer, serialized.
+            auto serialized_url = url.serialize();
+            return Utf16String::from_ascii_without_validation(serialized_url.bytes());
+        });
+}
+
+Bindings::ReferrerPolicy Request::referrer_policy() const
+{
+    // The referrerPolicy getter steps are to return this’s request’s referrer policy.
+    return referrer_policy_to_bindings(m_request->referrer_policy());
+}
+
+Bindings::RequestMode Request::mode() const
+{
+    // The mode getter steps are to return this’s request’s mode.
+    return request_mode_to_bindings(m_request->mode());
+}
+
+Bindings::RequestCredentials Request::credentials() const
+{
+    // The credentials getter steps are to return this’s request’s credentials mode.
+    return request_credentials_to_bindings(m_request->credentials_mode());
+}
+
+Bindings::RequestCache Request::cache() const
+{
+    // The cache getter steps are to return this’s request’s cache mode.
+    return request_cache_to_bindings(m_request->cache_mode());
+}
+
+Bindings::RequestRedirect Request::redirect() const
+{
+    // The redirect getter steps are to return this’s request’s redirect mode.
+    return request_redirect_to_bindings(m_request->redirect_mode());
+}
+
+// https://fetch.spec.whatwg.org/#dom-request-integrity
+Utf16String Request::integrity() const
+{
+    // The integrity getter steps are to return this’s request’s integrity metadata.
+    return m_request->integrity_metadata();
+}
+
+// https://fetch.spec.whatwg.org/#dom-request-keepalive
+bool Request::keepalive() const
+{
+    // The keepalive getter steps are to return this’s request’s keepalive.
+    return m_request->keepalive();
+}
+
+// https://fetch.spec.whatwg.org/#dom-request-isreloadnavigation
+bool Request::is_reload_navigation() const
+{
+    // The isReloadNavigation getter steps are to return true if this’s request’s reload-navigation flag is set; otherwise false.
+    return m_request->reload_navigation();
+}
+
+// https://fetch.spec.whatwg.org/#dom-request-ishistorynavigation
+bool Request::is_history_navigation() const
+{
+    // The isHistoryNavigation getter steps are to return true if this’s request’s history-navigation flag is set; otherwise false.
+    return m_request->history_navigation();
+}
+
+// https://fetch.spec.whatwg.org/#dom-request-signal
+GC::Ref<DOM::AbortSignal> Request::signal() const
+{
+    // The signal getter steps are to return this’s signal.
+    return *m_signal;
+}
+
+Bindings::RequestDuplex Request::duplex() const
+{
+    // The duplex getter steps are to return "half".
+    return Bindings::RequestDuplex::Half;
+}
+
+// https://fetch.spec.whatwg.org/#dom-request-clone
+WebIDL::ExceptionOr<GC::Ref<Request>> Request::clone(JS::Realm& realm) const
+{
+    // 1. If this is unusable, then throw a TypeError.
+    if (is_unusable())
+        return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Request is unusable"_utf16 };
+
+    // 2. Let clonedRequest be the result of cloning this’s request.
+    // NB: Cloning the body tees the stream held here.
+    auto cloned_request = m_request->clone();
+    auto cloned_body = body_impl() ? m_body->clone(realm) : GC::Ptr<Infrastructure::Body> {};
+
+    // 3. Assert: this’s signal is non-null.
+    VERIFY(m_signal);
+
+    // 4. Let clonedSignal be the result of creating a dependent abort signal from « this’s signal », using AbortSignal and this’s relevant realm.
+    auto cloned_signal = TRY(DOM::AbortSignal::create_dependent_abort_signal({ { *m_signal } }));
+
+    // 5. Let clonedRequestObject be the result of creating a Request object, given clonedRequest, this’s headers’s guard, clonedSignal and this’s relevant realm.
+    auto cloned_request_object = Request::create(cloned_request, m_headers->guard(), cloned_signal);
+    cloned_request_object->m_body = cloned_body;
+
+    // 6. Return clonedRequestObject.
+    return cloned_request_object;
+}
+
+}

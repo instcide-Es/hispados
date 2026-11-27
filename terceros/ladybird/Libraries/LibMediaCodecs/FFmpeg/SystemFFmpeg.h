@@ -1,0 +1,45 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/ByteString.h>
+#include <AK/NonnullOwnPtr.h>
+#include <LibMediaCodecs/CodecID.h>
+#include <LibMediaCodecs/DecoderError.h>
+#include <LibMediaCodecs/Export.h>
+#include <LibMediaCodecs/FFmpeg/FFmpegForward.h>
+
+namespace Media::FFmpeg {
+
+// A libavcodec loaded from the system, for the codecs the bundled FFmpeg is built without.
+class MEDIACODECS_API SystemFFmpeg {
+public:
+    AK_ALLOC_WITH_KMALLOC;
+
+    // The library's dependencies make syscalls that sandboxes do not allow, so a process loads it before sandboxing
+    // itself. Only the first call loads it.
+    static void load();
+    // The library that load() found, or null if it found none or the process never loaded it.
+    static SystemFFmpeg const* the();
+    static DecoderErrorOr<NonnullOwnPtr<SystemFFmpeg>> try_load(ByteString const& library_path);
+
+    SystemFFmpeg(void* library_handle, NonnullOwnPtr<FFmpegFunctions>, unsigned major);
+    ~SystemFFmpeg();
+
+    FFmpegFunctions const& functions() const { return *m_functions; }
+    void* library_handle() const { return m_library_handle; }
+    unsigned major() const { return m_major; }
+    bool has_decoder(CodecID) const;
+    bool provides_decoder_missing_from_bundle() const;
+
+private:
+    void* m_library_handle;
+    NonnullOwnPtr<FFmpegFunctions> m_functions;
+    unsigned m_major;
+};
+
+}

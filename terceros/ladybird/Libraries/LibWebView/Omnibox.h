@@ -1,0 +1,283 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Function.h>
+#include <AK/NonnullOwnPtr.h>
+#include <AK/Optional.h>
+#include <AK/String.h>
+#include <AK/Variant.h>
+#include <AK/Vector.h>
+#include <LibWebView/Autocomplete.h>
+#include <LibWebView/BrowsingSession.h>
+#include <LibWebView/Export.h>
+#include <LibWebView/URL.h>
+
+namespace WebView {
+
+// Feeds autocomplete suggestions to the Omnibox. The default implementation wraps WebView::Autocomplete;
+// tests provide a scripted implementation to control delivery content and timing exactly.
+class WEBVIEW_API OmniboxSuggestionProvider {
+public:
+    virtual ~OmniboxSuggestionProvider() = default;
+
+    // The rows for a query end with a final delivery. Any before it are intermediate, such as the local rows while the
+    // remote ones load.
+    Function<void(AutocompleteQueryID, Vector<AutocompleteSuggestion>, AutocompleteResultKind)> on_suggestions;
+
+    virtual void query(AutocompleteQueryID, String, size_t max_suggestions) = 0;
+    virtual void cancel() = 0;
+    virtual void record_engagement(OmniboxEngagement) { }
+};
+
+// The state machine behind a browser location bar editing session.
+//
+// The chrome forwards user events (keystrokes, popup interactions, focus changes) and renders whatever the
+// model instructs through the callbacks below. The model owns the authoritative state: the user's typed
+// query, who produced the text currently on display, the suggestion popup contents, and the handshake that
+// activates a suggestion once fresh results arrive after Enter. It lives outside any UI toolkit so the
+// behavior is unit-testable with a scripted provider and shareable between chromes.
+//
+// The text on display always has exactly one of three provenances:
+//   - UserText:        the text is exactly what the user typed (the query).
+//   - InlineCompleted: the query plus a completion suffix borrowed from one specific suggestion. The suffix
+//                      is shown selected so the next keystroke replaces it.
+//   - RowPreview:      the text of a highlighted suggestion that does not extend the query, shown fully
+//                      selected. The query is retained and restored when the popup goes away.
+//
+// The invariant that makes Enter trustworthy: a selected row is activated only when it belongs to the
+// current query generation, the user selected it explicitly, or it is the inline completion on display.
+// After the user rejects a completion, the row for the text as typed is activated even from older rows
+// for the same text, as it goes where that text goes.
+// When results lag behind fast typing, Enter otherwise commits the current input through the browser's
+// normal URL-or-search resolution. It never waits for a provider response that may arrive after the
+// user's intent has changed.
+//
+// The popup shows a copy of the rows, which changes only to the final rows for the text. The model itself takes in
+// every delivery, so the text is completed and Return goes to the best row as soon as the first rows arrive, while the
+// popup changes once for each change to the text, rather than once for each delivery.
+class WEBVIEW_API Omnibox {
+    AK_MAKE_NONCOPYABLE(Omnibox);
+    AK_MAKE_NONMOVABLE(Omnibox);
+
+public:
+    AK_ALLOC_WITH_KMALLOC;
+
+    explicit Omnibox(NonnullOwnPtr<OmniboxSuggestionProvider>);
+    ~Omnibox();
+
+    // What the location bar should display: the full text, and, when a completion or preview is active, the
+    // start of the range that should be shown selected (through the end of the text, caret at the end).
+    struct Display {
+        String text;
+        Optional<size_t> selection_start;
+    };
+
+    enum class EscapeAction {
+        ClosedPopup,
+        EndEditing,
+    };
+
+    // Events from the chrome:
+    void begin_editing(String text);
+    void end_editing();
+    void set_suspended(bool);
+    void show_all_suggestions();
+    void text_edited(String text, bool cursor_at_end);
+    void cursor_moved(bool cursor_at_end);
+    bool accept_completion();
+    void will_delete_text();
+    void return_pressed();
+    EscapeAction escape_pressed();
+    void popup_dismissed();
+    bool select_next_suggestion();
+    bool select_previous_suggestion();
+    // The index is that of a row in the popup.
+    void suggestion_clicked(size_t popup_row_index);
+    void navigate_directly_to_query(String text);
+
+    static String text_for_paste_and_go_action(String const& clipboard_text, bool has_search_engine_enabled);
+
+    // State for the chrome:
+    String const& query() const { return m_query; }
+    OmniboxDestinationKind destination_kind_for_last_commit() const { return m_destination_kind_for_last_commit; }
+    bool is_editing() const { return m_is_editing; }
+    bool is_popup_visible() const { return m_popup_visible; }
+    Vector<AutocompleteSuggestion> const& suggestions() const { return m_suggestions; }
+
+    Optional<size_t> selected_suggestion() const
+    {
+        return m_selection.map([](auto const& selection) { return selection.index; });
+    }
+
+    // What the popup shows, which lags behind the suggestions above until the final ones for the text arrive.
+    struct Popup {
+        bool is_visible { false };
+        Vector<AutocompleteSuggestion> suggestions;
+        Optional<size_t> selected_suggestion;
+    };
+    Popup const& popup() const { return m_popup; }
+
+    // Whether the selected suggestion was chosen by the user, rather than selected automatically.
+    bool selection_is_explicit() const;
+    // Whether the text on display is inline completed to a suggestion.
+    bool is_inline_completed() const { return m_provenance == TextProvenance::InlineCompleted; }
+    // Whether the suggestions for the text as it now stands have yet to arrive.
+    bool has_pending_suggestions() const { return m_active_query_id.has_value() && m_active_query_id != m_popup_query_id; }
+    // The suggestion that pressing Return would go to, if it would not go to the text as typed.
+    Optional<AutocompleteSuggestion const&> suggestion_for_return() const;
+    // The title of the page the text on display is inline completed to, if it has one.
+    Optional<String> completion_title() const;
+
+    // While editing, the icon before the text says where Return would go: a search, or a page and its favicon.
+    struct EditingIcon {
+        enum class Kind {
+            Search,
+            Page,
+        };
+
+        Kind kind { Kind::Search };
+        Optional<ByteBuffer const&> favicon_png;
+    };
+    EditingIcon editing_icon() const;
+
+    // Callbacks to the chrome:
+    Function<void(Display const&)> on_display_change;
+    // The suggestions changed, which may change the editing icon and the completion's title.
+    Function<void()> on_suggestions_change;
+    // The popup opened, closed, or shows other rows.
+    Function<void()> on_popup_change;
+    // Another row is selected, in the suggestions and, while the popup shows them, in the popup.
+    Function<void()> on_selection_change;
+    Function<void(String)> on_commit;
+
+private:
+    enum class TextProvenance {
+        UserText,
+        InlineCompleted,
+        RowPreview,
+    };
+
+    // The selection carries its own origin, so an explicit-choice verdict cannot outlive or predate the
+    // row it is about.
+    struct Selection {
+        enum class Origin {
+            Automatic,
+            ExplicitChoice,
+        };
+
+        size_t index { 0 };
+        Origin origin { Origin::Automatic };
+    };
+
+    // Suppression armed by a deleting key press, pinned to the query that the deletion produces, and
+    // lifted by any query change. This is what keeps a deleted completion from instantly growing back.
+    struct SuppressionArmedByDelete { };
+    using CompletionSuppression = Variant<Empty, SuppressionArmedByDelete, String>;
+
+    enum class StepDirection {
+        Next,
+        Previous,
+    };
+
+    void start_query();
+    void received_suggestions(AutocompleteQueryID, Vector<AutocompleteSuggestion>, AutocompleteResultKind);
+    void stabilize_automatic_default(Vector<AutocompleteSuggestion>&, bool is_same_generation_refresh) const;
+    Optional<size_t> update_completion_for_suggestions(Vector<AutocompleteSuggestion> const&);
+    bool select_adjacent_suggestion(StepDirection);
+    void highlight_suggestion(size_t suggestion_index, Selection::Origin);
+    void display_suggestion(size_t suggestion_index);
+    void move_typed_text_row_to_front(Vector<AutocompleteSuggestion>&) const;
+    bool return_goes_to_typed_text_regardless_of_suggestions() const;
+    Optional<size_t> suggestion_index_for_return() const;
+    void commit_suggestion(AutocompleteSuggestion, bool record_engagement, bool was_explicit);
+    void commit_suggestion_text(String, OmniboxDestinationKind);
+    void commit_verbatim(String);
+    void adopt_display_text_as_query();
+    void apply_completion(String suggestion_text, String completion_text);
+    void apply_preview(String suggestion_text);
+    void restore_query_display();
+    void set_display(String text, Optional<size_t> selection_start);
+    void show_popup();
+    void close_popup();
+    void present_popup();
+    void show_typed_text_in_popup();
+    void abandon_popup_session();
+    void set_selection(Optional<Selection>);
+    void commit(String text, OmniboxDestinationKind);
+    bool completion_is_suppressed() const;
+
+    NonnullOwnPtr<OmniboxSuggestionProvider> m_provider;
+
+    struct QueryClassification {
+        String query;
+        bool is_search { false };
+    };
+    mutable Optional<QueryClassification> m_query_classification;
+
+    bool m_is_editing { false };
+
+    // The chrome temporarily handed input elsewhere (for example a context menu) without ending the
+    // session; suggestion deliveries are held and completions left alone until it resumes.
+    bool m_is_suspended { false };
+    // The latest rows for the active query that arrived while suspended, shown on resuming.
+    struct HeldDelivery {
+        AutocompleteQueryID query_id;
+        Vector<AutocompleteSuggestion> suggestions;
+        AutocompleteResultKind kind { AutocompleteResultKind::Final };
+    };
+    Optional<HeldDelivery> m_delivery_held_while_suspended;
+
+    TextProvenance m_provenance { TextProvenance::UserText };
+
+    // The user's typed text, surviving completions and previews. Under UserText provenance the display
+    // equals the query; the other provenances layer borrowed text over it and restore it on the way out.
+    String m_query;
+    String m_display_text;
+
+    // Completions only ever append at the end, so they are skipped while the caret is elsewhere; a late
+    // delivery must not rewrite the text under a caret the user has moved.
+    bool m_cursor_at_end { true };
+
+    // InlineCompleted: the suggestion whose text supplied the completion suffix.
+    Optional<String> m_completion_suggestion;
+
+    // Accepting a completion makes the full display text the next query, but committing it without
+    // another edit must still teach the prefix that produced the completion.
+    Optional<String> m_retained_engagement_input;
+
+    // The user deleted or typed over a completion, so Enter must submit the query as typed instead of
+    // activating the popup's automatically selected row. Cleared as soon as a fresh completion is applied.
+    bool m_user_rejected_completion { false };
+
+    CompletionSuppression m_completion_suppression { Empty {} };
+
+    // The query ID makes provider delivery and popup freshness independent of comparing user-facing
+    // strings. The rows survive close_popup() so the arrow keys can bring a dismissed popup back.
+    bool m_popup_visible { false };
+    Optional<AutocompleteQueryID> m_popup_query_id;
+    // The text the rows in the popup were made for.
+    String m_popup_query;
+    Vector<AutocompleteSuggestion> m_suggestions;
+    Optional<Selection> m_selection;
+
+    Popup m_popup;
+    // The text that the popup's row for the text as typed is for.
+    String m_popup_typed_text;
+    // Whether the popup shows the suggestions as they are now, so that a row has the same index in both.
+    bool m_popup_shows_current_suggestions { false };
+
+    u64 m_next_query_id { 0 };
+    Optional<AutocompleteQueryID> m_active_query_id;
+    OmniboxDestinationKind m_destination_kind_for_last_commit { OmniboxDestinationKind::URL };
+};
+
+// Where the text the omnibox committed goes. A search goes to the search engine, even for text that also reads as an
+// address, such as "setup.py" or "localhost:631", unless the user asked for an address with AppendTLD.
+WEBVIEW_API Optional<URL::URL> url_for_omnibox_destination(StringView text, OmniboxDestinationKind, Optional<SearchEngine> const&, AppendTLD);
+
+}

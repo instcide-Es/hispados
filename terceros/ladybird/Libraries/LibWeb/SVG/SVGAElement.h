@@ -1,0 +1,66 @@
+/*
+ * Copyright (c) 2024, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2024, Jamie Mansfield <jmansfield@cadixdev.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <LibWeb/HTML/HyperlinkElementUtils.h>
+#include <LibWeb/SVG/SVGGraphicsElement.h>
+#include <LibWeb/SVG/SVGURIReference.h>
+
+namespace Web::SVG {
+
+class SVGAElement final
+    : public SVGGraphicsElement
+    , public SVGURIReferenceMixin<SupportsXLinkHref::Yes>
+    , public HTML::HyperlinkElementUtils {
+    WEB_WRAPPABLE(SVGAElement, SVGGraphicsElement);
+    GC_DECLARE_ALLOCATOR(SVGAElement);
+
+public:
+    virtual ~SVGAElement() override;
+
+    GC::Ref<SVGAnimatedString> target();
+
+    GC::Ref<DOM::DOMTokenList> rel_list();
+
+    virtual Optional<URL::Origin> extract_an_origin() const override { return hyperlink_element_utils_extract_an_origin(); }
+
+    virtual CSS::ElementBoxKind box_kind() const override;
+
+private:
+    SVGAElement(DOM::Document&, DOM::QualifiedName);
+    virtual void visit_edges(Cell::Visitor&) override;
+
+    virtual bool is_svg_a_element() const override { return true; }
+
+    // ^DOM::Element
+    virtual void attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_) override;
+    virtual i32 default_tab_index_value() const override;
+    virtual bool is_focusable() const override;
+
+    virtual bool has_activation_behavior() const override { return true; }
+    virtual void activation_behavior(DOM::Event const&) override;
+
+    // ^HTML::HyperlinkElementUtils
+    virtual DOM::Element& hyperlink_element_utils_element() override { return *this; }
+    virtual DOM::Element const& hyperlink_element_utils_element() const override { return *this; }
+    virtual void update_href() override;
+    virtual void set_the_url() override;
+
+    GC::Ptr<DOM::DOMTokenList> m_rel_list;
+
+    GC::Ptr<SVGAnimatedString> m_target;
+};
+
+}
+
+namespace Web::DOM {
+
+template<>
+inline bool Node::fast_is<SVG::SVGAElement>() const { return is_svg_a_element(); }
+
+}

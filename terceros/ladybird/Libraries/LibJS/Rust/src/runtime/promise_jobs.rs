@@ -1,0 +1,232 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+use crate::gc::heap_function::{HeapFunction, create_heap_function};
+use crate::interpreter::vm::Vm;
+use crate::layout::cell::Gc;
+use crate::layout::value::Value;
+use crate::runtime::abstract_operations::{call_function_object, get_function_realm};
+use crate::runtime::completion::{Completion, CompletionType, ThrowCompletionOr};
+use crate::runtime::error::InternalError;
+use crate::runtime::function_object::FunctionObject;
+use crate::runtime::job_callback::JobCallback;
+use crate::runtime::promise::Promise;
+use crate::runtime::promise_reaction::{PromiseReaction, PromiseReactionType};
+use crate::runtime::realm::Realm;
+
+/// The Record { [[Job]], [[Realm]] } of the abstract operations that create promise jobs.
+pub struct PromiseJob {
+    pub job: Gc<HeapFunction>,
+    pub realm: Option<Gc<Realm>>,
+}
+
+// 27.2.2.1 NewPromiseReactionJob ( reaction, argument ), https://tc39.es/ecma262/#sec-newpromisereactionjob
+fn run_reaction_job(vm: &Vm, reaction: Gc<PromiseReaction>, argument: Value) -> ThrowCompletionOr<Value> {
+    // a. Let promiseCapability be reaction.[[Capability]].
+    let promise_capability = reaction.capability();
+
+    // b. Let type be reaction.[[Type]].
+    let reaction_type = reaction.reaction_type();
+
+    // c. Let handler be reaction.[[Handler]].
+    let handler = reaction.handler();
+
+    let handler_result: Completion = match handler {
+        // d. If handler is empty, then
+        None => {
+            // i. If type is Fulfill, let handlerResult be NormalCompletion(argument).
+            if reaction_type == PromiseReactionType::Fulfill {
+                Completion::normal(argument)
+            }
+            // ii. Else,
+            else {
+                // 1. Assert: type is Reject.
+                assert!(reaction_type == PromiseReactionType::Reject);
+
+                // 2. Let handlerResult be ThrowCompletion(argument).
+                crate::embedding::completion::log_exception_if_enabled(vm, argument);
+                Completion::new(CompletionType::Throw, argument)
+            }
+        }
+        // e. Else, let handlerResult be Completion(HostCallJobCallback(handler, undefined, « argument »)).
+        Some(handler) => vm.host_call_job_callback()(vm, handler, Value::UNDEFINED, &[argument]).into(),
+    };
+
+    // f. If promiseCapability is undefined, then
+    let Some(promise_capability) = promise_capability else {
+        // i. Assert: handlerResult is not an abrupt completion.
+        // NB: Like MUST_OR_THROW_INTERNAL_ERROR, this lets the InternalError of a handler that ran out of stack through.
+        if handler_result.is_error() {
+            let value = handler_result.value();
+            assert!(value.is_object() && value.as_object().is::<InternalError>());
+            return Err(handler_result.release_error());
+        }
+
+        // ii. Return empty.
+        return Ok(Value::UNDEFINED);
+    };
+
+    // g. Assert: promiseCapability is a PromiseCapability Record.
+
+    if let Some(realm) = promise_capability.realm_without_resolving_functions() {
+        let promise = promise_capability
+            .promise()
+            .downcast::<Promise>()
+            .expect("a capability without resolving functions has a Promise");
+
+        // OPTIMIZATION: Nothing else can resolve the promise, so from the realm of its resolving functions, settling it
+        //               directly does what calling them would. Without a handler, the job runs in no realm at all. The
+        //               host looks at the running execution context for a rejection without a handler, which has to be
+        //               that of a resolving function. Only an object can reject the promise as it resolves it.
+        let may_reject_without_handler =
+            !promise.is_handled() && (handler_result.is_abrupt() || handler_result.value().is_object());
+        if vm.current_realm() == Some(realm) && !may_reject_without_handler {
+            if handler_result.is_abrupt() {
+                promise.reject(vm, handler_result.value());
+            } else {
+                promise.resolve(vm, handler_result.value());
+            }
+            return Ok(Value::UNDEFINED);
+        }
+
+        let resolving_functions = promise.create_resolving_functions_in_realm(vm, realm);
+        let function = if handler_result.is_abrupt() {
+            resolving_functions.reject
+        } else {
+            resolving_functions.resolve
+        };
+        return call_function_object(vm, function, Value::UNDEFINED, &[handler_result.value()]);
+    }
+
+    // h. If handlerResult is an abrupt completion, then
+    if handler_result.is_abrupt() {
+        // i. Return ? Call(promiseCapability.[[Reject]], undefined, « handlerResult.[[Value]] »).
+        call_function_object(
+            vm,
+            promise_capability.reject(),
+            Value::UNDEFINED,
+            &[handler_result.value()],
+        )
+    }
+    // i. Else,
+    else {
+        // i. Return ? Call(promiseCapability.[[Resolve]], undefined, « handlerResult.[[Value]] »).
+        call_function_object(
+            vm,
+            promise_capability.resolve(),
+            Value::UNDEFINED,
+            &[handler_result.value()],
+        )
+    }
+}
+
+// 27.2.2.1 NewPromiseReactionJob ( reaction, argument ), https://tc39.es/ecma262/#sec-newpromisereactionjob
+pub fn create_promise_reaction_job(vm: &Vm, reaction: Gc<PromiseReaction>, argument: Value) -> PromiseJob {
+    // 1. Let job be a new Job Abstract Closure with no parameters that captures reaction and argument and performs the following steps when called:
+    //    See run_reaction_job for "the following steps".
+    let job = create_heap_function(vm, (reaction, argument), |vm, &(reaction, argument)| {
+        run_reaction_job(vm, reaction, argument)
+    });
+
+    // 2. Let handlerRealm be null.
+    let mut handler_realm = None;
+
+    // 3. If reaction.[[Handler]] is not empty, then
+    if let Some(handler) = reaction.handler() {
+        // a. Let getHandlerRealmResult be Completion(GetFunctionRealm(reaction.[[Handler]].[[Callback]])).
+        let get_handler_realm_result = get_function_realm(vm, handler.callback());
+
+        // b. If getHandlerRealmResult is a normal completion, set handlerRealm to getHandlerRealmResult.[[Value]].
+        handler_realm = match get_handler_realm_result {
+            Ok(realm) => Some(realm),
+            // c. Else, set handlerRealm to the current Realm Record.
+            Err(_) => vm.current_realm(),
+        };
+
+        // d. NOTE: handlerRealm is never null unless the handler is undefined. When the handler is a revoked Proxy and no ECMAScript code runs, handlerRealm is used to create error objects.
+    }
+
+    // 4. Return the Record { [[Job]]: job, [[Realm]]: handlerRealm }.
+    PromiseJob {
+        job,
+        realm: handler_realm,
+    }
+}
+
+#[derive(Clone, Copy)]
+pub enum ThenAction {
+    JobCallback(Gc<JobCallback>),
+    Function(Gc<FunctionObject>),
+}
+
+// PerformPromiseResolveThenable ( promiseToResolve, thenable, then ), https://tc39.es/proposal-thenable-curtailment/#sec-perform-promise-resolve-thenable
+pub fn perform_promise_resolve_thenable(
+    vm: &Vm,
+    promise_to_resolve: Gc<Promise>,
+    thenable: Value,
+    then: ThenAction,
+) -> ThrowCompletionOr<Value> {
+    // 1. Let resolvingFunctions be CreateResolvingFunctions(promiseToResolve).
+    let resolving_functions = promise_to_resolve.create_resolving_functions(vm);
+
+    let arguments = [
+        Value::from_object(resolving_functions.resolve),
+        Value::from_object(resolving_functions.reject),
+    ];
+    let then_call_result = match then {
+        // 2. If then is a function object, then
+        //     a. Let thenCallResult be Completion(Call(then, thenable, « resolvingFunctions.[[Resolve]], resolvingFunctions.[[Reject]] »)).
+        ThenAction::Function(then) => call_function_object(vm, then, thenable, &arguments),
+        // 3. Else,
+        //     a. Let thenCallResult be Completion(HostCallJobCallback(then, thenable, « resolvingFunctions.[[Resolve]], resolvingFunctions.[[Reject]] »)).
+        ThenAction::JobCallback(then) => vm.host_call_job_callback()(vm, then, thenable, &arguments),
+    };
+
+    // 4. If thenCallResult is an abrupt completion, then
+    if let Err(throw) = then_call_result {
+        // a. Return ! Call(resolvingFunctions.[[Reject]], undefined, « thenCallResult.[[Value]] »).
+        return call_function_object(vm, resolving_functions.reject, Value::UNDEFINED, &[throw.value()]);
+    }
+
+    // 5. Return ! thenCallResult.
+    then_call_result
+}
+
+// NewPromiseResolveThenableJob ( promiseToResolve, thenable, then ), https://tc39.es/proposal-thenable-curtailment/#sec-newpromiseresolvethenablejob
+pub fn create_promise_resolve_thenable_job(
+    vm: &Vm,
+    promise_to_resolve: Gc<Promise>,
+    thenable: Value,
+    then: Gc<JobCallback>,
+) -> PromiseJob {
+    // 2. Let getThenRealmResult be Completion(GetFunctionRealm(then.[[Callback]])).
+    let get_then_realm_result = get_function_realm(vm, then.callback());
+
+    let then_realm = match get_then_realm_result {
+        // 3. If getThenRealmResult is a normal completion, let thenRealm be getThenRealmResult.[[Value]].
+        Ok(realm) => realm,
+        // 4. Else, let thenRealm be the current Realm Record.
+        Err(_) => vm.current_realm().expect("there is a current realm"),
+    };
+
+    // 5. NOTE: thenRealm is never null. When then.[[Callback]] is a revoked Proxy and no code runs, thenRealm is used to create error objects.
+
+    // 1. Let job be a new Job Abstract Closure with no parameters that captures promiseToResolve, thenable, and then and performs the following steps when called:
+    let job = create_heap_function(
+        vm,
+        (promise_to_resolve, thenable, then),
+        |vm, &(promise_to_resolve, thenable, then)| {
+            // a. Return ? PerformPromiseResolveThenable(promiseToResolve, thenable, then).
+            perform_promise_resolve_thenable(vm, promise_to_resolve, thenable, ThenAction::JobCallback(then))
+        },
+    );
+
+    // 6. Return the Record { [[Job]]: job, [[Realm]]: thenRealm }.
+    PromiseJob {
+        job,
+        realm: Some(then_realm),
+    }
+}

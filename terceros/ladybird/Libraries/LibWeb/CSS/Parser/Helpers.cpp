@@ -1,0 +1,174 @@
+/*
+ * Copyright (c) 2018-2025, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2020-2023, the SerenityOS developers.
+ * Copyright (c) 2021-2026, Sam Atkins <sam@ladybird.org>
+ * Copyright (c) 2021, Tobias Christiansen <tobyase@serenityos.org>
+ * Copyright (c) 2022, MacDue <macdue@dueutil.tech>
+ * Copyright (c) 2025, Lorenz Ackermann <me@lorenzackermann.xyz>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibTextCodec/Decoder.h>
+#include <LibWeb/CSS/Parser/Parser.h>
+#include <LibWeb/CSS/StyleSheetState.h>
+
+namespace Web {
+
+NonnullRefPtr<CSS::StyleSheetState> parse_css_stylesheet(CSS::Parser::ParsingParams const& context, StringView css, Optional<::URL::URL> location, CSS::RustMediaList media_list)
+{
+    return parse_css_stylesheet(context, Utf16String::from_utf8(css), move(location), move(media_list));
+}
+
+NonnullRefPtr<CSS::StyleSheetState> parse_css_stylesheet(CSS::Parser::ParsingParams const& context, Utf16View css, Optional<::URL::URL> location, CSS::RustMediaList media_list)
+{
+    if (css.is_empty()) {
+        return CSS::StyleSheetState::create(CSS::RustRuleList {}, nullptr, move(media_list), location);
+    }
+    return CSS::Parser::Parser { context }.parse_as_css_stylesheet(css, location, move(media_list));
+}
+
+CSS::RustDeclarationBlock parse_css_property_declaration_block(CSS::Parser::ParsingParams const& context, Utf16View css, bool* parsed_cleanly)
+{
+    if (css.is_empty()) {
+        if (parsed_cleanly)
+            *parsed_cleanly = true;
+        return { {}, {} };
+    }
+    return CSS::Parser::Parser { context }.parse_as_property_declaration_block(css, parsed_cleanly);
+}
+
+CSS::RustDescriptorBlock parse_css_descriptor_declaration_block(CSS::Parser::ParsingParams const& parsing_params, CSS::AtRuleID at_rule_id, Utf16View css)
+{
+    if (css.is_empty())
+        return CSS::RustDescriptorBlock { Vector<CSS::Descriptor> {} };
+    return CSS::Parser::Parser { parsing_params }.parse_as_descriptor_declaration_block(css, at_rule_id);
+}
+
+RefPtr<CSS::StyleValue const> parse_css_value(CSS::Parser::ParsingParams const& context, StringView string, CSS::PropertyID property_id)
+{
+    if (string.is_empty())
+        return nullptr;
+    return parse_css_value(context, Utf16String::from_utf8(string), property_id);
+}
+
+RefPtr<CSS::StyleValue const> parse_css_value(CSS::Parser::ParsingParams const& context, Utf16View string, CSS::PropertyID property_id)
+{
+    if (string.is_empty())
+        return nullptr;
+    return CSS::Parser::Parser { context }.parse_as_css_value(string, property_id);
+}
+
+RefPtr<CSS::StyleValue const> parse_css_type(CSS::Parser::ParsingParams const& context, Utf16View string, CSS::ValueType value_type)
+{
+    if (string.is_empty())
+        return nullptr;
+    return CSS::Parser::Parser { context }.parse_primitive_value_from_source(value_type, string);
+}
+
+Optional<CSS::RustRule> CSS::Parser::parse_keyframe_rule(CSS::Parser::ParsingParams const& context, Utf16View string)
+{
+    if (string.is_empty())
+        return {};
+    return CSS::Parser::Parser { context }.parse_as_keyframe_rule(string);
+}
+
+RefPtr<CSS::StyleValue const> parse_css_descriptor(CSS::Parser::ParsingParams const& parsing_params, CSS::AtRuleID at_rule_id, CSS::DescriptorNameAndID const& descriptor_name_and_id, Utf16View string)
+{
+    if (string.is_empty())
+        return nullptr;
+    return CSS::Parser::Parser { parsing_params }.parse_as_descriptor_value(string, at_rule_id, descriptor_name_and_id);
+}
+
+Optional<CSS::RustRule> parse_css_rule(CSS::Parser::ParsingParams const& context, Utf16View css_text, bool nested)
+{
+    return CSS::Parser::Parser { context }.parse_as_css_rule(css_text, nested);
+}
+
+Optional<CSS::SelectorList> parse_selector(CSS::Parser::ParsingParams const& context, Utf16View selector_text)
+{
+    return CSS::Parser::Parser { context }.parse_as_selector(selector_text);
+}
+
+Optional<CSS::Selector::PseudoElementSelector> parse_pseudo_element_selector(CSS::Parser::ParsingParams const& context, Utf16View selector_text, CSS::Parser::PseudoElementParsingMode mode)
+{
+    return CSS::Parser::Parser { context }.parse_as_pseudo_element_selector(selector_text, mode);
+}
+
+// https://drafts.csswg.org/css-syntax/#css-decode-bytes
+ErrorOr<Utf16String> css_decode_bytes(Optional<StringView> const& environment_encoding, Optional<StringView> mime_type_charset, ReadonlyBytes encoded_string)
+{
+    // https://drafts.csswg.org/css-syntax/#determine-the-fallback-encoding
+    auto determine_the_fallback_encoding = [&mime_type_charset, &environment_encoding, &encoded_string]() -> StringView {
+        // 1. If HTTP or equivalent protocol provides an encoding label (e.g. via the charset parameter of the Content-Type header) for the stylesheet,
+        //    get an encoding from encoding label. If that does not return failure, return it.
+        if (mime_type_charset.has_value()) {
+            if (auto encoding = TextCodec::get_standardized_encoding(*mime_type_charset); encoding.has_value())
+                return encoding.value();
+        }
+        // 2. Otherwise, check stylesheet’s byte stream. If the first 1024 bytes of the stream begin with the hex sequence
+        // 40 63 68 61 72 73 65 74 20 22 XX* 22 3B
+        // where each XX byte is a value between 0x16 and 0x21 inclusive or a value between 0x23 and 0x7F inclusive,
+        // then get an encoding from a string formed out of the sequence of XX bytes, interpreted as ASCII.
+        auto check_stylesheets_byte_stream = [&encoded_string]() -> Optional<StringView> {
+            size_t scan_length = min(encoded_string.size(), 1024);
+            auto pattern_start = "@charset \""sv;
+            auto pattern_end = "\";"sv;
+
+            if (scan_length < pattern_start.length())
+                return {};
+
+            StringView buffer_view = encoded_string.slice(0, scan_length);
+            if (!buffer_view.starts_with(pattern_start))
+                return {};
+
+            auto encoding_start = pattern_start.length();
+            auto end_index = buffer_view.find(pattern_end, encoding_start);
+            if (!end_index.has_value())
+                return {};
+
+            size_t encoding_length = end_index.value() - encoding_start;
+            auto encoding_view = buffer_view.substring_view(encoding_start, encoding_length);
+
+            for (char c : encoding_view) {
+                u8 byte = static_cast<u8>(c);
+                if ((byte < 0x01 || byte > 0x21) && (byte < 0x23 || byte > 0x7F)) {
+                    return {};
+                }
+            }
+
+            return TextCodec::get_standardized_encoding(encoding_view);
+        };
+        // If the return value was utf-16be or utf-16le, return utf-8; if it was anything else except failure, return it.
+        auto byte_stream_value = check_stylesheets_byte_stream();
+        if (byte_stream_value.has_value() && (byte_stream_value == "UTF-16BE"sv || byte_stream_value == "UTF-16LE"))
+            return "utf-8"sv;
+        if (byte_stream_value.has_value())
+            return byte_stream_value.value();
+
+        // 3. Otherwise, if an environment encoding is provided by the referring document, return it.
+        if (environment_encoding.has_value())
+            return environment_encoding.value();
+
+        // 4. Otherwise, return utf-8.
+        return "utf-8"sv;
+    };
+
+    // 1. Determine the fallback encoding of stylesheet, and let fallback be the result.
+    auto fallback = determine_the_fallback_encoding();
+    auto decoder = TextCodec::decoder_for(fallback);
+    if (!decoder.has_value()) {
+        // If we don't support the encoding yet, let's error out instead of trying to decode it as something it's most likely not.
+        dbgln("FIXME: Style sheet encoding '{}' is not supported yet", fallback);
+        return Error::from_string_literal("No Decoder found");
+    }
+    // 2. Decode stylesheet’s stream of bytes with fallback encoding fallback, and return the result.
+    return TextCodec::decode_to_utf16(encoded_string, *decoder);
+}
+
+bool is_valid_animation_name_custom_ident(Utf16View ident)
+{
+    return CSS::Parser::ValueParserFFI::rust_is_valid_animation_name_custom_ident(CSS::Parser::ffi_utf16_view(ident));
+}
+
+}

@@ -1,0 +1,90 @@
+/*
+ * Copyright (c) 2022, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2025, Jelle Raaijmakers <jelle@ladybird.org>
+ * Copyright (c) 2023-2025, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Badge.h>
+#include <AK/HashMap.h>
+#include <AK/HashTable.h>
+#include <AK/Utf16String.h>
+#include <AK/Vector.h>
+#include <LibWeb/Bindings/NavigationType.h>
+#include <LibWeb/Export.h>
+#include <LibWeb/HTML/ApplyHistoryStep.h>
+#include <LibWeb/HTML/CheckUnloadingCanceledState.h>
+#include <LibWeb/HTML/LocalNavigable.h>
+#include <LibWeb/Page/Page.h>
+#include <LibWebCommon/HTML/VisibilityState.h>
+
+namespace Web::HTML {
+
+// https://html.spec.whatwg.org/multipage/document-sequences.html#traversable-navigable
+class WEB_API LocalTraversableNavigable final : public LocalNavigable {
+    GC_CELL(LocalTraversableNavigable, LocalNavigable);
+    GC_DECLARE_ALLOCATOR(LocalTraversableNavigable);
+
+public:
+    static GC::Ref<LocalTraversableNavigable> create_a_new_top_level_traversable(GC::Ref<Page>, GC::Ptr<BrowsingContext> opener, Optional<SessionHistoryEntryDescriptor> initial_history_entry = {}, Optional<CrossProcessId> document_id = {});
+    static GC::Ref<LocalTraversableNavigable> create_for_new_web_view(PageClient::NewWebViewResult&&, GC::Ptr<BrowsingContext> opener);
+    static GC::Ref<LocalTraversableNavigable> create_a_fresh_top_level_traversable(GC::Ref<Page>, SessionHistoryEntryDescriptor initial_history_entry, CrossProcessId document_id);
+    static GC::Ref<LocalTraversableNavigable> create_stand_in(Badge<Page>, RemoteNavigable&, SessionHistoryEntryDescriptor const& current_history_entry);
+
+    virtual ~LocalTraversableNavigable() override;
+
+    virtual bool is_top_level_traversable() const override;
+
+    u64 session_history_entry_count() const { return m_session_history_entry_count; }
+    void set_session_history_entry_count(u64 count) { m_session_history_entry_count = count; }
+
+    bool is_created_by_web_content() const { return m_is_created_by_web_content; }
+    void set_is_created_by_web_content(bool value) { m_is_created_by_web_content = value; }
+
+    void reset_session_history_for_testing();
+
+    enum class PromptToUnload : bool {
+        No,
+        Yes,
+    };
+    void close_top_level_traversable(PromptToUnload = PromptToUnload::Yes);
+    void request_close_preflight(GC::Ref<GC::Function<void(bool)>> callback);
+    GC::Ptr<CheckUnloadingCanceledState> active_beforeunload_check(Badge<CheckUnloadingCanceledState>) const { return m_active_beforeunload_check; }
+    void set_active_beforeunload_check(Badge<CheckUnloadingCanceledState>, GC::Ptr<CheckUnloadingCanceledState> check) { m_active_beforeunload_check = check; }
+    void close_top_level_traversable_from_script();
+    void definitely_close_top_level_traversable(PromptToUnload = PromptToUnload::Yes);
+    void run_ui_traversable_close_unload_task();
+    void destroy_top_level_traversable();
+
+    Utf16String const& window_handle() const { return m_window_handle; }
+    void set_window_handle(Utf16String window_handle) { m_window_handle = move(window_handle); }
+
+    virtual Optional<u64> browsing_context_group_id() const override;
+
+private:
+    LocalTraversableNavigable(GC::Ref<Page>);
+
+    virtual bool is_traversable() const override { return true; }
+    virtual void visit_edges(Visitor&) override;
+
+    // WebContent needs the canonical top-level entry count synchronously for is_script_closable().
+    u64 m_session_history_entry_count { 1 };
+
+    // https://html.spec.whatwg.org/multipage/document-sequences.html#is-created-by-web-content
+    bool m_is_created_by_web_content { false };
+
+    GC::Ptr<CheckUnloadingCanceledState> m_active_beforeunload_check;
+
+    // AD-HOC: A forced close may supersede a prompted close while its beforeunload check is still pending.
+    bool m_close_steps_have_been_appended { false };
+
+    Utf16String m_window_handle;
+};
+
+template<>
+inline bool LocalNavigable::fast_is<LocalTraversableNavigable>() const { return is_traversable(); }
+
+}

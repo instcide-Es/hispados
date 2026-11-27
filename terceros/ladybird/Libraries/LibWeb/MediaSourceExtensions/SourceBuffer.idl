@@ -1,0 +1,30 @@
+// https://w3c.github.io/media-source/#dom-sourcebuffer
+enum AppendMode {
+    "segments",
+    "sequence",
+};
+
+// https://w3c.github.io/media-source/#dom-sourcebuffer
+[Exposed=(Window,DedicatedWorker)]
+interface SourceBuffer : EventTarget {
+    [ImplementedAs=mode] attribute AppendMode mode;
+    readonly  attribute boolean updating;
+    [NeedsCallerRealm] readonly attribute TimeRanges buffered;
+    attribute double timestampOffset;
+    readonly  attribute AudioTrackList audioTracks;
+    readonly  attribute VideoTrackList videoTracks;
+    readonly  attribute TextTrackList textTracks;
+    attribute double appendWindowStart;
+    attribute unrestricted double appendWindowEnd;
+
+    attribute EventHandler onupdatestart;
+    attribute EventHandler onupdate;
+    attribute EventHandler onupdateend;
+    attribute EventHandler onerror;
+    attribute EventHandler onabort;
+
+    undefined appendBuffer(BufferSource data);
+    undefined abort();
+    undefined changeType(DOMString type);
+    undefined remove(double start, unrestricted double end);
+};

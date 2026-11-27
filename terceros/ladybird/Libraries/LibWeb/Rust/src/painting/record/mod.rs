@@ -1,0 +1,820 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+use crate::painting::paint_read::{GeometryRead, PaintRead, PaintSource};
+use crate::painting::record::trace::{Observer, Operation};
+
+pub(crate) mod assemble;
+pub mod async_scroll_metadata;
+pub(crate) mod change_ticks;
+pub(crate) mod frame_inputs;
+pub mod hit_test_items;
+pub(crate) mod ink_bounds;
+pub(crate) mod inputs;
+pub(crate) mod order_tree;
+pub mod paint;
+pub(crate) mod producers;
+pub(crate) mod publish;
+pub(crate) mod recorder_state;
+pub(crate) mod resources;
+pub(crate) mod scratch;
+pub mod svg_resources;
+pub mod trace;
+pub mod traversal;
+pub(crate) mod vector_images;
+pub(crate) mod window;
+
+use crate::css::css_enums;
+use crate::css::css_pixels::CssPixelRect;
+use crate::layout::node_data::{NodeFlag, NodeSlotId};
+use crate::painting::border_radii::BorderRadii;
+use crate::painting::display_list::builder::{PendingInlineClip, RecordedDisplayList};
+use crate::painting::display_list::commands::{ContextRef, SpatialNodeIndex};
+use crate::painting::display_list::device_pixels::DevicePixelConverter;
+use crate::painting::display_list::recorder::DisplayListRecorder;
+use crate::painting::paintable_data::{InlineBoxPieceRecord, PaintableData};
+use crate::painting::record::frame_inputs::FrameInputs;
+use crate::painting::record::svg_resources::SvgResourceWalk;
+use crate::painting::selection::HighlightPseudoElement;
+use std::sync::Arc;
+
+pub(crate) use inputs::RecordingInputs;
+
+#[derive(Default)]
+pub struct RecordingOutput {
+    pub recorded_structural_epoch: u64,
+    pub(crate) recorded_as_of: change_ticks::PaintGeneration,
+    /// The visual context tree the recording was recorded against: the frozen frame's.
+    pub visual_context_tree: Option<Arc<crate::painting::visual_context::VisualContextTree>>,
+    pub(crate) frame_inputs: FrameInputs,
+    // The area the root background painted: the viewport united with the root's overflow. Only
+    // the root's background reads it, so a change stamps the root instead of asking for everything anew.
+    pub(crate) root_background_canvas_rect: CssPixelRect,
+    /// The name of the chunk the canvas was recorded into, outside the walked scopes, or none where it drew nothing.
+    pub(crate) prologue_id: Option<crate::painting::display_list::chunks::ChunkId>,
+    pub root_group_color: libgfx_rust::Color,
+    /// The rows' hit-test items stamp of the frame the recording recorded: hit testing walks its rows, which place
+    /// other items in a frame with another stamp or another visual context tree.
+    pub hit_test_items_stamp: u64,
+    /// The chunks of the display list in paint order: the canvas, recorded outside the walked scopes, the chunks of
+    /// those, and the inspector's overlays.
+    pub(crate) chunks: Arc<[Arc<order_tree::RecordedChunk>]>,
+    /// The display list's tape: its chunks one after another.
+    pub display_list: Arc<RecordedDisplayList>,
+    /// The scopes the recording walked, with what each part of them recorded, which the next recording reuses its
+    /// clean output by.
+    pub(crate) recorded_root: Option<Arc<order_tree::RecordedScope>>,
+    /// The part of the document the recording holds, or none where it holds all of it.
+    pub(crate) window: Option<Arc<window::RecordedWindow>>,
+    pub has_blocking_wheel_event_listeners: bool,
+    pub wheel_event_listener_state_generation: u64,
+    pub is_identical_to_published_recording: bool,
+    // Whether the window was focused, which the output of the producers that read it reflects.
+    pub(crate) window_is_focused: bool,
+    // A digest of the scale that each space of the tree accumulated, which the output of the producers that read one
+    // reflects. None where no producer read one.
+    pub(crate) accumulated_scales: Option<u64>,
+    pub(crate) capture_log: Option<trace::CaptureLog>,
+    /// The SVG images the recording draws, which the host rendered, and the ids of their records.
+    pub(crate) vector_image_ids_by_request: Vec<(vector_images::VectorImageRenderRequest, u64)>,
+    /// What the display list draws besides its tape.
+    pub(crate) resources: crate::painting::display_list_resources::DisplayListResources,
+    /// The display list's id, which a recording that repeats the one published last shares with it.
+    pub display_list_id: u64,
+    /// What the compositor clears the surface with below the display list, for a top-level traversable.
+    pub surface_clear_color: Option<libgfx_rust::Color>,
+    /// What the display list is stamped with for async scrolling, but for the keyboard scroll state, which each frame
+    /// sets.
+    pub async_scrolling_metadata: Option<libcompositing_rust::ipc_types::Compositing_AsyncScrollingMetadata>,
+    /// Where the records of the tape come from, by their offsets in it, for a recording that notes it.
+    pub(crate) record_notes: Option<Arc<crate::painting::display_list::recorder::RecordNotes>>,
+}
+
+pub(crate) struct RecordingResult {
+    pub(crate) output: RecordingOutput,
+    pub(crate) resources: resources::RecordingResourceManifest,
+}
+
+// What a recording shares with later recordings.
+const _: () = {
+    const fn assert_send_and_sync<T: Send + Sync>() {}
+    assert_send_and_sync::<order_tree::RecordedChunk>();
+    assert_send_and_sync::<paint::text::SelectionStyleAnswer>();
+};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum PaintPhase {
+    Background,
+    Border,
+    TableCollapsedBorder,
+    Foreground,
+    Outline,
+    Overlay,
+}
+
+impl PaintPhase {
+    pub const COUNT: usize = 6;
+
+    const fn bit(self) -> u8 {
+        1 << self as u8
+    }
+}
+pub struct PaintRecorder<'a, O: Observer> {
+    pub(crate) source: &'a PaintSource<'a>,
+    pub(crate) paint_state: &'a crate::painting::published_frame::PublishedPaintState,
+    pub(crate) inputs: &'a RecordingInputs,
+    pub(crate) recorder: DisplayListRecorder,
+    pub(crate) converter: DevicePixelConverter,
+    pub(crate) svg_resource_walk: Option<SvgResourceWalk>,
+    pub(crate) viewport: NodeSlotId,
+    ink_bounds_audit: ink_bounds::InkBoundsAudit,
+    // The published recording whose clean output this recording reuses, when its inputs match.
+    pub(crate) source_recording: Option<Arc<RecordingOutput>>,
+    // Set while a run records a placeholder for the records of an SVG image, which its chunk holds until the
+    // publication of the recording finishes it.
+    run_draws_vector_image_placeholders: bool,
+    // Set while a producer records output that must record again every frame.
+    live_producer: bool,
+    // Set while a producer records output that depends on whether the window is focused.
+    producer_reads_window_focus: std::cell::Cell<bool>,
+    // Set while a producer records output that depends on the scale that a space of the tree accumulates.
+    producer_reads_accumulated_scale: std::cell::Cell<bool>,
+    // Rows of the layout subtrees whose root moved: every producer of theirs records again.
+    pub(crate) blocking_wheel_event_region_count: u32,
+    pub(crate) records_per_box_wheel_hit_test_targets: bool,
+    pub(crate) observer: O,
+    pub(crate) scratch: &'a mut scratch::RecordingScratch,
+    pub(crate) resources: resources::RecordingResourceManifest,
+    line_root_positions: Option<(NodeSlotId, crate::painting::paintable_geometry::LineRootPositions)>,
+    // The spaces of the frame's tree against the window of the recording, for one that does not hold the whole
+    // document.
+    pub(crate) window_spaces: Option<window::WindowSpaces<'a>>,
+    // The notes of the records of each chunk taken, where the recording notes them.
+    pub(crate) record_notes_of_chunks: Vec<(
+        Arc<order_tree::RecordedChunk>,
+        crate::painting::display_list::recorder::RecordNotes,
+    )>,
+}
+
+#[derive(Clone, Copy, Default)]
+pub(crate) struct BasePaintFacts {
+    pub is_visible: bool,
+    pub empty_cells_property_applies: bool,
+    pub has_backdrop_filter: bool,
+    pub has_box_shadow: bool,
+    pub paints_border_image: bool,
+    pub has_fixed_background: bool,
+    pub has_scroll_offset_dependent_background: bool,
+    pub paints_column_rules: bool,
+    pub paint_phase_mask: u8,
+}
+
+impl<O: Observer> PaintRecorder<'_, O> {
+    pub(crate) fn mark_live_producer(&mut self) {
+        self.live_producer = true;
+    }
+
+    /// Whether the window is focused. The producer that asks records again when that changes.
+    pub(crate) fn window_is_focused(&self) -> bool {
+        self.producer_reads_window_focus.set(true);
+        self.inputs.window_is_focused
+    }
+
+    pub(crate) fn line_root_positions(
+        &mut self,
+        root: NodeSlotId,
+    ) -> crate::painting::paintable_geometry::LineRootPositions {
+        if let Some((cached_root, positions)) = &self.line_root_positions
+            && *cached_root == root
+        {
+            return positions.clone();
+        }
+        let positions = crate::painting::paintable_geometry::LineRootPositions::new(self.source, root);
+        self.line_root_positions = Some((root, positions.clone()));
+        positions
+    }
+
+    pub(crate) fn data(&self, paintable: NodeSlotId) -> &PaintableData {
+        self.source.paintable_data(paintable)
+    }
+
+    pub(crate) fn hit_test_facts(&mut self, paintable: NodeSlotId) -> hit_test_items::HitTestFacts {
+        self.paintable_facts(paintable)
+    }
+
+    fn paintable_facts(&mut self, paintable: NodeSlotId) -> hit_test_items::HitTestFacts {
+        if let Some(facts) = self.scratch.hit_test_facts(paintable) {
+            return facts;
+        }
+        let facts = hit_test_items::hit_test_facts(self.source, paintable);
+        self.scratch.set_hit_test_facts(paintable, facts);
+        facts
+    }
+
+    pub(crate) fn register_font(&mut self, font: &libgfx_rust::font::FontHandle) -> u64 {
+        self.resources.note_font(font)
+    }
+
+    pub(crate) fn register_image_frame(
+        &mut self,
+        frame: &libgfx_rust::image_frame::ImageFrameHandle,
+    ) -> crate::painting::display_list::commands::ImageFrameResourceId {
+        self.resources.note_image_frame(frame)
+    }
+
+    /// The color scheme an SVG image the box `owner` draws renders in: the box's own where it or its document opts into
+    /// `light` or `dark`, and otherwise the preferred one.
+    pub(crate) fn vector_image_color_scheme(&self, owner: crate::layout::node_data::NodeSlotId) -> u8 {
+        let names_light_or_dark = |schemes: &[crate::css::retained_fly_string::RetainedUtf16FlyString]| {
+            schemes.iter().any(|scheme| {
+                let scheme = scheme.to_utf16();
+                scheme.iter().copied().eq("light".encode_utf16()) || scheme.iter().copied().eq("dark".encode_utf16())
+            })
+        };
+        // INTEROP: Like Firefox, images use the preferred scheme when neither the element nor its document opts into a
+        //          supported scheme. Controls still default to light.
+        self.source
+            .node_style_if_live(owner)
+            .and_then(|style| {
+                let ui = style.inherited_ui();
+                (self.inputs.document_supports_light_or_dark || names_light_or_dark(ui.color_schemes.as_slice()))
+                    .then_some(ui.color_scheme)
+            })
+            .unwrap_or(self.inputs.image_fallback_color_scheme)
+    }
+
+    /// The force-dark settings an SVG image the recording draws renders its content with: the recorder's own, so the
+    /// image darkens along with the page around it, and stays as authored in a mask, where force dark is suspended.
+    pub(crate) fn vector_image_force_dark(&self) -> Option<crate::painting::force_dark::ForceDarkSettings> {
+        self.recorder.force_dark_settings()
+    }
+
+    /// The placeholder a command that paints the SVG image of `request` names until publication patches in the id of
+    /// the records the host rendered the image as.
+    pub(crate) fn vector_image_placeholder(
+        &mut self,
+        request: vector_images::VectorImageRenderRequest,
+    ) -> crate::painting::display_list::commands::DisplayListResourceId {
+        self.run_draws_vector_image_placeholders = true;
+        self.resources.vector_image_placeholder(request)
+    }
+
+    pub(crate) fn paint_vector_image(
+        &mut self,
+        source: vector_images::VectorImageSource,
+        content_identity: u64,
+        has_active_view_box: bool,
+        dest_rect: libgfx_rust::FloatRect,
+        accumulated_scale: libgfx_rust::FloatSize,
+        compositing_and_blending_operator: libgfx_rust::CompositingAndBlendingOperator,
+    ) {
+        use libgfx_rust::CompositingAndBlendingOperator;
+        // NB: The destination is in device pixels, and the accumulated scale doesn't include the device pixel ratio.
+        let device_scale = self.inputs.device_pixels_per_css_pixel as f32;
+        let geometry = vector_images::vector_image_render_geometry(
+            libgfx_rust::FloatRect::new(
+                0.0,
+                0.0,
+                dest_rect.width / device_scale,
+                dest_rect.height / device_scale,
+            ),
+            libgfx_rust::FloatSize {
+                width: accumulated_scale.width * device_scale,
+                height: accumulated_scale.height * device_scale,
+            },
+            has_active_view_box,
+            device_scale,
+        );
+        let display_list_id = self.vector_image_placeholder(vector_images::VectorImageRenderRequest::new(
+            source,
+            geometry.css_width,
+            geometry.css_height,
+            geometry.raster_scale,
+            content_identity,
+            self.vector_image_color_scheme(source.owner()),
+            self.vector_image_force_dark(),
+        ));
+        if compositing_and_blending_operator != CompositingAndBlendingOperator::Normal {
+            let dest_device_rect = libgfx_rust::enclosing_int_rect(dest_rect);
+            if dest_device_rect.is_empty() {
+                return;
+            }
+            let group = self.recorder.begin_repeated_tile();
+            self.recorder.paint_vector_image_records(
+                display_list_id,
+                libgfx_rust::FloatRect::new(0.0, 0.0, dest_device_rect.width as f32, dest_device_rect.height as f32),
+                geometry.list_size,
+            );
+            self.recorder.finish_repeated_tile(
+                group,
+                dest_device_rect.to_float(),
+                dest_device_rect,
+                libgfx_rust::IntSize {
+                    width: dest_device_rect.width,
+                    height: dest_device_rect.height,
+                },
+                libgfx_rust::FloatSize {
+                    width: dest_device_rect.width as f32,
+                    height: dest_device_rect.height as f32,
+                },
+                libgfx_rust::ScalingMode::Bilinear,
+                compositing_and_blending_operator,
+                crate::painting::display_list::commands::Repeat { x: false, y: false },
+            );
+            return;
+        }
+        self.recorder
+            .paint_vector_image_records(display_list_id, dest_rect, geometry.list_size);
+    }
+
+    pub(crate) fn own_scroll_container_offset(&self, paintable: NodeSlotId) -> crate::css::css_pixels::CssPixelPoint {
+        use crate::painting::display_list::commands::VISUAL_VIEWPORT_NODE_INDEX;
+        let own_scroll_node = self.data(paintable).own_scroll_node_index;
+        if own_scroll_node == VISUAL_VIEWPORT_NODE_INDEX {
+            return crate::css::css_pixels::CssPixelPoint::default();
+        }
+        let Some(tree) = self.paint_state.visual_context_tree.as_ref() else {
+            return crate::css::css_pixels::CssPixelPoint::default();
+        };
+        let slot = tree.scroll_state_slot_for_node(own_scroll_node);
+        let own_offset = self.paint_state.scroll_own_offset(slot);
+        crate::css::css_pixels::CssPixelPoint::new(-own_offset.x, -own_offset.y)
+    }
+
+    /// The focused text control's selection as `(start, end)` when `node` is one of its text
+    /// node's committed rows.
+    pub(crate) fn text_control_selection(&self, node: NodeSlotId) -> Option<(usize, usize)> {
+        let control = self.inputs.focused_text_control?;
+        self.source
+            .text_fragments(control.text_node)
+            .as_slice()
+            .contains(&node)
+            .then_some((control.start, control.end))
+    }
+
+    pub(crate) fn selection_style(
+        &mut self,
+        node: crate::layout::node_data::NodeSlotId,
+    ) -> Arc<paint::text::SelectionStyleAnswer> {
+        // Read before the cache, so that each producer asking notes that it depends on it.
+        let window_is_focused = self.window_is_focused();
+        let key = node.index;
+        if let Some(answer) = self.scratch.selection_style_cache.get(&key) {
+            return answer.clone();
+        }
+        let style_source = self.source.node_parent_if_live(node).unwrap_or(NodeSlotId::INVALID);
+        let committed = self.first_non_anonymous_ancestor_row(node).and_then(|element_row| {
+            self.committed_highlight_pseudo_style(HighlightPseudoElement::Selection, node, element_row)
+        });
+        let answer = Self::highlight_style_answer(committed, || {
+            self.default_selection_style(style_source, window_is_focused)
+        });
+        self.scratch.selection_style_cache.insert(key, answer.clone());
+        answer
+    }
+
+    pub(crate) fn element_selection_style(
+        &mut self,
+        element_row: crate::layout::node_data::NodeSlotId,
+    ) -> Arc<paint::text::SelectionStyleAnswer> {
+        let window_is_focused = self.window_is_focused();
+        let key = element_row.index;
+        if let Some(answer) = self.scratch.selection_style_cache.get(&key) {
+            return answer.clone();
+        }
+        let committed =
+            self.committed_highlight_pseudo_style(HighlightPseudoElement::Selection, element_row, element_row);
+        let answer = Self::highlight_style_answer(committed, || {
+            self.default_selection_style(element_row, window_is_focused)
+        });
+        self.scratch.selection_style_cache.insert(key, answer.clone());
+        answer
+    }
+
+    pub(crate) fn search_text_style(
+        &mut self,
+        node: crate::layout::node_data::NodeSlotId,
+        highlight: HighlightPseudoElement,
+    ) -> Arc<paint::text::SelectionStyleAnswer> {
+        let key = node.index;
+        let is_current = highlight == HighlightPseudoElement::SearchTextCurrent;
+        let cached = if is_current {
+            self.scratch.search_text_current_style_cache.get(&key)
+        } else {
+            self.scratch.search_text_style_cache.get(&key)
+        };
+        if let Some(answer) = cached {
+            return answer.clone();
+        }
+        let style_source = self.source.node_parent_if_live(node).unwrap_or(NodeSlotId::INVALID);
+        let committed = self
+            .first_non_anonymous_ancestor_row(node)
+            .and_then(|element_row| self.committed_highlight_pseudo_style(highlight, node, element_row));
+        let answer =
+            Self::highlight_style_answer(committed, || self.default_search_text_style(style_source, highlight));
+        let cache = if is_current {
+            &mut self.scratch.search_text_current_style_cache
+        } else {
+            &mut self.scratch.search_text_style_cache
+        };
+        cache.insert(key, answer.clone());
+        answer
+    }
+
+    pub(crate) fn spelling_error_style(
+        &mut self,
+        node: crate::layout::node_data::NodeSlotId,
+    ) -> Arc<paint::text::SelectionStyleAnswer> {
+        let key = node.index;
+        if let Some(answer) = self.scratch.spelling_error_style_cache.get(&key) {
+            return answer.clone();
+        }
+        let committed = self.first_non_anonymous_ancestor_row(node).and_then(|element_row| {
+            self.committed_highlight_pseudo_style(HighlightPseudoElement::SpellingError, node, element_row)
+        });
+        // The UA stylesheet's `:root::spelling-error` rule supplies the underline; with no committed style, a
+        // misspelling paints nothing of its own.
+        let answer = Self::highlight_style_answer(committed, || paint::text::SelectionStyleAnswer {
+            facts: crate::painting::host::FfiSelectionStyleFacts::default(),
+            shadows: Vec::new(),
+            decoration_metrics: None,
+        });
+        self.scratch.spelling_error_style_cache.insert(key, answer.clone());
+        answer
+    }
+
+    pub(crate) fn custom_highlight_style(
+        &mut self,
+        node: crate::layout::node_data::NodeSlotId,
+        layer: u32,
+    ) -> Option<Arc<paint::text::SelectionStyleAnswer>> {
+        let name = *self.paint_state.custom_highlights.layers.get(layer as usize)?;
+        let key = (node.index, name);
+        if let Some(answer) = self.scratch.custom_highlight_style_cache.get(&key) {
+            return answer.clone();
+        }
+        // https://drafts.csswg.org/css-highlight-api-1/#default-styles
+        // UAs must not define any default UA stylesheet rules or paired default highlight colors for any custom
+        // highlight pseudo-elements.
+        let answer = self
+            .paint_state
+            .custom_highlight_pseudo_styles
+            .get(&name)
+            .and_then(|styles| {
+                let element_row = self.first_non_anonymous_ancestor_row(node)?;
+                self.committed_highlight_pseudo_style_in(styles, node, element_row)
+            });
+        self.scratch.custom_highlight_style_cache.insert(key, answer.clone());
+        answer
+    }
+
+    /// A committed style that authored neither color takes the paired default colors (the text color among them) and
+    /// keeps its shadows and decorations.
+    fn highlight_style_answer(
+        committed: Option<Arc<paint::text::SelectionStyleAnswer>>,
+        defaults: impl FnOnce() -> paint::text::SelectionStyleAnswer,
+    ) -> Arc<paint::text::SelectionStyleAnswer> {
+        match committed {
+            Some(answer) if answer.facts.colors_authored => answer,
+            None => Arc::new(defaults()),
+            Some(answer) => {
+                let mut defaults = defaults();
+                defaults.facts = crate::painting::host::FfiSelectionStyleFacts {
+                    background_color: defaults.facts.background_color,
+                    background_color_is_current_color: defaults.facts.background_color_is_current_color,
+                    text_color: defaults.facts.text_color,
+                    wash_color: defaults.facts.wash_color,
+                    ..answer.facts
+                };
+                defaults.shadows = answer.shadows.clone();
+                defaults.decoration_metrics = answer.decoration_metrics;
+                Arc::new(defaults)
+            }
+        }
+    }
+
+    fn committed_highlight_pseudo_style(
+        &self,
+        highlight: HighlightPseudoElement,
+        node: crate::layout::node_data::NodeSlotId,
+        element_row: crate::layout::node_data::NodeSlotId,
+    ) -> Option<Arc<paint::text::SelectionStyleAnswer>> {
+        self.committed_highlight_pseudo_style_in(self.paint_state.highlight_pseudo_styles(highlight), node, element_row)
+    }
+
+    fn committed_highlight_pseudo_style_in(
+        &self,
+        styles: &crate::painting::paint_state::SelectionPseudoStyles,
+        node: crate::layout::node_data::NodeSlotId,
+        element_row: crate::layout::node_data::NodeSlotId,
+    ) -> Option<Arc<paint::text::SelectionStyleAnswer>> {
+        if let Some(answer) = styles.get(&node) {
+            return Some(answer.clone());
+        }
+        if let Some(answer) = styles.get(&element_row) {
+            return Some(answer.clone());
+        }
+        if self.source.node_flags_if_live(element_row) & NodeFlag::IsInUserAgentShadowTree as u32 == 0 {
+            return None;
+        }
+        let mut host_row = self.source.node_parent_if_live(element_row)?;
+        while self.source.node_flags_if_live(host_row) & NodeFlag::IsInUserAgentShadowTree as u32 != 0 {
+            host_row = self.source.node_parent_if_live(host_row)?;
+        }
+        styles.get(&host_row).cloned()
+    }
+
+    fn first_non_anonymous_ancestor_row(
+        &self,
+        node: crate::layout::node_data::NodeSlotId,
+    ) -> Option<crate::layout::node_data::NodeSlotId> {
+        let mut row = self.source.node_parent_if_live(node);
+        while let Some(current) = row {
+            if self.source.node_flags_if_live(current) & NodeFlag::Anonymous as u32 == 0 {
+                return Some(current);
+            }
+            row = self.source.node_parent_if_live(current);
+        }
+        None
+    }
+
+    fn default_selection_style(
+        &self,
+        style_source: crate::layout::node_data::NodeSlotId,
+        window_is_focused: bool,
+    ) -> paint::text::SelectionStyleAnswer {
+        let background_color = self.default_selection_background(style_source, window_is_focused);
+        paint::text::SelectionStyleAnswer {
+            facts: crate::painting::host::FfiSelectionStyleFacts {
+                background_color,
+                wash_color: background_color,
+                ..Default::default()
+            },
+            shadows: Vec::new(),
+            decoration_metrics: None,
+        }
+    }
+
+    fn default_search_text_style(
+        &self,
+        style_source: crate::layout::node_data::NodeSlotId,
+        highlight: HighlightPseudoElement,
+    ) -> paint::text::SelectionStyleAnswer {
+        if highlight == HighlightPseudoElement::SearchTextCurrent {
+            let background_color = self.default_selection_background(style_source, true);
+            return paint::text::SelectionStyleAnswer {
+                facts: crate::painting::host::FfiSelectionStyleFacts {
+                    background_color,
+                    wash_color: background_color,
+                    ..Default::default()
+                },
+                shadows: Vec::new(),
+                decoration_metrics: None,
+            };
+        }
+        let background_color = libgfx_rust::Color::from_rgb(255, 255, 0);
+        paint::text::SelectionStyleAnswer {
+            facts: crate::painting::host::FfiSelectionStyleFacts {
+                background_color,
+                text_color: Some(libgfx_rust::Color::from_rgb(0, 0, 0)).into(),
+                wash_color: background_color,
+                ..Default::default()
+            },
+            shadows: Vec::new(),
+            decoration_metrics: None,
+        }
+    }
+
+    fn default_selection_background(
+        &self,
+        style_source: crate::layout::node_data::NodeSlotId,
+        window_is_focused: bool,
+    ) -> libgfx_rust::Color {
+        use crate::css::color_resolution::{PREFERRED_COLOR_SCHEME_DARK, PREFERRED_COLOR_SCHEME_LIGHT};
+        let inputs = self.inputs;
+        let palette_color_scheme = if inputs.palette_is_dark {
+            PREFERRED_COLOR_SCHEME_DARK
+        } else {
+            PREFERRED_COLOR_SCHEME_LIGHT
+        };
+        // NB: The selection takes the element's used color scheme, which is light for `normal` unless the document
+        //     supports other color schemes, whatever the palette's. Without a style to tell, it takes the palette's.
+        let color_scheme = self
+            .source
+            .node_style_if_live(style_source)
+            .map_or(palette_color_scheme, |style| style.inherited_ui().color_scheme);
+        let (from_palette, light, dark) = if window_is_focused {
+            (
+                inputs.selection_background_from_palette,
+                inputs.selection_background_light,
+                inputs.selection_background_dark,
+            )
+        } else {
+            (
+                inputs.inactive_selection_background_from_palette,
+                inputs.inactive_selection_background_light,
+                inputs.inactive_selection_background_dark,
+            )
+        };
+        if color_scheme == palette_color_scheme {
+            from_palette
+        } else if color_scheme == PREFERRED_COLOR_SCHEME_DARK {
+            dark
+        } else {
+            light
+        }
+    }
+
+    pub(crate) fn border_radii(&mut self, paintable: NodeSlotId) -> BorderRadii {
+        crate::painting::border_radii::border_radii(self.source, paintable)
+    }
+
+    pub(crate) fn piece_border_radii(&mut self, paintable: NodeSlotId, piece: &InlineBoxPieceRecord) -> BorderRadii {
+        crate::painting::border_radii::piece_border_radii(self.source, paintable, piece)
+    }
+
+    pub(crate) fn fragment_border_box(
+        &mut self,
+        paintable: NodeSlotId,
+        index: usize,
+    ) -> (crate::css::css_pixels::CssPixelRect, BorderRadii) {
+        crate::painting::border_radii::fragment_border_box_and_radii(self.source, paintable, index)
+    }
+
+    pub(crate) fn border_boxes_of_fragments(
+        &mut self,
+        paintable: NodeSlotId,
+    ) -> smallvec::SmallVec<[(CssPixelRect, BorderRadii); 1]> {
+        crate::painting::border_radii::border_boxes_and_radii_of_fragments(self.source, paintable)
+    }
+
+    pub(crate) fn base_paint_facts(&mut self, paintable: NodeSlotId) -> BasePaintFacts {
+        if let Some(facts) = self.scratch.base_paint_facts(paintable) {
+            return facts;
+        }
+        let Some(style) = self.source.node_style_if_live(paintable) else {
+            let facts = BasePaintFacts::default();
+            self.scratch.set_base_paint_facts(paintable, facts);
+            return facts;
+        };
+        let effects = style.effects();
+        let is_visible = crate::painting::style_queries::is_visible(self.source, paintable);
+        let empty_cells_property_applies = self.display(paintable).is_internal_table()
+            && style.empty_cells() == crate::css::css_enums::empty_cells::HIDE
+            && crate::painting::paint_order::first_paint_child(self.source, paintable).is_none();
+        let has_backdrop_filter = effects.backdrop_filter.operations.length != 0;
+        let paints_border_image = paint::border_image::paints_border_image(style);
+        let mut facts = BasePaintFacts {
+            is_visible,
+            empty_cells_property_applies,
+            has_backdrop_filter,
+            has_box_shadow: effects.box_shadows.length != 0,
+            paints_border_image,
+            has_fixed_background: paint::background_resolution::background_has_fixed_attachment(
+                self.source,
+                self.inputs.uncaptured.root_background_source,
+                paintable,
+            ),
+            has_scroll_offset_dependent_background:
+                paint::background_resolution::background_depends_on_live_scroll_offset(
+                    self.source,
+                    self.inputs.uncaptured.root_background_source,
+                    paintable,
+                ),
+            paints_column_rules: paint::column_rule::has_visible_column_rule(style),
+            paint_phase_mask: 0,
+        };
+        facts.paint_phase_mask = paint::paint_phase_mask(self, paintable, style, &facts);
+        self.scratch.set_base_paint_facts(paintable, facts);
+        facts
+    }
+
+    fn has_stacking_context(&self, paintable: NodeSlotId) -> bool {
+        self.data(paintable).establishes_stacking_context
+    }
+
+    fn display(&self, paintable: NodeSlotId) -> crate::css::display::FfiDisplay {
+        crate::painting::style_queries::display(self.source, paintable)
+    }
+
+    fn visibility_is_visible(&self, paintable: NodeSlotId) -> bool {
+        self.source
+            .node_style_if_live(paintable)
+            .is_none_or(|style| style.visibility() == css_enums::visibility::VISIBLE)
+    }
+
+    pub(crate) fn is_visible(&mut self, paintable: NodeSlotId) -> bool {
+        self.base_paint_facts(paintable).is_visible
+    }
+
+    pub(crate) fn visible_for_hit_testing(&mut self, paintable: NodeSlotId) -> bool {
+        self.paintable_facts(paintable).visible_for_hit_testing
+    }
+
+    pub(crate) fn with_context<R>(&mut self, context: ContextRef, paint: impl FnOnce(&mut Self) -> R) -> R {
+        let previous_context = self.recorder.accumulated_visual_context();
+        self.recorder.set_accumulated_visual_context(context);
+        let result = paint(self);
+        self.recorder.set_accumulated_visual_context(previous_context);
+        result
+    }
+
+    pub(crate) fn record_with_inline_clips<R>(
+        &mut self,
+        inline_clips: &[PendingInlineClip],
+        paint: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let enclosing_scope_clip_count = self.recorder.ambient_inline_clip_depth();
+        self.recorder.push_ambient_inline_clips(inline_clips);
+        let result = paint(self);
+        self.recorder.truncate_ambient_inline_clips(enclosing_scope_clip_count);
+        result
+    }
+
+    pub(crate) fn own_context(&self, paintable: NodeSlotId) -> ContextRef {
+        if let Some(walk) = &self.svg_resource_walk {
+            return walk.enclosing_context;
+        }
+        self.data(paintable).accumulated_visual_context
+    }
+
+    pub(crate) fn is_recording_svg_resource_content(&self) -> bool {
+        self.svg_resource_walk.is_some()
+    }
+
+    pub(crate) fn draws_clip_path_geometry(&self) -> bool {
+        self.svg_resource_walk.is_some_and(|walk| walk.draws_clip_path_geometry)
+    }
+
+    /// The scale that the transforms of `spatial` and the spaces above it accumulate to. The producer that asks records
+    /// again when a transform changes such a scale.
+    pub(crate) fn accumulated_2d_scale_at(&self, spatial: SpatialNodeIndex) -> libgfx_rust::FloatSize {
+        if self.svg_resource_walk.is_some() {
+            let transform = self
+                .recorder
+                .ambient_inline_transform()
+                .unwrap_or_else(libgfx_rust::AffineTransform::identity);
+            return libgfx_rust::FloatSize {
+                width: transform.x_scale(),
+                height: transform.y_scale(),
+            };
+        }
+        self.producer_reads_accumulated_scale.set(true);
+        self.paint_state.unscrolled_world_transforms().accumulated_2d_scale(
+            spatial,
+            crate::painting::visual_context::IncludeVisualViewportTransform::No,
+        )
+    }
+
+    pub(crate) fn own_accumulated_2d_scale(&self, paintable: NodeSlotId) -> libgfx_rust::FloatSize {
+        self.accumulated_2d_scale_at(self.own_context(paintable).spatial)
+    }
+
+    pub(crate) fn pattern_tile_records(
+        &mut self,
+        pattern: NodeSlotId,
+        tile_content_transform: libgfx_rust::FloatMatrix4x4,
+        tile_surface_rect: libgfx_rust::FloatRect,
+    ) -> Arc<Vec<u8>> {
+        let root_transform = tile_content_transform.extract_2d_affine();
+        let key = PatternTileKey {
+            pattern: pattern.index,
+            root_transform_bits: root_transform.values.map(f32::to_bits),
+            tile_surface_size_bits: [tile_surface_rect.width.to_bits(), tile_surface_rect.height.to_bits()],
+            force_dark: self.recorder.force_dark_settings().is_some(),
+        };
+        if let Some((records, draws_vector_image_placeholders)) = self.scratch.pattern_tile_records.get(&key) {
+            self.run_draws_vector_image_placeholders |= *draws_vector_image_placeholders;
+            return records.clone();
+        }
+        let run_draws_vector_image_placeholders = std::mem::take(&mut self.run_draws_vector_image_placeholders);
+        let detached = self.recorder.begin_detached_records();
+        // Pattern tiles exclude the root's own transform: patternTransform reaches the replay-side
+        // tile shader instead, so the tiling grid repeats under it rather than the content scaling
+        // twice.
+        self.trace_paint(Operation::Named(Some(pattern), "svg-pattern"), |this| {
+            this.walk_svg_resource(pattern, root_transform, false, false, tile_surface_rect);
+        });
+        let records = Arc::new(self.recorder.finish_detached_records(detached));
+        let tile_draws_vector_image_placeholders = self.run_draws_vector_image_placeholders;
+        self.run_draws_vector_image_placeholders |= run_draws_vector_image_placeholders;
+        self.scratch
+            .pattern_tile_records
+            .insert(key, (records.clone(), tile_draws_vector_image_placeholders));
+        records
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct PatternTileKey {
+    pattern: u32,
+    root_transform_bits: [u32; 6],
+    tile_surface_size_bits: [u32; 2],
+    // A tile recorded inside a mask, where force dark is suspended, has authored colors, which a tile on the page
+    // can't reuse.
+    force_dark: bool,
+}

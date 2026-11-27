@@ -1,0 +1,49 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Function.h>
+#include <Compositor/CompositorPresentationClientEndpoint.h>
+#include <Compositor/CompositorPresentationServerEndpoint.h>
+#include <Compositor/CompositorState.h>
+#include <LibIPC/ConnectionFromClient.h>
+
+namespace Compositor {
+
+// Carries the frames of the contexts bound to it, the release of their buffers and the input to them.
+class ConnectionFromPresentation final
+    : public IPC::ConnectionFromClient<CompositorPresentationClientEndpoint, CompositorPresentationServerEndpoint>
+    , public CompositorStateClient {
+    C_OBJECT(ConnectionFromPresentation);
+
+public:
+    virtual ~ConnectionFromPresentation() override;
+
+    void set_on_death(Function<void()> on_death) { m_on_death = move(on_death); }
+
+    virtual PresentationId presentation_id() const override { return m_presentation_id; }
+
+private:
+    ConnectionFromPresentation(NonnullOwnPtr<IPC::Transport>, NonnullRefPtr<CompositorState>, CompositorState::PresentationCapabilities);
+
+    virtual void die() override;
+    virtual void post_message_to_presentation(IPC::MessageBuffer&) override;
+    virtual void did_allocate_backing_stores(Web::CompositorContextId, Vector<i32> bitmap_ids, Vector<Gfx::SharedImage>&& backing_stores) override;
+    virtual void did_add_backing_stores(Web::CompositorContextId, Vector<i32> bitmap_ids, Vector<Gfx::SharedImage>&& backing_stores) override;
+    virtual void did_retire_backing_stores(Web::CompositorContextId, Vector<i32> bitmap_ids) override;
+
+    virtual ErrorOr<OwnPtr<IPC::MessageBuffer>> handle_raw(IPC::RawMessage&) override;
+    virtual void take_frame_snapshot(Web::CompositorContextId, u64 request_id) override;
+
+    bool is_bound_to(Web::CompositorContextId) const;
+
+    NonnullRefPtr<CompositorState> m_compositor_state;
+    PresentationId m_presentation_id;
+    Function<void()> m_on_death;
+};
+
+}

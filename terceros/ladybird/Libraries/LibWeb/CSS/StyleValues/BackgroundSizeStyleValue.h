@@ -1,0 +1,33 @@
+/*
+ * Copyright (c) 2018-2020, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2021, Tobias Christiansen <tobyase@serenityos.org>
+ * Copyright (c) 2021-2023, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2022-2023, MacDue <macdue@dueutil.tech>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <LibWeb/CSS/StyleValues/StyleValue.h>
+
+namespace Web::CSS {
+
+// NOTE: This is not used for identifier sizes, like `cover` and `contain`.
+class BackgroundSizeStyleValue final : public StyleValueWithDefaultOperators<BackgroundSizeStyleValue> {
+public:
+    virtual ~BackgroundSizeStyleValue() override = default;
+
+    ValueComparingNonnullRefPtr<StyleValue const> size_x() const { return wrap_rust_child(m_value->background_size._0->size_x); }
+    ValueComparingNonnullRefPtr<StyleValue const> size_y() const { return wrap_rust_child(m_value->background_size._0->size_y); }
+
+private:
+    friend class StyleValue;
+
+    explicit BackgroundSizeStyleValue(StyleValueFFI::StyleValueData const* data)
+        : StyleValueWithDefaultOperators(Type::BackgroundSize, data)
+    {
+    }
+};
+
+}

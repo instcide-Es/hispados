@@ -1,0 +1,540 @@
+/*
+ * Copyright (c) 2020-2023, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
+ * Copyright (c) 2023, Andrew Kaster <akaster@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Function.h>
+#include <AK/HashMap.h>
+#include <AK/HashTable.h>
+#include <AK/Utf16String.h>
+#include <LibGC/Weak.h>
+#include <LibGfx/Rect.h>
+#include <LibJS/Forward.h>
+#include <LibWeb/CSS/StyleSheetIdentifier.h>
+#include <LibWeb/ContentSecurityPolicy/Directives/Directive.h>
+#include <LibWeb/DOM/AccessibilityChangeTracker.h>
+#include <LibWeb/Fetch/Engine/NetworkActivityObservers.h>
+#include <LibWeb/HTML/EventLoop/EventLoop.h>
+#include <LibWeb/HTML/SameDocumentNavigationEntry.h>
+#include <LibWeb/HTML/Scripting/ConsoleInputCompletion.h>
+#include <LibWeb/HTML/Scripting/ScriptRegistry.h>
+#include <LibWeb/HTML/SessionHistoryEntry.h>
+#include <LibWeb/Page/Page.h>
+#include <LibWebCommon/Forward.h>
+#include <LibWebCommon/HTML/CrossProcessId.h>
+#include <LibWebCommon/HTML/FileFilter.h>
+#include <LibWebCommon/HTML/ReplicatedNavigableState.h>
+#include <LibWebCommon/Page/PageId.h>
+#include <LibWebCommon/Page/QueuedInputEvent.h>
+#include <LibWebCommon/PixelUnits.h>
+#include <LibWebCommon/StorageAPI/StorageEndpoint.h>
+#include <LibWebCommon/WebDriver/Capabilities.h>
+#include <LibWebCommon/WebDriver/Response.h>
+#include <LibWebCommon/WebDriver/UserPrompt.h>
+#include <LibWebCommon/WebView/ConsoleOutputBuffer.h>
+#include <LibWebCommon/WebView/Geolocation.h>
+#include <LibWebCommon/WebView/Mutation.h>
+#include <LibWebCommon/WebView/StorageSetResult.h>
+#include <WebContent/Forward.h>
+
+namespace WebContent {
+
+class PageClient final : public Web::PageClient {
+    GC_CELL(PageClient, Web::PageClient);
+    GC_DECLARE_ALLOCATOR(PageClient);
+
+public:
+    static GC::Ref<PageClient> create(PageHost& page_host, Web::PageId id, Optional<Web::HTML::CrossProcessId> pending_root_navigable_id = {});
+
+    virtual ~PageClient() override;
+
+    virtual Web::PageId id() const override { return m_id; }
+
+    virtual bool is_headless() const override;
+    static void set_is_headless(bool);
+
+    virtual Web::Page& page() override { return *m_page; }
+    virtual Web::Page const& page() const override { return *m_page; }
+    virtual bool has_focus() const override { return m_has_focus; }
+
+    WebDriverConnection& ensure_webdriver_session();
+    void run_webdriver_command(u64 command_id, Optional<Web::HTML::CrossProcessId> navigable_id, String const& name, JsonValue payload, Vector<String> arguments);
+    void request_file_for_webdriver(u64 command_id, Web::FileRequest);
+    void webdriver_did_set_current_browsing_context(u64 command_id, Web::HTML::CrossProcessId navigable_id);
+    void did_handle_webdriver_mouse_event(u64 request_id);
+    bool prepare_webdriver_input_command(u64, Optional<Web::HTML::CrossProcessId>, JsonValue&);
+    void webdriver_command_complete(u64 command_id, Web::WebDriver::Response);
+    void webdriver_bidi_event(Web::HTML::CrossProcessId navigable_id, String const& name, JsonValue params);
+    void webdriver_bidi_navigation_event(Web::HTML::CrossProcessId navigable_id, StringView name, Optional<Utf16String> const& navigation_id, URL::URL const&);
+    void set_webdriver_session_config(Web::WebDriver::UserPromptHandler, Web::WebDriver::PageLoadStrategy, bool strict_file_interactability, JsonValue const& timeouts);
+    ErrorOr<void> connect_to_web_ui(IPC::TransportHandle);
+
+    virtual Queue<Web::QueuedInputEvent>& input_event_queue() override;
+    virtual void did_handle_input_event(Web::PageId page_id, Web::InputEvent const&) override;
+    virtual void report_finished_handling_input_event(Web::PageId page_id, u64 event_id, Web::EventResult event_was_handled) override;
+    virtual Web::CompositorContextId allocate_compositor_context_id(Web::PagePresentationRegistration) override;
+    virtual Web::HTML::CrossProcessId allocate_cross_process_id() override;
+    virtual Web::HTML::CrossProcessId allocate_navigable_id() override;
+
+    void set_palette_impl(Gfx::PaletteImpl&);
+    void set_viewport(Web::DevicePixelSize const&, double device_pixel_ratio);
+    void set_hosted_root_viewport(Web::HTML::CrossProcessId, Web::DevicePixelSize const&, Web::DevicePixelRect const& viewport_intersection, double device_pixel_ratio);
+    void set_screen_rects(Vector<Web::DevicePixelRect> const& rects, Vector<Web::DevicePixelRect> const& available_rects, size_t main_screen_index)
+    {
+        m_all_screen_rects = rects;
+        m_all_available_screen_rects = available_rects;
+        m_main_screen_index = main_screen_index;
+    }
+    void set_zoom_level(double zoom_level);
+    void set_maximum_frames_per_second(double maximum_frames_per_second);
+    void set_frame_rate_capped(bool capped) { m_frame_rate_capped = capped; }
+    virtual double maximum_frames_per_second() const override { return m_maximum_frames_per_second; }
+    void set_preferred_color_scheme(Web::CSS::PreferredColorScheme);
+    void set_screen_shows_high_dynamic_range(bool);
+    void set_preferred_contrast(Web::CSS::PreferredContrast);
+    void set_preferred_motion(Web::CSS::PreferredMotion);
+    virtual void set_has_focus(bool) override;
+    void set_window_handle(Utf16String);
+    void run_webdriver_user_prompt_handling(u64 request_id);
+    void set_is_scripting_enabled(bool);
+    void set_window_position(Web::DevicePixelPoint);
+    void set_window_size(Web::DevicePixelSize);
+    void compositor_process_reconnected();
+    void compositor_process_lost();
+
+    void toggle_media_play_state();
+    void toggle_media_mute_state();
+    void toggle_media_loop_state();
+    void toggle_media_controls_state();
+
+    void set_geolocation_emulated_position(WebView::GeolocationPositionData const&, Optional<u16> error_code);
+    void geolocation_position_response(u64 request_id, WebView::GeolocationPositionData const&, Optional<u16> error_code);
+    void permission_request_completed(u64 request_id, Web::Permissions::EffectiveState);
+    Optional<URL::URL> generate_text_fragment_url(u64 generation_id);
+
+    void alert_closed();
+    void confirm_closed(bool accepted);
+    void prompt_closed(Optional<Utf16String> response);
+    void color_picker_update(Optional<Color> picked_color, Web::HTML::ColorPickerUpdateState state);
+    void select_dropdown_closed(Optional<u32> const& selected_item_id);
+
+    void set_has_devtools_client(bool);
+    static void update_keeps_long_stack_traces();
+    bool has_devtools_client() const { return m_has_devtools_client; }
+    virtual bool has_active_devtools_client() const override { return has_devtools_client(); }
+    void start_sending_console_output(bool messages, bool errors);
+    void buffer_console_output(WebView::ConsoleOutput);
+    bool devtools_takes_console_messages() const { return m_devtools_takes_console_messages; }
+    bool devtools_takes_console_errors() const { return m_devtools_takes_console_errors; }
+
+    void initialize_js_console(Web::DOM::Document& document);
+    GC::Ptr<WebContentConsoleClient> attach_js_console(Web::DOM::Document&);
+    void for_each_devtools_console_client(Function<void(DevToolsConsoleClient&)> const&);
+    void js_console_input(StringView js_source);
+    Optional<Web::HTML::ConsoleInputCompletion> complete_js_console_input(StringView input);
+    void did_execute_js_console_input(WebView::DebuggerValue const&);
+    ErrorOr<WebView::DebuggerObjectProperties> console_object_properties(u64 object_id);
+    void run_javascript(StringView js_source);
+    void did_output_js_console_message(WebView::ConsoleOutput);
+
+    Vector<Web::CSS::StyleSheetIdentifier> list_style_sheets() const;
+    Vector<Web::HTML::ScriptRegistry::Description> list_devtools_sources() const;
+    Optional<Web::HTML::ScriptRegistry::Description> devtools_source_description(JS::SourceCode const&) const;
+    Optional<NonnullRefPtr<JS::SourceCode const>> devtools_source_code(Web::HTML::ScriptRegistry::Identifier const&) const;
+    Optional<Web::HTML::ScriptRegistry::Content> devtools_source_content(Web::HTML::ScriptRegistry::Identifier const&) const;
+    Vector<WebView::DebuggerSourcePosition> devtools_source_breakpoint_positions(Web::HTML::ScriptRegistry::Identifier const&) const;
+
+    virtual double zoom_level() const override { return m_zoom_level; }
+    virtual double device_pixel_ratio() const override { return m_device_pixel_ratio; }
+    virtual double device_pixels_per_css_pixel() const override { return m_device_pixel_ratio * m_zoom_level; }
+
+    virtual bool supports_compositor() const override { return true; }
+    virtual void ensure_compositor_host() override;
+    virtual Web::Compositor::CompositorHost* compositor_host() override;
+    virtual Web::Compositor::CompositorHost const* compositor_host() const override;
+
+    void queue_screenshot_task(Optional<Web::UniqueNodeID> node_id);
+    void send_current_needs_beforeunload_check();
+    void set_ongoing_navigation(Web::HTML::CrossProcessId navigable_id, Utf16String navigation_id);
+    void navigate_to_a_fragment(Web::HTML::CrossProcessId navigable_id, URL::URL const&, Web::HTML::HistoryHandlingBehavior, Web::HTML::UserNavigationInvolvement, Utf16String navigation_id);
+    void navigate_to_a_javascript_url(Web::HTML::CrossProcessId navigable_id, URL::URL const&, Web::HTML::HistoryHandlingBehavior, URL::Origin const& initiator_origin, Web::HTML::NavigationSourceSnapshot const&, Web::HTML::UserNavigationInvolvement, Web::ContentSecurityPolicy::Directives::Directive::NavigationType csp_navigation_type, Utf16String navigation_id);
+    void run_navigation_unload_check(Web::HTML::CrossProcessId navigable_id, Utf16String const& navigation_id, Web::HTML::UnloadPromptShown);
+    void did_receive_unload_check_result(Web::HTML::CrossProcessId check_id, Web::HTML::CheckIfUnloadingIsCanceledResult);
+    void create_navigation_params(Web::HTML::NavigationPopulationRequest);
+    void deliver_posted_message(Web::HTML::CrossProcessId navigable_id, Web::HTML::MessageDescriptor);
+    void report_violation_of_environment(Web::HTML::EnvironmentId const&, u64 policy_index, Web::ContentSecurityPolicy::RemoteViolationDirective, URL::URL resource);
+    void cancel_navigation_params_creation(Web::HTML::CrossProcessId navigable_id, Utf16String const& navigation_id);
+    void populate_navigation(Web::HTML::NavigationPopulationRequest, Web::HTML::NavigationPopulationResult);
+    void cancel_download(u64 download_id);
+    void clear_pending_dom_mutations();
+    void did_delete_all_cookies(u64 request_id);
+
+    void schedule_accessibility_tree_update();
+    // Sends the UI process what changed in the accessibility tree since the last tree sent, or the whole tree.
+    void publish_accessibility_tree(bool whole_tree_requested);
+
+private:
+    struct PendingDOMMutation {
+        GC::Ref<Web::DOM::Node> target;
+        WebView::Mutation mutation;
+    };
+
+    PageClient(PageHost&, Web::PageId id, Optional<Web::HTML::CrossProcessId>);
+
+    virtual void visit_edges(JS::Cell::Visitor&) override;
+    virtual void finalize() override;
+
+    enum class FrameTimerPurpose {
+        Inactive,
+        LocalFallback,
+        CompositorWatchdog,
+    };
+
+    void request_rendering_opportunity_if_needed();
+    void hurry_outstanding_rendering_opportunity();
+    void device_pixels_per_css_pixel_did_change();
+    Optional<Web::Compositor::CompositorContextHandle&> rendering_opportunity_context();
+    bool hosted_documents_are_hidden() const;
+    void schedule_local_rendering_opportunity();
+    void schedule_compositor_watchdog();
+    void frame_timer_fired();
+    void grant_rendering_opportunity(double frame_time, Web::HTML::EventLoop::RenderingOpportunitySource, Optional<double> cadence, bool is_display_tick);
+    bool rendered_display_tick_already(double frame_time, double display_interval) const;
+    void deliver_granted_rendering_opportunity();
+
+    // ^PageClient
+    virtual bool is_connection_open() const override;
+    virtual void request_navigation_start(Web::HTML::LocalNavigable&, Web::NavigationTarget, URL::URL const& url, Utf16String navigation_id, Optional<Web::HTML::NavigationStartRequest>) override;
+    virtual void request_navigation_of_navigable(Web::HTML::Navigable&, Web::HTML::Navigable& source_navigable, Web::DOM::Document const& source_document, Web::HTML::PreparedNavigationDescriptor) override;
+    virtual void request_post_message_to_remote_navigable(Web::HTML::RemoteNavigable&, Web::HTML::PostedMessageDescriptor) override;
+    virtual void request_close_of_remote_traversable(Web::HTML::RemoteNavigable&, Web::HTML::LocalNavigable const& source, Web::HTML::NavigationSourceSnapshot) override;
+    virtual void request_focusing_steps_for_remote_navigable(Web::HTML::RemoteNavigable&, Web::HTML::FocusTrigger) override;
+    virtual void request_window_focus_of_remote_navigable(Web::HTML::RemoteNavigable&) override;
+    virtual void request_set_opener_of_remote_navigable(Web::HTML::RemoteNavigable&, Web::HTML::Navigable const& opener) override;
+    virtual void navigation_params_creation_finished(Web::HTML::LocalNavigable&, Web::HTML::NavigationPopulationRequest, Web::HTML::NavigationPopulationResult) override;
+    virtual void changing_navigable_history_job_reached_population(Web::HTML::CrossProcessId operation_id, Web::HTML::CrossProcessId navigable_id, Web::HTML::NavigationSourceSnapshot) override;
+    virtual void history_navigation_params_creation_finished(Web::HTML::CrossProcessId operation_id, Web::HTML::CrossProcessId navigable_id, Web::HTML::NavigationPopulationResult) override;
+    virtual void navigation_population_failed(Web::HTML::CrossProcessId, Utf16String const&) override;
+    virtual void page_did_change_hosted_navigable_state(Web::HTML::CrossProcessId navigable_id, Web::HTML::HostedNavigableState const&) override;
+    virtual void page_did_set_opener_browsing_context(Web::HTML::CrossProcessId navigable_id, Optional<Web::HTML::CrossProcessId> opener_navigable_id) override;
+    virtual void page_did_completely_finish_loading(Web::HTML::CrossProcessId navigable_id, Web::DOM::Document const&) override;
+    virtual void page_did_change_navigable_container_state(Web::HTML::CrossProcessId navigable_id, Web::HTML::ReplicatedContainerState const&) override;
+    virtual void page_did_create_populated_document_with_an_origin_of_its_own(Web::HTML::CrossProcessId navigable_id, Web::HTML::CrossProcessId document_id, Web::HTML::PopulatedDocumentOrigin, Web::HTML::EnvironmentId const& environment_id) override;
+    virtual void page_did_create_child_frame(Web::HTML::CrossProcessId parent_frame_id, Web::DOM::Document const& container_document, Web::HTML::CrossProcessId frame_id, Web::HTML::HostedNavigableState const&, Web::HTML::PendingSessionHistoryEntryDescriptor const& initial_history_entry, URL::Origin const& origin, Web::HTML::EnvironmentId const& environment_id, Web::HTML::CrossProcessId document_id) override;
+    virtual void page_did_update_child_frame_viewport(Web::HTML::CrossProcessId frame_id, Web::DevicePixelRect viewport_rect, Web::DevicePixelRect viewport_intersection) override;
+    virtual void page_did_update_frame_stats_displayed(Web::HTML::CrossProcessId, bool) override;
+    virtual void forward_mouse_event_to_remote_navigable(Web::PageId, Web::HTML::CrossProcessId navigable_id, Web::MouseEvent) override;
+    virtual void forward_pinch_event_to_remote_navigable(Web::PageId, Web::HTML::CrossProcessId navigable_id, Web::PinchEvent) override;
+    virtual void page_did_destroy_child_frame(Web::HTML::CrossProcessId frame_id) override;
+    virtual String dump_site_isolation_process_tree_for_testing() override;
+    virtual void crash_remote_frame_processes_for_testing() override;
+    virtual void close_tab_for_testing() override;
+    virtual void page_did_spoof_document_origin_for_testing(Web::HTML::EnvironmentSettingsObject const&, URL::Origin const&) override;
+    virtual void stop_loading_through_ui_process_for_testing() override;
+    virtual void reload_through_ui_process_for_testing(bool bypass_cache) override;
+    virtual void traverse_history_by_delta_through_ui_process_for_testing(i32 delta) override;
+    virtual void send_bad_ipc_message_for_testing(StringView kind, URL::URL const& active_document_url) override;
+    virtual Gfx::Palette palette() const override;
+    virtual Web::DevicePixelRect screen_rect() const override { return m_all_screen_rects[m_main_screen_index]; }
+    virtual Web::DevicePixelRect available_screen_rect() const override
+    {
+        if (m_main_screen_index < m_all_available_screen_rects.size())
+            return m_all_available_screen_rects[m_main_screen_index];
+        return screen_rect();
+    }
+    virtual size_t screen_count() const override { return m_all_screen_rects.size(); }
+    virtual Web::CSS::PreferredColorScheme preferred_color_scheme() const override { return m_preferred_color_scheme; }
+    virtual bool screen_shows_high_dynamic_range() const override { return m_screen_shows_high_dynamic_range; }
+    virtual Web::CSS::PreferredContrast preferred_contrast() const override { return m_preferred_contrast; }
+    virtual Web::CSS::PreferredMotion preferred_motion() const override { return m_preferred_motion; }
+    virtual void request_frame() override;
+    virtual void rendering_opportunity(i64 frame_time_nanoseconds, double frame_interval_milliseconds, double display_interval_milliseconds, Compositing::RenderingOpportunityFrameTime frame_time_kind) override;
+    virtual double rendering_frame_interval_in_milliseconds() const override { return m_last_rendering_opportunity_frame_interval; }
+    virtual void will_begin_rendering_update() override;
+    virtual bool has_rendering_opportunity() const override;
+    virtual void did_finish_rendering_update() override;
+    virtual void set_manual_rendering_opportunities(bool enabled) override;
+    virtual void inject_rendering_opportunity(double frame_time, Optional<double> cadence, bool is_display_tick) override;
+    virtual void page_did_change_title(Utf16String const&) override;
+    virtual void page_did_update_editing_history_state(bool can_undo, bool can_redo) override;
+    virtual void page_did_set_text_fragment_indication_visibility(bool) override;
+    virtual void page_did_request_certificate_warning(URL::URL const&, Web::HTML::CrossProcessId document_state_id) override;
+    virtual void page_did_request_resize_window(Gfx::IntSize, u64 completion_id) override;
+    virtual void page_did_request_reposition_window(Gfx::IntPoint, u64 completion_id) override;
+    virtual void page_did_request_restore_window() override;
+    virtual void page_did_request_maximize_window(u64 completion_id) override;
+    virtual void page_did_request_minimize_window() override;
+    virtual void page_did_request_fullscreen_window() override;
+    virtual void page_did_request_exit_fullscreen() override;
+    virtual void page_did_exit_picture_in_picture() override;
+    virtual void page_did_change_picture_in_picture_video_size(Gfx::IntSize) override;
+    virtual void page_did_change_picture_in_picture_player_controls_visibility(bool shown) override;
+    virtual void page_did_enter_tooltip_area(ByteString const&) override;
+    virtual void page_did_leave_tooltip_area() override;
+    virtual void page_did_click_link(Web::HTML::PreparedNavigationDescriptor, ByteString const& target, unsigned modifiers) override;
+    virtual void page_did_middle_click_link(Web::HTML::PreparedNavigationDescriptor, ByteString const& target, unsigned modifiers) override;
+    virtual void page_did_request_external_url(URL::URL const&, URL::Origin const& initiator_origin, bool has_transient_activation) override;
+    virtual void page_did_request_context_menu(Web::HTML::CrossProcessId local_root_id, Web::CSSPixelPoint, Web::ContextMenuForInputEventsTarget, Optional<Utf16String> misspelled_word, GC::Ptr<Web::DOM::Range> selected_text_range) override;
+    virtual void page_did_request_spelling_menu_action_for_testing(Web::SpellingMenuActionForTesting, u32 guess_index) override;
+    virtual void page_did_request_link_context_menu(Web::HTML::CrossProcessId local_root_id, Web::CSSPixelPoint, Web::HTML::PreparedNavigationDescriptor, ByteString const& target, unsigned modifiers, GC::Ptr<Web::DOM::Range> selected_text_range) override;
+    virtual void page_did_request_image_context_menu(Web::HTML::CrossProcessId local_root_id, Web::CSSPixelPoint, Web::HTML::PreparedNavigationDescriptor, ByteString const& target, unsigned modifiers, Optional<Gfx::Bitmap const*>, Optional<Web::HTML::PreparedNavigationDescriptor> link_navigation, Optional<String> image_mime_type) override;
+    virtual void page_did_request_media_context_menu(Web::HTML::CrossProcessId local_root_id, Web::CSSPixelPoint, ByteString const& target, unsigned modifiers, Web::Page::MediaContextMenu const&, Optional<Web::HTML::PreparedNavigationDescriptor>) override;
+    virtual void page_did_change_active_document_in_top_level_browsing_context(Web::DOM::Document&) override;
+    virtual void page_did_change_active_document_in_child_navigable(Web::DOM::Document&) override;
+    virtual void page_did_finish_loading(Web::HTML::CrossProcessId, Web::HTML::CrossProcessId) override;
+    virtual Optional<u64> page_did_start_download(Web::HTML::CrossProcessId navigable_id, Optional<Utf16String> const& navigation_id, URL::URL const&, ByteString const& suggested_filename, Optional<u64> total_size, HTTP::Cookie::SameSiteContext, int request_server_client_id, u64 request_server_request_id, ByteBuffer initial_data, JsonValue network_response) override;
+    virtual Optional<u64> page_did_start_download(URL::URL const&, ByteString const& suggested_filename, Optional<u64> total_size) override;
+    virtual void page_did_receive_download_data(u64 download_id, ByteBuffer data) override;
+    virtual void page_did_finish_download(u64 download_id) override;
+    virtual void page_did_fail_download(u64 download_id, String const& error) override;
+    virtual void page_did_register_download_controller(u64 download_id, GC::Ref<Web::Fetch::Infrastructure::FetchController>) override;
+    virtual void page_did_register_download_reader(u64 download_id, GC::Ref<Web::Streams::ReadableStreamDefaultReader>) override;
+    virtual void page_did_unregister_download(u64 download_id) override;
+    virtual bool page_is_download_canceled(u64 download_id) const override;
+    virtual void page_did_change_accessibility_focus(Web::UniqueNodeID) override;
+
+    virtual void page_did_request_alert(Utf16String const&) override;
+    virtual void page_did_request_before_unload(String const&) override;
+    virtual void page_did_request_confirm(Utf16String const&) override;
+    virtual void page_did_request_prompt(Utf16String const&, Utf16String const&) override;
+    virtual void page_did_request_set_prompt_text(Utf16String const&) override;
+    virtual void page_did_request_accept_dialog() override;
+    virtual void page_did_request_dismiss_dialog() override;
+    virtual void page_did_change_favicon(Gfx::Bitmap const&) override;
+    virtual Optional<Core::SharedVersion> page_did_request_document_cookie_version(Core::SharedVersionIndex document_index) override;
+    virtual void page_did_receive_document_cookie_version_buffer(Core::AnonymousBuffer document_cookie_version_buffer) override;
+    virtual void page_did_request_document_cookie_version_index(Web::HTML::EnvironmentSettingsObject const&, Web::UniqueNodeID document_id, String const& domain) override;
+    virtual void page_did_receive_document_cookie_version_index(Web::UniqueNodeID document_id, Core::SharedVersionIndex document_index) override;
+    virtual Vector<HTTP::Cookie::Cookie> page_did_request_all_cookies_webdriver(URL::URL const&, Optional<HTTP::Cookie::PartitionContext> const& partition_context = {}) override;
+    virtual Vector<HTTP::Cookie::Cookie> page_did_request_all_cookies_cookiestore(Web::HTML::EnvironmentId const&, URL::URL const&) override;
+    virtual Optional<HTTP::Cookie::Cookie> page_did_request_named_cookie(URL::URL const&, String const&) override;
+    virtual HTTP::Cookie::VersionedCookie page_did_request_cookie(Optional<Web::HTML::EnvironmentId> const&, URL::URL const&, HTTP::Cookie::Source) override;
+    virtual void page_did_set_cookie(Optional<Web::HTML::EnvironmentId> const&, URL::URL const&, HTTP::Cookie::ParsedCookie const&, HTTP::Cookie::Source) override;
+    virtual void page_did_update_cookie(HTTP::Cookie::Cookie const&) override;
+    virtual void page_did_expire_cookies_with_time_offset(AK::Duration) override;
+    virtual void page_did_delete_all_cookies(URL::URL const&, GC::Ref<Web::WebIDL::Promise>) override;
+    virtual void page_did_lose_request_server_connection(Optional<Utf16String> const& top_level_site) override;
+    virtual void page_did_simulate_worker_request_server_connection_loss() override;
+    virtual void page_did_store_hsts_policy_for_testing(String const&, HTTP::HSTS::ParsedHSTSPolicy const&) override;
+    virtual void page_did_request_clear_storage_for_testing(Web::StorageAPI::StorageEndpointType, Web::HTML::EnvironmentSettingsObject const&) override;
+    virtual bool page_did_is_known_hsts_host(String const&) override;
+    virtual u64 page_did_request_storage_usage(Web::HTML::EnvironmentId const& environment_id) override;
+    virtual void page_did_update_indexed_database(String const& url, Web::IndexedDB::TransactionChanges const&) override;
+    virtual void page_did_update_resource_count(i32) override;
+    virtual NewWebViewResult page_did_request_new_web_view(Web::HTML::ActivateTab, Web::HTML::WebViewHints, Web::HTML::CrossProcessId current_navigable_id, Utf16String const& name, Web::HTML::TokenizedFeature::NoOpener no_opener, Optional<URL::URL> current_document_base_url) override;
+    virtual void page_did_close() override;
+    virtual void page_did_change_needs_beforeunload_check(bool needs_beforeunload_check) override;
+    virtual void page_did_change_had_user_edits(bool had_user_edits) override;
+    virtual void page_did_consume_user_activation(Web::HTML::UserActivationConsumption) override;
+    virtual void page_did_notify_about_user_activation(Web::HTML::CrossProcessId document_id) override;
+    virtual void page_did_update_session_history_entry_navigation_api_state(Web::HTML::CrossProcessId navigable_id, Web::HTML::SessionHistoryEntryIdentity const& entry_identity, Web::HTML::StorageSerializationRecord const& navigation_api_state) override;
+    virtual void page_did_update_session_history_entry_scroll_restoration_mode(Web::HTML::CrossProcessId navigable_id, Web::HTML::SessionHistoryEntryIdentity const& entry_identity, Web::HTML::ScrollRestorationMode scroll_restoration_mode) override;
+    virtual void page_did_update_session_history_entry_document_state_navigable_target_name(Web::HTML::CrossProcessId navigable_id, Web::HTML::SessionHistoryEntryIdentity const& entry_identity, Utf16String const& navigable_target_name) override;
+    virtual void page_did_set_session_history_entry_document_state_reload_pending(Web::HTML::CrossProcessId navigable_id, Utf16String const& navigation_api_key, bool reload_pending) override;
+    virtual void page_did_request_set_system_focus(bool) override;
+    virtual void page_did_change_focused_navigable(Web::HTML::CrossProcessId) override;
+    virtual void page_did_request_key_event_for_testing(Web::KeyEvent) override;
+    virtual void page_did_request_webdriver_mouse_event(Web::HTML::CrossProcessId local_root_id, Web::MouseEvent, GC::Ref<GC::Function<void()>> on_handled) override;
+    virtual void page_did_request_pinch_event_for_testing(Web::HTML::CrossProcessId local_root_id, Web::PinchEvent const&) override;
+    virtual void page_did_request_set_system_visibility_state(Web::HTML::VisibilityState) override;
+    virtual void page_did_request_history_operation(Web::HTML::CrossProcessId operation_id, Web::HistoryOperationParameters) override;
+    virtual void page_did_revoke_history_operation(Web::HTML::CrossProcessId operation_id) override;
+    virtual void page_did_request_child_navigable_unload(Web::HTML::CrossProcessId navigable_id) override;
+    virtual void page_did_request_remote_document_abort(Web::HTML::CrossProcessId navigable_id) override;
+    virtual void page_did_request_remote_document_unfullscreen(Web::HTML::CrossProcessId navigable_id) override;
+    virtual void page_did_request_container_fullscreen(Web::HTML::CrossProcessId navigable_id, Web::HTML::CrossProcessId requesting_navigable_id, Web::Fullscreen::RequestType request_type) override;
+    virtual void page_did_request_container_unfullscreen(Web::HTML::CrossProcessId navigable_id) override;
+    virtual void page_did_complete_container_unfullscreen(Web::HTML::CrossProcessId requesting_navigable_id) override;
+    virtual void page_did_request_fully_exit_fullscreen() override;
+    virtual void page_did_request_unload_check(Web::HTML::CrossProcessId navigable_id, GC::Ref<GC::Function<void(Web::HTML::CheckIfUnloadingIsCanceledResult)>>) override;
+    virtual String page_did_request_ui_process_session_history_for_testing() override;
+    virtual bool page_did_request_has_populated_document_for_testing(Web::HTML::CrossProcessId navigable_id) override;
+    virtual Optional<Web::MediaSession::MediaSessionState> page_did_request_now_playing_state_for_testing() override;
+    virtual void page_did_trigger_now_playing_action_for_testing(Web::Bindings::MediaSessionAction action, Optional<double> seek_offset, Optional<double> seek_time, Optional<bool> fast_seek) override;
+    virtual bool page_did_request_tab_is_playing_audio_for_testing() override;
+    virtual bool page_did_request_tab_is_heard_playing_audio_for_testing() override;
+    virtual bool page_did_request_tab_is_using_microphone_for_testing() override;
+    virtual bool page_did_request_tab_is_capturing_audio_for_testing() override;
+    virtual void page_did_report_audio_capture_for_testing(Web::PageId labelled_page_id, bool capturing) override;
+    virtual void page_did_retire_picture_in_picture_window_for_testing() override;
+    virtual Vector<bool> page_did_request_tab_audibility_transitions_for_testing() override;
+    virtual bool page_did_request_capture_session_history_snapshot_for_testing() override;
+    virtual bool page_did_request_restore_session_history_snapshot_for_testing() override;
+    virtual bool page_did_request_record_reported_session_history_for_testing() override;
+    virtual String page_did_request_reported_session_history_for_testing() override;
+    virtual void request_file(Web::FileRequest) override;
+    virtual URL::BlobURLEntry::Token page_did_add_blob_url_entry(Web::HTML::EnvironmentSettingsObject const&, Utf16String const& url, Web::FileAPI::SerializedBlobURLEntry const&) override;
+    virtual void page_did_remove_blob_url_entries(Web::HTML::EnvironmentSettingsObject const&, Vector<Utf16String> const& urls) override;
+    virtual void page_did_retain_blob_url_token(Web::HTML::CrossProcessId navigable_id, URL::BlobURLEntry::Token) override;
+    virtual Optional<Web::FileAPI::SerializedBlobURLEntry> page_did_request_blob_url_entry(Utf16String const& url, Optional<URL::BlobURLEntry::Token> token) override;
+    virtual void page_did_request_color_picker(Color current_color) override;
+    virtual void page_did_request_date_picker(Utf16String input_type, Utf16String value, Utf16String minimum, Utf16String maximum) override;
+    virtual void page_did_request_file_picker(Web::HTML::FileFilter const& accepted_file_types, Web::HTML::AllowMultipleFiles) override;
+    virtual void page_did_show_validation_message(Web::HTML::CrossProcessId, Web::CSSPixelPoint, Utf16String) override;
+    virtual void page_did_request_select_dropdown(Web::HTML::CrossProcessId local_root_id, Web::CSSPixelPoint content_position, Web::CSSPixels minimum_width, Vector<Web::HTML::SelectItem> items) override;
+    virtual void page_did_request_geolocation_position(u64 request_id, Web::HTML::CrossProcessId requesting_document_id) override;
+    virtual void page_did_cancel_geolocation_position_request(u64 request_id) override;
+    virtual void page_did_start_geolocation_position_watch(u64 request_id, Web::HTML::CrossProcessId requesting_document_id) override;
+    virtual void page_did_stop_geolocation_position_watch(u64 request_id) override;
+    virtual void page_did_request_permission(u64 request_id, Web::HTML::CrossProcessId requesting_document_id, Utf16String const& name) override;
+    virtual Optional<Web::Permissions::PermissionSnapshot> page_did_request_permission_snapshot(URL::Origin const& top_level_origin) override;
+    virtual Optional<Web::Permissions::PermissionSnapshot> page_did_set_permission_for_testing(Web::HTML::CrossProcessId document_id, String const& name, String const& state) override;
+    virtual void page_did_set_next_permission_prompt_outcome_for_testing(String const& name, String const& outcome, bool held) override;
+    virtual void page_did_set_system_microphone_authorization_for_testing(String const& authorization, String const& answer, bool held) override;
+    virtual void page_did_release_system_microphone_answer_for_testing() override;
+    virtual String page_did_request_microphone_state_for_testing() override;
+    virtual void page_did_release_held_permission_prompt_for_testing(u32 waiters) override;
+    virtual Optional<Web::Permissions::PermissionSnapshot> page_did_advance_permission_clock_for_testing(u64 milliseconds) override;
+    virtual void page_did_request_show_notification(u64 notification_id, Web::HTML::CrossProcessId document_id, Web::NotificationsAPI::NotificationData const&, RefPtr<Gfx::Bitmap const> icon) override;
+    virtual void page_did_request_close_notification(u64 notification_id) override;
+    virtual void page_did_abandon_notification(u64 notification_id) override;
+    virtual void page_did_handle_notification_click(u64 notification_id, bool into_focus) override;
+    virtual String page_did_request_notifications_state_for_testing() override;
+    virtual void page_did_request_click_notification_for_testing(u64 notification_id) override;
+    virtual void page_did_request_click_notification_by_id_for_testing(u64 browser_notification_id) override;
+    virtual void page_did_request_dismiss_notification_for_testing(u64 notification_id) override;
+    virtual void page_did_request_hold_next_notification_show_for_testing() override;
+    virtual void page_did_request_fail_held_notification_show_for_testing() override;
+    virtual void page_did_finish_test(Utf16String const& text) override;
+    virtual void page_did_set_test_timeout(double milliseconds) override;
+    virtual void page_did_receive_reference_test_metadata(JsonValue) override;
+    virtual void page_did_set_browser_zoom(double factor) override;
+    virtual void page_did_set_device_pixel_ratio_for_testing(double ratio) override;
+    virtual void page_did_change_theme_color(Gfx::Color color) override;
+    virtual void page_did_change_background_color(Gfx::Color color) override;
+    virtual void page_did_insert_clipboard_item(Web::Clipboard::SystemClipboardItem const&, StringView presentation_style, Optional<Web::HTML::CrossProcessId> writing_document_id) override;
+    virtual void page_did_request_clipboard_entries_for_paste(u64 request_id) override;
+    virtual void page_did_request_clipboard_entries(u64 request_id, Web::HTML::CrossProcessId reading_document_id) override;
+    virtual void page_did_request_paste_from_clipboard_for_testing() override;
+    virtual void page_did_request_spell_check(u64 request_id, Utf16String const& text) override;
+    virtual void page_did_request_translation(Web::TranslationUnit const&) override;
+    virtual void page_did_request_page_translation_for_testing(String const& target_language) override;
+    virtual void page_did_request_writing_suggestion(u64 request_id, Utf16String const& text, u32 caret_offset) override;
+    virtual void page_did_request_primary_paste() override;
+    virtual void page_did_complete_paste_action() override;
+    virtual void page_did_update_primary_selection(Utf16String const&) override;
+    virtual NonnullRefPtr<Media::AudioOutputFactory> create_audio_output_factory() override;
+    virtual NonnullOwnPtr<MediaClient::RemotePlaybackManager> create_media_playback_manager() override;
+    virtual void rebind_media_playback_manager(MediaClient::RemotePlaybackManager&) override;
+    virtual NonnullRefPtr<Core::Promise<NonnullRefPtr<Audio::RecordStream>>> create_audio_record_stream(StringView device_id, Function<void(ReadonlyBytes, Audio::SampleSpecification const&)>) override;
+    virtual void page_did_change_media_session_state(Optional<Web::MediaSession::MediaSessionState> const&) override;
+    virtual void page_did_change_screen_wake_lock_state(Web::ScreenWakeLockState) override;
+    virtual void page_did_start_using_gamepads() override;
+    virtual void page_did_play_gamepad_effect(Web::Gamepad::GamepadHandle, Web::Gamepad::GamepadEffect const&) override;
+    virtual void page_did_request_stop_gamepad_effects(Web::Gamepad::GamepadHandle) override;
+    virtual Optional<Web::Gamepad::VirtualGamepad> create_virtual_gamepad() override;
+    virtual void set_virtual_gamepad_button(Web::Gamepad::GamepadHandle, i32 button, bool down) override;
+    virtual void set_virtual_gamepad_axis(Web::Gamepad::GamepadHandle, i32 axis, i16 value) override;
+    virtual void disconnect_virtual_gamepad(Web::Gamepad::GamepadHandle) override;
+    virtual Web::Gamepad::ReceivedRumbleEffects virtual_gamepad_received_rumble_effects(Web::Gamepad::GamepadHandle) override;
+    virtual void pump_gamepad_events() override;
+    virtual void reset_gamepad_access_for_testing() override;
+    virtual Web::PageClient::StartedWorkerAgent start_worker_agent(Web::HTML::WorkerAgentStartRequest&&) override;
+    virtual RefPtr<Web::HTML::DedicatedWorkerThreadLink> start_dedicated_worker(Web::HTML::WorkerAgentStartRequest&&) override;
+    virtual void close_worker_agent(Web::HTML::WorkerAgentId, Web::HTML::WorkerAgentOwnerToken) override;
+    virtual void page_did_mutate_dom(Utf16FlyString const& type, Web::DOM::Node const& target, Web::DOM::NodeList& added_nodes, Web::DOM::NodeList& removed_nodes, GC::Ptr<Web::DOM::Node> previous_sibling, GC::Ptr<Web::DOM::Node> next_sibling, Optional<Utf16FlyString> const& attribute_name) override;
+    virtual void flush_pending_dom_mutations() override;
+    virtual void page_did_change_accessibility_tree() override;
+    virtual void page_did_take_screenshot(Gfx::ShareableBitmap const& screenshot) override;
+    virtual void received_message_from_web_ui(Utf16String const& name, JS::Value data) override;
+    virtual void page_did_block_resource(URL::URL const&, StringView kind) override;
+    virtual void page_did_start_network_request(u64 request_id, URL::URL const&, ByteString const&, Vector<HTTP::Header> const&, ReadonlyBytes, Optional<String>, String const& referrer_policy, bool is_navigation_request, Web::Fetch::Infrastructure::Request::Priority) override;
+    virtual void page_did_receive_network_response_headers(u64 request_id, u32 status_code, Optional<String>, Vector<HTTP::Header> const&, Requests::CacheState) override;
+    virtual void page_did_receive_network_response_body(u64 request_id, ReadonlyBytes) override;
+    virtual void page_did_finish_network_request(u64 request_id, u64 body_size, Requests::RequestTimingInfo const&, Optional<Requests::NetworkError> const&) override;
+    virtual void page_did_register_javascript_source(Web::DOM::Document&, Web::HTML::ScriptRegistry::Description const&) override;
+    virtual void page_did_post_broadcast_channel_message(Web::HTML::PostedBroadcastChannelMessage const&) override;
+    virtual void page_did_report_navigation_violation_of_remote_client(Web::HTML::RemoteClientNavigation const&, u64 policy_index, Web::ContentSecurityPolicy::RemoteViolationDirective, bool url_is_https) override;
+    virtual void page_did_report_navigation_violation_of_container_document(Web::HTML::CrossProcessId navigable_id, Utf16String const& navigation_id, u64 policy_index, Web::ContentSecurityPolicy::RemoteViolationDirective, bool url_is_https) override;
+
+    void setup_palette();
+    ConnectionFromClient& client() const;
+    void send_dom_mutation(Web::DOM::Node const& target, WebView::Mutation mutation);
+    Optional<u64> prepare_text_fragment_generation(GC::Ptr<Web::DOM::Range>);
+
+    PageHost& m_owner;
+    GC::Ref<Web::Page> m_page;
+    RefPtr<Gfx::PaletteImpl> m_palette_impl;
+    Vector<Web::DevicePixelRect> m_all_screen_rects { Web::DevicePixelRect {} };
+    Vector<Web::DevicePixelRect> m_all_available_screen_rects { Web::DevicePixelRect {} };
+    size_t m_main_screen_index { 0 };
+    Web::DevicePixelSize m_viewport_size;
+    double m_device_pixel_ratio { 1.0 };
+    Optional<double> m_pending_device_pixel_ratio_for_testing;
+    Optional<double> m_pending_browser_zoom;
+    double m_zoom_level { 1.0 };
+    double m_maximum_frames_per_second { 60.0 };
+    bool m_frame_rate_capped { false };
+    Web::PageId m_id { 0 };
+    u64 m_next_delete_all_cookies_request_id { 1 };
+    u64 m_next_text_fragment_generation_id { 1 };
+    HashMap<u64, GC::Ref<Web::DOM::Range>> m_pending_text_fragment_generation_ranges;
+    HashMap<u64, GC::Ref<Web::WebIDL::Promise>> m_pending_delete_all_cookies_promises;
+    HashMap<Web::HTML::CrossProcessId, GC::Ref<GC::Function<void(Web::HTML::CheckIfUnloadingIsCanceledResult)>>> m_pending_unload_checks;
+    HashMap<u64, GC::Ref<Web::Fetch::Infrastructure::FetchController>> m_download_controllers;
+    HashMap<u64, GC::Ref<Web::Streams::ReadableStreamDefaultReader>> m_download_readers;
+    HashTable<u64> m_canceled_downloads;
+    bool m_has_focus { true };
+    bool m_is_closed { false };
+    bool m_did_start_using_gamepads { false };
+
+    Web::CSS::PreferredColorScheme m_preferred_color_scheme { Web::CSS::PreferredColorScheme::Auto };
+    bool m_screen_shows_high_dynamic_range { false };
+    Web::CSS::PreferredContrast m_preferred_contrast { Web::CSS::PreferredContrast::NoPreference };
+    Web::CSS::PreferredMotion m_preferred_motion { Web::CSS::PreferredMotion::NoPreference };
+
+    Core::AnonymousBuffer m_document_cookie_version_buffer;
+
+    RefPtr<WebDriverConnection> m_webdriver;
+    HashMap<u64, GC::Ref<Web::HTML::Navigable>> m_webdriver_input_commands;
+    HashMap<u64, GC::Ref<GC::Function<void()>>> m_pending_webdriver_mouse_events;
+    u64 m_next_webdriver_mouse_event_request_id { 0 };
+    RefPtr<WebUIConnection> m_web_ui;
+
+    // Weak, since the page can stop showing a document here without showing another, when another process hosts the
+    // tab's next document.
+    GC::Weak<WebContentConsoleClient> m_top_level_document_console_client;
+
+    RefPtr<Core::Timer> m_frame_timer;
+    FrameTimerPurpose m_frame_timer_purpose { FrameTimerPurpose::Inactive };
+    Optional<double> m_last_scheduled_frame_dispatch_time;
+    double m_last_rendering_opportunity_frame_interval { 1000.0 / 60.0 };
+    double m_compositor_watchdog_deadline { 0 };
+    bool m_rendering_update_requested { false };
+    bool m_compositor_rendering_opportunity_outstanding { false };
+    bool m_rendering_opportunity_granted { false };
+    bool m_rendering_opportunity_for_current_update { false };
+    bool m_manual_rendering_opportunities { false };
+    Optional<double> m_granted_rendering_opportunity_time;
+    // Cadence in milliseconds. Zero means uncapped. An absent value means the cadence is unknown.
+    Optional<double> m_granted_rendering_opportunity_cadence;
+    bool m_granted_rendering_opportunity_is_display_tick { false };
+    Optional<double> m_last_rendered_display_tick;
+    Web::HTML::EventLoop::RenderingOpportunitySource m_granted_rendering_opportunity_source { Web::HTML::EventLoop::RenderingOpportunitySource::LocalTimer };
+    Queue<PendingDOMMutation> m_pending_dom_mutations;
+    Optional<Web::HTML::CrossProcessId> m_pending_root_navigable_id;
+
+    RefPtr<Core::Timer> m_accessibility_update_timer;
+    // What the UI process was last sent of the accessibility tree, and the number of the last tree sent: Each change
+    // names the number of the tree it applies to, so the UI process can tell when it doesn't hold that tree.
+    Web::DOM::AccessibilityChangeTracker m_accessibility_change_tracker;
+    u64 m_accessibility_tree_sequence { 0 };
+    RefPtr<Core::Timer> m_accessibility_focus_timer;
+    Optional<i64> m_pending_accessibility_focus;
+
+    bool m_has_devtools_client { false };
+    NonnullRefPtr<Web::Fetch::Engine::NetworkActivityObservers> m_network_activity_observers;
+    bool m_devtools_takes_console_messages { false };
+    bool m_devtools_takes_console_errors { false };
+
+    // The latest output of the document that the tab shows and of its iframes, which a DevTools client gets once it
+    // asks, so it sees what the page output before.
+    WebView::ConsoleOutputBuffer m_console_output_buffer;
+};
+
+}

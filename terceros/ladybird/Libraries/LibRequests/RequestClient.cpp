@@ -1,0 +1,328 @@
+/*
+ * Copyright (c) 2018-2020, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/Atomic.h>
+#include <LibCore/EventLoop.h>
+#include <LibCore/Promise.h>
+#include <LibRequests/Request.h>
+#include <LibRequests/RequestClient.h>
+
+namespace Requests {
+
+static u64 take_transport_epoch()
+{
+    static Atomic<u64> s_next_transport_epoch { 1 };
+    return s_next_transport_epoch.fetch_add(1);
+}
+
+RequestClient::RequestClient(NonnullOwnPtr<IPC::Transport> transport)
+    : IPC::ConnectionToServer<RequestClientEndpoint, RequestServerEndpoint>(*this, move(transport))
+    , m_transport_epoch(take_transport_epoch())
+{
+    m_request_server_client_id = send_sync<Messages::RequestServer::GetClientId>()->client_id();
+}
+
+RequestClient::RequestClient(NonnullOwnPtr<IPC::Transport> transport, int client_id)
+    : IPC::ConnectionToServer<RequestClientEndpoint, RequestServerEndpoint>(*this, move(transport))
+    , m_request_server_client_id(client_id)
+    , m_transport_epoch(take_transport_epoch())
+{
+}
+
+RequestClient::~RequestClient() = default;
+
+void RequestClient::die()
+{
+    for (auto& [id, request] : m_requests) {
+        if (request)
+            request->did_finish({}, {}, {}, NetworkError::RequestServerDied);
+    }
+
+    auto websockets = move(m_websockets);
+
+    m_requests.clear();
+    m_websockets.clear();
+
+    auto host_lookups = move(m_host_lookups);
+    for (auto& [id, on_resolved] : host_lookups)
+        on_resolved({});
+
+    for (auto& [id, websocket] : websockets) {
+        auto ready_state = websocket->ready_state();
+        websocket->detach_from_client({});
+        websocket->set_ready_state(WebSocket::ReadyState::Closed);
+
+        auto error = ready_state == WebSocket::ReadyState::Connecting
+            ? WebSocket::Error::CouldNotEstablishConnection
+            : WebSocket::Error::ServerClosedSocket;
+        websocket->did_error({}, to_underlying(error));
+        websocket->did_close({}, to_underlying(::WebSocket::CloseStatusCode::AbnormalClosure), {}, false);
+    }
+
+    if (auto request_server_died_callback = move(on_request_server_died)) {
+        Core::deferred_invoke([request_server_died_callback = move(request_server_died_callback)]() mutable {
+            request_server_died_callback();
+        });
+    }
+}
+
+RefPtr<Request> RequestClient::start_request(ByteString const& method, URL::URL const& url, HTTP::Cookie::SameSiteContext same_site_context, Optional<HTTP::HeaderList const&> request_headers, ReadonlyBytes request_body, HTTP::CacheMode cache_mode, HTTP::Cookie::IncludeCredentials include_credentials, TransferLease transfer_lease, Optional<u32> address_selection_hint, CacheMissNotification cache_miss_notification, u64 originating_page_id, Optional<HTTP::NetworkIsolationKey> network_isolation_key)
+{
+    auto request_id = m_next_request_id++;
+    auto headers = request_headers.map([](auto const& headers) { return headers.headers().span(); }).value_or({});
+
+    auto transfer_lease_key = transfer_lease == TransferLease::Yes
+        ? Optional<RequestTransferLeaseKey> { { m_request_server_client_id, request_id } }
+        : Optional<RequestTransferLeaseKey> {};
+    IPCProxy::async_start_request(request_id, method, url, headers, request_body, cache_mode, move(network_isolation_key), include_credentials, transfer_lease_key.has_value(), address_selection_hint, cache_miss_notification == CacheMissNotification::Yes, originating_page_id, same_site_context);
+    auto request = Request::create_from_id({}, *this, request_id, move(transfer_lease_key));
+    m_requests.set(request_id, request);
+    return request;
+}
+
+RefPtr<Request> RequestClient::adopt_request(int source_client_id, u64 source_request_id, TransferLease transfer_lease, Optional<int> owner_client_id)
+{
+    auto request_id = m_next_request_id++;
+
+    auto transfer_lease_key = transfer_lease == TransferLease::Yes
+        ? Optional<RequestTransferLeaseKey> { { source_client_id, source_request_id } }
+        : Optional<RequestTransferLeaseKey> {};
+    IPCProxy::async_adopt_request(source_client_id, source_request_id, request_id, transfer_lease_key.has_value(), owner_client_id);
+    auto request = Request::create_from_id({}, *this, request_id, move(transfer_lease_key));
+    m_requests.set(request_id, request);
+    return request;
+}
+
+ErrorOr<ExportedRequest> RequestClient::export_request(Request& request)
+{
+    auto exported = IPCProxy::export_request(request.id());
+    if (!exported.has_value())
+        return Error::from_string_literal("RequestServer refused to export the request");
+    m_requests.remove(request.id());
+    return exported.release_value();
+}
+
+RefPtr<Request> RequestClient::import_request(ExportedRequest exported, TransferLease transfer_lease)
+{
+    auto request_id = m_next_request_id++;
+
+    auto transfer_lease_key = transfer_lease == TransferLease::Yes
+        ? Optional<RequestTransferLeaseKey> { { m_request_server_client_id, request_id } }
+        : Optional<RequestTransferLeaseKey> {};
+    IPCProxy::async_import_request(request_id, move(exported), transfer_lease_key.has_value());
+    auto request = Request::create_from_id({}, *this, request_id, move(transfer_lease_key));
+    m_requests.set(request_id, request);
+    return request;
+}
+
+bool RequestClient::stop_request(Badge<Request>, Request& request)
+{
+    auto stopped_request = m_requests.take(request.id());
+    if (!stopped_request.has_value())
+        return false;
+
+    // This is sent asynchronously so that stopping a request whose RequestServer connection has been lost does not
+    // crash on a synchronous send to a dead connection.
+    async_stop_request(request.id());
+    return true;
+}
+
+void RequestClient::release_request_transfer_lease(Badge<Request>, Request& request, RequestTransferLeaseKey transfer_lease)
+{
+    release_request_transfer_lease(transfer_lease);
+
+    // A request that has finished stays registered only for the sake of its lease — so it goes along with the lease.
+    if (request.is_finished())
+        m_requests.remove(request.id());
+}
+
+void RequestClient::release_request_transfer_lease(RequestTransferLeaseKey transfer_lease)
+{
+    async_release_request_transfer_lease(transfer_lease.source_client_id, transfer_lease.source_request_id);
+}
+
+void RequestClient::ensure_connection(URL::URL const& url, RequestServer::CacheLevel cache_level)
+{
+    auto request_id = m_next_request_id++;
+    async_ensure_connection(request_id, url, cache_level);
+}
+
+void RequestClient::resolve_host(ByteString const& host, Function<void(Vector<ByteString>)> on_resolved)
+{
+    auto lookup_id = m_next_host_lookup_id++;
+    m_host_lookups.set(lookup_id, move(on_resolved));
+    async_resolve_host(lookup_id, host);
+}
+
+void RequestClient::host_resolved(u64 lookup_id, Vector<ByteString> addresses)
+{
+    if (auto on_resolved = m_host_lookups.take(lookup_id); on_resolved.has_value())
+        (*on_resolved)(move(addresses));
+}
+
+void RequestClient::request_requires_network(u64 request_id)
+{
+    if (auto request = m_requests.get(request_id); request.has_value()) {
+        if ((*request)->on_requires_network)
+            (*request)->on_requires_network();
+    }
+}
+
+void RequestClient::request_upload_progress(u64 request_id, u64 bytes_sent)
+{
+    if (auto request = m_requests.get(request_id); request.has_value()) {
+        if ((*request)->on_upload_progress)
+            (*request)->on_upload_progress(bytes_sent);
+    }
+}
+
+void RequestClient::request_started(u64 request_id, IPC::File response_file)
+{
+    auto request = m_requests.get(request_id);
+    if (!request.has_value()) {
+        warnln("Received response for non-existent request {}", request_id);
+        return;
+    }
+
+    auto response_fd = response_file.take_fd();
+    request.value()->set_request_fd({}, response_fd);
+}
+
+void RequestClient::request_body_file_available(u64 request_id, IPC::File response_file, u64 offset, u64 size)
+{
+    auto request = m_requests.get(request_id);
+    if (!request.has_value()) {
+        warnln("Received response body file for non-existent request {}", request_id);
+        return;
+    }
+
+    auto response_fd = response_file.take_fd();
+    request.value()->set_request_body_file({}, response_fd, offset, size);
+}
+
+void RequestClient::request_cached_body_file_available(u64 request_id, IPC::File response_file, u64 offset, u64 size)
+{
+    auto request = m_requests.get(request_id);
+    if (!request.has_value()) {
+        warnln("Received cached response body file for non-existent request {}", request_id);
+        return;
+    }
+
+    auto response_fd = response_file.take_fd();
+    request.value()->set_request_cached_body_file({}, response_fd, offset, size);
+}
+
+void RequestClient::request_finished(u64 request_id, u64 total_size, RequestTimingInfo timing_info, Optional<NetworkError> network_error)
+{
+    RefPtr<Request> request = m_requests.get(request_id).value_or(nullptr);
+    if (!request)
+        return;
+
+    request->did_finish({}, total_size, timing_info, network_error);
+
+    // A leased request stays registered after it finishes — just as RequestServer keeps a leased request alive after
+    // completion: Another client may still adopt it — and the request_transferred that follows has to find the request
+    // here to tear it down. It's unregistered when it's transferred, when its lease is released, or when it's stopped.
+    // Gecko and WebKit work the same way: The process a navigation response is taken away from keeps its state for the
+    // request until the one notification telling it to let go — and nothing tears it down before that notification.
+    if (!request->has_transfer_lease())
+        m_requests.remove(request_id);
+}
+
+void RequestClient::headers_became_available(u64 request_id, URL::URL url, Vector<HTTP::Header> response_headers, Optional<u32> status_code, Optional<String> reason_phrase, CacheState cache_state, ByteString http_version)
+{
+    RefPtr<Request> request = m_requests.get(request_id).value_or(nullptr);
+    if (request)
+        request->did_receive_headers({}, move(url), HTTP::HeaderList::create(move(response_headers)), status_code, reason_phrase, cache_state, move(http_version));
+    else
+        warnln("Received headers for non-existent request {}", request_id);
+}
+
+void RequestClient::request_transferred(u64 request_id)
+{
+    auto request = m_requests.take(request_id);
+    if (!request.has_value())
+        return;
+
+    (*request)->did_transfer({});
+}
+
+RefPtr<WebSocket> RequestClient::websocket_connect(URL::URL const& url, Optional<HTTP::NetworkIsolationKey> const& network_isolation_key, ByteString const& origin, Vector<ByteString> const& protocols, Vector<ByteString> const& extensions, HTTP::HeaderList const& request_headers, u64 originating_page_id, HTTP::Cookie::SameSiteContext same_site_context)
+{
+    auto websocket_id = m_next_websocket_id++;
+    IPCProxy::async_websocket_connect(websocket_id, url, network_isolation_key, origin, protocols, extensions, request_headers.headers(), originating_page_id, same_site_context);
+    auto connection = WebSocket::create_from_id({}, *this, websocket_id);
+    m_websockets.set(websocket_id, connection);
+    return connection;
+}
+
+void RequestClient::websocket_connected(u64 websocket_id)
+{
+    if (auto connection = m_websockets.get(websocket_id); connection.has_value())
+        (*connection)->did_open({});
+}
+
+void RequestClient::websocket_received(u64 websocket_id, bool is_text, ByteBuffer data)
+{
+    if (auto connection = m_websockets.get(websocket_id); connection.has_value())
+        (*connection)->did_receive({}, move(data), is_text);
+}
+
+void RequestClient::websocket_transmitted(u64 websocket_id, u64 message_byte_count)
+{
+    if (auto connection = m_websockets.get(websocket_id); connection.has_value())
+        (*connection)->did_transmit({}, message_byte_count);
+}
+
+void RequestClient::websocket_received_shared(u64 websocket_id, bool is_text, Core::AnonymousBuffer data)
+{
+    auto connection = m_websockets.get(websocket_id);
+    if (!connection.has_value())
+        return;
+
+    auto byte_buffer_or_error = ByteBuffer::copy(data.bytes());
+    if (byte_buffer_or_error.is_error()) {
+        // NB: A WebSocket can't skip a message — so, the connection closes with 1009 (message too big) instead. And the
+        // Closing state keeps the messages that are already on their way here from reaching the page.
+        dbgln("websocket_received_shared: failed to copy {} bytes from shared buffer: {}", data.size(), byte_buffer_or_error.error());
+        (*connection)->set_ready_state(WebSocket::ReadyState::Closing);
+        (*connection)->did_error({}, to_underlying(WebSocket::Error::ServerClosedSocket));
+        (*connection)->close(1009, "Message too big");
+        return;
+    }
+    (*connection)->did_receive({}, byte_buffer_or_error.release_value(), is_text);
+}
+
+void RequestClient::websocket_errored(u64 websocket_id, i32 message)
+{
+    if (auto connection = m_websockets.get(websocket_id); connection.has_value())
+        (*connection)->did_error({}, message);
+}
+
+void RequestClient::websocket_closed(u64 websocket_id, u16 code, ByteString reason, bool clean)
+{
+    if (auto connection = m_websockets.take(websocket_id); connection.has_value()) {
+        (*connection)->set_ready_state(WebSocket::ReadyState::Closed);
+        (*connection)->did_close({}, code, move(reason), clean);
+    }
+}
+
+void RequestClient::websocket_ready_state_changed(u64 websocket_id, u32 ready_state)
+{
+    VERIFY(ready_state <= static_cast<u32>(WebSocket::ReadyState::Closed));
+
+    if (auto connection = m_websockets.get(websocket_id); connection.has_value())
+        (*connection)->set_ready_state(static_cast<WebSocket::ReadyState>(ready_state));
+}
+
+void RequestClient::websocket_subprotocol(u64 websocket_id, ByteString subprotocol)
+{
+    if (auto connection = m_websockets.get(websocket_id); connection.has_value()) {
+        (*connection)->set_subprotocol_in_use(move(subprotocol));
+    }
+}
+
+}

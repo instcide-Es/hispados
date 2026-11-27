@@ -1,0 +1,76 @@
+/*
+ * Copyright (c) 2018-2020, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Utf16View.h>
+#include <LibWeb/HTML/HTMLElement.h>
+#include <LibWeb/HTML/HTMLHyperlinkElementUtils.h>
+
+namespace Web::HTML {
+
+class HTMLAnchorElement final
+    : public HTMLElement
+    , public HTMLHyperlinkElementUtils {
+    WEB_WRAPPABLE(HTMLAnchorElement, HTMLElement);
+    GC_DECLARE_ALLOCATOR(HTMLAnchorElement);
+
+public:
+    virtual ~HTMLAnchorElement() override;
+
+    virtual Optional<URL::Origin> extract_an_origin() const override { return hyperlink_element_utils_extract_an_origin(); }
+
+    Utf16String rel() const { return get_attribute_value(HTML::AttributeNames::rel); }
+    void set_rel(Utf16View rel) { set_attribute_value(HTML::AttributeNames::rel, rel); }
+
+    Utf16String download() const { return get_attribute_value(HTML::AttributeNames::download); }
+    void set_download(Utf16View download) { set_attribute_value(HTML::AttributeNames::download, download); }
+
+    GC::Ref<DOM::DOMTokenList> rel_list();
+
+    Utf16String text() const;
+    void set_text(Utf16View);
+
+    // ^EventTarget
+    // https://html.spec.whatwg.org/multipage/interaction.html#the-tabindex-attribute:the-a-element
+    virtual bool is_focusable() const override
+    {
+        return (Base::is_focusable() || has_attribute(HTML::AttributeNames::href))
+            && meets_focusable_area_rendering_requirements();
+    }
+
+    virtual bool is_html_anchor_element() const override { return true; }
+
+private:
+    HTMLAnchorElement(DOM::Document&, DOM::QualifiedName);
+
+    virtual void visit_edges(Cell::Visitor&) override;
+
+    // ^DOM::EventTarget
+    virtual bool has_activation_behavior() const override;
+    virtual void activation_behavior(Web::DOM::Event const&) override;
+
+    // ^DOM::Element
+    virtual void attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_) override;
+    virtual i32 default_tab_index_value() const override;
+
+    // ^HTML::HyperlinkElementUtils
+    virtual DOM::Element& hyperlink_element_utils_element() override { return *this; }
+    virtual DOM::Element const& hyperlink_element_utils_element() const override { return *this; }
+
+    virtual Optional<ARIA::Role> default_role() const override;
+
+    GC::Ptr<DOM::DOMTokenList> m_rel_list;
+};
+
+}
+
+namespace Web::DOM {
+
+template<>
+inline bool Node::fast_is<HTML::HTMLAnchorElement>() const { return is_html_anchor_element(); }
+
+}

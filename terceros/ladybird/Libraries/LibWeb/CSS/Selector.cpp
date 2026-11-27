@@ -1,0 +1,164 @@
+/*
+ * Copyright (c) 2018-2020, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2021-2026, Sam Atkins <sam@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibWeb/CSS/RustRule.h>
+#include <LibWeb/CSS/Selector.h>
+#include <LibWeb/CSS/StyleSheetState.h>
+#include <LibWeb/SelectorRustFFI.h>
+
+namespace Web::CSS {
+
+static_assert(sizeof(Utf16FlyString) == sizeof(uintptr_t));
+
+u8 pseudo_element_to_ffi(Optional<PseudoElement> pseudo_element)
+{
+    if (!pseudo_element.has_value())
+        return NumericLimits<u8>::max();
+    if (*pseudo_element == PseudoElement::UnknownWebKit)
+        return to_underlying(PseudoElement::KnownPseudoElementCount);
+    VERIFY(*pseudo_element < PseudoElement::KnownPseudoElementCount);
+    return to_underlying(*pseudo_element);
+}
+
+Optional<PseudoElement> pseudo_element_from_ffi(u8 pseudo_element)
+{
+    if (pseudo_element == NumericLimits<u8>::max())
+        return {};
+    if (pseudo_element == to_underlying(PseudoElement::KnownPseudoElementCount))
+        return PseudoElement::UnknownWebKit;
+    VERIFY(pseudo_element < to_underlying(PseudoElement::KnownPseudoElementCount));
+    return static_cast<PseudoElement>(pseudo_element);
+}
+
+Selector::Selector(SelectorFFI::RustSelector* selector)
+    : m_rust_selector(selector)
+{
+    VERIFY(m_rust_selector);
+}
+
+NonnullRefPtr<Selector> Selector::create(SelectorFFI::RustSelector* selector)
+{
+    return adopt_ref(*new Selector(selector));
+}
+
+Selector::~Selector()
+{
+    SelectorFFI::rust_selector_destroy(m_rust_selector);
+}
+
+bool Selector::contains_named_namespace() const
+{
+    return SelectorFFI::rust_selector_contains_named_namespace(m_rust_selector);
+}
+
+u32 Selector::specificity() const
+{
+    return SelectorFFI::rust_selector_specificity(m_rust_selector);
+}
+
+static Vector<u16> to_code_units(Utf16View view)
+{
+    Vector<u16> result;
+    result.ensure_capacity(view.length_in_code_units());
+    for (size_t i = 0; i < view.length_in_code_units(); ++i)
+        result.unchecked_append(view.code_unit_at(i));
+    return result;
+}
+
+Optional<SelectorList> parse_selector_list_in_rust(Utf16View input, RustNamespaceContext const& namespaces, bool is_relative, bool is_forgiving)
+{
+    auto* parsed = SelectorFFI::rust_selector_parse_with_namespace_context(
+        {
+            .latin1 = input.has_latin1_storage() ? input.latin1_span().data() : nullptr,
+            .utf16 = input.has_latin1_storage() ? nullptr : reinterpret_cast<u16 const*>(input.utf16_span().data()),
+            .length = input.length_in_code_units(),
+        },
+        namespaces.handle(), is_relative, is_forgiving);
+    if (!parsed)
+        return {};
+
+    auto selectors = selector_list_from_rust(parsed);
+    SelectorFFI::rust_parsed_selector_list_destroy(parsed);
+    return selectors;
+}
+
+SelectorList selector_list_from_rust(SelectorFFI::RustParsedSelectorList const* parsed)
+{
+    SelectorList selectors;
+    auto selector_count = SelectorFFI::rust_parsed_selector_list_length(parsed);
+    selectors.ensure_capacity(selector_count);
+    for (size_t index = 0; index < selector_count; ++index)
+        selectors.append(Selector::create(SelectorFFI::rust_parsed_selector_list_selector(parsed, index)));
+    return selectors;
+}
+
+static SelectorList take_selector_list(SelectorFFI::RustParsedSelectorList* parsed)
+{
+    auto selectors = selector_list_from_rust(parsed);
+    SelectorFFI::rust_parsed_selector_list_destroy(parsed);
+    return selectors;
+}
+
+SelectorList matching_selectors_for_rule(RustRule const& rule)
+{
+    auto* bound = Parser::ValueParserFFI::rust_rule_matching_selectors(rule.handle());
+    return take_selector_list(static_cast<SelectorFFI::RustParsedSelectorList*>(bound));
+}
+
+static Vector<SelectorFFI::StringView> namespace_prefixes_mapping_to_default(StyleSheetState const& style_sheet, Vector<Vector<u16>>& storage)
+{
+    Vector<SelectorFFI::StringView> prefixes;
+    auto default_namespace = style_sheet.default_namespace();
+    if (!default_namespace.has_value())
+        return prefixes;
+    style_sheet.for_each_namespace([&](Utf16View prefix, Utf16View uri) {
+        if (uri == default_namespace->view())
+            storage.append(to_code_units(prefix));
+    });
+    prefixes.ensure_capacity(storage.size());
+    for (auto const& prefix : storage)
+        prefixes.append({ prefix.data(), prefix.size() });
+    return prefixes;
+}
+
+void Selector::serialize_to(Utf16StringBuilder& builder, StyleSheetState const* style_sheet) const
+{
+    Vector<Vector<u16>> prefix_storage;
+    Vector<SelectorFFI::StringView> prefixes;
+    if (style_sheet)
+        prefixes = namespace_prefixes_mapping_to_default(*style_sheet, prefix_storage);
+    auto text = Utf16String::adopt_raw(SelectorFFI::rust_selector_serialize(
+        m_rust_selector, style_sheet && style_sheet->default_namespace().has_value(), prefixes.data(), prefixes.size()));
+    builder.append(text);
+}
+
+Utf16String Selector::serialize() const
+{
+    Utf16StringBuilder builder;
+    serialize_to(builder);
+    return builder.to_string();
+}
+
+Utf16String serialize_a_group_of_selectors(SelectorList const& selectors, StyleSheetState const* style_sheet)
+{
+    Utf16StringBuilder builder;
+    for (size_t index = 0; index < selectors.size(); ++index) {
+        if (index != 0)
+            builder.append_ascii(", "sv);
+        selectors[index]->serialize_to(builder, style_sheet);
+    }
+    return builder.to_string();
+}
+
+Utf16String Selector::PseudoElementSelector::serialize() const
+{
+    if (!m_serialized.is_empty() || m_type == PseudoElement::UnknownWebKit)
+        return m_serialized;
+    return Utf16String::formatted("::{}", pseudo_element_name(m_type));
+}
+
+}

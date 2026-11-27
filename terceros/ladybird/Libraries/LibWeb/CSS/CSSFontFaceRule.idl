@@ -1,0 +1,5 @@
+// https://drafts.csswg.org/css-fonts/#om-fontface
+[Exposed=Window, ImplementedIn=Rust]
+interface CSSFontFaceRule : CSSRule {
+    [SameObject, PutForwards=cssText] readonly attribute CSSFontFaceDescriptors style;
+};

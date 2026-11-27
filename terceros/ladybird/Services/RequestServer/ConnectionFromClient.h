@@ -1,0 +1,183 @@
+/*
+ * Copyright (c) 2018-2020, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Badge.h>
+#include <AK/ByteBuffer.h>
+#include <AK/HashMap.h>
+#include <AK/HashTable.h>
+#include <AK/Optional.h>
+#include <AK/Time.h>
+#include <AK/Vector.h>
+#include <LibCore/AnonymousBuffer.h>
+#include <LibCore/Timer.h>
+#include <LibHTTP/Cache/CacheMode.h>
+#include <LibHTTP/Cache/DiskCacheSettings.h>
+#include <LibHTTP/Cache/Utilities.h>
+#include <LibHTTP/Forward.h>
+#include <LibHTTP/Proxy.h>
+#include <LibIPC/ConnectionFromClient.h>
+#include <LibRequests/RequestTransferLease.h>
+#include <LibRequests/WebSocket.h>
+#include <LibWebSocket/WebSocket.h>
+#include <RequestServer/Forward.h>
+#include <RequestServer/IsPrivate.h>
+#include <RequestServer/RequestClientEndpoint.h>
+#include <RequestServer/RequestServerEndpoint.h>
+#include <RequestServer/SiteBinding.h>
+
+namespace RequestServer {
+
+// Cap on an AIA response: these carry one DER or PKCS#7 certificate bundle, never anything large.
+constexpr inline size_t max_aia_response_size = 64 * KiB;
+
+struct AIAFetch {
+    AK_ALLOC_WITH_KMALLOC;
+
+    ByteString url;
+    ByteBuffer body;
+    Vector<u64> request_ids;
+    curl_slist* resolve_list { nullptr };
+};
+
+// Diagnostics hook shared with the control connection; only does anything under REQUESTSERVER_WIRE_DEBUG.
+void note_event_tick(StringView label);
+
+class ConnectionFromClient final
+    : public IPC::ConnectionFromClient<RequestClientEndpoint, RequestServerEndpoint> {
+    C_OBJECT(ConnectionFromClient);
+
+    friend class ControlConnectionFromClient;
+
+public:
+    using ConnectionMap = HashMap<int, NonnullRefPtr<ConnectionFromClient>>;
+
+    struct RequestTransferLease {
+        NonnullRefPtr<ConnectionFromClient> owner;
+        u64 request_id { 0 };
+        // The bound client that may adopt the request, until it does or disconnects.
+        Optional<int> adopter_client_id {};
+    };
+
+    using RequestTransferLeaseMap = HashMap<Requests::RequestTransferLeaseKey, RequestTransferLease>;
+
+    ~ConnectionFromClient() override;
+
+    virtual void die() override;
+
+    bool websocket_retrieved_http_cookie(Badge<ControlConnectionFromClient>, u64 websocket_id, u64 cookie_request_id, String cookie);
+
+    IsPrivate is_private() const { return m_is_private; }
+
+    // Lets a bound client make requests for documents of frame_site under a top-level document of top_level_site. A
+    // frame site of nothing stands for documents with opaque origins.
+    void bind_to_site(Badge<ControlConnectionFromClient>, Utf16String const& top_level_site, Optional<Utf16String> const& frame_site);
+
+    void start_revalidation_request(Badge<Request>, HTTP::NetworkIsolationKey, ByteString method, URL::URL, NonnullRefPtr<HTTP::HeaderList> request_headers, ByteBuffer request_body, HTTP::Cookie::IncludeCredentials, HTTP::Cookie::SameSiteContext);
+    void request_complete(Badge<Request>, Request const&);
+    void fetch_aia_intermediate(Badge<Request>, ByteString const& url, u64 for_request_id);
+
+private:
+    ConnectionFromClient(NonnullOwnPtr<IPC::Transport>, IsPrivate, SiteBinding, ConnectionMap&, RequestTransferLeaseMap&, Optional<HTTP::DiskCache&>);
+
+    bool may_use_network_isolation_key(HTTP::NetworkIsolationKey const&, URL::URL const* request_url = nullptr) const;
+
+    virtual Messages::RequestServer::IsSupportedProtocolResponse is_supported_protocol(ByteString) override;
+    virtual Messages::RequestServer::GetClientIdResponse get_client_id() override;
+    virtual void start_request(u64 request_id, ByteString, URL::URL, Vector<HTTP::Header>, ByteBuffer, HTTP::CacheMode, Optional<HTTP::NetworkIsolationKey>, HTTP::Cookie::IncludeCredentials, bool create_transfer_lease, Optional<u32> address_selection_hint, bool notify_on_cache_miss, u64 originating_page_id, HTTP::Cookie::SameSiteContext) override;
+    virtual void adopt_request(int source_client_id, u64 source_request_id, u64 target_request_id, bool preserve_transfer_lease, Optional<int> owner_client_id) override;
+    virtual void release_request_transfer_lease(int source_client_id, u64 source_request_id) override;
+    virtual Messages::RequestServer::StopRequestResponse stop_request(u64 request_id) override;
+    virtual Messages::RequestServer::ExportRequestResponse export_request(u64 request_id) override;
+    virtual void import_request(u64 request_id, Requests::ExportedRequest, bool create_transfer_lease) override;
+    virtual void ensure_connection(u64 request_id, URL::URL url, ::RequestServer::CacheLevel cache_level) override;
+    virtual void resolve_host(u64 lookup_id, ByteString host) override;
+
+    virtual void websocket_connect(u64 websocket_id, URL::URL, Optional<HTTP::NetworkIsolationKey>, ByteString, Vector<ByteString>, Vector<ByteString>, Vector<HTTP::Header>, u64 originating_page_id, HTTP::Cookie::SameSiteContext) override;
+    virtual void websocket_send(u64 websocket_id, bool, ByteBuffer) override;
+    virtual void websocket_send_shared(u64 websocket_id, bool, Core::AnonymousBuffer) override;
+    virtual void websocket_close(u64 websocket_id, u16, ByteString) override;
+
+    static int on_socket_callback(void*, int sockfd, int what, void* user_data, void*);
+    static int on_timeout_callback(void*, long timeout_ms, void* user_data);
+    bool is_live_request_id(u64 request_id) const;
+    void cancel_owned_work();
+    void check_active_requests();
+    void complete_aia_fetch(void* easy_handle, int result_code);
+    void fail_websocket(u64 websocket_id, Requests::WebSocket::Error);
+    size_t websocket_count() const;
+    size_t total_websocket_count() const;
+    void connect_websocket(u64 websocket_id, u64 originating_page_id, URL::URL, ByteString origin, Vector<ByteString> protocols, Vector<ByteString> extensions, Vector<HTTP::Header> request_headers);
+    void look_up_websocket_host(u64 websocket_id, u64 originating_page_id, URL::URL, ByteString origin, Vector<ByteString> protocols, Vector<ByteString> extensions, Vector<HTTP::Header> additional_request_headers, Optional<HTTP::Proxy>);
+    void open_websocket(u64 websocket_id, u64 originating_page_id, URL::URL, ByteString origin, Vector<ByteString> protocols, Vector<ByteString> extensions, Vector<HTTP::Header> additional_request_headers, Optional<HTTP::Proxy>, RefPtr<DNS::LookupResult const>);
+
+    IsPrivate m_is_private { IsPrivate::No };
+
+    SiteBinding m_site_binding { SiteBinding::Bound };
+    struct BoundSite {
+        Utf16String top_level_site;
+        Utf16String frame_site;
+
+        bool operator==(BoundSite const&) const = default;
+    };
+    struct BoundSiteTraits : public DefaultTraits<BoundSite> {
+        static unsigned hash(BoundSite const& site) { return pair_int_hash(site.top_level_site.hash(), site.frame_site.hash()); }
+    };
+
+    // NB: Bindings are only ever added, for the life of the client. See WebView::RequestServerSiteBindings.
+    HashTable<Utf16String> m_bound_top_level_sites;
+    HashTable<BoundSite, BoundSiteTraits> m_bound_sites;
+
+    ConnectionMap& m_connections;
+    RequestTransferLeaseMap& m_request_transfer_leases;
+    Optional<HTTP::DiskCache&> m_disk_cache;
+
+    struct CurlMulti {
+        ConnectionFromClient* client { nullptr };
+        void* handle { nullptr };
+        RefPtr<Core::Timer> timer;
+        Optional<MonotonicTime> timer_due_at;
+    };
+    void set_up_curl_multi(CurlMulti&);
+
+    CurlMulti m_fetch_curl;
+    CurlMulti m_websocket_curl;
+
+    HashMap<u64, NonnullOwnPtr<Request>> m_active_requests;
+    HashMap<u64, NonnullOwnPtr<Request>> m_active_revalidation_requests;
+    void look_up_aia_host(ByteString const& url, ByteString const& fetch_url, ByteString const& host, u16 port, Optional<HTTP::Proxy>);
+    void start_aia_fetch(ByteString const& url, ByteString const& fetch_url, Optional<HTTP::Proxy>, Optional<ByteString> resolve_entry);
+    void abandon_aia_lookup(ByteString const& url);
+
+    HashMap<void*, NonnullOwnPtr<AIAFetch>> m_aia_fetches;
+    // AIA URLs whose DNS lookup is still outstanding, mapped to the requests waiting on them. Keeps a second
+    // request asking for the same URL from starting a duplicate lookup before m_aia_fetches has an entry.
+    HashMap<ByteString, Vector<u64>> m_pending_aia_lookups;
+    HashTable<u64> m_pending_websockets;
+
+    struct WebSocketCookieRequest {
+        u64 cookie_request_id { 0 };
+        Function<void(String)> continuation;
+    };
+    HashMap<u64, WebSocketCookieRequest> m_websocket_cookie_requests;
+    HashMap<u64, RefPtr<WebSocket::WebSocket>> m_websockets;
+
+    HashMap<int, NonnullRefPtr<Core::Notifier>> m_read_notifiers;
+    HashMap<int, NonnullRefPtr<Core::Notifier>> m_write_notifiers;
+
+    NonnullRefPtr<Resolver> m_resolver;
+
+    u64 m_next_revalidation_request_id { 0 };
+
+    Optional<MonotonicTime> m_burst_window_started_at;
+    u64 m_requests_in_burst_window { 0 };
+};
+
+constexpr inline uintptr_t websocket_private_tag = 0x1;
+constexpr inline uintptr_t aia_fetch_private_tag = 0x2;
+
+}

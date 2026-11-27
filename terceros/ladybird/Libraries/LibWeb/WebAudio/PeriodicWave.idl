@@ -1,0 +1,16 @@
+// https://webaudio.github.io/web-audio-api/#PeriodicWaveConstraints
+dictionary PeriodicWaveConstraints {
+    boolean disableNormalization = false;
+};
+
+// https://webaudio.github.io/web-audio-api/#PeriodicWaveOptions
+dictionary PeriodicWaveOptions : PeriodicWaveConstraints {
+    sequence<float> real;
+    sequence<float> imag;
+};
+
+// https://webaudio.github.io/web-audio-api/#PeriodicWave
+[Exposed=Window, ImplementedIn=Rust]
+interface PeriodicWave {
+    constructor(BaseAudioContext context, optional PeriodicWaveOptions options = {});
+};

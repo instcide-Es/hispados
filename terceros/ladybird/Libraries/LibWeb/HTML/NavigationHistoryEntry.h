@@ -1,0 +1,52 @@
+/*
+ * Copyright (c) 2023, Andrew Kaster <akaster@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <LibJS/Forward.h>
+#include <LibJS/Runtime/Value.h>
+#include <LibWeb/DOM/EventTarget.h>
+#include <LibWeb/WebIDL/ExceptionOr.h>
+
+namespace Web::HTML {
+
+// https://html.spec.whatwg.org/multipage/nav-history-apis.html#navigationhistoryentry
+class NavigationHistoryEntry : public DOM::EventTarget {
+    WEB_WRAPPABLE(NavigationHistoryEntry, DOM::EventTarget);
+    GC_DECLARE_ALLOCATOR(NavigationHistoryEntry);
+
+public:
+    [[nodiscard]] static GC::Ref<NavigationHistoryEntry> create(Window&, NonnullRefPtr<SessionHistoryEntry>);
+
+    Optional<Utf16String> url() const;
+    Utf16String key() const;
+    Utf16String id() const;
+    i64 index() const;
+    bool same_document() const;
+    bool associated_document_is_fully_active() const;
+    WebIDL::ExceptionOr<JS::Value> get_state(JS::Realm&);
+
+    void set_ondispose(WebIDL::CallbackType*);
+    WebIDL::CallbackType* ondispose();
+
+    // Non-spec'd getter, not exposed to JS
+    SessionHistoryEntry const& session_history_entry() const { return *m_session_history_entry; }
+    SessionHistoryEntry& session_history_entry() { return *m_session_history_entry; }
+
+    virtual ~NavigationHistoryEntry() override;
+
+private:
+    NavigationHistoryEntry(GC::Ref<Window>, NonnullRefPtr<SessionHistoryEntry>);
+
+    Window& window() const;
+
+    virtual void visit_edges(Cell::Visitor&) override;
+
+    NonnullRefPtr<SessionHistoryEntry> m_session_history_entry;
+    GC::Ref<Window> m_window;
+};
+
+}

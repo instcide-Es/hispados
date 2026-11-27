@@ -1,0 +1,474 @@
+/*
+ * Copyright (c) 2018-2020, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/Checked.h>
+#include <AK/ScopeGuard.h>
+#include <LibCore/EventLoop.h>
+#include <LibCore/File.h>
+#include <LibCore/System.h>
+#include <LibRequests/Request.h>
+#include <LibRequests/RequestClient.h>
+
+namespace Requests {
+
+static Optional<Core::ImmutableBytes> map_body_file(int fd, u64 offset, u64 size)
+{
+    ArmedScopeGuard close_fd = [fd] {
+        (void)Core::System::close(fd);
+    };
+
+    if (!AK::is_within_range<off_t>(offset) || !AK::is_within_range<size_t>(size)) {
+        dbgln("Request: Received body file outside mappable range");
+        return {};
+    }
+
+    close_fd.disarm();
+    auto payload = Core::ImmutableBytes::map_from_fd_range_and_close(fd, "request response"sv, static_cast<off_t>(offset), static_cast<size_t>(size));
+    if (payload.is_error()) {
+        dbgln("Request: Failed to map body file: {}", payload.error());
+        return {};
+    }
+
+    return payload.release_value();
+}
+
+ErrorOr<NonnullOwnPtr<ReadStream>> ReadStream::create(int reader_fd)
+{
+#if defined(AK_OS_WINDOWS)
+    auto local_socket = TRY(Core::LocalSocket::adopt_fd(reader_fd));
+    auto notifier = local_socket->notifier();
+    VERIFY(notifier);
+    return adopt_own(*new ReadStream(move(local_socket), notifier.release_nonnull()));
+#else
+    auto file = TRY(Core::File::adopt_fd(reader_fd, Core::File::OpenMode::Read));
+    auto notifier = Core::Notifier::construct(reader_fd, Core::Notifier::Type::Read);
+    return adopt_own(*new ReadStream(move(file), move(notifier)));
+#endif
+}
+
+Request::Request(RequestClient& client, u64 request_id, Optional<RequestTransferLeaseKey> transfer_lease)
+    : m_client(client)
+    , m_request_id(request_id)
+    , m_transport_epoch(client.transport_epoch())
+    , m_transfer_lease(move(transfer_lease))
+{
+}
+
+Request::~Request()
+{
+    if (m_fd != -1 && !m_fd_is_owned_by_read_stream)
+        (void)Core::System::close(m_fd);
+}
+
+int Request::request_server_client_id() const
+{
+    return m_client->request_server_client_id();
+}
+
+bool Request::stop()
+{
+    RefPtr keep_alive = *this;
+
+    // The client may already be gone if the RequestServer connection was lost while this request was in flight.
+    auto client = m_client.strong_ref();
+    auto had_active_request = client && client->stop_request({}, *this);
+    if (!had_active_request)
+        release_transfer_lease();
+    auto on_stop = move(m_on_stop);
+    auto teardown = move(on_teardown);
+
+    defer_teardown();
+
+    if (had_active_request && on_stop)
+        on_stop();
+    if (teardown)
+        teardown(TeardownReason::Stopped);
+
+    return had_active_request;
+}
+
+void Request::set_body_delivery_paused(bool paused)
+{
+    m_body_delivery_paused = paused;
+    if (m_internal_stream_data && m_internal_stream_data->read_notifier)
+        m_internal_stream_data->read_notifier->set_enabled(!m_body_delivery_paused);
+    if (!m_body_delivery_paused)
+        schedule_file_backed_delivery();
+}
+
+void Request::account_body_delivery(size_t byte_count)
+{
+    auto& remaining_byte_count = m_internal_stream_data->body_delivery_remaining_byte_count;
+    if (!remaining_byte_count.has_value())
+        return;
+    if (byte_count >= *remaining_byte_count) {
+        *remaining_byte_count = 0;
+        set_body_delivery_paused(true);
+        return;
+    }
+    *remaining_byte_count -= byte_count;
+}
+
+void Request::resume_body_delivery()
+{
+    if (m_internal_stream_data)
+        m_internal_stream_data->body_delivery_remaining_byte_count = {};
+    set_body_delivery_paused(false);
+}
+
+void Request::resume_body_delivery_up_to(size_t byte_count)
+{
+    if (!m_internal_stream_data)
+        return;
+
+    m_internal_stream_data->body_delivery_remaining_byte_count = byte_count;
+    set_body_delivery_paused(false);
+}
+
+void Request::release_transfer_lease()
+{
+    if (!m_transfer_lease.has_value())
+        return;
+
+    // Releasing the lease can unregister this request from its client, which may hold the last reference to it.
+    NonnullRefPtr protector { *this };
+    if (auto client = m_client.strong_ref())
+        client->release_request_transfer_lease({}, *this, m_transfer_lease.release_value());
+}
+
+bool Request::has_file_backed_response_body() const
+{
+    return m_internal_stream_data && m_internal_stream_data->file_backed_payload.has_value();
+}
+
+bool Request::has_undelivered_file_backed_bytes() const
+{
+    return has_file_backed_response_body() && m_internal_stream_data->file_backed_delivery_offset < m_internal_stream_data->file_backed_payload->size();
+}
+
+// Delivers under the same pause and byte allowance as the read stream.
+void Request::deliver_file_backed_payload()
+{
+    if (m_mode != Mode::Unbuffered || !has_file_backed_response_body())
+        return;
+
+    NonnullRefPtr protector { *this };
+    auto payload = *m_internal_stream_data->file_backed_payload;
+
+    while (!m_body_delivery_paused) {
+        auto offset = m_internal_stream_data->file_backed_delivery_offset;
+        auto length = payload.size() - offset;
+        if (length == 0)
+            break;
+        if (auto const& remaining_byte_count = m_internal_stream_data->body_delivery_remaining_byte_count; remaining_byte_count.has_value()) {
+            if (*remaining_byte_count == 0) {
+                set_body_delivery_paused(true);
+                break;
+            }
+            length = min(length, *remaining_byte_count);
+        }
+
+        m_internal_stream_data->file_backed_delivery_offset += length;
+        m_internal_stream_data->delivered_size += length;
+        m_internal_stream_data->on_data_available(ResponseData::from_file_backed_payload(payload, offset, length));
+        if (m_mode != Mode::Unbuffered)
+            return;
+        account_body_delivery(length);
+    }
+
+    if (m_internal_stream_data->request_done)
+        m_internal_stream_data->on_finish();
+}
+
+void Request::schedule_file_backed_delivery()
+{
+    if (!has_undelivered_file_backed_bytes() || m_internal_stream_data->file_backed_delivery_scheduled)
+        return;
+
+    m_internal_stream_data->file_backed_delivery_scheduled = true;
+    Core::deferred_invoke([self = NonnullRefPtr(*this)] {
+        if (!self->m_internal_stream_data)
+            return;
+        self->m_internal_stream_data->file_backed_delivery_scheduled = false;
+        self->deliver_file_backed_payload();
+    });
+}
+
+void Request::set_request_fd(Badge<Requests::RequestClient>, int fd)
+{
+    VERIFY(m_fd == -1);
+    m_fd = fd;
+
+    if (m_internal_stream_data)
+        attach_read_stream();
+}
+
+void Request::attach_read_stream()
+{
+    VERIFY(m_internal_stream_data);
+    if (m_fd == -1 || m_fd_is_owned_by_read_stream)
+        return;
+
+    auto read_stream = MUST(ReadStream::create(m_fd));
+    m_fd_is_owned_by_read_stream = true;
+    auto notifier = read_stream->notifier();
+    notifier->on_activation = move(m_internal_stream_data->read_notifier->on_activation);
+    notifier->set_enabled(!m_body_delivery_paused);
+    m_internal_stream_data->read_notifier = notifier;
+    m_internal_stream_data->read_stream = move(read_stream);
+}
+
+void Request::set_request_body_file(Badge<Requests::RequestClient>, int fd, u64 offset, u64 size)
+{
+    auto payload = map_body_file(fd, offset, size);
+    if (!payload.has_value()) {
+        if (m_internal_stream_data)
+            m_body_delivery_error = NetworkError::CacheReadFailed;
+        return;
+    }
+
+    // If the request was stopped while this IPC was in-flight, just bail.
+    if (!m_internal_stream_data)
+        return;
+
+    if (m_mode == Mode::Buffered) {
+        m_internal_buffered_data->payload = payload.release_value();
+        return;
+    }
+
+    m_internal_stream_data->file_backed_payload = payload.release_value();
+    m_internal_stream_data->file_backed_delivery_offset = 0;
+    deliver_file_backed_payload();
+}
+
+void Request::set_request_cached_body_file(Badge<Requests::RequestClient>, int fd, u64 offset, u64 size)
+{
+    auto payload = map_body_file(fd, offset, size);
+    if (!payload.has_value())
+        return;
+
+    if (m_mode == Mode::Buffered) {
+        m_internal_buffered_data->payload = payload.release_value();
+        return;
+    }
+
+    // If the request was stopped while this IPC was in-flight, just bail.
+    if (!m_internal_stream_data)
+        return;
+
+    m_internal_stream_data->cached_payload = payload.release_value();
+    if (m_internal_stream_data->on_cached_body_available)
+        m_internal_stream_data->on_cached_body_available(*m_internal_stream_data->cached_payload);
+}
+
+void Request::set_buffered_request_finished_callback(BufferedRequestFinished on_buffered_request_finished)
+{
+    VERIFY(m_mode == Mode::Unknown);
+    m_mode = Mode::Buffered;
+
+    m_internal_buffered_data = make<InternalBufferedData>();
+
+    on_headers_received = [this](auto headers, auto response_code, auto const& reason_phrase, auto cache_state) {
+        m_internal_buffered_data->response_headers = move(headers);
+        m_internal_buffered_data->response_code = move(response_code);
+        m_internal_buffered_data->reason_phrase = reason_phrase;
+        m_internal_buffered_data->cache_state = cache_state;
+    };
+
+    on_finish = [this, on_buffered_request_finished = move(on_buffered_request_finished)](auto total_size, auto& timing_info, auto network_error) {
+        auto payload = [&] {
+            if (m_internal_buffered_data->payload.has_value())
+                return m_internal_buffered_data->payload.release_value();
+
+            auto output_buffer = ByteBuffer::create_uninitialized(m_internal_buffered_data->payload_stream.used_buffer_size()).release_value_but_fixme_should_propagate_errors();
+            m_internal_buffered_data->payload_stream.read_until_filled(output_buffer).release_value_but_fixme_should_propagate_errors();
+            return Core::ImmutableBytes::adopt(move(output_buffer));
+        }();
+
+        on_buffered_request_finished(
+            total_size,
+            timing_info,
+            network_error,
+            m_internal_buffered_data->response_headers,
+            m_internal_buffered_data->response_code,
+            m_internal_buffered_data->reason_phrase,
+            m_internal_buffered_data->cache_state,
+            move(payload));
+    };
+
+    set_up_internal_stream_data([this](auto data) {
+        // FIXME: What do we do if this fails?
+        m_internal_buffered_data->payload_stream.write_until_depleted(data.bytes()).release_value_but_fixme_should_propagate_errors();
+    });
+}
+
+void Request::set_unbuffered_request_callbacks(HeadersReceived on_headers_received, DataReceived on_data_received, CachedBodyAvailable on_cached_body_available, RequestFinished on_finish)
+{
+    VERIFY(m_mode == Mode::Unknown);
+    m_mode = Mode::Unbuffered;
+
+    this->on_headers_received = move(on_headers_received);
+    this->on_finish = move(on_finish);
+
+    set_up_internal_stream_data(move(on_data_received));
+    m_internal_stream_data->on_cached_body_available = move(on_cached_body_available);
+}
+
+void Request::set_stop_callback(RequestStopped on_stop)
+{
+    m_on_stop = move(on_stop);
+}
+
+void Request::did_finish(Badge<RequestClient>, u64 total_size, RequestTimingInfo const& timing_info, Optional<NetworkError> const& network_error)
+{
+    m_finished = true;
+
+    auto effective_network_error = m_body_delivery_error.has_value() ? m_body_delivery_error : network_error;
+    if (on_finish)
+        on_finish(total_size, timing_info, effective_network_error);
+}
+
+void Request::did_receive_headers(Badge<RequestClient>, URL::URL url, NonnullRefPtr<HTTP::HeaderList> response_headers, Optional<u32> response_code, Optional<String> const& reason_phrase, CacheState cache_state, ByteString http_version)
+{
+    m_response_url = move(url);
+    m_http_version = move(http_version);
+    if (on_headers_received)
+        on_headers_received(move(response_headers), response_code, reason_phrase, cache_state);
+}
+
+void Request::did_transfer(Badge<RequestClient>)
+{
+    m_transfer_lease.clear();
+    auto on_stop = move(m_on_stop);
+    auto teardown = move(on_teardown);
+
+    defer_teardown();
+
+    if (on_stop)
+        on_stop();
+    if (teardown)
+        teardown(TeardownReason::Transferred);
+}
+
+void Request::defer_teardown()
+{
+    if (m_internal_stream_data && m_internal_stream_data->read_notifier)
+        m_internal_stream_data->read_notifier->set_enabled(false);
+    m_mode = Mode::Unknown;
+    Core::deferred_invoke([self = NonnullRefPtr(*this)] {
+        self->on_headers_received = nullptr;
+        self->on_finish = nullptr;
+        self->on_upload_progress = nullptr;
+        self->m_internal_buffered_data = nullptr;
+        self->m_internal_stream_data = nullptr;
+    });
+}
+
+void Request::set_up_internal_stream_data(DataReceived on_data_available)
+{
+    VERIFY(!m_internal_stream_data);
+
+    m_internal_stream_data = make<InternalStreamData>();
+    m_internal_stream_data->on_data_available = move(on_data_available);
+    m_internal_stream_data->read_notifier = Core::Notifier::construct(fd(), Core::Notifier::Type::Read);
+    m_internal_stream_data->read_notifier->set_enabled(!m_body_delivery_paused);
+    attach_read_stream();
+
+    auto user_on_finish = move(on_finish);
+    on_finish = [this](auto total_size, auto const& timing_info, auto network_error) {
+        // If the request was stopped while this IPC was in-flight, just bail.
+        if (!m_internal_stream_data)
+            return;
+
+        NonnullRefPtr protector { *this };
+
+        m_internal_stream_data->total_size = total_size;
+        m_internal_stream_data->network_error = network_error;
+        m_internal_stream_data->timing_info = timing_info;
+        m_internal_stream_data->request_done = true;
+        m_internal_stream_data->on_finish();
+    };
+
+    m_internal_stream_data->on_finish = [this, user_on_finish = move(user_on_finish)]() {
+        // If the request was stopped while this IPC was in-flight, just bail.
+        if (!m_internal_stream_data)
+            return;
+
+        NonnullRefPtr protector { *this };
+
+        auto has_received_all_reported_bytes = m_internal_stream_data->request_done && m_internal_stream_data->delivered_size >= m_internal_stream_data->total_size;
+        if (!m_internal_stream_data->user_finish_called && !has_undelivered_file_backed_bytes() && (!m_internal_stream_data->read_stream || m_internal_stream_data->read_stream->is_eof() || has_received_all_reported_bytes)) {
+            m_internal_stream_data->user_finish_called = true;
+            m_internal_stream_data->read_notifier->close();
+            m_internal_stream_data->read_notifier = nullptr;
+            m_internal_stream_data->read_stream = nullptr;
+            // The request has finished for its owner, so a stop or transfer that follows has nothing left to report.
+            m_on_stop = nullptr;
+            on_teardown = nullptr;
+            user_on_finish(m_internal_stream_data->total_size, m_internal_stream_data->timing_info, m_internal_stream_data->network_error);
+            defer_teardown();
+        }
+    };
+
+    m_internal_stream_data->read_notifier->on_activation = [this]() {
+        static constexpr size_t buffer_size = 256 * KiB;
+        // NB: The buffer lives on the heap, as a thread_local array this large would be static TLS that every thread
+        //     of the process zeroes as it starts, reading requests or not. It is allocated the first time a thread
+        //     reads a response and kept for the life of that thread's event loop.
+        static thread_local u8* buffer = nullptr;
+
+        // If the request was stopped while this IPC was in-flight, just bail.
+        if (!m_internal_stream_data || !m_internal_stream_data->read_stream)
+            return;
+
+        NonnullRefPtr protector { *this };
+
+        if (!buffer)
+            buffer = new u8[buffer_size];
+
+        do {
+            auto bytes_to_read = buffer_size;
+            if (m_internal_stream_data->body_delivery_remaining_byte_count.has_value()) {
+                if (*m_internal_stream_data->body_delivery_remaining_byte_count == 0) {
+                    set_body_delivery_paused(true);
+                    break;
+                }
+                bytes_to_read = min(bytes_to_read, *m_internal_stream_data->body_delivery_remaining_byte_count);
+            }
+
+            auto result = m_internal_stream_data->read_stream->read_some({ buffer, bytes_to_read });
+            if (result.is_error() && (!result.error().is_errno() || (result.error().is_errno() && result.error().code() != EINTR)))
+                break;
+            if (result.is_error())
+                continue;
+
+            auto read_bytes = result.release_value();
+            if (read_bytes.is_empty())
+                break;
+
+            m_internal_stream_data->delivered_size += read_bytes.size();
+            m_internal_stream_data->on_data_available(ResponseData::from_bytes(read_bytes));
+            if (!m_internal_stream_data || !m_internal_stream_data->read_stream)
+                return;
+            account_body_delivery(read_bytes.size());
+            if (m_body_delivery_paused)
+                break;
+        } while (true);
+
+        if (m_internal_stream_data->read_stream->is_eof())
+            m_internal_stream_data->read_notifier->close();
+
+        if (m_internal_stream_data->request_done)
+            m_internal_stream_data->on_finish();
+    };
+}
+
+Request::InternalBufferedData::InternalBufferedData()
+    : response_headers(HTTP::HeaderList::create())
+{
+}
+
+}

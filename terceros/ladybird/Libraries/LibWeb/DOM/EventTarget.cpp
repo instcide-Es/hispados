@@ -1,0 +1,1204 @@
+/*
+ * Copyright (c) 2020-2022, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2022, Luke Wilde <lukew@serenityos.org>
+ * Copyright (c) 2024, Glenn Skrzypczak <glenn.skrzypczak@gmail.com>
+ * Copyright (c) 2025, Felipe Muñoz Mazur <felipe.munoz.mazur@protonmail.com>
+ * Copyright (c) 2025, Simon Farre <simon.farre.cx@gmail.com>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/StringBuilder.h>
+#include <LibGC/Heap.h>
+#include <LibJS/Runtime/AbstractOperations.h>
+#include <LibJS/Runtime/ExternalMemory.h>
+#include <LibJS/Runtime/GlobalEnvironment.h>
+#include <LibJS/Runtime/NativeFunction.h>
+#include <LibJS/Runtime/ObjectEnvironment.h>
+#include <LibJS/Runtime/PrimitiveString.h>
+#include <LibJS/Runtime/VM.h>
+#include <LibJS/Runtime/Value.h>
+#include <LibJS/ScriptCompilation.h>
+#include <LibWeb/Bindings/EventTarget.h>
+#include <LibWeb/Bindings/MainThreadVM.h>
+#include <LibWeb/Bindings/Wrappable.h>
+#include <LibWeb/Bindings/WrapperWorld.h>
+#include <LibWeb/ContentSecurityPolicy/BlockingAlgorithms.h>
+#include <LibWeb/DOM/AbortSignal.h>
+#include <LibWeb/DOM/BindingsGlue.h>
+#include <LibWeb/DOM/DOMEventListener.h>
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOM/Event.h>
+#include <LibWeb/DOM/EventDispatcher.h>
+#include <LibWeb/DOM/EventTarget.h>
+#include <LibWeb/DOM/IDLEventListener.h>
+#include <LibWeb/DOM/Node.h>
+#include <LibWeb/Gamepad/EventNames.h>
+#include <LibWeb/HTML/AttributeNames.h>
+#include <LibWeb/HTML/BeforeUnloadEvent.h>
+#include <LibWeb/HTML/CloseWatcherManager.h>
+#include <LibWeb/HTML/ErrorEvent.h>
+#include <LibWeb/HTML/EventHandler.h>
+#include <LibWeb/HTML/EventNames.h>
+#include <LibWeb/HTML/FormAssociatedElement.h>
+#include <LibWeb/HTML/GlobalEventHandlers.h>
+#include <LibWeb/HTML/HTMLBodyElement.h>
+#include <LibWeb/HTML/HTMLFormElement.h>
+#include <LibWeb/HTML/HTMLFrameSetElement.h>
+#include <LibWeb/HTML/LocalNavigable.h>
+#include <LibWeb/HTML/LocalTraversableNavigable.h>
+#include <LibWeb/HTML/Navigable.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HTML/Scripting/ExceptionReporter.h>
+#include <LibWeb/HTML/Storage.h>
+#include <LibWeb/HTML/Window.h>
+#include <LibWeb/HTML/WindowOrWorkerGlobalScope.h>
+#include <LibWeb/HighResolutionTime/TimeOrigin.h>
+#include <LibWeb/Page/Page.h>
+#include <LibWeb/Page/RenderingStats.h>
+#include <LibWeb/UIEvents/EventNames.h>
+#include <LibWeb/UIEvents/KeyboardEvent.h>
+#include <LibWeb/UIEvents/PointerEvent.h>
+#include <LibWeb/WebIDL/AbstractOperations.h>
+#include <LibWeb/WebIDL/CallbackType.h>
+#include <LibWebCommon/UIEvents/KeyCode.h>
+
+namespace Web::Bindings {
+
+// https://dom.spec.whatwg.org/#concept-flatten-options
+static bool flatten_event_listener_options(Variant<EventListenerOptions, bool> const& options)
+{
+    // 1. If options is a boolean, then return options.
+    if (options.has<bool>())
+        return options.get<bool>();
+
+    // 2. Return options["capture"].
+    return options.get<EventListenerOptions>().capture;
+}
+
+static bool flatten_event_listener_options(Variant<AddEventListenerOptions, bool> const& options)
+{
+    // 1. If options is a boolean, then return options.
+    if (options.has<bool>())
+        return options.get<bool>();
+
+    // 2. Return options["capture"].
+    return options.get<AddEventListenerOptions>().capture;
+}
+
+// https://dom.spec.whatwg.org/#event-flatten-more
+static DOM::EventTarget::AddEventListenerOptions flatten_add_event_listener_options(Variant<AddEventListenerOptions, bool> const& options)
+{
+    // 1. Let capture be the result of flattening options.
+    bool capture = flatten_event_listener_options(options);
+
+    // 2. Let once be false.
+    bool once = false;
+
+    // 3. Let passive and signal be null.
+    Optional<bool> passive;
+    GC::Ptr<DOM::AbortSignal> signal;
+
+    // 4. If options is a dictionary, then:
+    if (options.has<AddEventListenerOptions>()) {
+        auto const& add_event_listener_options = options.get<AddEventListenerOptions>();
+
+        // 1. Set once to options["once"].
+        once = add_event_listener_options.once;
+
+        // 2. If options["passive"] exists, then set passive to options["passive"].
+        if (add_event_listener_options.passive.has_value())
+            passive = add_event_listener_options.passive;
+
+        // 3. If options["signal"] exists, then set signal to options["signal"].
+        if (add_event_listener_options.signal)
+            signal = add_event_listener_options.signal;
+    }
+
+    // 5. Return capture, passive, once, and signal.
+    return DOM::EventTarget::AddEventListenerOptions { .capture = capture, .passive = passive, .once = once, .signal = signal };
+}
+
+void add_event_listener(DOM::EventTarget& event_target, Utf16String const& type, GC::Ptr<DOM::IDLEventListener> callback, Variant<AddEventListenerOptions, bool> const& options)
+{
+    event_target.add_event_listener(Utf16FlyString::from_utf16(type.utf16_view()), callback, flatten_add_event_listener_options(options));
+}
+
+void remove_event_listener(DOM::EventTarget& event_target, Utf16String const& type, GC::Ptr<DOM::IDLEventListener> callback, Variant<EventListenerOptions, bool> const& options)
+{
+    event_target.remove_event_listener(Utf16FlyString::from_utf16(type.utf16_view()), callback, DOM::EventTarget::EventListenerOptions {
+                                                                                                    .capture = flatten_event_listener_options(options),
+                                                                                                });
+}
+
+GC::Ref<JS::Environment> new_event_handler_object_environment(JS::Realm& realm, GC::Ref<DOM::EventTarget> target, GC::Ref<JS::Environment> outer_environment)
+{
+    return JS::new_object_environment(*wrap(host_defined_wrapper_world(realm), realm, target), true, outer_environment);
+}
+
+JS::Realm* callback_realm(WebIDL::CallbackType* callback)
+{
+    if (!callback)
+        return nullptr;
+    return &callback->associated_realm();
+}
+
+HTML::Window* window_from_callback(WebIDL::CallbackType& callback)
+{
+    auto& realm = callback.associated_realm();
+    return HTML::window_from_global_object(realm.global_object());
+}
+
+// targetGlobal in https://dom.spec.whatwg.org/#concept-event-listener-inner-invoke for an event whose currentTarget isn't
+// a node, if it's a Window: event's currentTarget's relevant global object.
+DOM::EventTarget* current_target_global(WebIDL::CallbackType& callback, DOM::Event const& event)
+{
+    auto current_target = event.current_target();
+    if (auto* window = as_if<HTML::Window>(current_target.ptr()))
+        return window;
+
+    // Any other target's relevant realm is its wrapper's: the realm it was created in.
+    auto& callback_realm = callback.associated_realm();
+    auto wrapper = current_target_wrapper(callback_realm, event);
+    if (!wrapper)
+        return nullptr;
+    return HTML::window_from_global_object(wrapper->shape().realm().global_object());
+}
+
+void report_exception_for_callback(WebIDL::CallbackType& callback, JS::Value exception)
+{
+    auto& realm = callback.associated_realm();
+    HTML::report_an_exception(realm.global_object(), exception);
+}
+
+JS::Completion invoke_event_listener(WebIDL::CallbackType& callback, DOM::Event& event)
+{
+    auto& callback_realm = callback.associated_realm();
+    auto this_value = current_target_wrapper(callback_realm, event);
+    auto& event_realm = this_value ? this_value->shape().realm() : callback_realm;
+    auto wrapped_event = Bindings::event(event_realm, GC::Ref { event });
+
+    static Utf16FlyString const& handle_event = *new Utf16FlyString("handleEvent"_utf16_fly_string);
+    // Inner invoke has just skipped the listener if its callback's Window has a document that isn't fully active.
+    return WebIDL::call_user_object_operation(callback, handle_event, this_value.ptr(), { { wrapped_event } }, WebIDL::RefuseCallbackFromInactiveWindow::No);
+}
+
+JS::Completion invoke_event_handler(WebIDL::CallbackType& callback, DOM::Event& event, bool special_error_event_handling)
+{
+    // FIXME: This rewraps the this value from DOM::EventTarget::activate_event_handler().
+    //        If that is observable, we must reuse the original callback this value instead.
+    if (special_error_event_handling) {
+        auto error_information = HTML::error_event_information(event).release_value();
+        auto& vm = callback.callback->vm();
+        auto wrapped_message = JS::PrimitiveString::create(vm, move(error_information.message));
+        auto wrapped_filename = JS::PrimitiveString::create(vm, move(error_information.filename));
+        auto wrapped_lineno = JS::Value(error_information.lineno);
+        auto wrapped_colno = JS::Value(error_information.colno);
+
+        auto this_value = current_target_wrapper(callback.associated_realm(), event);
+        return WebIDL::invoke_callback(callback, this_value.ptr(), { { wrapped_message, wrapped_filename, wrapped_lineno, wrapped_colno, error_information.error } });
+    }
+
+    auto& callback_realm = callback.associated_realm();
+    auto this_value = current_target_wrapper(callback_realm, event);
+    auto& event_realm = this_value ? this_value->shape().realm() : callback_realm;
+    auto wrapped_event = Bindings::event(event_realm, GC::Ref { event });
+
+    return WebIDL::invoke_callback(callback, this_value.ptr(), { { wrapped_event } });
+}
+
+}
+
+namespace Web::DOM {
+
+GC_DEFINE_ALLOCATOR(EventTarget);
+
+EventTarget::EventTarget()
+{
+}
+
+EventTarget::~EventTarget() = default;
+
+// https://dom.spec.whatwg.org/#dom-eventtarget-eventtarget
+GC::Ref<EventTarget> EventTarget::create()
+{
+    // The new EventTarget() constructor steps are to do nothing.
+    return GC::Heap::the().allocate<EventTarget>();
+}
+
+void EventTarget::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+
+    if (auto const* data = m_data.ptr()) {
+        visitor.visit(data->event_listener_list);
+        visitor.visit(data->event_handler_map);
+    }
+}
+
+size_t EventTarget::external_memory_size() const
+{
+    auto size = Base::external_memory_size();
+    if (!m_data)
+        return size;
+
+    size = JS::saturating_add_external_memory_size(size, JS::vector_external_memory_size(m_data->event_listener_list));
+    size = JS::saturating_add_external_memory_size(size, JS::hash_map_external_memory_size(m_data->event_handler_map));
+    return size;
+}
+
+EventTarget::ClonedEventListeners EventTarget::event_listener_list_matching(Utf16FlyString const& type, Optional<Utf16FlyString> const& legacy_type) const
+{
+    ClonedEventListeners list;
+    if (!m_data)
+        return list;
+    for (auto& listener : m_data->event_listener_list) {
+        if (listener->type == type || (legacy_type.has_value() && listener->type == *legacy_type))
+            list.append(listener);
+    }
+    return list;
+}
+
+// https://dom.spec.whatwg.org/#default-passive-value
+static bool default_passive_value(Utf16FlyString const& type, EventTarget* event_target)
+{
+    // 1. Return true if all of the following are true:
+    //    - type is one of "touchstart", "touchmove", "wheel", or "mousewheel".
+    //    - eventTarget is a Window object, or is a node whose node document is eventTarget, or is a node whose node document’s document element is eventTarget,
+    //      or is a node whose node document’s body element is eventTarget.
+    if (AK::first_is_one_of(type, u"touchstart"sv, u"touchmove"sv, u"wheel"sv, u"mousewheel"sv)) {
+        if (is<HTML::Window>(event_target))
+            return true;
+
+        if (auto* node = as_if<Node>(event_target)) {
+            if (&node->document() == event_target || node->document().document_element() == event_target || node->document().body() == event_target)
+                return true;
+        }
+    }
+
+    // 2. Return false.
+    return false;
+}
+
+static void invalidate_compositor_keyboard_scroll_state(EventTarget& target, DOMEventListener const& listener)
+{
+    if (!AK::first_is_one_of(listener.type, u"keydown"sv, u"keypress"sv))
+        return;
+    if (auto* window = as_if<HTML::Window>(target))
+        window->associated_document().page().keyboard_scroll_event_path_changed(target);
+    else if (auto* node = as_if<Node>(target))
+        node->document().page().keyboard_scroll_event_path_changed(target);
+}
+
+static bool is_blocking_keyboard_event_listener(DOMEventListener const& listener)
+{
+    return AK::first_is_one_of(listener.type, u"keydown"sv, u"keypress"sv) && listener.passive != true;
+}
+
+static bool is_blocking_wheel_event_listener(DOMEventListener const& listener)
+{
+    return AK::first_is_one_of(listener.type, u"wheel"sv, u"mousewheel"sv) && listener.passive != true;
+}
+
+static void invalidate_compositor_wheel_event_listener_state(EventTarget& event_target, DOMEventListener const& listener)
+{
+    if (!is_blocking_wheel_event_listener(listener))
+        return;
+
+    if (auto* window = as_if<HTML::Window>(event_target)) {
+        auto& document = window->associated_document();
+        document.set_needs_to_record_display_list();
+        document.page().invalidate_compositor_wheel_event_listener_state(document);
+        return;
+    }
+
+    if (auto* node = as_if<Node>(event_target)) {
+        // The document remembers that a blocking listener lives in it, so that a node arriving
+        // under this one later derives the state it inherits.
+        node->document().set_may_have_blocking_wheel_event_listener();
+        node->update_inside_blocking_wheel_event_handler_state_for_subtree();
+        node->set_needs_repaint();
+        node->document().page().invalidate_compositor_wheel_event_listener_state(node->document());
+    }
+}
+
+static bool is_css_animation_event_listener(DOMEventListener const& listener)
+{
+    return AK::first_is_one_of(listener.type,
+        HTML::EventNames::animationcancel,
+        HTML::EventNames::animationend,
+        HTML::EventNames::animationiteration,
+        HTML::EventNames::animationstart,
+        HTML::EventNames::webkitAnimationEnd,
+        HTML::EventNames::webkitAnimationIteration,
+        HTML::EventNames::webkitAnimationStart);
+}
+
+static void wake_animation_frame_pump_for_animation_event_listener(EventTarget& event_target, DOMEventListener const& listener)
+{
+    if (!is_css_animation_event_listener(listener))
+        return;
+
+    if (auto* window = as_if<HTML::Window>(event_target)) {
+        if (Core::StatsLog::the())
+            set_rendering_pending(window->associated_document(), RenderingPendingReason::NeedsRenderingUpdate, 1);
+        window->associated_document().page().client().request_frame();
+        return;
+    }
+
+    if (auto* node = as_if<Node>(event_target)) {
+        set_rendering_pending(node->document(), RenderingPendingReason::NeedsRenderingUpdate, 1);
+        node->document().page().client().request_frame();
+    }
+}
+
+static void prepare_to_observe_css_animation_events(EventTarget& event_target, DOMEventListener const& listener)
+{
+    if (!is_css_animation_event_listener(listener))
+        return;
+
+    if (auto* window = as_if<HTML::Window>(event_target)) {
+        window->associated_document().prepare_to_observe_css_animation_events();
+        return;
+    }
+
+    if (auto* node = as_if<Node>(event_target))
+        node->document().prepare_to_observe_css_animation_events();
+}
+
+static void update_needs_beforeunload_check(EventTarget& event_target, DOMEventListener const& listener)
+{
+    if (listener.type != HTML::EventNames::beforeunload)
+        return;
+
+    auto* window = as_if<HTML::Window>(event_target);
+    if (!window)
+        return;
+
+    auto navigable = window->associated_document().navigable();
+    if (!navigable)
+        return;
+
+    navigable->page().update_needs_beforeunload_check();
+}
+
+// A storage event made in another process reaches this one only through the mirror of the map it changed, and a
+// window that has never touched its storage has no mirror. So the moment a window starts listening for storage
+// events, its Storage objects are created, which connects the mirrors and brings the events.
+static void connect_storage_for_storage_event_listener(EventTarget& event_target, DOMEventListener const& listener)
+{
+    if (listener.type != HTML::EventNames::storage)
+        return;
+
+    auto* window = as_if<HTML::Window>(event_target);
+    if (!window)
+        return;
+    auto document = window->associated_document_if_any();
+    if (!document || !document->is_fully_active())
+        return;
+
+    if (auto local_storage = window->local_storage(); !local_storage.is_error())
+        local_storage.value()->connect();
+    if (auto session_storage = window->session_storage(); !session_storage.is_error())
+        session_storage.value()->connect();
+}
+
+static void notify_page_that_window_listens_for_gamepad_events(EventTarget& event_target, DOMEventListener const& listener)
+{
+    if (!first_is_one_of(listener.type, Gamepad::EventNames::gamepadconnected, Gamepad::EventNames::gamepaddisconnected))
+        return;
+
+    auto* window = as_if<HTML::Window>(event_target);
+    if (!window)
+        return;
+
+    auto& document = window->associated_document();
+    if (!document.navigable())
+        return;
+
+    if (!document.is_allowed_to_use_feature(PolicyControlledFeature::Gamepad))
+        return;
+
+    window->page().client().page_did_start_using_gamepads();
+}
+
+// https://dom.spec.whatwg.org/#dom-eventtarget-addeventlistener
+void EventTarget::add_event_listener(FlyString const& type, GC::Ptr<IDLEventListener> callback, AddEventListenerOptions const& options)
+{
+    // 1. Let capture, passive, once, and signal be the result of flattening more options.
+
+    // 2. Add an event listener with this and an event listener whose type is type, callback is callback, capture is capture, passive is passive,
+    //    once is once, and signal is signal.
+
+    auto event_listener = GC::Heap::the().allocate<DOMEventListener>();
+    event_listener->type = Utf16FlyString::from_fly_string(type);
+    event_listener->callback = callback;
+    event_listener->signal = options.signal;
+    event_listener->capture = options.capture;
+    event_listener->passive = options.passive;
+    event_listener->once = options.once;
+    add_an_event_listener(*event_listener);
+}
+
+void EventTarget::add_event_listener(Utf16FlyString const& type, GC::Ptr<IDLEventListener> callback, AddEventListenerOptions const& options)
+{
+    auto event_listener = GC::Heap::the().allocate<DOMEventListener>();
+    event_listener->type = type;
+    event_listener->callback = callback;
+    event_listener->signal = options.signal;
+    event_listener->capture = options.capture;
+    event_listener->passive = options.passive;
+    event_listener->once = options.once;
+    add_an_event_listener(*event_listener);
+}
+
+void EventTarget::add_event_listener_without_options(Utf16FlyString const& type, IDLEventListener& callback)
+{
+    auto utf8_type = type.to_utf16_string().to_utf8();
+    add_event_listener(MUST(FlyString::from_utf8(utf8_type.bytes_as_string_view())), &callback, {});
+}
+
+// https://dom.spec.whatwg.org/#add-an-event-listener
+void EventTarget::add_an_event_listener(DOMEventListener& listener)
+{
+    // FIXME: 1. If eventTarget is a ServiceWorkerGlobalScope object, its service worker’s script resource’s has ever been evaluated flag is set,
+    //           and listener’s type matches the type attribute value of any of the service worker events, then report a warning to the console
+    //           that this might not give the expected results. [SERVICE-WORKERS]
+
+    auto& event_listener_list = ensure_data().event_listener_list;
+
+    // 2. If listener’s signal is not null and is aborted, then return.
+    if (listener.signal && listener.signal->aborted())
+        return;
+
+    // 3. If listener’s callback is null, then return.
+    if (!listener.callback)
+        return;
+
+    // 4. If listener’s passive is null, then set it to the default passive value given listener’s type and eventTarget.
+    if (!listener.passive.has_value()) {
+        listener.passive = default_passive_value(listener.type, this);
+    }
+
+    // 5. If eventTarget’s event listener list does not contain an event listener whose type is listener’s type, callback is listener’s callback,
+    //    and capture is listener’s capture, then append listener to eventTarget’s event listener list.
+    auto it = event_listener_list.find_if([&](auto& entry) {
+        return entry->type == listener.type
+            && entry->callback->callback().callback == listener.callback->callback().callback
+            && entry->capture == listener.capture;
+    });
+    if (it == event_listener_list.end()) {
+        prepare_to_observe_css_animation_events(*this, listener);
+        event_listener_list.append(listener);
+        invalidate_compositor_keyboard_scroll_state(*this, listener);
+        invalidate_compositor_wheel_event_listener_state(*this, listener);
+        wake_animation_frame_pump_for_animation_event_listener(*this, listener);
+        update_needs_beforeunload_check(*this, listener);
+        event_listener_list_changed();
+        notify_page_that_window_listens_for_gamepad_events(*this, listener);
+        connect_storage_for_storage_event_listener(*this, listener);
+    }
+
+    // 6. If listener’s signal is not null, then add the following abort steps to it:
+    if (listener.signal) {
+        // NOTE: `this` and `listener` are protected by AbortSignal using GC::HeapFunction.
+        (void)listener.signal->add_abort_algorithm(GC::create_function(GC::Heap::the(), GC::captures(*this, listener), [](EventTarget& self, DOMEventListener& listener) {
+            // 1. Remove an event listener with eventTarget and listener.
+            self.remove_an_event_listener(listener);
+        }));
+    }
+}
+
+// https://dom.spec.whatwg.org/#dom-eventtarget-removeeventlistener
+void EventTarget::remove_event_listener(FlyString const& type, GC::Ptr<IDLEventListener> callback, EventListenerOptions const& options)
+{
+    auto& event_listener_list = ensure_data().event_listener_list;
+
+    // 1. Let capture be the result of flattening options.
+    bool capture = options.capture;
+
+    // 2. If this’s event listener list contains an event listener whose type is type, callback is callback, and capture is capture,
+    //    then remove an event listener with this and that event listener.
+    auto callbacks_match = [&](DOMEventListener& entry) {
+        if (!entry.callback && !callback)
+            return true;
+        if (!entry.callback || !callback)
+            return false;
+        return entry.callback->callback().callback == callback->callback().callback;
+    };
+    auto utf16_type = Utf16FlyString::from_fly_string(type);
+    auto it = event_listener_list.find_if([&](auto& entry) {
+        return entry->type == utf16_type
+            && callbacks_match(*entry)
+            && entry->capture == capture;
+    });
+    if (it != event_listener_list.end())
+        remove_an_event_listener(**it);
+}
+
+void EventTarget::remove_event_listener(Utf16FlyString const& type, GC::Ptr<IDLEventListener> callback, EventListenerOptions const& options)
+{
+    remove_event_listener(FlyString { type.to_utf16_string().to_utf8() }, callback, options);
+}
+
+void EventTarget::remove_event_listener_without_options(Utf16FlyString const& type, IDLEventListener& callback)
+{
+    auto utf8_type = type.to_utf16_string().to_utf8();
+    remove_event_listener(MUST(FlyString::from_utf8(utf8_type.bytes_as_string_view())), &callback, {});
+}
+
+// https://dom.spec.whatwg.org/#remove-an-event-listener
+void EventTarget::remove_an_event_listener(DOMEventListener& listener)
+{
+    // FIXME: 1. If eventTarget is a ServiceWorkerGlobalScope object and its service worker’s set of event types to handle contains type,
+    //           then report a warning to the console that this might not give the expected results. [SERVICE-WORKERS]
+
+    // 2. Set listener’s removed to true and remove listener from eventTarget’s event listener list.
+    listener.removed = true;
+    VERIFY(m_data);
+    auto did_remove = m_data->event_listener_list.remove_first_matching([&](auto& entry) { return entry.ptr() == &listener; });
+    if (did_remove) {
+        invalidate_compositor_keyboard_scroll_state(*this, listener);
+        invalidate_compositor_wheel_event_listener_state(*this, listener);
+        update_needs_beforeunload_check(*this, listener);
+        event_listener_list_changed();
+    }
+}
+
+// https://dom.spec.whatwg.org/#dom-eventtarget-dispatchevent
+WebIDL::ExceptionOr<bool> EventTarget::dispatch_event_for_bindings(Event& event)
+{
+    // 1. If event’s dispatch flag is set, or if its initialized flag is not set, then throw an "InvalidStateError" DOMException.
+    if (event.dispatched())
+        return WebIDL::InvalidStateError::create("The event is already being dispatched."_utf16);
+
+    if (!event.initialized())
+        return WebIDL::InvalidStateError::create("Cannot dispatch an uninitialized event."_utf16);
+
+    // 2. Initialize event’s isTrusted attribute to false.
+    event.set_is_trusted(false);
+
+    // 3. Return the result of dispatching event to this.
+    return dispatch_event(event);
+}
+
+// https://html.spec.whatwg.org/multipage/webappapis.html#window-reflecting-body-element-event-handler-set
+bool is_window_reflecting_body_element_event_handler(Utf16FlyString const& name)
+{
+    return name.is_one_of(
+        HTML::EventNames::blur,
+        HTML::EventNames::error,
+        HTML::EventNames::focus,
+        HTML::EventNames::load,
+        UIEvents::EventNames::resize,
+        HTML::EventNames::scroll);
+}
+
+// https://html.spec.whatwg.org/multipage/webappapis.html#windoweventhandlers
+static bool is_window_event_handler(Utf16FlyString const& name)
+{
+    return name.is_one_of(
+        HTML::EventNames::afterprint,
+        HTML::EventNames::beforeprint,
+        HTML::EventNames::beforeunload,
+        HTML::EventNames::hashchange,
+        HTML::EventNames::languagechange,
+        HTML::EventNames::message,
+        HTML::EventNames::messageerror,
+        HTML::EventNames::offline,
+        HTML::EventNames::online,
+        HTML::EventNames::pagehide,
+        HTML::EventNames::pageshow,
+        HTML::EventNames::popstate,
+        HTML::EventNames::rejectionhandled,
+        HTML::EventNames::storage,
+        HTML::EventNames::unhandledrejection,
+        HTML::EventNames::unload);
+}
+
+// https://html.spec.whatwg.org/multipage/webappapis.html#determining-the-target-of-an-event-handler
+static EventTarget* determine_target_of_event_handler(EventTarget& event_target, Utf16FlyString const& name)
+{
+    // To determine the target of an event handler, given an EventTarget object eventTarget on which the event handler is exposed,
+    // and an event handler name name, the following steps are taken:
+
+    // 1. If eventTarget is not a body element or a frameset element, then return eventTarget.
+    if (!is<HTML::HTMLBodyElement>(event_target) && !is<HTML::HTMLFrameSetElement>(event_target))
+        return &event_target;
+
+    auto& event_target_element = static_cast<HTML::HTMLElement&>(event_target);
+
+    // 2. If name is not the name of an attribute member of the WindowEventHandlers interface mixin and the Window-reflecting
+    //    body element event handler set does not contain name, then return eventTarget.
+    if (!is_window_event_handler(name) && !is_window_reflecting_body_element_event_handler(name))
+        return &event_target;
+
+    // 3. If eventTarget's node document is not an active document, then return null.
+    if (!event_target_element.document().is_active())
+        return nullptr;
+
+    // 4. Return eventTarget's node document's relevant global object.
+    return event_target_element.document().window().ptr();
+}
+
+static Optional<Utf16FlyString> event_name_from_event_handler_attribute_local_name(Utf16FlyString const& local_name)
+{
+#undef __ENUMERATE
+#define __ENUMERATE(attribute_name, event_name)             \
+    if (local_name == HTML::AttributeNames::attribute_name) \
+        return event_name;
+    ENUMERATE_GLOBAL_EVENT_HANDLERS(__ENUMERATE)
+    ENUMERATE_WINDOW_EVENT_HANDLERS(__ENUMERATE)
+#undef __ENUMERATE
+
+    return {};
+}
+
+// https://html.spec.whatwg.org/multipage/webappapis.html#event-handler-attributes:event-handler-idl-attributes-2
+WebIDL::CallbackType* EventTarget::event_handler_attribute(Utf16FlyString const& name)
+{
+    // 1. Let eventTarget be the result of determining the target of an event handler given this object and name.
+    auto target = determine_target_of_event_handler(*this, name);
+
+    // 2. If eventTarget is null, then return null.
+    if (!target)
+        return nullptr;
+
+    // 3. Return the result of getting the current value of the event handler given eventTarget and name.
+    return target->get_current_value_of_event_handler(name);
+}
+
+// https://html.spec.whatwg.org/multipage/webappapis.html#getting-the-current-value-of-the-event-handler
+WebIDL::CallbackType* EventTarget::get_current_value_of_event_handler(Utf16FlyString const& name)
+{
+    // 1. Let handlerMap be eventTarget's event handler map. (NOTE: Not necessary)
+    auto& handler_map = ensure_data().event_handler_map;
+
+    // 2. Let eventHandler be handlerMap[name].
+    auto event_handler_iterator = handler_map.find(name);
+
+    // Optimization: The spec creates all the event handlers exposed on an object up front and has the initial value of the handler set to null.
+    //               If the event handler hasn't been set, null would be returned in step 4.
+    //               However, this would be very allocation heavy. For example, each DOM::Element includes GlobalEventHandlers, which defines 60+(!) event handler attributes.
+    //               Plus, the vast majority of these allocations would be likely wasted, as I imagine web content will only use a handful of these attributes on certain elements, if any at all.
+    //               Thus, we treat the event handler not being in the event handler map as being equivalent to an event handler with an initial null value.
+    if (event_handler_iterator == handler_map.end())
+        return nullptr;
+
+    auto& event_handler = event_handler_iterator->value;
+
+    // 3. If eventHandler's value is an internal raw uncompiled handler, then:
+    if (event_handler->value.has<Utf16String>()) {
+        // 1. If eventTarget is an element, then let element be eventTarget, and document be element's node document.
+        //    Otherwise, eventTarget is a Window object, let element be null, and document be eventTarget's associated Document.
+        GC::Ptr<Element> element;
+        GC::Ptr<Document> document;
+
+        if (auto* element_event_target = as_if<Element>(this)) {
+            element = element_event_target;
+            document = &element_event_target->document();
+        } else {
+            auto& window_event_target = as<HTML::Window>(*this);
+            document = window_event_target.associated_document();
+        }
+
+        VERIFY(document);
+
+        // 2. If scripting is disabled for document, then return null.
+        if (document->is_scripting_disabled())
+            return nullptr;
+
+        // 3. Let body be the uncompiled script body in eventHandler's value.
+        auto const& body = event_handler->value.get<Utf16String>();
+
+        // FIXME: 4. Let location be the location where the script body originated, as given by eventHandler's value.
+
+        // 5. If element is not null and element has a form owner, let form owner be that form owner. Otherwise, let form owner be null.
+        GC::Ptr<HTML::HTMLFormElement> form_owner;
+        if (auto* form_associated_element = as_if<HTML::FormAssociatedElement>(element.ptr())) {
+            if (auto* form = form_associated_element->form())
+                form_owner = form;
+        }
+
+        // 6. Let settings object be the relevant settings object of document.
+        auto& settings_object = document->relevant_settings_object();
+
+        // Build source text and parameter strings for the event handler function.
+        Utf16StringBuilder source_builder;
+        Utf16View parameters_string;
+
+        // sourceText / ParameterList
+        if (name == HTML::EventNames::error && is<HTML::Window>(this)) {
+            //  -> If name is onerror and eventTarget is a Window object
+            //      Let the function have five arguments, named event, source, lineno, colno, and error.
+            source_builder.appendff("function on{}(event, source, lineno, colno, error) {{\n{}\n}}", name, body);
+            parameters_string = u"event, source, lineno, colno, error"sv;
+        } else {
+            //  -> Otherwise
+            //      Let the function have a single argument called event.
+            source_builder.appendff("function on{}(event) {{\n{}\n}}", name, body);
+            parameters_string = u"event"sv;
+        }
+
+        auto source_text = source_builder.to_string();
+
+        auto& vm = JS::VM::the();
+
+        auto compiled_function = JS::CompiledDynamicFunction::compile(vm, source_text, parameters_string, body, JS::FunctionKind::Normal);
+
+        // 7. If body is not parsable as FunctionBody or if parsing detects an early error, then follow these substeps:
+        if (compiled_function.is_error()) {
+            // 1. Set eventHandler's value to null.
+            event_handler->value = GC::Ptr<WebIDL::CallbackType> {};
+
+            // 2. Let syntaxError be a new SyntaxError exception associated with settings object's realm which describes
+            //    the error while parsing. It should be based on location, where the script body originated.
+            // FIXME: Base the error on location.
+            auto syntax_error = JS::SyntaxError::create(settings_object.realm(), compiled_function.release_error());
+
+            // 3. Report an exception with syntaxError for settings object's global object.
+            HTML::report_an_exception(settings_object.global_object(), syntax_error);
+
+            // 4. Return null.
+            return nullptr;
+        }
+
+        // 8. Push settings object's realm execution context onto the JavaScript execution context stack; it is now the running JavaScript execution context.
+        vm.push_execution_context(settings_object.realm_execution_context());
+
+        // scope
+        //  1. Let realm be settings object's Realm.
+        auto& realm = settings_object.realm();
+
+        //  2. Let scope be realm.[[GlobalEnv]].
+        auto scope = GC::Ref<JS::Environment> { realm.global_environment() };
+
+        // 3. If eventHandler is an element's event handler, then set scope to NewObjectEnvironment(document, true, scope).
+        //    (Otherwise, eventHandler is a Window object's event handler.)
+        if (is<Element>(this))
+            scope = Bindings::new_event_handler_object_environment(realm, GC::Ref { *document }, scope);
+
+        //  4. If form owner is not null, then set scope to NewObjectEnvironment(form owner, true, scope).
+        if (form_owner)
+            scope = Bindings::new_event_handler_object_environment(realm, GC::Ref { *form_owner }, scope);
+
+        //  5. If element is not null, then set scope to NewObjectEnvironment(element, true, scope).
+        if (element)
+            scope = Bindings::new_event_handler_object_environment(realm, GC::Ref { *element }, scope);
+
+        // 9. Let function be the result of calling OrdinaryFunctionCreate.
+        auto function = compiled_function.value().instantiate(realm, *scope, nullptr, JS::ScriptOrModule {});
+
+        // 10. Remove settings object's realm execution context from the JavaScript execution context stack.
+        auto* popped_execution_context = vm.pop_execution_context();
+        VERIFY(popped_execution_context == &settings_object.realm_execution_context());
+
+        // 11. Set function.[[ScriptOrModule]] to null.
+        // NB: Step 9 already did this by instantiating the function with an empty script or module.
+
+        // 12. Set eventHandler's value to the result of creating a Web IDL EventHandler callback function object whose object reference is function and whose callback context is settings object.
+        // FIXME: Update this comment once the ShadowRealm proposal is merged to pass realm.
+        event_handler->value = GC::Ptr(GC::Heap::the().allocate<WebIDL::CallbackType>(*function, realm));
+    }
+
+    // 4. Return eventHandler's value.
+    VERIFY(event_handler->value.has<GC::Ptr<WebIDL::CallbackType>>());
+    return event_handler->value.get_pointer<GC::Ptr<WebIDL::CallbackType>>()->ptr();
+}
+
+// https://html.spec.whatwg.org/multipage/webappapis.html#event-handler-attributes:event-handler-idl-attributes-3
+void EventTarget::set_event_handler_attribute(Utf16FlyString const& name, GC::Ptr<WebIDL::CallbackType> value)
+{
+    // 1. Let eventTarget be the result of determining the target of an event handler given this object and name.
+    auto event_target = determine_target_of_event_handler(*this, name);
+
+    // 2. If eventTarget is null, then return.
+    if (!event_target)
+        return;
+
+    // 3. If the given value is null, then deactivate an event handler given eventTarget and name.
+    if (!value) {
+        event_target->deactivate_event_handler(name);
+        return;
+    }
+
+    // 4. Otherwise:
+    //  1. Let handlerMap be eventTarget's event handler map.
+    auto& handler_map = event_target->ensure_data().event_handler_map;
+
+    //  2. Let eventHandler be handlerMap[name].
+    auto event_handler_iterator = handler_map.find(name);
+
+    //  3. Set eventHandler's value to the given value.
+    if (event_handler_iterator == handler_map.end()) {
+        // NOTE: See the optimization comment in get_current_value_of_event_handler about why this is done.
+        auto new_event_handler = GC::Heap::the().allocate<HTML::EventHandler>(*value);
+
+        //  4. Activate an event handler given eventTarget and name.
+        // Optimization: We pass in the event handler here instead of having activate_event_handler do another hash map lookup just to get the same object.
+        //               This handles a new event handler while the other path handles an existing event handler. As such, both paths must have their own
+        //               unique call to activate_event_handler.
+        event_target->activate_event_handler(name, *new_event_handler);
+
+        handler_map.set(name, new_event_handler);
+        return;
+    }
+
+    auto& event_handler = event_handler_iterator->value;
+
+    event_handler->value = GC::Ptr(value);
+
+    //  4. Activate an event handler given eventTarget and name.
+    //  NOTE: See the optimization comment above.
+    event_target->activate_event_handler(name, *event_handler);
+}
+
+// https://html.spec.whatwg.org/multipage/webappapis.html#activate-an-event-handler
+static JS::Realm& event_handler_listener_realm(EventTarget& event_target, HTML::EventHandler& event_handler)
+{
+    if (auto* callback = event_handler.value.get_pointer<GC::Ptr<WebIDL::CallbackType>>()) {
+        if (auto* realm = Bindings::callback_realm(callback->ptr()))
+            return *realm;
+    }
+
+    if (auto* node = as_if<Node>(&event_target))
+        return node->document().relevant_settings_object().realm();
+
+    if (auto* window = as_if<HTML::Window>(&event_target))
+        return window->associated_document().relevant_settings_object().realm();
+
+    VERIFY_NOT_REACHED();
+}
+
+void EventTarget::activate_event_handler(Utf16FlyString const& name, HTML::EventHandler& event_handler)
+{
+    // 1. Let handlerMap be eventTarget's event handler map.
+    // 2. Let eventHandler be handlerMap[name].
+    // NOTE: These are achieved by using the passed in event handler.
+
+    // 3. If eventHandler's listener is not null, then return.
+    if (event_handler.listener)
+        return;
+
+    JS::Realm& realm = event_handler_listener_realm(*this, event_handler);
+
+    // 4. Let callback be the result of creating a Web IDL EventListener instance representing a reference to a function of one argument that executes the steps of the event handler processing algorithm, given eventTarget, name, and its argument.
+    //    The EventListener's callback context can be arbitrary; it does not impact the steps of the event handler processing algorithm. [DOM]
+
+    // NB: The listener below is eventTarget's and has type name, so the event it is called with gives both, and the
+    //     function needs no captures.
+    auto callback_function = JS::NativeFunction::create(
+        realm, +[](JS::VM& vm) -> JS::ThrowCompletionOr<JS::Value> {
+            // The event dispatcher should only call this with one argument.
+            VERIFY(vm.argument_count() == 1);
+
+            // The argument must be an object and it must be an Event.
+            auto* event = Bindings::event_from_callback_argument(vm);
+            VERIFY(event);
+
+            TRY(event->current_target()->process_event_handler_for_event(event->type(), *event));
+            return JS::js_undefined();
+        },
+        0, Utf16FlyString {}, &realm);
+
+    // NOTE: As per the spec, the callback context is arbitrary.
+    auto callback = GC::Heap::the().allocate<WebIDL::CallbackType>(*callback_function, realm);
+
+    // 5. Let listener be a new event listener whose type is the event handler event type corresponding to eventHandler and callback is callback.
+    auto listener = GC::Heap::the().allocate<DOMEventListener>();
+    listener->type = name;
+    listener->callback = IDLEventListener::create(*callback);
+
+    // 6. Add an event listener with eventTarget and listener.
+    add_an_event_listener(*listener);
+
+    // 7. Set eventHandler's listener to listener.
+    event_handler.listener = listener;
+}
+
+void EventTarget::deactivate_event_handler(Utf16FlyString const& name)
+{
+    // 1. Let handlerMap be eventTarget's event handler map.
+    auto& handler_map = ensure_data().event_handler_map;
+
+    // 2. Let eventHandler be handlerMap[name].
+    auto event_handler_iterator = handler_map.find(name);
+
+    // NOTE: See the optimization comment in get_current_value_of_event_handler about why this is done.
+    if (event_handler_iterator == handler_map.end())
+        return;
+
+    auto& event_handler = event_handler_iterator->value;
+
+    // 4. Let listener be eventHandler's listener. (NOTE: Not necessary)
+
+    // 5. If listener is not null, then remove an event listener with eventTarget and listener.
+    if (event_handler->listener) {
+        remove_an_event_listener(*event_handler->listener);
+    }
+
+    // 6. Set eventHandler's listener to null.
+    event_handler->listener = nullptr;
+
+    // 3. Set eventHandler's value to null.
+    // NOTE: This is done out of order since our equivalent of setting value to null is removing the event handler from the map.
+    //       Given that event_handler is a reference to an entry, this would invalidate event_handler if we did it in order.
+    handler_map.remove(event_handler_iterator);
+}
+
+// https://dom.spec.whatwg.org/#remove-all-event-listeners
+void EventTarget::remove_all_event_listeners()
+{
+    if (!m_data)
+        return;
+
+    // For each listener of eventTarget's event listener list, remove an event listener with eventTarget and listener.
+    while (!m_data->event_listener_list.is_empty())
+        remove_an_event_listener(*m_data->event_listener_list.first());
+}
+
+// https://html.spec.whatwg.org/multipage/webappapis.html#erase-all-event-listeners-and-handlers
+void EventTarget::erase_all_event_listeners_and_handlers()
+{
+    if (!m_data)
+        return;
+
+    // 1. If eventTarget has an associated event handler map, then for each name -> eventHandler of eventTarget's
+    //    associated event handler map, deactivate an event handler given eventTarget and name.
+    // NB: Deactivating an event handler removes it from the map, so collect the names up front.
+    for (auto const& name : m_data->event_handler_map.keys())
+        deactivate_event_handler(name);
+
+    // 2. Remove all event listeners given eventTarget.
+    remove_all_event_listeners();
+}
+
+// https://html.spec.whatwg.org/multipage/webappapis.html#the-event-handler-processing-algorithm
+JS::ThrowCompletionOr<void> EventTarget::process_event_handler_for_event(Utf16FlyString const& name, Event& event)
+{
+    // FIXME: 1. If the result of WebDriver BiDi scripting is enabled with eventTarget's relevant settings object is false,
+    //           then return.
+
+    // 2. Let callback be the result of getting the current value of the event handler given eventTarget and name.
+    auto* callback = get_current_value_of_event_handler(name);
+
+    // 3. If callback is null, then return.
+    if (!callback)
+        return {};
+
+    // 4. If callback's associated realm's global object is a Window object whose associated Document is not fully
+    //    active, then return.
+    if (auto* window = Bindings::window_from_callback(*callback); window && !window->associated_document().is_fully_active())
+        return {};
+
+    // 5. Let special error event handling be true if event is an ErrorEvent object, event's type is error, and event's currentTarget implements the WindowOrWorkerGlobalScope mixin.
+    //    Otherwise, let special error event handling be false.
+    bool special_error_event_handling = HTML::is_error_event(event) && event.type() == HTML::EventNames::error && is<HTML::WindowOrWorkerGlobalScopeMixin>(event.current_target().ptr());
+
+    // 6. Process the Event object event as follows:
+    JS::Completion return_value_or_error;
+
+    return_value_or_error = Bindings::invoke_event_handler(*callback, event, special_error_event_handling);
+
+    // If an exception gets thrown by the callback, end these steps and allow the exception to propagate. (It will propagate to the DOM event dispatch logic, which will then report the exception.)
+    if (return_value_or_error.is_error())
+        return return_value_or_error.release_error();
+
+    // FIXME: Ideally, invoke_callback would convert JS::Value to the appropriate return type for us as per the spec, but it doesn't currently.
+    auto return_value = return_value_or_error.value();
+
+    auto is_beforeunload = event.type() == HTML::EventNames::beforeunload;
+
+    // 7. Process return value as follows:
+    auto before_unload_event_return_value = HTML::before_unload_event_return_value(event);
+    if (before_unload_event_return_value.has_value() && is_beforeunload) {
+        // ->  If event is a BeforeUnloadEvent object and event's type is "beforeunload"
+        //         If return value is not null, then:
+        if (!return_value.is_nullish()) {
+            // 1. Set event's canceled flag.
+            event.set_cancelled(true);
+
+            // 2. If event's returnValue attribute's value is the empty string, then set event's returnValue attribute's value to return value.
+            if (before_unload_event_return_value->is_empty())
+                HTML::set_before_unload_event_return_value(event, TRY(return_value.to_utf16_string(vm())));
+        }
+    }
+
+    if (special_error_event_handling) {
+        // -> If special error event handling is true
+        //      If return value is true, then set event's canceled flag.
+        // NB: the return type of EventHandler is `any`, so no coercion happens, meaning we have to check if it's a
+        //     boolean first.
+        if (return_value.is_boolean() && return_value.as_bool())
+            event.set_cancelled(true);
+    } else {
+        // -> Otherwise
+        //      If return value is false, then set event's canceled flag.
+        // NB: the return type of EventHandler is `any`, so no coercion happens, meaning we have to check if it's a
+        //     boolean first.
+        // NOTE: If we've gotten to this "Otherwise" clause because event's type is "beforeunload" but event is not a
+        //       BeforeUnloadEvent object, then return value will never be false, since in such cases return value will
+        //       have been coerced into either null or a DOMString.
+        if (return_value.is_boolean() && !return_value.as_bool() && !is_beforeunload)
+            event.set_cancelled(true);
+    }
+
+    return {};
+}
+
+// https://html.spec.whatwg.org/multipage/webappapis.html#event-handler-attributes:concept-element-attributes-change-ext
+void EventTarget::element_event_handler_attribute_changed(Utf16FlyString const& local_name, Optional<Utf16String> const& value)
+{
+    // NOTE: Step 1 of this algorithm was handled in HTMLElement::attribute_changed.
+
+    auto event_name = event_name_from_event_handler_attribute_local_name(local_name);
+    if (!event_name.has_value())
+        return;
+
+    // 2. Let eventTarget be the result of determining the target of an event handler given element and localName.
+    // NOTE: element is `this`.
+    auto* event_target = determine_target_of_event_handler(*this, *event_name);
+
+    // 3. If eventTarget is null, then return.
+    if (!event_target)
+        return;
+
+    // 4. If value is null, then deactivate an event handler given eventTarget and localName.
+    if (!value.has_value()) {
+        event_target->deactivate_event_handler(*event_name);
+        return;
+    }
+
+    // 5. Otherwise:
+    //  1. If the Should element's inline behavior be blocked by Content Security Policy? algorithm returns "Blocked" when executed upon element, "script attribute", and value, then return. [CSP]
+    auto& this_as_element = as<DOM::Element>(*this);
+    if (ContentSecurityPolicy::should_elements_inline_type_behavior_be_blocked_by_content_security_policy(
+            this_as_element,
+            ContentSecurityPolicy::Directives::Directive::InlineType::ScriptAttribute,
+            value.value())
+        == ContentSecurityPolicy::Directives::Directive::Result::Blocked) {
+        dbgln("EventTarget: Refusing to add inline event handler as it violates the Content Security Policy.");
+        return;
+    }
+
+    //  2. Let handlerMap be eventTarget's event handler map.
+    auto& handler_map = event_target->ensure_data().event_handler_map;
+
+    //  3. Let eventHandler be handlerMap[localName].
+    auto event_handler_iterator = handler_map.find(*event_name);
+
+    //  FIXME: 4. Let location be the script location that triggered the execution of these steps.
+
+    //  FIXME: 5. Set eventHandler's value to the internal raw uncompiled handler value/location.
+    //            (This currently sets the value to the uncompiled source code instead of the named struct)
+
+    // NOTE: See the optimization comments in set_event_handler_attribute.
+
+    if (event_handler_iterator == handler_map.end()) {
+        auto new_event_handler = GC::Heap::the().allocate<HTML::EventHandler>(*value);
+
+        //  6. Activate an event handler given eventTarget and name.
+        event_target->activate_event_handler(*event_name, *new_event_handler);
+
+        handler_map.set(*event_name, new_event_handler);
+        return;
+    }
+
+    auto& event_handler = event_handler_iterator->value;
+
+    //  6. Activate an event handler given eventTarget and name.
+    event_handler->value = *value;
+    event_target->activate_event_handler(*event_name, *event_handler);
+}
+
+bool EventTarget::dispatch_event(Event& event)
+{
+    // https://html.spec.whatwg.org/multipage/interaction.html#activation-triggering-input-event
+    auto is_activation_triggering_input_event = [&]() -> bool {
+        // An activation triggering input event is any event whose isTrusted attribute is true and whose type is one of:
+        if (!event.is_trusted())
+            return false;
+
+        // keydown, provided the key is neither the Esc key nor a shortcut key reserved by the user agent.
+        if (event.type() == UIEvents::EventNames::keydown)
+            return static_cast<UIEvents::KeyboardEvent*>(&event)->key_code() != UIEvents::KeyCode::Key_Escape;
+
+        // mousedown.
+        if (event.type() == UIEvents::EventNames::mousedown)
+            return true;
+
+        // pointerdown, provided the event's pointerType is "mouse".
+        if (event.type() == UIEvents::EventNames::pointerdown) {
+            if (auto* pointer_event = as_if<UIEvents::PointerEvent>(&event))
+                return pointer_event->pointer_type() == u"mouse"sv;
+        }
+
+        // pointerup, provided the event's pointerType is not "mouse".
+        if (event.type() == UIEvents::EventNames::pointerup) {
+            if (auto* pointer_event = as_if<UIEvents::PointerEvent>(&event))
+                return pointer_event->pointer_type() != u"mouse"sv;
+        }
+
+        // touchend.
+        if (event.type() == UIEvents::EventNames::touchend)
+            return true;
+
+        return false;
+    };
+
+    // https://html.spec.whatwg.org/multipage/interaction.html#user-activation-processing-model
+    // When a user interaction causes firing of an activation triggering input event in a Document document,
+    // the user agent must perform the following activation notification steps before dispatching the event:
+    if (is_activation_triggering_input_event()) {
+        GC::Ptr<Document> document = [&]() -> GC::Ptr<Document> {
+            if (auto* window = as_if<HTML::Window>(*this))
+                return window->associated_document();
+            if (auto* node = as_if<Node>(*this))
+                return node->document();
+            return nullptr;
+        }();
+
+        if (document)
+            HTML::Window::run_activation_notification_steps(*document);
+    }
+
+    return EventDispatcher::dispatch(*this, event);
+}
+
+bool EventTarget::has_event_listener(Utf16FlyString const& type) const
+{
+    return m_data && m_data->event_listener_list.contains([&type](auto listener) { return listener->type == type; });
+}
+
+bool EventTarget::has_blocking_wheel_event_listener() const
+{
+    return m_data && m_data->event_listener_list.contains(is_blocking_wheel_event_listener);
+}
+
+bool EventTarget::has_blocking_keyboard_event_listener() const
+{
+    return m_data && m_data->event_listener_list.contains(is_blocking_keyboard_event_listener);
+}
+
+bool EventTarget::has_event_listeners() const
+{
+    return m_data && !m_data->event_listener_list.is_empty();
+}
+
+bool EventTarget::has_activation_behavior() const
+{
+    return false;
+}
+
+void EventTarget::activation_behavior(Event const&)
+{
+}
+
+auto EventTarget::ensure_data() -> Data&
+{
+    if (!m_data)
+        m_data = make<Data>();
+    return *m_data;
+}
+
+}

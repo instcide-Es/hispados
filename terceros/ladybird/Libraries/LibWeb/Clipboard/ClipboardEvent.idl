@@ -1,0 +1,10 @@
+dictionary ClipboardEventInit : EventInit {
+    DataTransfer? clipboardData = null;
+};
+
+// https://w3c.github.io/clipboard-apis/#clipboardevent
+[Exposed=Window, ImplementedIn=Rust]
+interface ClipboardEvent : Event {
+    constructor(DOMString type, optional ClipboardEventInit eventInitDict = {});
+    readonly attribute DataTransfer? clipboardData;
+};

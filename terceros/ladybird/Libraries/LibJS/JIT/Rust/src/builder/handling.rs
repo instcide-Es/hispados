@@ -1,0 +1,386 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+//! How the graph builder handles each bytecode opcode.
+//!
+//! The match below is exhaustive on purpose: a new opcode does not compile
+//! until someone decides how the JIT handles it.
+
+use crate::bytecode::OpCode;
+
+/// How the graph builder handles one opcode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Handling {
+    /// Built from native IR nodes.
+    Native,
+    /// Built as a `Generic` node that runs the interpreter's slow path for
+    /// the opcode.
+    Generic(GenericInfo),
+    /// Built as IR for the common cases, with cold blocks that run the
+    /// slow path of a `Generic` node for the others (`Op::CallSlowPath`).
+    Expanded(GenericInfo),
+    /// Compilation fails with the given reason.
+    Unsupported(&'static str),
+}
+
+impl Handling {
+    pub fn generic(self) -> Option<GenericInfo> {
+        match self {
+            Handling::Generic(info) | Handling::Expanded(info) => Some(info),
+            _ => None,
+        }
+    }
+}
+
+/// What the graph builder and later passes need to know about the slow path
+/// of a generic opcode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GenericInfo {
+    pub can_throw: bool,
+    /// Calls a JS function with call semantics (the runtime's call helper).
+    pub is_js_call: bool,
+    /// Reads frame slots that are not among its operands (the arguments, or
+    /// any slot through direct eval or the debugger), so every slot must be
+    /// written back to the frame before it, not just the live ones.
+    pub reads_whole_frame: bool,
+}
+
+const GENERIC: Handling = Handling::Generic(GenericInfo {
+    can_throw: true,
+    is_js_call: false,
+    reads_whole_frame: false,
+});
+
+const GENERIC_NO_THROW: Handling = Handling::Generic(GenericInfo {
+    can_throw: false,
+    is_js_call: false,
+    reads_whole_frame: false,
+});
+
+const GENERIC_CALL: Handling = Handling::Generic(GenericInfo {
+    can_throw: true,
+    is_js_call: true,
+    reads_whole_frame: false,
+});
+
+const GENERIC_READS_WHOLE_FRAME: Handling = Handling::Generic(GenericInfo {
+    can_throw: true,
+    is_js_call: false,
+    reads_whole_frame: true,
+});
+
+const GENERIC_CALL_READS_WHOLE_FRAME: Handling = Handling::Generic(GenericInfo {
+    can_throw: true,
+    is_js_call: true,
+    reads_whole_frame: true,
+});
+
+const EXPANDED: Handling = Handling::Expanded(GenericInfo {
+    can_throw: true,
+    is_js_call: false,
+    reads_whole_frame: false,
+});
+
+/// How the graph builder handles `opcode`.
+pub fn handling(opcode: OpCode) -> Handling {
+    use OpCode as O;
+    match opcode {
+        // Control flow, moves and frame setup.
+        O::Enter
+        | O::EnterCoercingThis
+        | O::Mov
+        | O::MovWide
+        | O::WideNameIndices
+        | O::MovSrcUndefined
+        | O::Jump
+        | O::JumpIf
+        | O::JumpTrue
+        | O::JumpFalse
+        | O::JumpLoop
+        | O::JumpIfLoop
+        | O::JumpTrueLoop
+        | O::JumpFalseLoop
+        | O::JumpNullish
+        | O::JumpUndefined
+        | O::Return
+        | O::End
+        | O::Yield
+        | O::YieldIteratorResult
+        | O::Await => Handling::Native,
+
+        // Truthiness, built from a truthiness branch and a phi.
+        O::Not | O::ToBoolean => Handling::Native,
+
+        // Trivial frame field accesses and tag checks without a slow path.
+        O::GetLexicalEnvironment
+        | O::SetLexicalEnvironment
+        | O::LeavePrivateEnvironment
+        | O::EnterWithOwnEnvironments
+        | O::IsCallable
+        | O::GetArgumentCount => Handling::Native,
+
+        // NB: The interpreter runs it, and compiled code is entered after it
+        //     (see `build_catch_entries()`). Handlers of inlined callees run
+        //     in the interpreter to their end (see `can_inline()`).
+        O::Catch => Handling::Unsupported("starts an exception handler, which the interpreter runs"),
+
+        // Calls.
+        O::Call
+        | O::CallConstruct
+        | O::CallWithArgumentArray
+        | O::CallConstructWithArgumentArray
+        | O::SuperCallWithArgumentArray
+        | O::SuperCall => GENERIC_CALL,
+        O::BindThisFromSuperCall => GENERIC,
+        O::CallDirectEval | O::CallDirectEvalWithArgumentArray | O::SuperCallWithForwardedArguments => {
+            GENERIC_CALL_READS_WHOLE_FRAME
+        }
+
+        O::CreateArguments | O::CreateRestParams | O::GetArgument | O::Debugger => GENERIC_READS_WHOLE_FRAME,
+
+        // Slow paths that only allocate or inspect values.
+        O::NewObject
+        | O::NewObjectWithNoPrototype
+        | O::NewArray
+        | O::NewPrimitiveArray
+        | O::NewFunction
+        | O::NewFunctionWide
+        | O::NewReferenceError
+        | O::NewTypeError
+        | O::CreateLexicalEnvironment
+        | O::CreateVariableEnvironment
+        | O::CreatePrivateEnvironment
+        | O::Typeof
+        | O::IsConstructor
+        | O::GetNewTarget
+        | O::NewDisposableResourceStack => GENERIC_NO_THROW,
+
+        // Comparisons and conditional jumps, built as IR (see `speculation`).
+        // The slow paths of the jumps return the next pc.
+        O::LessThan
+        | O::LessThanEquals
+        | O::GreaterThan
+        | O::GreaterThanEquals
+        | O::StrictlyEquals
+        | O::StrictlyInequals
+        | O::LooselyEquals
+        | O::LooselyInequals
+        | O::LessThanRhsInt32
+        | O::LessThanEqualsRhsInt32
+        | O::GreaterThanRhsInt32
+        | O::GreaterThanEqualsRhsInt32
+        | O::StrictlyEqualsRhsInt32
+        | O::StrictlyInequalsRhsInt32
+        | O::LooselyEqualsRhsInt32
+        | O::LooselyInequalsRhsInt32
+        | O::JumpLessThan
+        | O::JumpGreaterThan
+        | O::JumpLessThanEquals
+        | O::JumpGreaterThanEquals
+        | O::JumpLooselyEquals
+        | O::JumpLooselyInequals
+        | O::JumpStrictlyEquals
+        | O::JumpStrictlyInequals
+        | O::JumpLessThanRhsInt32
+        | O::JumpLessThanEqualsRhsInt32
+        | O::JumpGreaterThanRhsInt32
+        | O::JumpGreaterThanEqualsRhsInt32
+        | O::JumpStrictlyEqualsRhsInt32
+        | O::JumpStrictlyInequalsRhsInt32
+        | O::JumpLooselyEqualsRhsInt32
+        | O::JumpLooselyInequalsRhsInt32
+        | O::JumpLessThanLoop
+        | O::JumpGreaterThanLoop
+        | O::JumpLessThanEqualsLoop
+        | O::JumpGreaterThanEqualsLoop
+        | O::JumpLooselyEqualsLoop
+        | O::JumpLooselyInequalsLoop
+        | O::JumpStrictlyEqualsLoop
+        | O::JumpStrictlyInequalsLoop
+        | O::JumpLessThanLoopRhsInt32
+        | O::JumpLessThanEqualsLoopRhsInt32
+        | O::JumpGreaterThanLoopRhsInt32
+        | O::JumpGreaterThanEqualsLoopRhsInt32
+        | O::JumpStrictlyEqualsLoopRhsInt32
+        | O::JumpStrictlyInequalsLoopRhsInt32
+        | O::JumpLooselyEqualsLoopRhsInt32
+        | O::JumpLooselyInequalsLoopRhsInt32 => EXPANDED,
+
+        // Arithmetic, built as IR (see `speculation`).
+        O::Add
+        | O::Sub
+        | O::Mul
+        | O::Div
+        | O::Mod
+        | O::Increment
+        | O::Decrement
+        | O::PostfixIncrement
+        | O::PostfixDecrement
+        | O::BitwiseXor
+        | O::BitwiseAnd
+        | O::BitwiseOr
+        | O::BitwiseNot
+        | O::LeftShift
+        | O::RightShift
+        | O::UnsignedRightShift
+        | O::UnaryPlus
+        | O::UnaryMinus
+        | O::ToInt32
+        | O::AddLhsInt32
+        | O::AddRhsInt32
+        | O::SubRhsInt32
+        | O::MulRhsInt32
+        | O::DivRhsInt32
+        | O::ModRhsInt32
+        | O::BitwiseXorRhsInt32
+        | O::BitwiseAndRhsInt32
+        | O::BitwiseOrRhsInt32
+        | O::LeftShiftRhsInt32
+        | O::RightShiftRhsInt32
+        | O::UnsignedRightShiftRhsInt32 => EXPANDED,
+
+        // Keyed access and `length` with an inline fast path in the
+        // interpreter for arrays, typed arrays and strings.
+        O::GetByValue | O::PutByValue | O::GetLength => EXPANDED,
+
+        // Named property access through the interpreter's property lookup
+        // caches.
+        O::GetById | O::PutById => EXPANDED,
+
+        // Bindings at static environment coordinates.
+        O::GetBinding
+        | O::GetInitializedBinding
+        | O::GetCalleeAndThisFromEnvironment
+        | O::SetLexicalBinding
+        | O::SetVariableBinding
+        | O::InitializeLexicalBinding
+        | O::InitializeVariableBinding
+        // Bindings that environments of a shape get next.
+        | O::CreateVariable => EXPANDED,
+
+        // Global variables through the interpreter's global variable caches.
+        O::GetGlobal | O::SetGlobal => EXPANDED,
+
+        // The next key of a for-in loop over a cached key snapshot.
+        O::ObjectPropertyIteratorNext => EXPANDED,
+
+        // Iteration over arrays.
+        O::GetIterator | O::IteratorNextUnpack => EXPANDED,
+
+        // The completion a generator resumed with, which the generator
+        // object holds.
+        O::GetCompletionFields => EXPANDED,
+
+        // Closing an iterator, which does nothing if the cache of the site
+        // has no return method for it.
+        O::IteratorClose => EXPANDED,
+
+        // Conversions that change nothing for objects, for lengths that are
+        // int32 values already, and for primitives.
+        O::ToObject | O::ToLength | O::ToPrimitiveWithStringHint => EXPANDED,
+
+        // Concatenations of strings, and of a string and an integer.
+        O::ConcatString => EXPANDED,
+
+        // Checks that only throw in their slow path.
+        O::ThrowIfTDZ | O::ThrowIfNotObject | O::ThrowIfNullish | O::ResolveThisBinding => EXPANDED,
+
+        O::Exp
+        | O::CopyObjectExcludingProperties
+        | O::ImportCall
+        | O::GetClassFieldInitializerName
+        | O::GetClassProtoParent
+        | O::NewClass
+        | O::GetImportMeta
+        | O::GetImport
+        | O::GetSuperConstructor
+        | O::DynamicGetBinding
+        | O::DynamicGetInitializedBinding
+        | O::DynamicInitializeLexicalBinding
+        | O::DynamicInitializeVariableBinding
+        | O::DynamicSetLexicalBinding
+        | O::DynamicSetVariableBinding
+        | O::ResolveBinding
+        | O::ResolveGlobalBinding
+        | O::ResolveSuperBase
+        | O::GetResolvedBinding
+        | O::SetResolvedBinding
+        | O::TypeofBinding
+        | O::DynamicTypeofBinding
+        | O::TypeofGlobal
+        | O::VerifyEnvironmentCoordinate
+        | O::HasPrivateId
+        | O::SetFunctionName
+        | O::NewArrayWithLength
+        | O::ArrayAppend
+        | O::EnterObjectEnvironment
+        | O::ThrowConstAssignment
+        | O::ThrowNotAFunction
+        | O::Throw
+        | O::ToString
+        | O::DynamicGetCalleeAndThisFromEnvironment
+        | O::GetByIdWithThis
+        | O::PutByIdWithThis
+        | O::GetByValueWithThis
+        | O::PutByValueWithThis
+        | O::PutBySpread
+        | O::GetLengthWithThis
+        | O::GetMethod
+        | O::GetObjectPropertyIterator
+        | O::IteratorNext
+        | O::IteratorStep
+        | O::SetVariableBindingOfBlockFunction
+        | O::IteratorToArray
+        | O::CacheObjectShape
+        | O::InitObjectLiteralProperty
+        | O::NewRegExp
+        | O::InstanceOf
+        | O::In
+        | O::AddPrivateName
+        | O::CreateAsyncFromSyncIterator
+        | O::CreateDataPropertyOrThrow
+        | O::CreateImmutableBinding
+        | O::CreateMutableBinding
+        | O::DeleteById
+        | O::DeleteByValue
+        | O::DeleteVariable
+        | O::SetCompletionType
+        | O::GetTemplateObject
+        | O::GetPrivateById
+        | O::PutPrivateById
+        | O::AddDisposableResource
+        | O::DisposeResources
+        | O::AsyncDisposeResourcesStep
+        | O::ExpRhsInt32 => GENERIC,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bytecode::NUM_OPCODES;
+
+    fn all_opcodes() -> impl Iterator<Item = OpCode> {
+        (0..NUM_OPCODES).map(|value| OpCode::from_u8(u8::try_from(value).unwrap()).unwrap())
+    }
+
+    #[test]
+    fn terminators_are_native_generic_jumps_or_unsupported() {
+        for opcode in all_opcodes() {
+            if !opcode.is_terminator() {
+                continue;
+            }
+            match handling(opcode) {
+                Handling::Native | Handling::Unsupported(_) => {}
+                Handling::Generic(_) | Handling::Expanded(_) => assert!(
+                    opcode.name().starts_with("Jump") || opcode == OpCode::Throw,
+                    "{} is a generic terminator",
+                    opcode.name()
+                ),
+            }
+        }
+    }
+}

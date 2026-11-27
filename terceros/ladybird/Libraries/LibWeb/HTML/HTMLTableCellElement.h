@@ -1,0 +1,51 @@
+/*
+ * Copyright (c) 2020-2025, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <LibWeb/HTML/HTMLElement.h>
+#include <LibWebCommon/WebIDL/Types.h>
+
+namespace Web::HTML {
+
+class HTMLTableCellElement final : public HTMLElement {
+    WEB_WRAPPABLE(HTMLTableCellElement, HTMLElement);
+    GC_DECLARE_ALLOCATOR(HTMLTableCellElement);
+
+public:
+    virtual ~HTMLTableCellElement() override;
+
+    WebIDL::UnsignedLong col_span() const;
+    WebIDL::UnsignedLong row_span() const;
+
+    void set_col_span(WebIDL::UnsignedLong);
+    void set_row_span(WebIDL::UnsignedLong);
+
+    // Whether the cell's effective spans differ from what they were when this was last asked.
+    bool take_table_span_change();
+
+    WebIDL::Long cell_index() const;
+
+    virtual Optional<ARIA::Role> default_role() const override;
+
+private:
+    WebIDL::UnsignedLong m_last_col_span { 1 };
+    WebIDL::UnsignedLong m_last_row_span { 1 };
+    HTMLTableCellElement(DOM::Document&, DOM::QualifiedName);
+
+    virtual bool is_html_table_cell_element() const override { return true; }
+    virtual bool is_presentational_hint(Utf16FlyString const&) const override;
+    virtual void apply_presentational_hints(Vector<CSS::StyleProperty>&) const override;
+};
+
+}
+
+namespace Web::DOM {
+
+template<>
+inline bool Node::fast_is<HTML::HTMLTableCellElement>() const { return is_html_table_cell_element(); }
+
+}

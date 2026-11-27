@@ -1,0 +1,10 @@
+// https://webaudio.github.io/web-audio-api/#ChannelMergerNode
+[Exposed=Window, ImplementedIn=Rust]
+interface ChannelMergerNode : AudioNode {
+    constructor (BaseAudioContext context, optional ChannelMergerOptions options = {});
+};
+
+// https://webaudio.github.io/web-audio-api/#ChannelMergerOptions
+dictionary ChannelMergerOptions : AudioNodeOptions {
+    unsigned long numberOfInputs = 6;
+};

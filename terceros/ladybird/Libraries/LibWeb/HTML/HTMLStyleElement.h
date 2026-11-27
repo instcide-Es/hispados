@@ -1,0 +1,58 @@
+/*
+ * Copyright (c) 2018-2021, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2021, the SerenityOS developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <LibWeb/DOM/StyleElementBase.h>
+#include <LibWeb/HTML/HTMLElement.h>
+
+namespace Web::HTML {
+
+class HTMLStyleElement final
+    : public HTMLElement
+    , public DOM::StyleElementBase {
+    WEB_WRAPPABLE(HTMLStyleElement, HTMLElement);
+    GC_DECLARE_ALLOCATOR(HTMLStyleElement);
+
+public:
+    virtual ~HTMLStyleElement() override;
+
+    GC::Ref<DOM::DOMTokenList> blocking();
+
+    virtual void children_changed(ChildrenChangedMetadata const&) override;
+    virtual void inserted() override;
+    virtual void removed_from(IsSubtreeRoot, Node* old_ancestor, Node& old_root) override;
+    virtual void moved_from(IsSubtreeRoot, GC::Ptr<Node> old_ancestor) override;
+    virtual void attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_) override;
+
+    virtual bool contributes_a_script_blocking_style_sheet() const final;
+    virtual bool is_implicitly_potentially_render_blocking() const override;
+
+private:
+    HTMLStyleElement(DOM::Document&, DOM::QualifiedName);
+
+    GC::Ptr<DOM::DOMTokenList> m_blocking;
+
+    // ^DOM::Node
+    virtual bool is_html_style_element() const override { return true; }
+
+    // ^DOM::StyleElementBase
+    virtual Element& as_element() override { return *this; }
+    virtual Element const& as_element() const override { return *this; }
+
+    virtual void visit_edges(Cell::Visitor&) override;
+    virtual void adopted_from(DOM::Document&) override;
+};
+
+}
+
+namespace Web::DOM {
+
+template<>
+inline bool Node::fast_is<HTML::HTMLStyleElement>() const { return is_html_style_element(); }
+
+}

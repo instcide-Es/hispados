@@ -1,0 +1,50 @@
+/*
+ * Copyright (c) 2022, Luke Wilde <lukew@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Variant.h>
+#include <AK/Vector.h>
+#include <LibGC/Root.h>
+#include <LibGC/RootVector.h>
+#include <LibWeb/Export.h>
+#include <LibWeb/Forward.h>
+#include <LibWebCommon/HTML/FocusTrigger.h>
+
+namespace Web::HTML {
+
+enum class ScrollIntoView : u8 {
+    No,
+    Yes,
+};
+
+WEB_API Vector<GC::Root<DOM::Node>> focus_chain(GC::Ptr<DOM::Node> subject);
+void dispatch_system_focus_events(DOM::Document&, bool has_focus);
+WEB_API void run_focus_update_steps(Vector<GC::Root<DOM::Node>> old_chain, Vector<GC::Root<DOM::Node>> new_chain, GC::Ptr<DOM::Node> new_focus_target, GC::Ptr<NavigableContainer> explicitly_focused_container = nullptr);
+WEB_API void run_focusing_steps(GC::Ptr<DOM::Node> new_focus_target, GC::Ptr<DOM::Node> fallback_target = nullptr, FocusTrigger focus_trigger = FocusTrigger::Other, ScrollIntoView = ScrollIntoView::Yes, Optional<bool> focus_visible = {});
+WEB_API void run_unfocusing_steps(GC::Ptr<DOM::Node> old_focus_target);
+GC::Ptr<DOM::Node> focus_delegate(DOM::Node& focus_target, FocusTrigger = FocusTrigger::Other);
+void run_popover_focusing_steps(HTMLElement& subject);
+bool focus_fixup_rule_may_apply(DOM::Document const&);
+bool focus_fixup_rule_applies(DOM::Document&);
+void run_focus_fixup_rule(DOM::Document&);
+
+// https://html.spec.whatwg.org/multipage/interaction.html#sequential-focus-direction
+enum class SequentialFocusDirection : u8 {
+    Forward,
+    Backward,
+};
+
+// https://html.spec.whatwg.org/multipage/interaction.html#selection-mechanism
+enum class SelectionMechanism : u8 {
+    DOM,
+    Sequential,
+};
+
+WEB_API GC::RootVector<GC::Ref<DOM::Element>> sequential_focus_navigation_order(DOM::Document&);
+WEB_API GC::Ptr<DOM::Element> sequential_navigation_search(Variant<GC::Ref<LocalNavigable>, GC::Ref<DOM::Node>> starting_point, SequentialFocusDirection, SelectionMechanism);
+
+}

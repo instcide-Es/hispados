@@ -1,0 +1,17 @@
+// https://svgwg.org/svg2-draft/single-page.html#pservers-InterfaceSVGGradientElement
+[Exposed=Window]
+interface SVGGradientElement : SVGElement {
+
+    // Spread Method Types
+    const unsigned short SVG_SPREADMETHOD_UNKNOWN = 0;
+    const unsigned short SVG_SPREADMETHOD_PAD = 1;
+    const unsigned short SVG_SPREADMETHOD_REFLECT = 2;
+    const unsigned short SVG_SPREADMETHOD_REPEAT = 3;
+
+    [SameObject, ImplementedAs=gradient_units_for_bindings] readonly attribute SVGAnimatedEnumeration gradientUnits;
+    [SameObject, ImplementedAs=gradient_transform_for_bindings] readonly attribute SVGAnimatedTransformList gradientTransform;
+    [SameObject, ImplementedAs=spread_method_for_bindings] readonly attribute SVGAnimatedEnumeration spreadMethod;
+
+};
+
+SVGGradientElement includes SVGURIReference;

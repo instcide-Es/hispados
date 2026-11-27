@@ -1,0 +1,109 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+use core::cell::Cell;
+use core::ptr::NonNull;
+
+/// A pointer to a garbage-collected cell. Cells are kept alive by being reachable from the heap's roots or from the
+/// stack, which the collector scans conservatively, so a `Gc` needs no rooting while it lives in a local.
+#[repr(transparent)]
+pub struct Gc<T: ?Sized>(NonNull<T>);
+
+impl<T: ?Sized> Gc<T> {
+    /// # Safety
+    ///
+    /// `pointer` must point to a live cell of type `T`.
+    pub const unsafe fn from_non_null(pointer: NonNull<T>) -> Self {
+        Self(pointer)
+    }
+
+    pub const fn as_non_null(self) -> NonNull<T> {
+        self.0
+    }
+
+    pub fn as_ptr(self) -> *mut T {
+        self.0.as_ptr()
+    }
+}
+
+impl<T: ?Sized> Clone for Gc<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: ?Sized> Copy for Gc<T> {}
+
+impl<T: ?Sized> PartialEq for Gc<T> {
+    fn eq(&self, other: &Self) -> bool {
+        core::ptr::addr_eq(self.0.as_ptr(), other.0.as_ptr())
+    }
+}
+
+impl<T: ?Sized> Eq for Gc<T> {}
+
+/// Hashes the identity of the cell, which stays the same wherever the collector moves it.
+impl<T: ?Sized> core::hash::Hash for Gc<T> {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        // SAFETY: A Gc points at a live cell.
+        state.write_u32(unsafe { crate::layout_forward::cell_identity_hash(self.0.as_ptr().cast()) });
+    }
+}
+
+impl<T: ?Sized> core::fmt::Debug for Gc<T> {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(formatter, "Gc({:p})", self.0)
+    }
+}
+
+/// Mirrors GC::CellKind.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum CellKind {
+    Other,
+    Object,
+    PrimitiveString,
+    Symbol,
+    BigInt,
+    Accessor,
+}
+
+/// Mirrors GC::Cell::State.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum CellState {
+    Live,
+    Dead,
+}
+
+/// The bytes LibGC shares with every cell. The first word is the vtable pointer of a C++ cell, which LibGC never
+/// reads; the block of a Rust cell holds its class instead (see `class_of`). The header is packed so that a cell's own
+/// fields can use the bytes that follow it, the same way C++ cells reuse the base class's tail padding.
+#[repr(C, packed)]
+pub struct CellHeader {
+    pub unused: [u8; 8],
+    /// The state of the cell's identity hash, which LibGC keeps here, see `cell_identity_hash()`.
+    pub identity_hash_state: Cell<u8>,
+    pub state: Cell<CellState>,
+    pub kind: CellKind,
+}
+
+const _: () = assert!(size_of::<CellHeader>() == 11);
+
+/// The header of a cell that keeps fields of its own in the first word, which comes right after those fields.
+#[repr(C, packed)]
+pub struct CellHeaderTail {
+    pub identity_hash_state: Cell<u8>,
+    pub state: Cell<CellState>,
+    pub kind: CellKind,
+}
+
+const _: () = assert!(size_of::<CellHeaderTail>() == 3);
+
+/// Added to the class that the block of an allocator holds when the classes that extend it share the allocator, whose
+/// cells each keep their own class in the word after the cell_size bytes of that class.
+pub const BLOCK_CLASS_TAIL_TAG: usize = 1;
+const _: () = assert!(align_of::<CellHeader>() == 1);

@@ -1,0 +1,53 @@
+[package]
+name = "libjs_rust"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[features]
+default = ["jit"]
+allocator = ["dep:ladybird_allocator"]
+# The optimizing JIT. Without it, the interpreter is built without the machinery that only the JIT needs.
+jit = ["dep:libjs_jit"]
+address-sanitizer = []
+thread-sanitizer = []
+
+# After changing dependencies, regenerate the Flatpak sources:
+#   python3 Meta/CMake/flatpak/generate-cargo-sources.py
+[dependencies]
+ak = { path = "../../../AK/Rust" }
+foldhash = "0.2"
+getrandom = "0.4"
+hashbrown = { version = "0.17.1", default-features = false }
+indexmap = "2"
+ladybird_allocator = { path = "../../RustAllocator", optional = true }
+libc = "0.2"
+libcompress_rust = { path = "../../LibCompress/Rust" }
+libjs_abi = { path = "../ABI" }
+libjs_jit = { path = "../JIT/Rust", optional = true }
+libjs_parser = { path = "../Parser/Rust" }
+libjs_runtime_macros = { path = "macros" }
+memchr = "2"
+libregex_compiler = { path = "../../LibRegex/Compiler/Rust" }
+libregex_rust = { path = "../../LibRegex/Rust", default-features = false }
+libunicode_rust = { path = "../../LibUnicode/Rust", default-features = false }
+num-bigint = "0.5"
+num-integer = "0.1"
+num-traits = "0.2"
+rustc-demangle = "0.1"
+
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+iced-x86 = { version = "1.22", default-features = false, features = ["decoder", "intel", "std"] }
+
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+farm64 = { package = "fARM64", version = "0.0.2", features = ["alloc"] }
+
+[build-dependencies]
+cc = "1"
+flapc = { path = "../Flap" }
+libjs_abi = { path = "../ABI" }
+
+[lints]
+workspace = true

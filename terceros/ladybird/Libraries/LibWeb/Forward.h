@@ -1,0 +1,1279 @@
+/*
+ * Copyright (c) 2020-2024, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2021-2023, the SerenityOS developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/DistinctNumeric.h>
+#include <AK/Variant.h>
+#include <LibCompositing/Forward.h>
+#include <LibCore/Forward.h>
+#include <LibGC/Forward.h>
+#include <LibGfx/Forward.h>
+#include <LibHTTP/Forward.h>
+#include <LibIPC/Forward.h>
+#include <LibJS/Forward.h>
+#include <LibURL/Forward.h>
+#include <LibWeb/Bindings/Forward.h>
+#include <LibWeb/CSS/StyleEngineIdentifiers.h>
+#include <LibWeb/CSS/StyleRecordID.h>
+#include <LibWeb/Export.h>
+#include <LibWebCommon/Forward.h>
+
+namespace Gfx {
+
+class Typeface;
+
+}
+
+namespace Web::Fetch::Engine {
+
+class FetchBodyDeliveryGate;
+class FetchByteChannel;
+class FetchEngineRecord;
+class FetchLoad;
+class WholeBodyTransport;
+
+}
+
+// NB: The fetch engine can't include LibGC, so these are declared here. A whole-body transport keeps the callbacks
+//     that fetch gives it, which hold the cells they use in roots.
+GC_UNTRACED_CAPTURE(Web::Fetch::Engine::FetchBodyDeliveryGate);
+GC_UNTRACED_CAPTURE(Web::Fetch::Engine::FetchByteChannel);
+GC_UNTRACED_CAPTURE(Web::Fetch::Engine::FetchEngineRecord);
+GC_UNTRACED_CAPTURE(Web::Fetch::Engine::FetchLoad);
+GC_UNTRACED_CAPTURE_WITH_ROOTED_CALLBACKS(Web::Fetch::Engine::WholeBodyTransport);
+GC_UNTRACED_CAPTURE(Gfx::Typeface);
+GC_UNTRACED_CAPTURE(HTTP::HeaderList);
+GC_UNTRACED_CAPTURE(HTTP::MemoryCache);
+GC_UNTRACED_CAPTURE(URL::URL);
+GC_UNTRACED_CAPTURE(URL::Origin);
+
+namespace Web {
+
+class AutoScrollHandler;
+class DragAndDropEventHandler;
+class ElementResizeAction;
+class EventHandler;
+class MiddleButtonScrollHandler;
+class InputEventsTarget;
+class LoadRequest;
+class Page;
+class PageClient;
+class Resource;
+class ResourceLoader;
+class XMLDocumentBuilder;
+
+enum class InvalidateDisplayList;
+enum class TraversalDecision;
+
+struct AsyncScrollOperation;
+struct RemoteInputEventTarget;
+
+}
+
+namespace Web::Compositor {
+
+class CompositorConnection;
+class CompositorContextHandle;
+class CompositorHost;
+class NavigablePresenter;
+
+}
+
+namespace Web::Painting {
+
+class BackingStore;
+class ChromeWidget;
+class ChromeWidgetRegistry;
+enum class PaintCommandCacheMode : u8;
+struct GradientPaintStyle;
+struct PatternPaintStyle;
+
+}
+
+namespace Web::Animations {
+
+class Animatable;
+class AnimationRef;
+class EffectRef;
+class KeyframeSetView;
+class NamedTimelines;
+class TimelineView;
+
+}
+
+namespace Web::ARIA {
+
+class AriaData;
+class ARIAMixin;
+
+enum class StateAndProperties;
+
+}
+
+namespace Web::Bindings {
+
+class Intrinsics;
+enum class NamedPropertyDeletionResult : u8;
+class Wrappable;
+class WrapperWorld;
+
+enum class WrapperWorldType : u8 {
+    Main,
+    Internal,
+    Extension,
+};
+
+enum class AudioContextLatencyCategory : u8;
+enum class CanPlayTypeResult : u8;
+enum class CanvasColorType : u8;
+enum class CanvasFillRule : u8;
+enum class CanvasDirection : u8;
+enum class CanvasLineCap : u8;
+enum class CanvasLineJoin : u8;
+enum class CanvasTextAlign : u8;
+enum class CanvasTextBaseline : u8;
+enum class ColorGamut : u8;
+enum class DOMParserSupportedType : u8;
+enum class EndingType : u8;
+enum class HdrMetadataType : u8;
+enum class ImageSmoothingQuality : u8;
+enum class IDBCursorDirection : u8;
+enum class MediaDecodingType : u8;
+enum class MediaEncodingType : u8;
+enum class MediaStreamTrackState : u8;
+enum class OffscreenRenderingContextId : u8;
+enum class PredefinedColorSpace : u8;
+enum class ReadableStreamReaderMode : u8;
+enum class ReferrerPolicy : u8;
+enum class RenderBlockingStatusType : u8;
+enum class RequestCache : u8;
+enum class RequestDestination : u8;
+enum class RequestDuplex : u8;
+enum class RequestMode : u8;
+enum class RequestPriority : u8;
+enum class RequestRedirect : u8;
+enum class ResizeObserverBoxOptions : u8;
+enum class ResponseType : u8;
+enum class ServiceWorkerState : u8;
+enum class ServiceWorkerUpdateViaCache : u8;
+enum class ShadowRootMode : u8;
+enum class SlotAssignmentMode : u8;
+enum class TransferFunction : u8;
+enum class XMLHttpRequestResponseType : u8;
+
+}
+
+namespace Web::MediaCapture {
+
+class MediaStream;
+class MediaStreamTrack;
+
+}
+
+namespace Web::WebRTC {
+
+class KeyFrameRequestEvent;
+class RTCCertificate;
+class RTCDataChannel;
+class RTCDataChannelEvent;
+class RTCDTMFSender;
+class RTCDTMFToneChangeEvent;
+class RTCDtlsTransport;
+class RTCEncodedAudioFrame;
+class RTCEncodedVideoFrame;
+class RTCError;
+class RTCErrorEvent;
+class RTCIceCandidate;
+class RTCIceTransport;
+class RTCPeerConnection;
+class RTCPeerConnectionIceErrorEvent;
+class RTCPeerConnectionIceEvent;
+class RTCRtpReceiver;
+class RTCRtpScriptTransform;
+class RTCRtpScriptTransformer;
+class RTCRtpSender;
+class RTCRtpTransceiver;
+class RTCSctpTransport;
+class RTCSessionDescription;
+class RTCSFrameReceiverTransform;
+class RTCSFrameSenderTransform;
+class RTCStatsReport;
+class RTCTrackEvent;
+class RTCTransformEvent;
+class SFrameDecrypterStream;
+class SFrameEncrypterStream;
+class SFrameTransformErrorEvent;
+
+}
+
+namespace Web::Clipboard {
+
+class Clipboard;
+
+}
+
+namespace Web::ContentSecurityPolicy {
+
+class Policy;
+class PolicyList;
+class Violation;
+
+}
+
+namespace Web::ContentSecurityPolicy::Directives {
+
+class Directive;
+
+}
+
+namespace Web::CookieStore {
+
+class CookieStore;
+
+}
+
+namespace Web::CredentialManagement {
+
+class CredentialsContainer;
+
+}
+
+namespace Web::Crypto {
+
+class Crypto;
+class CryptoKey;
+class SubtleCrypto;
+
+}
+
+namespace Web::CSS {
+
+enum class ElementBoxKind : u8;
+
+class AbstractImageStyleValue;
+class AbstractOrHypotheticalElement;
+class Angle;
+class AnglePercentage;
+class AngleStyleValue;
+class BackgroundSizeStyleValue;
+class BlurFilterStyleValue;
+class CalculatedStyleValue;
+class CustomPropertyData;
+enum class IsAnimationOverlay : bool;
+class ColorFilterStyleValue;
+class ColorFunctionStyleValue;
+class ColorSchemeStyleValue;
+class ColorStyleValue;
+class ComputedStyleWorkingSet;
+class ComputedValues;
+class ComputedStyleRecordView;
+class ContainerQuery;
+class ContentStyleValue;
+class CounterDefinitionsStyleValue;
+class CounterStyleStyleValue;
+class CSSDescriptors;
+class CSSFontFaceRule;
+class CSSFontFeatureValuesRule;
+class CSSFunctionRule;
+class CSSGroupingRule;
+class CSSImportRule;
+class CSSKeyframesRule;
+class CSSNestedDeclarations;
+class CSSPositionTryDescriptors;
+class CSSRule;
+class CSSRuleList;
+class CSSStyleDeclaration;
+class CSSStyleProperties;
+class CSSStyleRule;
+class CSSStyleSheet;
+class StyleSheetState;
+class CursorStyleValue;
+class CustomIdentStyleValue;
+class DimensionStyleValue;
+class Display;
+class DisplayStyleValue;
+class DropShadowFilterStyleValue;
+class FilterStyleValue;
+class Flex;
+class FlexStyleValue;
+class FontComputer;
+class FontFace;
+class FontFaceState;
+class FontFaceSet;
+class FontSourceStyleValue;
+class FontStyleStyleValue;
+class Frequency;
+class FrequencyPercentage;
+class FrequencyStyleValue;
+class FunctionStyleValue;
+class HighlightRegistry;
+class HueRotateFilterStyleValue;
+class ImageSetStyleValue;
+class ImageStyleValue;
+class IntegerStyleValue;
+class KeywordStyleValue;
+class Length;
+class LengthBox;
+class LengthPercentage;
+class LengthPercentageOrAuto;
+class LengthStyleValue;
+class MediaList;
+class MediaQueryList;
+class Number;
+class NumberStyleValue;
+class NumericType;
+class OpacityValueStyleValue;
+class PendingSubstitutionStyleValue;
+class Percentage;
+class PercentageStyleValue;
+class PropertyNameAndID;
+class Ratio;
+class RatioStyleValue;
+class Resolution;
+class ResolutionStyleValue;
+class Screen;
+class Selector;
+class ShadowStyleValue;
+class ShorthandStyleValue;
+class StringStyleValue;
+class StyleComputer;
+class StylePropertyMap;
+class StylePropertyMapReadOnly;
+class StyleScope;
+class StyleSheetImport;
+class StyleSheetList;
+class StyleValue;
+class StyleValueList;
+class Time;
+class TimePercentage;
+class TimeStyleValue;
+class TransformationStyleValue;
+class UnicodeRangeStyleValue;
+class UnresolvedStyleValue;
+class URL;
+class URLStyleValue;
+class VisualViewport;
+
+enum class FontFeatureValueType : u8;
+enum class Keyword : u16;
+enum class LayoutTreeRebuildRoot : u8;
+enum class MediaFeatureID : u8;
+enum class PropertyID : u16;
+enum class ValueType : u8;
+
+enum class AbsoluteSize : u8;
+enum class AnchorSize : u8;
+enum class AnimationComposition : u8;
+enum class AnimationDirection : u8;
+enum class AnimationFillMode : u8;
+enum class AnimationPlayState : u8;
+enum class Axis : u8;
+enum class CommonLigValue : u8;
+enum class ContextualAltValue : u8;
+enum class CounterStyleSystem : u8;
+enum class CrossOriginModifierValue : u8;
+enum class Direction : u8;
+enum class DiscretionaryLigValue : u8;
+enum class DisplayBox : u8;
+enum class DisplayInside : u8;
+enum class DisplayInternal : u8;
+enum class DisplayOutside : u8;
+enum class EastAsianVariant : u8;
+enum class EastAsianWidth : u8;
+enum class FontDisplay : u8;
+enum class FontKerning : u8;
+enum class FontOpticalSizing : u8;
+enum class FontStyleKeyword : u8;
+enum class FontTech : u8;
+enum class FontVariantCaps : u8;
+enum class FontVariantEmoji : u8;
+enum class FontVariantPosition : u8;
+enum class HistoricalLigValue : u8;
+enum class HueInterpolationMethod : u8;
+enum class ImageRendering : u8;
+enum class MixBlendMode : u8;
+enum class NumericFigureValue : u8;
+enum class NumericSpacingValue : u8;
+enum class NumericFractionValue : u8;
+enum class PaintOrder : u8;
+enum class PositionEdge : u8;
+enum class RadialExtent : u8;
+enum class ReferrerPolicyModifierValue : u8;
+enum class RelativeSize : u8;
+enum class Repetition : u8;
+enum class RoundingStrategy : u8;
+enum class Scroller : u8;
+enum class StepPosition : u8;
+enum class StrokeLinecap : u8;
+enum class StrokeLinejoin : u8;
+enum class VectorEffect : u8;
+enum class SymbolsType : u8;
+enum class TextRendering : u8;
+enum class TextUnderlinePositionHorizontal : u8;
+enum class TextUnderlinePositionVertical : u8;
+enum class TransitionBehavior : u8;
+enum class WritingMode : u8;
+
+struct CalculationContext;
+struct CalculationResolutionContext;
+struct ColorResolutionStyle;
+struct ComputationContext;
+struct CustomPropertyRegistration;
+struct LogicalAliasMappingContext;
+struct RequiredInvalidationAfterStyleChange;
+
+using PaintOrderList = Array<PaintOrder, 3>;
+using StyleValueVector = Vector<ValueComparingNonnullRefPtr<StyleValue const>>;
+
+}
+
+namespace Web::CSS::Parser::ValueParserFFI {
+
+struct DeclarationBlock;
+struct FfiMediaFeatureValue;
+
+}
+
+namespace Web::CSS::Parser {
+
+class Parser;
+class RustSyntaxHandle;
+
+struct ParsingParams;
+
+}
+
+namespace Web::DOM {
+
+class AbortController;
+class AbortSignal;
+class AbstractElement;
+class AbstractRange;
+class AccessibilityChangeTracker;
+class AccessibilityTreeNode;
+class AnchorNameMap;
+class Attr;
+class CDATASection;
+class CaretPosition;
+class CharacterData;
+class Comment;
+class CommitMessages;
+class Document;
+class DocumentFragment;
+class DocumentLoadEventDelayer;
+class DocumentObserver;
+class DocumentType;
+class DOMEventListener;
+class DOMImplementation;
+class DOMTokenList;
+class EditingHostManager;
+class Element;
+class ElementByIdMap;
+class Event;
+class EventHandler;
+class EventTarget;
+class FragmentDirective;
+class HTMLCollection;
+class IDLEventListener;
+class LiveNodeList;
+class MutationObserver;
+class MutationRecord;
+class NamedNodeMap;
+class Node;
+class NodeFilter;
+class NodeIdentity;
+class NodeIterator;
+class NodeList;
+class ParentNode;
+class Position;
+class ProcessingInstruction;
+class PseudoElement;
+class QuerySelectorResultCache;
+class Range;
+class RegisteredObserver;
+class SelectorQuery;
+class ShadowRoot;
+class SlotRegistry;
+class SlottableMixin;
+class StaticNodeList;
+class StaticRange;
+class SubtreeInsertionScope;
+class SyntheticPseudoElement;
+class Text;
+class TreeWalker;
+class XMLDocument;
+
+enum class QuirksMode;
+enum class SetNeedsLayoutReason;
+enum class UpdateLayoutReason;
+
+using HTMLSerializationOptions = Bindings::GetHTMLOptions;
+using ShadowRootMode = Bindings::ShadowRootMode;
+using SlotAssignmentMode = Bindings::SlotAssignmentMode;
+
+}
+
+namespace Web::Translation {
+
+class DocumentTranslator;
+
+}
+
+namespace Web::Editing {
+
+class EditCommand;
+class EditingHistory;
+class SpellCheckController;
+class SpellingMarkers;
+class WritingSuggestionController;
+class UndoStep;
+enum class HistoryAction : u8;
+
+}
+
+namespace Web::EncryptedMediaExtensions {
+
+class MediaKeySystemAccess;
+
+}
+
+namespace Web::EntriesAPI {
+
+class FileSystemEntry;
+
+}
+
+namespace Web::EventTiming {
+
+class PerformanceEventTiming;
+
+}
+
+namespace Web::Fetch {
+
+class BodyMixin;
+class Headers;
+class HeadersIterator;
+class Request;
+class Response;
+
+}
+
+namespace Web::Fetch::Engine {
+
+class FetchBodyDeliveryGate;
+class FetchByteChannel;
+class NetworkTransportHandle;
+class WholeBodyTransport;
+
+}
+
+namespace Web::Fetch::Engine::Event {
+
+struct EndOfBody;
+struct NetworkActivity;
+
+}
+
+namespace Web::Fetch::Fetching {
+
+class PendingResponse;
+class PreloadWaitHandle;
+class RefCountedFlag;
+
+}
+
+namespace Web::Fetch::Infrastructure {
+
+class Body;
+class FetchAlgorithms;
+class FetchControlBlock;
+class FetchController;
+class FetchControllerRegistry;
+class FetchParams;
+class FetchRecord;
+class FetchTimingInfo;
+class IncrementalReadLoopReadRequest;
+class KeepaliveQuotaAccountant;
+class Request;
+class Response;
+class ResponseView;
+
+struct BodyWithType;
+
+}
+
+namespace Web::FileAPI {
+
+class Blob;
+class File;
+class FileList;
+
+}
+
+namespace Web::Gamepad {
+
+class NavigatorGamepadPartial;
+class Gamepad;
+
+}
+
+namespace Web::Geolocation {
+
+class Geolocation;
+class GeolocationCoordinates;
+
+}
+
+namespace Web::Geometry {
+
+class DOMMatrix;
+class DOMMatrixReadOnly;
+class DOMPoint;
+class DOMPointReadOnly;
+class DOMRect;
+class DOMRectList;
+class DOMRectReadOnly;
+
+}
+
+namespace Web::HTML {
+
+enum class CheckIfUnloadingIsCanceledResult;
+enum class HoverUpdatePoint : u8;
+
+class AnimationFrameCallbackDriver;
+class AudioTrack;
+class AudioTrackList;
+class AutoplaySettings;
+class BarProp;
+class BrowsingContext;
+class Canvas2DContextBase;
+class CanvasHost;
+class CanvasRenderingContext2D;
+class CheckUnloadingCanceledState;
+class ClassicScript;
+class CloseEvent;
+class CloseWatcher;
+class CloseWatcherManager;
+class CustomElementDefinition;
+class CustomElementRegistry;
+class CustomStateSet;
+class DataTransfer;
+class DecodedImageData;
+class DedicatedWorkerThreadLink;
+class DocumentState;
+class DOMParser;
+class DOMStringList;
+class DOMStringMap;
+class DragDataStore;
+class DragEvent;
+class ElementInternals;
+class EventHandler;
+class EventLoop;
+class External;
+class FormAssociatedElement;
+class FormAssociatedTextControlElement;
+class History;
+class HistoryExecutor;
+class HTMLAllCollection;
+class HTMLAnchorElement;
+class HTMLAreaElement;
+class HTMLAudioElement;
+class HTMLBaseElement;
+class HTMLBodyElement;
+class HTMLBRElement;
+class HTMLButtonElement;
+class HTMLCanvasElement;
+class HTMLDataElement;
+class HTMLDataListElement;
+class HTMLDetailsElement;
+class HTMLDialogElement;
+class HTMLDirectoryElement;
+class HTMLDivElement;
+class HTMLDListElement;
+class HTMLElement;
+class HTMLEmbedElement;
+class HTMLFieldSetElement;
+class HTMLFontElement;
+class HTMLFormControlsCollection;
+class HTMLFormElement;
+class HTMLFrameElement;
+class HTMLFrameSetElement;
+class HTMLHeadElement;
+class HTMLHeadingElement;
+class HTMLHRElement;
+class HTMLHtmlElement;
+class HTMLHyperlinkElementUtils;
+class HTMLIFrameElement;
+class HTMLImageElement;
+class HTMLInputElement;
+class HTMLLabelElement;
+class HTMLLegendElement;
+class HTMLLIElement;
+class HTMLLinkElement;
+class HTMLMapElement;
+class HTMLMarqueeElement;
+class HTMLMediaElement;
+class HTMLMenuElement;
+class HTMLMetaElement;
+class HTMLMeterElement;
+class HTMLModElement;
+class HTMLObjectElement;
+class HTMLOListElement;
+class HTMLOptGroupElement;
+class HTMLOptionElement;
+class HTMLOptionsCollection;
+class HTMLOrSVGScriptElement;
+class HTMLOutputElement;
+class HTMLParagraphElement;
+class HTMLParamElement;
+class HTMLParser;
+class HTMLParserEndState;
+class SpeculativeHTMLParser;
+class HTMLPictureElement;
+class HTMLPreElement;
+class HTMLProgressElement;
+class HTMLQuoteElement;
+class HTMLScriptElement;
+class HTMLSelectedContentElement;
+class HTMLSelectElement;
+class HTMLSlotElement;
+class HTMLSourceElement;
+class HTMLSpanElement;
+class HTMLStyleElement;
+class HTMLSummaryElement;
+class HTMLTableCaptionElement;
+class HTMLTableCellElement;
+class HTMLTableColElement;
+class HTMLTableElement;
+class HTMLTableRowElement;
+class HTMLTableSectionElement;
+class HTMLTemplateElement;
+class HTMLTextAreaElement;
+class HTMLTimeElement;
+class HTMLTitleElement;
+class HTMLTrackElement;
+class HTMLUListElement;
+class HTMLUnknownElement;
+class HTMLVideoElement;
+class ImageBitmap;
+class ImageBitmapRenderingContext;
+class ImageData;
+class ImageRequest;
+class ListOfAvailableImages;
+class LocalNavigable;
+class LocalTraversableNavigable;
+class Location;
+class MediaError;
+class MediaStreamPlayback;
+class MessagePort;
+class MimeTypeArray;
+class ModuleMap;
+class Navigable;
+class NavigableContainer;
+class NavigateEvent;
+class Navigation;
+struct NavigationAPIMethodTracker;
+class NavigationActivation;
+class NavigationDestination;
+class NavigationHistoryEntry;
+class NavigationObserver;
+class NavigationTransition;
+class Navigator;
+class OffscreenCanvas;
+class OffscreenCanvasRenderingContext2D;
+class PluginArray;
+class PopoverTargetAttributes;
+class PreloadEntry;
+struct PreloadKey;
+class RadioButtonGroupRegistry;
+class RadioNodeList;
+class RemoteNavigable;
+class RemoteWindow;
+class Sanitizer;
+class SanitizerConfiguration;
+class ScriptRegistry;
+class SessionHistoryEntry;
+class SharedResourceRequest;
+class SharedWorker;
+class SharedWorkerGlobalScope;
+class Storage;
+class TextTrack;
+class TextTrackCue;
+class TextTrackCueList;
+class TextTrackList;
+class TextTrackObserver;
+class Timer;
+class TimeRanges;
+class UserActivation;
+class UserScrollGestureHold;
+class ValidityState;
+class VideoPlaybackQuality;
+class VideoTrack;
+class VideoTrackList;
+class VisibilityStateEntry;
+class Window;
+class WindowEnvironmentSettingsObject;
+class WindowProxy;
+class Worker;
+class WorkerAgentParent;
+class WorkerDebugConsoleClient;
+class WorkerEnvironmentSettingsObject;
+class WorkerGlobalScope;
+class Worklet;
+class WorkletEnvironmentSettingsObject;
+class WorkletGlobalScope;
+class WorkerLocation;
+class WorkerNavigator;
+class XMLSerializer;
+
+using CanvasColorType = Bindings::CanvasColorType;
+using CanvasDirection = Bindings::CanvasDirection;
+using CanvasLineCap = Bindings::CanvasLineCap;
+using CanvasLineJoin = Bindings::CanvasLineJoin;
+using CanvasTextAlign = Bindings::CanvasTextAlign;
+using CanvasTextBaseline = Bindings::CanvasTextBaseline;
+using ImageSmoothingQuality = Bindings::ImageSmoothingQuality;
+using NavigationType = Bindings::NavigationType;
+using PredefinedColorSpace = Bindings::PredefinedColorSpace;
+enum class RequireWellFormed;
+enum class SelectionDirection : u8;
+
+struct Agent;
+class ScriptAbortHandle;
+struct DeserializedTransferRecord;
+struct Environment;
+struct EnvironmentSettingsObject;
+struct NavigationParams;
+struct PreparedNavigation;
+struct PaintConfig;
+struct PolicyContainer;
+struct RemoteClientNavigation;
+struct SerializedFormData;
+struct SourceSnapshotParams;
+struct ToggleTaskTracker;
+
+}
+
+namespace Web::HighResolutionTime {
+
+class Performance;
+
+}
+
+namespace Web::IndexedDB {
+
+class IDBFactory;
+
+}
+
+namespace Web::Internals {
+
+class Internals;
+class InternalGamepad;
+class WebUI;
+
+}
+
+namespace Web::IntersectionObserver {
+
+class IntersectionObserver;
+class IntersectionObserverEntry;
+
+}
+
+namespace Web::Layout::RustFFI {
+
+struct BegunRead;
+enum class FfiTextCaretMovement : u8;
+
+}
+
+namespace Web::Layout {
+
+class ImageProvider;
+class Box;
+class ForcedReadScope;
+class Node;
+class NodeArena;
+class NodeWithStyle;
+class TextNode;
+class Viewport;
+
+using BegunRead = RustFFI::BegunRead;
+
+}
+
+namespace Web::MathML {
+
+class MathMLAnchorElement;
+class MathMLElement;
+class MathMLMiElement;
+class MathMLMspaceElement;
+
+}
+
+namespace Web::MediaCapabilitiesAPI {
+
+class MediaCapabilities;
+
+}
+
+namespace Web::MediaSession {
+
+class ChapterInformation;
+class MediaMetadata;
+class MediaSession;
+
+}
+
+namespace Web::MediaSourceExtensions {
+
+class ManagedMediaSource;
+class ManagedSourceBuffer;
+class MediaSource;
+class MediaSourceHandle;
+class SourceBuffer;
+class SourceBufferList;
+
+}
+
+namespace Web::MimeSniff {
+
+}
+
+namespace Web::NavigationTiming {
+
+class PerformanceNavigationTiming;
+
+}
+
+namespace Web::NotificationsAPI {
+
+class Notification;
+struct NotificationData;
+
+}
+
+namespace Web::LargestContentfulPaint {
+
+class LargestContentfulPaint;
+
+}
+
+namespace Web::PaintTiming {
+
+class PerformancePaintTiming;
+
+}
+
+namespace Web::Painting {
+
+class BoxViewRepaintAccess;
+class DocumentPaintState;
+
+}
+
+namespace Web::PerformanceTimeline {
+
+class PerformanceEntry;
+
+}
+
+namespace Web::PermissionsAPI {
+
+class Permissions;
+
+}
+
+namespace Web::PictureInPicture {
+
+class PictureInPictureController;
+class PictureInPictureWindow;
+
+}
+
+namespace Web::Platform {
+
+class Timer;
+
+}
+
+namespace Web::ReferrerPolicy {
+
+}
+
+namespace Web::RequestIdleCallback {
+
+class IdleDeadline;
+
+}
+
+namespace Web::ResizeObserver {
+
+class ResizeObserver;
+
+using ObservedBox = Bindings::ResizeObserverBoxOptions;
+
+}
+
+namespace Web::ResourceTiming {
+
+class PerformanceResourceTiming;
+
+}
+
+namespace Web::Selection {
+
+class Selection;
+
+}
+
+namespace Web::ServiceWorker {
+
+class Cache;
+class CacheStorage;
+class ServiceWorker;
+class ServiceWorkerContainer;
+class ServiceWorkerRegistration;
+
+using ServiceWorkerState = Bindings::ServiceWorkerState;
+using ServiceWorkerUpdateViaCache = Bindings::ServiceWorkerUpdateViaCache;
+using WorkerType = Bindings::WorkerType;
+
+}
+
+namespace Web::Speech {
+
+class SpeechSynthesis;
+
+}
+
+namespace Web::Streams {
+
+class ReadableStream;
+class ReadableStreamDefaultReader;
+class ReadRequest;
+class TransformStream;
+class WritableStream;
+
+}
+
+namespace Web::StorageAPI {
+
+class NavigatorStorage;
+class StorageManager;
+
+}
+
+namespace Web::SVG {
+
+class Path;
+class SMILTimeContainer;
+class SVGAnimatedEnumeration;
+class SVGAnimatedInteger;
+class SVGAnimatedLength;
+class SVGAnimatedLengthList;
+class SVGAnimatedNumber;
+class SVGAnimatedNumberList;
+class SVGAnimatedRect;
+class SVGAnimateElement;
+class SVGAnimateMotionElement;
+class SVGAnimationElement;
+class SVGCircleElement;
+class SVGClipPathElement;
+class SVGComponentTransferFunctionElement;
+class SVGDecodedImageData;
+class SVGDefsElement;
+class SVGDescElement;
+class SVGElement;
+class SVGEllipseElement;
+class SVGFEBlendElement;
+class SVGFEColorMatrixElement;
+class SVGFEComponentTransferElement;
+class SVGFECompositeElement;
+class SVGFEDisplacementMapElement;
+class SVGFEFloodElement;
+class SVGFEFuncAElement;
+class SVGFEFuncBElement;
+class SVGFEFuncGElement;
+class SVGFEFuncRElement;
+class SVGFEGaussianBlurElement;
+class SVGFEImageElement;
+class SVGFEMorphologyElement;
+class SVGFETurbulenceElement;
+class SVGFilterElement;
+class SVGFitToViewBox;
+class SVGForeignObjectElement;
+class SVGGElement;
+class SVGGeometryElement;
+class SVGGraphicsElement;
+class SVGImageElement;
+class SVGLength;
+class SVGLengthList;
+class SVGLineElement;
+class SVGMaskElement;
+class SVGMetadataElement;
+class SVGMPathElement;
+class SVGNumber;
+class SVGNumberList;
+class SVGPathElement;
+class SVGPatternElement;
+class SVGPolygonElement;
+class SVGPolylineElement;
+class SVGRectElement;
+class SVGResourceDocument;
+class SVGScriptElement;
+class SVGSetElement;
+class SVGSVGElement;
+class SVGSwitchElement;
+class SVGSymbolElement;
+class SVGTitleElement;
+class SVGTransformList;
+class SVGUseElement;
+class SVGViewElement;
+
+}
+
+namespace Web::UIEvents {
+
+class CompositionEvent;
+class InputEvent;
+class KeyboardEvent;
+class MouseEvent;
+class PointerEvent;
+class TextEvent;
+class Touch;
+class TouchEvent;
+class TouchList;
+class UIEvent;
+
+}
+
+namespace Web::DOMURL {
+
+class URLSearchParams;
+
+}
+
+namespace Web::ViewTransition {
+
+class ViewTransition;
+
+}
+
+namespace Web::WebAudio {
+
+class AudioBuffer;
+class AudioWorklet;
+class AudioWorkletGlobalScope;
+class AudioWorkletNode;
+class AudioWorkletProcessor;
+class AudioBufferSourceNode;
+class AudioContext;
+class AudioDestinationNode;
+class AudioListener;
+class AudioNode;
+class AudioParam;
+class AudioParamMap;
+class AudioScheduledSourceNode;
+class BaseAudioContext;
+class BiquadFilterNode;
+class ControlMessageQueue;
+class ConvolverNode;
+class DynamicsCompressorNode;
+class GainNode;
+class MediaStreamAudioDestinationNode;
+class MediaStreamAudioSourceNode;
+class OfflineAudioCompletionEvent;
+class OfflineAudioContext;
+class OscillatorNode;
+class PannerNode;
+class PeriodicWave;
+
+}
+
+namespace Web::WebGL {
+
+class WebGL2RenderingContext;
+class WebGLRenderingContext;
+class WebGLRenderingContextBase;
+
+}
+
+namespace Web::WebIDL {
+
+class ArrayBufferView;
+class BufferSource;
+class CallbackType;
+class DOMException;
+class ObservableArray;
+
+template<typename ValueType>
+class ExceptionOr;
+
+using Promise = JS::PromiseCapability;
+
+}
+
+namespace Web::WebDriver {
+
+struct ActionObject;
+struct InputState;
+
+}
+
+namespace Web::WebLocks {
+
+class Lock;
+class LockManager;
+class NavigatorLocks;
+
+}
+
+namespace Web::WebSockets {
+
+class WebSocket;
+
+}
+
+namespace Web::WebVTT {
+
+class VTTCue;
+
+}
+
+namespace Web::XHR {
+
+class FormData;
+class XMLHttpRequest;
+
+struct FormDataEntry;
+
+}
+
+namespace Web::TrustedTypes {
+
+class TrustedHTML;
+class TrustedHTMLParserOptions;
+class TrustedScript;
+class TrustedScriptURL;
+class TrustedTypePolicy;
+class TrustedTypePolicyFactory;
+
+}
+
+namespace Web::XPath {
+
+class XPathEvaluator;
+class XPathExpression;
+class XPathNSResolver;
+class XPathResult;
+
+}

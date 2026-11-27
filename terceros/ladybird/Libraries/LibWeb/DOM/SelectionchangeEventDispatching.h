@@ -1,0 +1,81 @@
+/*
+ * Copyright (c) 2024, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <LibGC/Heap.h>
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOM/Event.h>
+#include <LibWeb/DOM/EventTarget.h>
+#include <LibWeb/HTML/EventNames.h>
+#include <LibWeb/HTML/LocalNavigable.h>
+#include <LibWeb/HTML/Navigable.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HighResolutionTime/TimeOrigin.h>
+#include <LibWeb/Page/Page.h>
+
+namespace Web::DOM {
+
+// https://w3c.github.io/selection-api/#dfn-has-scheduled-selectionchange-event
+template<typename T>
+concept SelectionChangeTarget = DerivedFrom<T, EventTarget> && requires(T t) {
+    { t.has_scheduled_selectionchange_event() } -> SameAs<bool>;
+    { t.set_scheduled_selectionchange_event(bool()) } -> SameAs<void>;
+};
+
+// https://w3c.github.io/selection-api/#scheduling-selectionchange-event
+template<SelectionChangeTarget T>
+void schedule_a_selectionchange_event(T& target, Document& document)
+{
+    // NB: Style must observe every range change, even when the event is already queued.
+    document.set_needs_highlight_style_update(CSS::PseudoElement::Selection);
+
+    // 1. If target's has scheduled selectionchange event is true, abort these steps.
+    if (target.has_scheduled_selectionchange_event())
+        return;
+
+    // AD-HOC: See https://github.com/w3c/selection-api/issues/338
+    // Set target's has scheduled selectionchange event to true
+    target.set_scheduled_selectionchange_event(true);
+
+    // 2. Queue a task on the user interaction task source to fire a selectionchange event on
+    //    target.
+    queue_global_task(HTML::Task::Source::UserInteraction, relevant_global_object(document), GC::create_function(GC::Heap::the(), GC::captures(target, document), [](auto& target, auto& document) {
+        fire_a_selectionchange_event(target, document);
+    }));
+}
+
+// https://w3c.github.io/selection-api/#firing-selectionchange-event
+template<SelectionChangeTarget T>
+void fire_a_selectionchange_event(T& target, Document& document)
+{
+    // 1. Set target's has scheduled selectionchange event to false.
+    target.set_scheduled_selectionchange_event(false);
+
+    // 2. If target is an element, fire an event named selectionchange, which bubbles and not
+    //    cancelable, at target.
+    // 3. Otherwise, if target is a document, fire an event named selectionchange, which does not
+    //    bubble and not cancelable, at target.
+    EventInit event_init;
+    event_init.bubbles = DerivedFrom<T, Element>;
+    event_init.cancelable = false;
+
+    auto event = DOM::Event::create(
+        HTML::EventNames::selectionchange,
+        event_init,
+        HighResolutionTime::current_high_resolution_time(relevant_global_object(document)));
+    target.dispatch_event(event);
+
+    // AD-HOC: When the selection changes, inform the UI to update the primary pasteboard.
+    if (auto& page = document.page(); page.enable_primary_paste()) {
+        if (auto navigable = page.hosted_focused_navigable()) {
+            if (auto text = navigable->selected_text(); !text.is_empty())
+                page.client().page_did_update_primary_selection(text);
+        }
+    }
+}
+
+}

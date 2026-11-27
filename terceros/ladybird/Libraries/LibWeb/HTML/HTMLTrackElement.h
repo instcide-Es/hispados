@@ -1,0 +1,67 @@
+/*
+ * Copyright (c) 2020, the SerenityOS developers.
+ * Copyright (c) 2024, Jamie Mansfield <jmansfield@cadixdev.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Utf16View.h>
+#include <LibWeb/Forward.h>
+#include <LibWeb/HTML/HTMLElement.h>
+
+namespace Web::HTML {
+
+class HTMLTrackElement final : public HTMLElement {
+    WEB_WRAPPABLE(HTMLTrackElement, HTMLElement);
+    GC_DECLARE_ALLOCATOR(HTMLTrackElement);
+
+public:
+    static constexpr size_t track_offset() { return offsetof(HTMLTrackElement, m_track); }
+    virtual ~HTMLTrackElement() override;
+
+    WebIDL::UnsignedShort ready_state();
+
+    GC::Ref<TextTrack> track() { return *m_track; }
+
+private:
+    HTMLTrackElement(DOM::Document&, DOM::QualifiedName);
+
+    virtual void initialize_element() override;
+    virtual void visit_edges(Cell::Visitor&) override;
+
+    Utf16String track_url() const { return m_track_url; }
+    void set_track_url(Utf16View);
+
+    void start_the_track_processing_model();
+    void start_the_track_processing_model_parallel_steps();
+
+    void track_became_ready();
+    void track_failed_to_load();
+
+    // ^DOM::Element
+    virtual void attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_) override;
+    virtual void inserted() override;
+    virtual void removed_from(IsSubtreeRoot, Node* old_ancestor, Node& old_root) override;
+    virtual void moved_from(IsSubtreeRoot, GC::Ptr<Node> old_ancestor) override;
+
+    void parent_changed(GC::Ptr<Node> old_parent);
+
+    GC::Ptr<TextTrack> m_track;
+    GC::Ptr<TextTrackObserver> m_track_observer;
+
+    // https://html.spec.whatwg.org/multipage/media.html#track-url
+    Utf16String m_track_url {};
+
+    GC::Ptr<Fetch::Infrastructure::FetchAlgorithms> m_fetch_algorithms;
+    GC::Ptr<Fetch::Infrastructure::FetchController> m_fetch_controller;
+
+    bool m_loading { false };
+    bool m_awaiting_track_url_change { false };
+
+    // Incremented whenever the src attribute changes, so cues from a previously given URL are not added.
+    u64 m_src_generation { 0 };
+};
+
+}

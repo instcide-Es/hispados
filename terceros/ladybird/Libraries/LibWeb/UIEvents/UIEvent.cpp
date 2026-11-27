@@ -1,0 +1,62 @@
+/*
+ * Copyright (c) 2022, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibGC/Heap.h>
+#include <LibWeb/HTML/WindowProxy.h>
+#include <LibWeb/UIEvents/UIEvent.h>
+
+namespace Web::UIEvents {
+
+GC_DEFINE_ALLOCATOR(UIEvent);
+
+GC::Ref<UIEvent> UIEvent::create(FlyString const& event_name, HighResolutionTime::DOMHighResTimeStamp time_stamp)
+{
+    return GC::Heap::the().allocate<UIEvent>(event_name, time_stamp);
+}
+
+GC::Ref<UIEvent> UIEvent::create(FlyString const& event_name, UIEventInit const& event_init, HighResolutionTime::DOMHighResTimeStamp time_stamp)
+{
+    return GC::Heap::the().allocate<UIEvent>(event_name, event_init, time_stamp);
+}
+
+GC::Ref<UIEvent> UIEvent::create(Utf16String const& event_name, UIEventInit const& event_init, HighResolutionTime::DOMHighResTimeStamp time_stamp)
+{
+    return GC::Heap::the().allocate<UIEvent>(Utf16FlyString::from_utf16(event_name.utf16_view()), event_init, time_stamp);
+}
+
+UIEvent::UIEvent(FlyString const& event_name, HighResolutionTime::DOMHighResTimeStamp time_stamp)
+    : Event(event_name, time_stamp)
+{
+}
+
+UIEvent::UIEvent(Utf16FlyString const& event_name, HighResolutionTime::DOMHighResTimeStamp time_stamp)
+    : Event(event_name, time_stamp)
+{
+}
+
+UIEvent::UIEvent(FlyString const& event_name, UIEventInit const& event_init, HighResolutionTime::DOMHighResTimeStamp time_stamp)
+    : Event(event_name, event_init, time_stamp)
+    , m_view(event_init.view)
+    , m_detail(event_init.detail)
+{
+}
+
+UIEvent::UIEvent(Utf16FlyString const& event_name, UIEventInit const& event_init, HighResolutionTime::DOMHighResTimeStamp time_stamp)
+    : Event(event_name, event_init, time_stamp)
+    , m_view(event_init.view)
+    , m_detail(event_init.detail)
+{
+}
+
+UIEvent::~UIEvent() = default;
+
+void UIEvent::visit_edges(GC::Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_view);
+}
+
+}

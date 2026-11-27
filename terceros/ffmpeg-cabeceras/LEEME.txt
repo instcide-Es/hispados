@@ -1,0 +1,17 @@
+Las cabeceras públicas de FFmpeg 9.0.2 (https://ffmpeg.org/), con la licencia
+LGPL-2.1 o posterior (compatible con la GPL): ver COPYING.LGPLv2.1 y
+LICENSE.md.
+  De ffmpeg-9.0.2.tar.xz de https://ffmpeg.org/releases/ (SHA-256
+  8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e, el mismo
+  que espera Ladybird en Meta/CMake/system_ffmpeg_headers.cmake), solo lo que
+  instala FFmpeg de libavcodec, libavutil y libswresample (las listas HEADERS
+  de sus Makefile), sin cambiar nada.
+  Más, nuestros (no son de FFmpeg: los hace su configure): libavutil/avconfig.h
+  y libavutil/ffversion.h.
+
+Lo usa Hispa-64 desde la etapa 10 g (docs/64/HISPA-64.md, sección 24): solo
+para compilar LibMedia y LibMediaCodecs de Ladybird (castel/nucleo64/
+programas/ladybird/hazweb.sh), que en Linux no enlazan FFmpeg: lo cargan al
+correr con dlopen(), y en Hispa-64 (programas estáticos) no lo encuentran, así
+que Ladybird va sin vídeo ni sonido de FFmpeg. No va ningún código de FFmpeg en
+los programas.

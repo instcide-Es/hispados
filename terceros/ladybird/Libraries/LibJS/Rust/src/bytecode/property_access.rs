@@ -1,0 +1,798 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+//! The property gets and puts that consult and fill the inline caches the interpreter's fast paths read.
+
+use ak::Utf16FlyString;
+use libjs_abi::PutKind;
+
+use crate::bytecode::executable::{
+    KeyedPropertyLookup, KeyedPropertyLookupCache, PropertyLookupCache, PropertyLookupCacheEntryType,
+};
+use crate::interpreter::vm::Vm;
+use crate::layout::cell::Gc;
+use crate::layout::value::Value;
+use crate::runtime::abstract_operations::call_function_object;
+use crate::runtime::class_field_definition::ClassElementName;
+use crate::runtime::completion::{Must, ThrowCompletionOr};
+use crate::runtime::ecmascript_function_object::as_ecmascript_function_object;
+use crate::runtime::error::ErrorKind;
+use crate::runtime::error_types::ErrorType;
+use crate::runtime::object::{
+    CacheableGetPropertyMetadata, CacheableGetPropertyMetadataType, CacheableSetPropertyMetadata,
+    CacheableSetPropertyMetadataType, Object, PropertyLookupPhase,
+};
+use crate::runtime::property_attributes::{Attribute, PropertyAttributes};
+use crate::runtime::property_key::PropertyKey;
+use crate::runtime::shape::ShapeKey;
+use crate::utf16::Utf16Display;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GetByIdMode {
+    Normal,
+    Length,
+}
+
+/// Whether the code doing a property access is strict mode code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Strict {
+    No,
+    Yes,
+}
+
+pub fn get_cached_property_value(vm: &Vm, value: Value, this_value: Value) -> ThrowCompletionOr<Value> {
+    if !value.is_accessor() {
+        return Ok(value);
+    }
+
+    // https://tc39.es/ecma262/#sec-ordinaryget
+    // If _getter_ is *undefined*, return *undefined*.
+    let Some(getter) = value.as_accessor().getter() else {
+        return Ok(Value::UNDEFINED);
+    };
+    call_function_object(vm, getter, this_value, &[])
+}
+
+pub fn object_can_cache_property_additions(object: &Object) -> bool {
+    !object.may_interfere_with_indexed_property_access() && !object.requires_slow_add_own_property()
+}
+
+pub fn property_addition_is_cacheable(vm: &Vm, object: &Object, property_key: &PropertyKey) -> bool {
+    if !property_key.is_string() {
+        return object_can_cache_property_additions(object);
+    }
+    object_can_cache_property_additions(object)
+        && !(object.has_magical_length_property() && property_key.as_string() == vm.names.length.as_string())
+}
+
+/// Remembers a keyed lookup that the VM's keyed property lookup cache describes in the per-site cache of the
+/// instruction that made it, keyed by the identity of the key Value (see PropertyLookupCacheEntry::key).
+fn remember_keyed_lookup(site_cache: &PropertyLookupCache, site_cache_key: u64, entry: &KeyedPropertyLookup) {
+    site_cache.update(entry.entry_type, |site_entry| {
+        site_entry.key = site_cache_key;
+        site_entry.property_offset = entry.property_offset;
+        site_entry.shape = entry.shape_key();
+        site_entry.prototype = entry.prototype;
+        site_entry.prototype_chain_validity = entry.prototype_chain_validity;
+    });
+}
+
+/// Copies the entry of the VM's keyed property lookup cache for the shape of `object` and the name whose identity is
+/// `name_identity` into `site_cache`, the megamorphic cache of a named get whose compiled code missed its tables and
+/// then found that entry. The tables then have it inline the next time, unless the get sees more shapes than they
+/// hold (see MAX_MEGAMORPHIC_VM_CACHE_LESSONS).
+pub fn remember_vm_cache_get(vm: &Vm, object: Gc<Object>, site_cache: &PropertyLookupCache, name_identity: usize) {
+    let shape = object.shape();
+    let Some(entry) = vm
+        .keyed_property_lookup_cache()
+        .lookup_by_name_identity(shape, name_identity)
+    else {
+        return;
+    };
+    if entry.shape_key() == Some(ShapeKey::of(shape)) && site_cache.take_vm_cache_lesson() {
+        remember_keyed_lookup(site_cache, 0, &entry);
+    }
+}
+
+/// Gets a property by a key that is not known statically. Lookups of string keys are cached in the VM's keyed property
+/// lookup cache, and also in `site_cache` under its key if one is given, so that the instruction can find them again
+/// by the identity of its key Value.
+pub fn get_by_value_with_keyed_cache(
+    vm: &Vm,
+    base_object: Gc<Object>,
+    this_value: Value,
+    property_key: &PropertyKey,
+    site_cache: Option<(&PropertyLookupCache, u64)>,
+) -> ThrowCompletionOr<Value> {
+    if !property_key.is_string() || !base_object.is_cacheable_across_realms() {
+        return base_object.internal_get(vm, property_key, this_value, None, PropertyLookupPhase::OwnProperty);
+    }
+
+    let property_name = property_key.as_string();
+    let shape = base_object.shape();
+    let keyed_property_lookup_cache = vm.keyed_property_lookup_cache();
+    let entry_index = KeyedPropertyLookupCache::entry_index_for(shape, property_name);
+    let remember = |entry: &KeyedPropertyLookup| {
+        if let Some((site_cache, site_cache_key)) = site_cache {
+            remember_keyed_lookup(site_cache, site_cache_key, entry);
+        }
+    };
+    if let Some(entry) = keyed_property_lookup_cache.lookup(entry_index, shape, property_name)
+        && entry.shape_key() == Some(ShapeKey::of(shape))
+    {
+        let prototype_chain_validity_is_valid = entry
+            .prototype_chain_validity
+            .is_some_and(|validity| validity.is_valid());
+        match entry.entry_type {
+            PropertyLookupCacheEntryType::GetOwnProperty => {
+                remember(&entry);
+                return get_cached_property_value(vm, base_object.get_direct(entry.property_offset), this_value);
+            }
+            PropertyLookupCacheEntryType::GetPropertyInPrototypeChain => {
+                if prototype_chain_validity_is_valid {
+                    remember(&entry);
+                    let prototype = entry.prototype.expect("an inherited property has a holder");
+                    return get_cached_property_value(vm, prototype.get_direct(entry.property_offset), this_value);
+                }
+            }
+            PropertyLookupCacheEntryType::GetMissingProperty
+                if base_object.is_cacheable_for_property_absence()
+                    && (shape.prototype().is_none() || prototype_chain_validity_is_valid) =>
+            {
+                remember(&entry);
+                return Ok(Value::UNDEFINED);
+            }
+            _ => {}
+        }
+    }
+
+    let prototype_chain_validity = shape
+        .prototype()
+        .and_then(|prototype| prototype.shape().prototype_chain_validity());
+
+    let shape_key = ShapeKey::of(shape);
+    let mut cacheable_metadata = CacheableGetPropertyMetadata {
+        // NB: Indexed properties live outside the shape, so a shape can't vouch for the absence of one.
+        property_absence_is_cacheable: !property_key.is_number()
+            && base_object.is_cacheable_for_absence_of(vm, property_key),
+        ..Default::default()
+    };
+    let value = base_object.internal_get(
+        vm,
+        property_key,
+        this_value,
+        Some(&mut cacheable_metadata),
+        PropertyLookupPhase::OwnProperty,
+    )?;
+
+    // A getter may have changed the object's shape or the property storage of a dictionary shape, which
+    // leaves the metadata describing a lookup that no longer applies.
+    if ShapeKey::of(base_object.shape()) != shape_key
+        || cacheable_metadata.r#type == CacheableGetPropertyMetadataType::NotCacheable
+    {
+        return Ok(value);
+    }
+
+    let mut entry = KeyedPropertyLookup::for_shape(shape_key);
+    match cacheable_metadata.r#type {
+        CacheableGetPropertyMetadataType::GetOwnProperty => {
+            entry.entry_type = PropertyLookupCacheEntryType::GetOwnProperty;
+            entry.property_offset = cacheable_metadata
+                .property_offset
+                .expect("cacheable metadata has an offset");
+        }
+        CacheableGetPropertyMetadataType::GetPropertyInPrototypeChain => {
+            entry.entry_type = PropertyLookupCacheEntryType::GetPropertyInPrototypeChain;
+            entry.property_offset = cacheable_metadata
+                .property_offset
+                .expect("cacheable metadata has an offset");
+            entry.prototype = cacheable_metadata.prototype;
+            entry.prototype_chain_validity = prototype_chain_validity;
+        }
+        CacheableGetPropertyMetadataType::GetMissingProperty => {
+            entry.entry_type = PropertyLookupCacheEntryType::GetMissingProperty;
+            entry.prototype_chain_validity = prototype_chain_validity;
+        }
+        CacheableGetPropertyMetadataType::NotCacheable => unreachable!("an uncacheable lookup returned above"),
+    }
+    remember(&entry);
+    keyed_property_lookup_cache.set_entry(entry_index, entry, property_name);
+    Ok(value)
+}
+
+// Non-standard
+pub fn get_own_property_without_side_effects(
+    object: &Object,
+    property_key: &PropertyKey,
+    cache: &PropertyLookupCache,
+) -> Value {
+    let shape = object.shape();
+
+    if let Some(cache_entry) = cache.first_entry()
+        && (cache_entry.entry_type == PropertyLookupCacheEntryType::GetOwnProperty
+            || cache_entry.entry_type == PropertyLookupCacheEntryType::GetMissingProperty)
+        && cache_entry.shape == Some(ShapeKey::of(shape))
+    {
+        if cache_entry.entry_type == PropertyLookupCacheEntryType::GetMissingProperty {
+            return Value::EMPTY;
+        }
+        return object.get_direct(cache_entry.property_offset);
+    }
+
+    let metadata = shape.lookup(property_key);
+    let cache_type = if metadata.is_some() {
+        PropertyLookupCacheEntryType::GetOwnProperty
+    } else {
+        PropertyLookupCacheEntryType::GetMissingProperty
+    };
+    cache.update(cache_type, |entry| {
+        entry.shape = Some(ShapeKey::of(shape));
+        if let Some(metadata) = metadata {
+            entry.property_offset = metadata.offset;
+        }
+    });
+
+    let Some(metadata) = metadata else {
+        return Value::EMPTY;
+    };
+    object.get_direct(metadata.offset)
+}
+
+pub fn base_object_for_get_impl(vm: &Vm, base_value: Value) -> Option<Gc<Object>> {
+    if base_value.is_object() {
+        return Some(base_value.as_object());
+    }
+
+    // OPTIMIZATION: For various primitives we can avoid actually creating a new object for them.
+    if base_value.is_nullish() {
+        return None;
+    }
+    let realm = vm
+        .current_realm()
+        .expect("there is a current realm to find the prototype of a primitive in");
+    if base_value.is_string() {
+        return Some(realm.string_prototype(vm));
+    }
+    if base_value.is_number() {
+        return Some(realm.number_prototype(vm));
+    }
+    if base_value.is_boolean() {
+        return Some(realm.boolean_prototype(vm));
+    }
+    if base_value.is_bigint() {
+        return Some(realm.bigint_prototype(vm));
+    }
+    if base_value.is_symbol() {
+        return Some(realm.symbol_prototype(vm));
+    }
+
+    None
+}
+
+#[cold]
+fn throw_null_or_undefined_property_get<T>(
+    vm: &Vm,
+    base_value: Value,
+    get_base_identifier: impl FnOnce() -> Option<Utf16FlyString>,
+    property_name: &dyn Utf16Display,
+) -> ThrowCompletionOr<T> {
+    assert!(base_value.is_nullish());
+
+    if let Some(base_identifier) = get_base_identifier() {
+        return vm.throw_completion(
+            ErrorKind::TypeError,
+            ErrorType::ToObjectNullOrUndefinedWithPropertyAndName,
+            &[property_name, &base_value, &base_identifier],
+        );
+    }
+    vm.throw_completion(
+        ErrorKind::TypeError,
+        ErrorType::ToObjectNullOrUndefinedWithProperty,
+        &[property_name, &base_value],
+    )
+}
+
+/// The object a property get on `base_value` looks the property up in. `property_name` is the property as the error
+/// for a null or undefined base names it: a key, or the value a key has yet to be computed from.
+pub fn base_object_for_get(
+    vm: &Vm,
+    base_value: Value,
+    get_base_identifier: impl FnOnce() -> Option<Utf16FlyString>,
+    property_name: &dyn Utf16Display,
+) -> ThrowCompletionOr<Gc<Object>> {
+    if let Some(base_object) = base_object_for_get_impl(vm, base_value) {
+        return Ok(base_object);
+    }
+
+    // NOTE: At this point this is guaranteed to throw (null or undefined).
+    throw_null_or_undefined_property_get(vm, base_value, get_base_identifier, property_name)
+}
+
+pub fn get_by_id(
+    vm: &Vm,
+    mode: GetByIdMode,
+    get_base_identifier: impl FnOnce() -> Option<Utf16FlyString>,
+    property_name: &PropertyKey,
+    base_value: Value,
+    this_value: Value,
+    cache: &PropertyLookupCache,
+) -> ThrowCompletionOr<Value> {
+    if mode == GetByIdMode::Length && base_value.is_string() {
+        return Ok(Value::from_f64(
+            base_value.as_string().length_in_utf16_code_units() as f64
+        ));
+    }
+
+    if base_value.is_string() {
+        // https://tc39.es/ecma262/#sec-stringgetownproperty
+        // String exotic objects expose virtual own properties for canonical string indexes.
+        let string_value = base_value.as_string().get(vm, property_name)?;
+        if let Some(string_value) = string_value {
+            return Ok(string_value);
+        }
+    }
+
+    let base_obj = base_object_for_get(vm, base_value, get_base_identifier, property_name)?;
+
+    // OPTIMIZATION: Fast path for the magical "length" property on Array objects.
+    if mode == GetByIdMode::Length && base_obj.has_magical_length_property() {
+        return Ok(Value::from_f64(f64::from(base_obj.indexed_array_like_size())));
+    }
+
+    get_with_property_lookup_cache(vm, base_obj, property_name, this_value, cache, 0)
+}
+
+/// The slot an entry of `cache` for the shape of `object` points to, which may hold an accessor, or undefined for a
+/// missing property.
+#[inline(always)]
+pub fn cached_property_slot(object: Gc<Object>, cache: &PropertyLookupCache, cache_key: u64) -> Option<Value> {
+    let shape = object.shape();
+    for entry in cache.entry_slots_for_shape(shape, cache_key) {
+        // NB: Only the caches of keyed accesses have keys, and named accesses pass a constant 0.
+        if cache_key != 0 && entry.key.get() != cache_key {
+            continue;
+        }
+        if entry.shape_key() != Some(ShapeKey::of(shape)) {
+            continue;
+        }
+        let prototype_chain_is_valid = || {
+            entry
+                .prototype_chain_validity
+                .get()
+                .is_some_and(|validity| validity.is_valid())
+        };
+        match entry.entry_type.get() {
+            PropertyLookupCacheEntryType::GetMissingProperty => {
+                if !object.is_cacheable_for_property_absence()
+                    || (shape.prototype().is_some() && !prototype_chain_is_valid())
+                {
+                    continue;
+                }
+                return Some(Value::UNDEFINED);
+            }
+            PropertyLookupCacheEntryType::GetOwnProperty
+            | PropertyLookupCacheEntryType::GetPropertyInPrototypeChain => {
+                let Some(prototype) = entry.prototype.get() else {
+                    return Some(object.get_direct(entry.property_offset.get()));
+                };
+                if !prototype_chain_is_valid() {
+                    continue;
+                }
+                return Some(prototype.get_direct(entry.property_offset.get()));
+            }
+            _ => continue,
+        }
+    }
+    None
+}
+
+/// Gets the property from `base_obj` through `cache`, filling the cache on a miss. `cache_key` is the key the cache's
+/// entries are for (see PropertyLookupCacheEntry::key).
+#[inline(always)]
+pub fn get_with_property_lookup_cache(
+    vm: &Vm,
+    base_obj: Gc<Object>,
+    property_name: &PropertyKey,
+    this_value: Value,
+    cache: &PropertyLookupCache,
+    cache_key: u64,
+) -> ThrowCompletionOr<Value> {
+    if let Some(value) = cached_property_slot(base_obj, cache, cache_key) {
+        return get_cached_property_value(vm, value, this_value);
+    }
+    if vm.is_static_property_lookup_cache(cache) && !base_obj.is_cacheable_across_realms() {
+        return base_obj.internal_get(vm, property_name, this_value, None, PropertyLookupPhase::OwnProperty);
+    }
+    // NB: A megamorphic named access sees more shapes than its hash tables hold, so it also looks in the VM's keyed
+    //     property lookup cache, which has room for many more.
+    //     Objects the keyed cache does not take keep using the access's own cache.
+    if cache_key == 0 && cache.is_megamorphic() && property_name.is_string() && base_obj.is_cacheable_across_realms() {
+        return get_by_value_with_keyed_cache(vm, base_obj, this_value, property_name, Some((cache, 0)));
+    }
+    let shape = base_obj.shape();
+    let prototype_chain_validity = shape
+        .prototype()
+        .and_then(|prototype| prototype.shape().prototype_chain_validity());
+
+    let shape_key = ShapeKey::of(shape);
+    let mut cacheable_metadata = CacheableGetPropertyMetadata {
+        // NB: Indexed properties live outside the shape, so a shape can't vouch for the absence of one.
+        property_absence_is_cacheable: !property_name.is_number()
+            && base_obj.is_cacheable_for_absence_of(vm, property_name),
+        ..Default::default()
+    };
+    let value = base_obj.internal_get(
+        vm,
+        property_name,
+        this_value,
+        Some(&mut cacheable_metadata),
+        PropertyLookupPhase::OwnProperty,
+    )?;
+
+    // If internal_get() caused object's shape change, we can no longer be sure
+    // that collected metadata is valid, e.g. if getter in prototype chain added
+    // property with the same name into the object itself. The same applies when
+    // a getter changed the property storage of a dictionary shape.
+    if ShapeKey::of(base_obj.shape()) == shape_key {
+        match cacheable_metadata.r#type {
+            CacheableGetPropertyMetadataType::GetOwnProperty => {
+                cache.update(PropertyLookupCacheEntryType::GetOwnProperty, |entry| {
+                    entry.key = cache_key;
+                    entry.shape = Some(shape_key);
+                    entry.property_offset = cacheable_metadata
+                        .property_offset
+                        .expect("cacheable metadata has an offset");
+                });
+            }
+            CacheableGetPropertyMetadataType::GetPropertyInPrototypeChain => {
+                cache.update(PropertyLookupCacheEntryType::GetPropertyInPrototypeChain, |entry| {
+                    entry.key = cache_key;
+                    entry.shape = Some(shape_key);
+                    entry.property_offset = cacheable_metadata
+                        .property_offset
+                        .expect("cacheable metadata has an offset");
+                    entry.prototype = cacheable_metadata.prototype;
+                    entry.prototype_chain_validity = prototype_chain_validity;
+                });
+            }
+            CacheableGetPropertyMetadataType::GetMissingProperty => {
+                cache.update(PropertyLookupCacheEntryType::GetMissingProperty, |entry| {
+                    entry.key = cache_key;
+                    entry.shape = Some(shape_key);
+                    entry.prototype_chain_validity = prototype_chain_validity;
+                });
+            }
+            _ => {}
+        }
+    }
+
+    Ok(value)
+}
+
+#[cold]
+fn throw_null_or_undefined_property_access<T>(
+    vm: &Vm,
+    base_value: Value,
+    base_identifier: Option<Utf16FlyString>,
+    property_identifier: &dyn Utf16Display,
+) -> ThrowCompletionOr<T> {
+    assert!(base_value.is_nullish());
+
+    if let Some(base_identifier) = base_identifier {
+        return vm.throw_completion(
+            ErrorKind::TypeError,
+            ErrorType::ToObjectNullOrUndefinedWithPropertyAndName,
+            &[property_identifier, &base_value, &base_identifier],
+        );
+    }
+    vm.throw_completion(
+        ErrorKind::TypeError,
+        ErrorType::ToObjectNullOrUndefinedWithProperty,
+        &[property_identifier, &base_value],
+    )
+}
+
+/// Throw the TypeError of a put to `base` if it is null or undefined. ToObject converts the base before the key is
+/// converted to a property key, so `property_name` is the property as the error names it: a key, or the value a key
+/// has yet to be computed from.
+pub fn throw_if_nullish_put_base(
+    vm: &Vm,
+    base: Value,
+    get_base_identifier: impl FnOnce() -> Option<Utf16FlyString>,
+    property_name: &dyn Utf16Display,
+    strict: Strict,
+) -> ThrowCompletionOr<()> {
+    if !base.is_nullish() {
+        return Ok(());
+    }
+    // Better error message than to_object would give
+    if strict == Strict::Yes {
+        return vm.throw_completion(
+            ErrorKind::TypeError,
+            ErrorType::ReferenceNullishSetProperty,
+            &[property_name, &base],
+        );
+    }
+    throw_null_or_undefined_property_access(vm, base, get_base_identifier(), property_name)
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline]
+pub fn put_by_property_key(
+    vm: &Vm,
+    base: Value,
+    this_value: Value,
+    value: Value,
+    get_base_identifier: impl FnOnce() -> Option<Utf16FlyString>,
+    name: &PropertyKey,
+    kind: PutKind,
+    strict: Strict,
+    caches: Option<&PropertyLookupCache>,
+    cache_key: u64,
+) -> ThrowCompletionOr<()> {
+    // a. Let baseObj be ? ToObject(V.[[Base]]).
+    throw_if_nullish_put_base(vm, base, get_base_identifier, name, strict)?;
+    let object = base.to_object(vm)?;
+
+    if kind == PutKind::Getter || kind == PutKind::Setter {
+        // The generator should only pass us functions for getters and setters.
+        assert!(value.is_function());
+    }
+    match kind {
+        PutKind::Getter | PutKind::Setter => {
+            let function = value.as_function();
+            if let Some(ecmascript_function) = as_ecmascript_function_object(function)
+                && ecmascript_function.name().is_empty()
+            {
+                let prefix = if kind == PutKind::Getter { "get" } else { "set" };
+                ecmascript_function.set_inferred_name(vm, &ClassElementName::PropertyKey(name.clone()), Some(prefix));
+            }
+            let attributes = PropertyAttributes::new(Attribute::CONFIGURABLE | Attribute::ENUMERABLE);
+            if kind == PutKind::Getter {
+                object.define_direct_accessor(vm, name, Some(function), None, attributes);
+            } else {
+                object.define_direct_accessor(vm, name, None, Some(function), attributes);
+            }
+        }
+        PutKind::Normal => {
+            // NB: The this value of a super property reference need not be an object, e.g. for `super.x = v` in a method
+            //     called with a null this. [[Set]] handles a non-object receiver by failing to create or change a data
+            //     property (https://tc39.es/ecma262/#sec-ordinarysetwithowndescriptor, step 2.b), but the caches below
+            //     assume an object one, so don't use them for such a receiver.
+            let (caches, from_shape) = if this_value.is_object() {
+                (caches, this_value.as_object().shape())
+            } else {
+                (None, object.shape())
+            };
+            let from_shape = ShapeKey::of(from_shape);
+            if let Some(caches) = caches {
+                for cache in caches.entries_for_shape(object.shape(), cache_key).as_slice() {
+                    // NB: Only the caches of keyed accesses have keys, and named accesses pass a constant 0.
+                    if cache_key != 0 && cache.key != cache_key {
+                        continue;
+                    }
+                    match cache.entry_type {
+                        PropertyLookupCacheEntryType::Empty => {}
+                        PropertyLookupCacheEntryType::ChangePropertyInPrototypeChain => {
+                            let Some(cached_prototype) = cache.prototype else {
+                                continue;
+                            };
+                            // OPTIMIZATION: If the prototype chain hasn't been mutated in a way that would invalidate the cache, we can use it.
+                            let can_use_cache = cache.shape == Some(ShapeKey::of(object.shape()))
+                                && cache
+                                    .prototype_chain_validity
+                                    .is_some_and(|validity| validity.is_valid());
+                            if can_use_cache {
+                                let value_in_prototype = cached_prototype.get_direct(cache.property_offset);
+                                if value_in_prototype.is_accessor() {
+                                    let Some(setter) = value_in_prototype.as_accessor().setter() else {
+                                        continue;
+                                    };
+                                    call_function_object(vm, setter, this_value, &[value])?;
+                                    return Ok(());
+                                }
+                            }
+                        }
+                        PropertyLookupCacheEntryType::ChangeOwnProperty => {
+                            if cache.shape != Some(ShapeKey::of(object.shape())) {
+                                continue;
+                            }
+
+                            let value_in_object = object.get_direct(cache.property_offset);
+                            if value_in_object.is_accessor() {
+                                let Some(setter) = value_in_object.as_accessor().setter() else {
+                                    continue;
+                                };
+                                call_function_object(vm, setter, this_value, &[value])?;
+                                return Ok(());
+                            }
+                            if !cache.writes_data_property {
+                                continue;
+                            }
+                            object.put_direct_from_cache(cache.property_offset, value);
+                            return Ok(());
+                        }
+                        PropertyLookupCacheEntryType::AddOwnProperty => {
+                            // OPTIMIZATION: If the object's shape is the same as the one cached before adding the new property, we can
+                            //               reuse the resulting shape from the cache.
+                            if cache.shape != Some(ShapeKey::of(object.shape())) {
+                                continue;
+                            }
+                            if !property_addition_is_cacheable(vm, &object, name) {
+                                continue;
+                            }
+                            let Some(new_shape) = cache.new_shape else {
+                                continue;
+                            };
+
+                            // The cache is invalid if the prototype chain has been mutated, since such a mutation could have added a setter for the property.
+                            if cache
+                                .prototype_chain_validity
+                                .is_some_and(|validity| !validity.is_valid())
+                            {
+                                continue;
+                            }
+                            object.unsafe_set_shape(new_shape);
+                            object.initialize_direct(cache.property_offset, value);
+                            return Ok(());
+                        }
+                        PropertyLookupCacheEntryType::GetOwnProperty
+                        | PropertyLookupCacheEntryType::GetPropertyInPrototypeChain
+                        | PropertyLookupCacheEntryType::GetMissingProperty
+                        | PropertyLookupCacheEntryType::MissingOwnProperty => {}
+                    }
+                }
+            }
+
+            let caches = caches
+                .filter(|cache| !vm.is_static_property_lookup_cache(cache) || object.is_cacheable_across_realms());
+            let prototype_chain_validity = object
+                .shape()
+                .prototype()
+                .and_then(|prototype| prototype.shape().prototype_chain_validity());
+
+            let mut cacheable_metadata = CacheableSetPropertyMetadata::default();
+            let succeeded = object.internal_set(
+                vm,
+                name,
+                value,
+                this_value,
+                Some(&mut cacheable_metadata),
+                PropertyLookupPhase::OwnProperty,
+            )?;
+
+            if let Some(caches) = caches
+                && succeeded
+                && cacheable_metadata.r#type == CacheableSetPropertyMetadataType::AddOwnProperty
+            {
+                caches.update(PropertyLookupCacheEntryType::AddOwnProperty, |cache| {
+                    cache.key = cache_key;
+                    cache.shape = Some(from_shape);
+                    cache.property_offset = cacheable_metadata
+                        .property_offset
+                        .expect("cacheable metadata has an offset");
+                    cache.new_shape = Some(object.shape());
+                    if let Some(prototype) = cacheable_metadata.prototype {
+                        cache.prototype_chain_validity = prototype.shape().prototype_chain_validity();
+                    }
+                });
+            }
+
+            // If internal_set() caused object's shape change, we can no longer be sure
+            // that collected metadata is valid, e.g. if setter in prototype chain added
+            // property with the same name into the object itself. The same applies when
+            // a setter changed the property storage of a dictionary shape.
+            if let Some(caches) = caches
+                && succeeded
+                && ShapeKey::of(object.shape()) == from_shape
+            {
+                match cacheable_metadata.r#type {
+                    CacheableSetPropertyMetadataType::AddOwnProperty => {
+                        // Something went wrong if we ended up here, because cacheable addition of a new property should've changed the shape.
+                        unreachable!("a cacheable addition of a property changes the shape");
+                    }
+                    CacheableSetPropertyMetadataType::ChangeOwnProperty => {
+                        caches.update(PropertyLookupCacheEntryType::ChangeOwnProperty, |cache| {
+                            cache.key = cache_key;
+                            cache.shape = Some(from_shape);
+                            cache.property_offset = cacheable_metadata
+                                .property_offset
+                                .expect("cacheable metadata has an offset");
+                            cache.writes_data_property = cacheable_metadata.writes_data_property;
+                        });
+                    }
+                    CacheableSetPropertyMetadataType::ChangePropertyInPrototypeChain => {
+                        caches.update(PropertyLookupCacheEntryType::ChangePropertyInPrototypeChain, |cache| {
+                            cache.key = cache_key;
+                            cache.shape = Some(from_shape);
+                            cache.property_offset = cacheable_metadata
+                                .property_offset
+                                .expect("cacheable metadata has an offset");
+                            let prototype = cacheable_metadata
+                                .prototype
+                                .expect("a property in the prototype chain has a holder");
+                            cache.prototype = Some(prototype);
+                            cache.prototype_chain_validity = prototype_chain_validity;
+                        });
+                    }
+                    CacheableSetPropertyMetadataType::NotCacheable => {}
+                }
+            }
+
+            if !succeeded && strict == Strict::Yes {
+                if base.is_object() {
+                    return vm.throw_completion(
+                        ErrorKind::TypeError,
+                        ErrorType::ReferenceNullishSetProperty,
+                        &[name, &base],
+                    );
+                }
+                return vm.throw_completion(
+                    ErrorKind::TypeError,
+                    ErrorType::ReferencePrimitiveSetProperty,
+                    &[name, &base.typeof_(vm), &base],
+                );
+            }
+        }
+        PutKind::Own => {
+            if let Some(caches) = caches {
+                for cache in caches.entries_for_shape(object.shape(), cache_key).as_slice() {
+                    // NB: Only the caches of keyed accesses have keys, and named accesses pass a constant 0.
+                    if cache_key != 0 && cache.key != cache_key {
+                        continue;
+                    }
+                    if cache.entry_type == PropertyLookupCacheEntryType::AddOwnProperty {
+                        // PutKind::Own is not currently emitted for platform
+                        // objects, but keep this aligned with the normal PutById
+                        // AddOwnProperty cache hit so a future bytecode path cannot
+                        // bypass subclass hooks for objects that require them.
+                        if cache.shape != Some(ShapeKey::of(object.shape())) {
+                            continue;
+                        }
+                        if !property_addition_is_cacheable(vm, &object, name) {
+                            continue;
+                        }
+                        let Some(new_shape) = cache.new_shape else {
+                            continue;
+                        };
+                        object.unsafe_set_shape(new_shape);
+                        object.initialize_direct(cache.property_offset, value);
+                        return Ok(());
+                    }
+                }
+            }
+
+            let from_shape = object.shape();
+            object.define_direct_property(
+                vm,
+                name,
+                value,
+                PropertyAttributes::new(Attribute::ENUMERABLE | Attribute::WRITABLE | Attribute::CONFIGURABLE),
+            );
+
+            if let Some(caches) = caches
+                && from_shape != object.shape()
+                && !object.shape().is_dictionary()
+            {
+                caches.update(PropertyLookupCacheEntryType::AddOwnProperty, |cache| {
+                    cache.key = cache_key;
+                    cache.shape = Some(ShapeKey::of(from_shape));
+                    cache.new_shape = Some(object.shape());
+                    cache.property_offset = object.shape().lookup(name).expect("the property was just added").offset;
+                });
+            }
+        }
+        PutKind::Prototype => {
+            if value.is_object() || value.is_null() {
+                object
+                    .internal_set_prototype_of(vm, value.is_object().then(|| value.as_object()))
+                    .must();
+            }
+        }
+    }
+
+    Ok(())
+}

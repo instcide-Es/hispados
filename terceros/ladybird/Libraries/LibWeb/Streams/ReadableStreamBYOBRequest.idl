@@ -1,0 +1,8 @@
+// https://streams.spec.whatwg.org/#readablestreambyobrequest
+[Exposed=*, ImplementedIn=Rust]
+interface ReadableStreamBYOBRequest {
+    readonly attribute Uint8Array? view;
+
+    undefined respond([EnforceRange] unsigned long long bytesWritten);
+    [NeedsCallerRealm] undefined respondWithNewView(ArrayBufferView view);
+};

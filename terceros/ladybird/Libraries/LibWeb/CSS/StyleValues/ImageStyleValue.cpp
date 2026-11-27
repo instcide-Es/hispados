@@ -1,0 +1,349 @@
+/*
+ * Copyright (c) 2018-2023, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2021, Tobias Christiansen <tobyase@serenityos.org>
+ * Copyright (c) 2021-2025, Sam Atkins <sam@ladybird.org>
+ * Copyright (c) 2022-2023, MacDue <macdue@dueutil.tech>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/Diagnostics.h>
+#include <LibGC/Weak.h>
+#include <LibWeb/CSS/Fetch.h>
+#include <LibWeb/CSS/StyleSheetState.h>
+#include <LibWeb/CSS/StyleValues/ImageStyleValue.h>
+#include <LibWeb/CSS/StyleValues/URLStyleValue.h>
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOMURL/DOMURL.h>
+#include <LibWeb/HTML/DecodedImageData.h>
+#include <LibWeb/HTML/PotentialCORSRequest.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HTML/SharedResourceRequest.h>
+
+namespace Web::CSS {
+
+StyleValueFFI::StyleValueData const* ImageStyleValue::make_image_url_data(URL const& url, Optional<::URL::URL> const& style_resource_base_url)
+{
+    // Rust copies the borrowed URL text and takes ownership of each modifier string.
+    auto modifiers = retain_url_modifiers_for_rust(url);
+    Utf16View url_string = url.url();
+    auto resource_base_url = style_resource_base_url.has_value() ? style_resource_base_url->to_string() : String {};
+    auto resource_base_url_bytes = resource_base_url.bytes();
+    return StyleValueFFI::rust_style_value_create_image(
+        { url_string.has_latin1_storage() ? url_string.latin1_span().data() : nullptr,
+            url_string.has_latin1_storage() ? nullptr : reinterpret_cast<u16 const*>(url_string.utf16_span().data()), url_string.length_in_code_units() },
+        to_underlying(url.type()), modifiers.data(), modifiers.size(),
+        { resource_base_url_bytes.data(), nullptr, resource_base_url_bytes.size() }, style_resource_base_url.has_value());
+}
+
+URL ImageStyleValue::url_value() const
+{
+    auto const& data = *m_value->image._0;
+    return url_from_rust_data(data.url, data.url_type, data.url_modifiers);
+}
+
+ImageStyleValueResource::ImageStyleValueResource(ImageStyleValueResourceKey key, GC::Ref<HTML::SharedResourceRequest> request, GC::Ref<DOM::Document> const& document)
+    : m_key(move(key))
+    , m_resource_request(move(request))
+{
+    m_resource_request->add_callbacks(
+        GC::create_function(GC::Heap::the(), GC::captures(GC::Weak(document), m_key), [](auto& weak_document, auto& key) {
+            // FIXME: Can we directly access the resource (i.e. this) here instead of looking it up in the document?
+            if (auto document = weak_document.ptr()) {
+                if (auto* resource = document->css_image_resource(key))
+                    resource->on_decoded_image_data_loaded();
+            }
+        }),
+        nullptr);
+}
+
+ImageStyleValueResource::~ImageStyleValueResource()
+{
+    // Registrations are only left behind by clients that were collected along with our document, which then destroys
+    // us. See ImageStyleValue::unregister_client().
+    unregister_with_decoded_image_data_if_needed();
+}
+
+void ImageStyleValueResource::visit_edges(JS::Cell::Visitor& visitor)
+{
+    visitor.visit(m_resource_request);
+}
+
+void ImageStyleValueResource::register_image_style_value(ImageStyleValue const& image_style_value)
+{
+    ++m_registration_counts_by_image_style_value.ensure(&image_style_value);
+    register_with_decoded_image_data_if_needed();
+}
+
+void ImageStyleValueResource::unregister_image_style_value(ImageStyleValue const& image_style_value)
+{
+    auto it = m_registration_counts_by_image_style_value.find(&image_style_value);
+    VERIFY(it != m_registration_counts_by_image_style_value.end());
+    if (--it->value == 0)
+        m_registration_counts_by_image_style_value.remove(it);
+    if (m_registration_counts_by_image_style_value.is_empty())
+        unregister_with_decoded_image_data_if_needed();
+}
+
+GC::Ptr<HTML::DecodedImageData> ImageStyleValueResource::decoded_image_data() const
+{
+    return m_resource_request->image_data();
+}
+
+void ImageStyleValueResource::on_decoded_image_data_loaded()
+{
+    notify_image_style_values_did_update();
+    if (!m_registration_counts_by_image_style_value.is_empty())
+        register_with_decoded_image_data_if_needed();
+}
+
+void ImageStyleValueResource::notify_image_style_values_did_update()
+{
+    for (auto const& registration : m_registration_counts_by_image_style_value)
+        registration.key->notify_clients_did_update();
+}
+
+static HashMap<StyleValueFFI::StyleValueData const*, ImageStyleValue const*>& facades_by_rust_style_value_data()
+{
+    // NB: A facade is not thread safe, so each thread has its own. Two agents that see the same data get a facade each.
+    using Facades = HashMap<StyleValueFFI::StyleValueData const*, ImageStyleValue const*>;
+    // NB: Free what this thread kept when it exits.
+#ifdef AK_COMPILER_CLANG
+    AK_IGNORE_DIAGNOSTIC("-Wexit-time-destructors", static thread_local Facades facades)
+#else
+    static thread_local Facades facades;
+#endif
+    return facades;
+}
+
+ValueComparingNonnullRefPtr<ImageStyleValue const> ImageStyleValue::adopt_rust_style_value_data(StyleValueFFI::StyleValueData const* data)
+{
+    if (auto facade = facades_by_rust_style_value_data().get(data); facade.has_value()) {
+        // The transferred reference duplicates the one the shared facade already holds.
+        StyleValueFFI::rust_style_value_release(data);
+        return **facade;
+    }
+    return adopt_ref(*new (nothrow) ImageStyleValue(data));
+}
+
+ValueComparingNonnullRefPtr<ImageStyleValue const> ImageStyleValue::create(URL const& url)
+{
+    return adopt_ref(*new (nothrow) ImageStyleValue(url));
+}
+
+ValueComparingNonnullRefPtr<ImageStyleValue const> ImageStyleValue::create(URL const& url, Optional<::URL::URL> style_resource_base_url)
+{
+    return adopt_ref(*new (nothrow) ImageStyleValue(url, move(style_resource_base_url)));
+}
+
+ValueComparingNonnullRefPtr<ImageStyleValue const> ImageStyleValue::create(::URL::URL const& url)
+{
+    return adopt_ref(*new (nothrow) ImageStyleValue(URL { url.to_string() }));
+}
+
+ImageStyleValue::ImageStyleValue(URL const& url, Optional<::URL::URL> style_resource_base_url)
+    : AbstractImageStyleValue(Type::Image, make_image_url_data(url, style_resource_base_url))
+    , m_style_resource_base_url(move(style_resource_base_url))
+{
+    facades_by_rust_style_value_data().set(m_value.data(), this);
+}
+
+ImageStyleValue::ImageStyleValue(StyleValueFFI::StyleValueData const* data)
+    : AbstractImageStyleValue(Type::Image, data)
+{
+    auto const& context = data->image._0->resource_context;
+    if (context.has_base_url)
+        m_style_resource_base_url = DOMURL::parse(url_text_from_rust_data(context.base_url));
+    if (context.has_parent_style_sheet_origin_clean)
+        m_parent_style_sheet_origin_clean = context.parent_style_sheet_origin_clean;
+    m_should_absolutize_url_for_computed_value = context.should_absolutize_url_for_computed_value;
+    facades_by_rust_style_value_data().set(m_value.data(), this);
+}
+
+ImageStyleValue::~ImageStyleValue()
+{
+    auto& facades = facades_by_rust_style_value_data();
+    if (auto it = facades.find(m_value.data()); it != facades.end() && it->value == this)
+        facades.remove(it);
+}
+
+GC::Ptr<HTML::SharedResourceRequest> ImageStyleValue::fetch_image(DOM::Document& document) const
+{
+    auto resolved_url = this->resolved_url(document);
+    if (!resolved_url.has_value())
+        return {};
+    // NB: Match the resource key while preserving URL modifiers and the stylesheet's referrer context.
+    auto original_url = url_value();
+    URL request_url { resolved_url->to_string(), original_url.type(), original_url.request_url_modifiers() };
+
+    RuleOrDeclaration rule_or_declaration {
+        .environment_settings_object = document.relevant_settings_object(),
+        .value = RuleOrDeclaration::Rule {},
+        .style_resource_base_url = m_style_resource_base_url,
+        .parent_style_sheet_origin_clean = m_parent_style_sheet_origin_clean,
+    };
+
+    return fetch_an_external_image_for_a_stylesheet(request_url, rule_or_declaration, document);
+}
+
+void ImageStyleValue::load_any_resources(DOM::Document& document)
+{
+    // NB: Prefetching for inactive documents would load images merely from parsing or cloning declarations. If these
+    //     declarations are later rendered in an active document, register_client() will fetch their images then.
+    if (!document.is_fully_active())
+        return;
+
+    if (resource_registered_by_clients(document))
+        return;
+    if (auto key = resource_key(document); key.has_value() && document.css_image_resource(*key))
+        return;
+    fetch_image(document);
+}
+
+ImageStyleValueResource* ImageStyleValue::resource_registered_by_clients(DOM::Document const& document) const
+{
+    for (auto const* client : m_clients) {
+        if (client->m_resource && client->document().ptr() == &document)
+            return client->m_resource;
+    }
+    return nullptr;
+}
+
+void ImageStyleValue::set_style_sheet(StyleSheetState* style_sheet)
+{
+    m_style_resource_base_url.clear();
+    m_resolved_url.clear();
+    m_parent_style_sheet_origin_clean.clear();
+    m_should_absolutize_url_for_computed_value = false;
+
+    if (style_sheet)
+        update_style_sheet_resource_context(*style_sheet);
+}
+
+void ImageStyleValue::update_style_sheet_resource_context(StyleSheetState const& style_sheet)
+{
+    m_style_resource_base_url = style_sheet.style_resource_base_url();
+    m_resolved_url.clear();
+    m_parent_style_sheet_origin_clean = style_sheet.is_origin_clean();
+    m_should_absolutize_url_for_computed_value = true;
+}
+
+void ImageStyleValue::register_client(Client& client) const
+{
+    auto result = m_clients.set(&client);
+    VERIFY(result == AK::HashSetResult::InsertedNewEntry);
+    auto document = client.document();
+    if (!document)
+        return;
+
+    auto* resource = resource_registered_by_clients(*document);
+    if (!resource) {
+        auto key = resource_key(*document);
+        if (!key.has_value())
+            return;
+
+        resource = document->css_image_resource(*key);
+        if (!resource) {
+            auto resource_request = fetch_image(*document);
+
+            // NB: This can only fail if the URL is invalid or ResourceLoader is not initialized, neither of which should be
+            //     the case here.
+            VERIFY(resource_request);
+
+            resource = &document->create_css_image_resource(key.release_value(), *resource_request);
+        }
+    }
+
+    resource->register_image_style_value(*this);
+    client.m_resource = resource;
+}
+
+void ImageStyleValue::unregister_client(Client& client) const
+{
+    auto did_remove = m_clients.remove(&client);
+    VERIFY(did_remove);
+
+    auto* resource = exchange(client.m_resource, nullptr);
+    if (!resource)
+        return;
+
+    // The document owns the resource. A client only loses its document when the document is collected, which destroys
+    // the resource along with any registrations that are left.
+    auto document = client.document();
+    if (!document)
+        return;
+
+    resource->unregister_image_style_value(*this);
+    if (resource->can_be_removed())
+        document->remove_css_image_resource_if_unused(resource->key());
+}
+
+void ImageStyleValue::notify_clients_did_update() const
+{
+    for (auto* client : m_clients)
+        client->image_style_value_did_update(const_cast<ImageStyleValue&>(*this));
+}
+
+Optional<::URL::URL> ImageStyleValue::resolved_url(DOM::Document const& document) const
+{
+    if (m_resolved_url.has_value())
+        return m_resolved_url;
+
+    auto url = url_text_from_rust_data(m_value->image._0->url);
+    if (url.is_empty())
+        return {};
+
+    // https://drafts.csswg.org/css-values-4/#local-urls
+    // NB: A fragment-only image reference follows the document URL rather than a stylesheet or base element.
+    if (url.starts_with(u'#'))
+        return DOMURL::parse(url, document.url());
+    auto resolved_url = DOMURL::parse(url, style_resource_base_url(document));
+    // A value without a base URL of its own follows the document's base URL as that changes.
+    if (m_style_resource_base_url.has_value())
+        m_resolved_url = resolved_url;
+    return resolved_url;
+}
+
+Optional<ImageStyleValueResourceKey> ImageStyleValue::resource_key(DOM::Document const& document) const
+{
+    auto resolved_url = this->resolved_url(document);
+    if (!resolved_url.has_value())
+        return {};
+
+    // OPTIMIZATION: Most url() values have no request modifiers, so don't rebuild the URL value for those.
+    if (m_value->image._0->url_modifiers.length == 0)
+        return ImageStyleValueResourceKey { .url = resolved_url.release_value(), .cross_origin = {}, .integrity = {}, .referrer_policy = {} };
+    return ImageStyleValueResourceKey::create(resolved_url.release_value(), url_value());
+}
+
+::URL::URL ImageStyleValue::style_resource_base_url(DOM::Document const& document) const
+{
+    return m_style_resource_base_url.value_or_lazy_evaluated([&] {
+        return document.relevant_settings_object().api_base_url();
+    });
+}
+
+ImageStyleValue::Client::Client(DOM::Document& document, ImageStyleValue const& image_style_value)
+    : m_image_style_value(image_style_value)
+    , m_document(document)
+{
+    m_image_style_value.register_client(*this);
+}
+
+ImageStyleValue::Client::~Client()
+{
+}
+
+void ImageStyleValue::Client::image_style_value_finalize()
+{
+    m_image_style_value.unregister_client(*this);
+}
+
+GC::Ptr<HTML::DecodedImageData> ImageStyleValue::Client::decoded_image_data() const
+{
+    if (!m_resource)
+        return nullptr;
+    return m_resource->decoded_image_data();
+}
+
+}

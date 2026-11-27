@@ -1,0 +1,64 @@
+dictionary CookieListItem {
+    USVString name;
+    USVString value;
+};
+
+typedef sequence<CookieListItem> CookieList;
+
+dictionary CookieStoreGetOptions {
+    USVString name;
+    USVString url;
+};
+
+enum CookieSameSite {
+    "strict",
+    "lax",
+    "none"
+};
+
+dictionary CookieInit {
+    required USVString name;
+    required USVString value;
+    DOMHighResTimeStamp? expires = null;
+    USVString? domain = null;
+    USVString path = "/";
+    CookieSameSite sameSite = "strict";
+    boolean partitioned = false;
+    long long? maxAge = null;
+};
+
+dictionary CookieStoreDeleteOptions {
+    required USVString name;
+    USVString? domain = null;
+    USVString path = "/";
+    boolean partitioned = false;
+};
+
+// https://cookiestore.spec.whatwg.org/#cookiestore
+[Exposed=(ServiceWorker,Window), SecureContext, ImplementedIn=Rust]
+interface CookieStore : EventTarget {
+    [ImplementedAs=get_with_name] Promise<CookieListItem?> get(USVString name);
+    [ImplementedAs=get] Promise<CookieListItem?> get(optional CookieStoreGetOptions options = {});
+
+    [ImplementedAs=get_all_with_name] Promise<CookieList> getAll(USVString name);
+    [ImplementedAs=get_all] Promise<CookieList> getAll(optional CookieStoreGetOptions options = {});
+
+    [ImplementedAs=set_with_name_and_value] Promise<undefined> set(USVString name, USVString value);
+    [ImplementedAs=set] Promise<undefined> set(CookieInit options);
+
+    [ImplementedAs=delete_with_name] Promise<undefined> delete(USVString name);
+    [ImplementedAs=delete] Promise<undefined> delete(CookieStoreDeleteOptions options);
+
+    [Exposed=Window] attribute EventHandler onchange;
+};
+
+// https://cookiestore.spec.whatwg.org/#Window
+[SecureContext]
+partial interface Window {
+    [SameObject] readonly attribute CookieStore cookieStore;
+};
+
+// https://cookiestore.spec.whatwg.org/#ServiceWorkerGlobalScope
+partial interface ServiceWorkerGlobalScope {
+    [SameObject] readonly attribute CookieStore cookieStore;
+};

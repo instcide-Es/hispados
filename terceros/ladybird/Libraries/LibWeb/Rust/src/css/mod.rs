@@ -1,0 +1,79 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+pub(crate) mod absolutize;
+pub mod animated_overlay;
+pub mod animation;
+pub mod calc;
+pub(crate) mod calc_size;
+pub mod cascaded_properties;
+pub(crate) mod color_conversion;
+pub mod color_interpolation;
+pub(crate) mod color_resolution;
+pub mod computed_longhand_table;
+pub mod computed_value_types;
+pub(crate) mod computed_value_views;
+pub mod computed_values;
+pub(crate) mod container_conditions;
+pub(crate) mod counter_representation;
+pub(crate) mod counter_style;
+pub mod css_enums;
+pub mod css_path;
+pub use libcompositing_rust::css_pixels;
+pub(crate) mod css_string;
+pub(crate) mod css_tokenizer;
+pub mod custom_properties;
+pub(crate) mod declaration_block;
+pub(crate) mod descriptor_block;
+pub(crate) mod descriptor_metadata;
+pub mod display;
+pub use libcompositing_rust::easing;
+mod dom_selector_matching;
+pub mod ffi_stats;
+pub mod ffi_support;
+pub(crate) mod font_feature_values;
+pub(crate) mod font_matching;
+pub(crate) mod function_signature;
+pub(crate) mod host_shared;
+pub(crate) mod import_rule;
+pub mod inline_style_blocks;
+pub(crate) mod keyframes;
+pub(crate) mod layer_names;
+pub(crate) mod math_functions;
+pub(crate) mod media_list;
+pub(crate) mod named_colors;
+pub(crate) mod namespace_rule;
+pub(crate) mod parser;
+pub mod property_metadata;
+pub(crate) mod property_rule;
+pub(crate) mod resolved_value;
+pub(crate) mod retained_fly_string;
+pub(crate) mod rule;
+pub(crate) mod scope_selectors;
+pub(crate) mod selector;
+mod selector_arena;
+mod selector_operations;
+pub(crate) mod selector_parser;
+pub(crate) mod selector_serialization;
+pub(crate) mod selector_tree;
+pub(crate) mod serialize;
+pub mod style;
+pub mod style_compute;
+pub(crate) mod style_rule;
+pub(crate) mod style_sheet;
+pub(crate) mod style_value;
+pub(crate) mod style_value_arc;
+pub(crate) mod svg_paint;
+pub mod table_group_builder;
+pub(crate) mod thin_slice;
+pub(crate) mod transform_functions;
+pub mod transition;
+pub mod typed_om;
+pub(crate) mod value_codes;
+
+pub(crate) mod dimension_units {
+    include!(concat!(env!("OUT_DIR"), "/dimension_units_generated.rs"));
+}

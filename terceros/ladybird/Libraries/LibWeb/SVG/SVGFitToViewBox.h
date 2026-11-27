@@ -1,0 +1,38 @@
+/*
+ * Copyright (c) 2025, Tim Ledbetter <tim.ledbetter@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Utf16FlyString.h>
+#include <LibJS/Heap/Cell.h>
+#include <LibWeb/SVG/AttributeParsing.h>
+#include <LibWeb/SVG/SVGAnimatedPreserveAspectRatio.h>
+#include <LibWeb/SVG/SVGAnimatedString.h>
+
+namespace Web::SVG {
+
+class SVGFitToViewBox {
+public:
+    virtual ~SVGFitToViewBox() = default;
+
+    GC::Ref<SVGAnimatedRect> view_box_for_bindings() const { return *m_view_box_for_bindings; }
+    GC::Ref<SVGAnimatedPreserveAspectRatio> preserve_aspect_ratio_for_bindings() const { return *m_preserve_aspect_ratio_for_bindings; }
+    Optional<ViewBox> view_box() const { return m_view_box; }
+    Optional<PreserveAspectRatio> preserve_aspect_ratio() const { return m_preserve_aspect_ratio; }
+
+protected:
+    void initialize_fit_to_view_box(SVGElement&);
+    void visit_edges(JS::Cell::Visitor&);
+    void attribute_changed(DOM::Element& element, Utf16FlyString const& name, Optional<Utf16String> const& value);
+
+private:
+    Optional<ViewBox> m_view_box;
+    GC::Ptr<SVGAnimatedRect> m_view_box_for_bindings;
+    Optional<PreserveAspectRatio> m_preserve_aspect_ratio;
+    GC::Ptr<SVGAnimatedPreserveAspectRatio> m_preserve_aspect_ratio_for_bindings;
+};
+
+}

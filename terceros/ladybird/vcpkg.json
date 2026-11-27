@@ -1,0 +1,521 @@
+{
+  "builtin-baseline": "944dee83774536dd280cf459f41989584b9ef86a",
+  "dependencies": [
+    {
+      "name": "angle",
+      "platform": "osx",
+      "features": [
+        "metal"
+      ]
+    },
+    {
+      "name": "angle",
+      "platform": "linux | windows | android | bsd"
+    },
+    "brotli",
+    {
+      "name": "cpptrace",
+      "platform": "linux | windows | osx"
+    },
+    {
+      "name": "curl",
+      "default-features": false,
+      "features": [
+        "brotli",
+        "http2",
+        "http3",
+        "openssl",
+        "websockets",
+        "zstd"
+      ]
+    },
+    {
+      "name": "dbus",
+      "default-features": false,
+      "platform": "linux | freebsd"
+    },
+    {
+      "name": "dirent",
+      "platform": "windows"
+    },
+    "fast-float",
+    {
+      "name": "ffmpeg",
+      "default-features": false,
+      "features": [
+        "avcodec",
+        "swresample",
+        "dav1d",
+        "opus",
+        "zlib",
+        "ladybird-components",
+        {
+          "name": "vulkan",
+          "platform": "linux"
+        }
+      ]
+    },
+    {
+      "name": "fontconfig",
+      "platform": "linux | bsd | osx"
+    },
+    {
+      "name": "harfbuzz",
+      "platform": "linux | bsd | windows",
+      "features": [
+        "freetype",
+        "icu"
+      ]
+    },
+    {
+      "name": "harfbuzz",
+      "platform": "osx",
+      "features": [
+        "coretext",
+        "icu"
+      ]
+    },
+    "icu",
+    {
+      "name": "libavif",
+      "features": [
+        "dav1d"
+      ]
+    },
+    {
+      "name": "libdwarf",
+      "platform": "linux | windows | osx"
+    },
+    "libjpeg-turbo",
+    "libpsl",
+    {
+      "name": "libedit",
+      "platform": "!windows & !android"
+    },
+    {
+      "name": "libwebp",
+      "features": [
+        "anim",
+        "libwebpmux",
+        "simd"
+      ]
+    },
+    "llvm-libc",
+    {
+      "name": "mman",
+      "platform": "windows"
+    },
+    {
+      "name": "mimalloc",
+      "features": [
+        "secure"
+      ]
+    },
+    "openssl",
+    "pdfjs",
+    {
+      "name": "pthread",
+      "platform": "windows"
+    },
+    {
+      "name": "qtbase",
+      "platform": "freebsd",
+      "default-features": false,
+      "features": [
+        "dbus",
+        "doubleconversion",
+        "fontconfig",
+        "freetype",
+        "gui",
+        "icu",
+        "jpeg",
+        "network",
+        "opengl",
+        "pcre2",
+        "png",
+        "thread",
+        "vulkan",
+        "widgets",
+        "xcb",
+        "xcb-xlib",
+        "xlib",
+        "xrender",
+        "zstd"
+      ]
+    },
+    {
+      "name": "qtbase",
+      "platform": "osx",
+      "default-features": false,
+      "features": [
+        "dnslookup",
+        "doubleconversion",
+        "freetype",
+        "gui",
+        "harfbuzz",
+        "icu",
+        "jpeg",
+        "network",
+        "opengl",
+        "pcre2",
+        "png",
+        "thread",
+        "widgets",
+        "zstd"
+      ]
+    },
+    {
+      "name": "qtbase",
+      "platform": "windows",
+      "default-features": false,
+      "features": [
+        "doubleconversion",
+        "freetype",
+        "gui",
+        "icu",
+        "jpeg",
+        "network",
+        "opengl",
+        "pcre2",
+        "png",
+        "thread",
+        "widgets",
+        "windeployqt",
+        "zstd"
+      ]
+    },
+    {
+      "name": "qtpositioning",
+      "platform": "windows | freebsd",
+      "default-features": false
+    },
+    {
+      "name": "sdl3",
+      "default-features": false
+    },
+    "simdjson",
+    "simdutf",
+    {
+      "name": "skia",
+      "platform": "osx",
+      "default-features": false,
+      "features": [
+        "metal",
+        "fontconfig",
+        "harfbuzz",
+        "icu"
+      ]
+    },
+    {
+      "name": "skia",
+      "platform": "windows",
+      "default-features": false,
+      "features": [
+        "freetype",
+        "harfbuzz",
+        "icu",
+        "direct3d"
+      ]
+    },
+    {
+      "name": "skia",
+      "platform": "linux | bsd",
+      "default-features": false,
+      "features": [
+        "freetype",
+        "fontconfig",
+        "harfbuzz",
+        "icu",
+        "vulkan"
+      ]
+    },
+    {
+      "name": "skia",
+      "platform": "android",
+      "default-features": false,
+      "features": [
+        "vulkan"
+      ]
+    },
+    "sqlite3",
+    {
+      "name": "tiff",
+      "features": [
+        "zstd"
+      ]
+    },
+    {
+      "name": "vulkan",
+      "platform": "linux | bsd | android"
+    },
+    {
+      "name": "vulkan-headers",
+      "platform": "linux | bsd | android"
+    },
+    {
+      "name": "vulkan-memory-allocator",
+      "platform": "linux | bsd | android"
+    },
+    "woff2",
+    "wuffs",
+    "zlib",
+    "zmij"
+  ],
+  "features": {
+    "qt": {
+      "description": "Build Qt for Linux distributions",
+      "dependencies": [
+        {
+          "name": "qtbase",
+          "platform": "linux",
+          "default-features": false,
+          "features": [
+            "dbus",
+            "doubleconversion",
+            "egl",
+            "fontconfig",
+            "freetype",
+            "harfbuzz",
+            "icu",
+            "jpeg",
+            "network",
+            "opengl",
+            "openssl",
+            "pcre2",
+            "png",
+            "thread",
+            "vulkan",
+            "wayland",
+            "widgets",
+            "xcb",
+            "xcb-xlib",
+            "zstd"
+          ]
+        },
+        {
+          "name": "qtpositioning",
+          "platform": "linux",
+          "default-features": false
+        },
+        {
+          "name": "qtsvg",
+          "platform": "linux",
+          "default-features": false
+        }
+      ]
+    },
+    "sparkle": {
+      "description": "Update the macOS app with Sparkle",
+      "dependencies": [
+        {
+          "name": "sparkle",
+          "platform": "osx"
+        }
+      ]
+    }
+  },
+  "overrides": [
+    {
+      "name": "angle",
+      "version": "chromium_7258#2"
+    },
+    {
+      "name": "brotli",
+      "version": "1.2.1#0"
+    },
+    {
+      "name": "cpptrace",
+      "version": "1.0.4#2"
+    },
+    {
+      "name": "curl",
+      "version": "8.23.0#3"
+    },
+    {
+      "name": "dav1d",
+      "version": "1.5.4#0"
+    },
+    {
+      "name": "dbus",
+      "version": "1.16.4#0"
+    },
+    {
+      "name": "dirent",
+      "version": "1.26#0"
+    },
+    {
+      "name": "fast-float",
+      "version": "8.3.3#0"
+    },
+    {
+      "name": "ffmpeg",
+      "version": "9.0.2#1"
+    },
+    {
+      "name": "ffmpeg-bin2c",
+      "version": "9.0.2#0",
+      "$comment": "ffmpeg-bin2c is a host tool built from the FFmpeg sources, so keep it on the same version as ffmpeg."
+    },
+    {
+      "name": "fontconfig",
+      "version": "2.17.1#2"
+    },
+    {
+      "name": "freetype",
+      "version": "2.13.3#0",
+      "$comment": "freetype is not updated yet to avoid major font rendering differences. See: https://github.com/LadybirdBrowser/ladybird/pull/10165#issuecomment-4747336594"
+    },
+    {
+      "name": "glslang",
+      "version": "16.4.0#0",
+      "$comment": "glslang is a host dependency of shaderc (used by ffmpeg's vulkan feature). Pinned to keep it from moving along with unrelated baseline bumps."
+    },
+    {
+      "name": "harfbuzz",
+      "version": "10.2.0#0",
+      "$comment": "harfbuzz is not updated to avoid conflicts with Qt. See: https://github.com/LadybirdBrowser/ladybird/pull/5273"
+    },
+    {
+      "name": "icu",
+      "version": "78.3#4"
+    },
+    {
+      "name": "libavif",
+      "version": "1.4.2#1"
+    },
+    {
+      "name": "libdwarf",
+      "version": "2.3.3#0"
+    },
+    {
+      "name": "libedit",
+      "version": "2024-08-08#1"
+    },
+    {
+      "name": "libjpeg-turbo",
+      "version": "3.2.1#0"
+    },
+    {
+      "name": "libpng",
+      "version": "1.6.59#0"
+    },
+    {
+      "name": "libpsl",
+      "version": "0.23.3#1"
+    },
+    {
+      "name": "libwebp",
+      "version": "1.6.0#3"
+    },
+    {
+      "name": "llvm-libc",
+      "version": "e54169423e7ee5d8b41c2f1b6f7a59000c901ee0#0"
+    },
+    {
+      "name": "md4c",
+      "version": "0.5.3#0",
+      "$comment": "md4c 0.6.0 is incompatible with the pinned Qt 6.10.0 Markdown importer."
+    },
+    {
+      "name": "mimalloc",
+      "version": "2.2.7#1"
+    },
+    {
+      "name": "mman",
+      "version": "git-f5ff813#5"
+    },
+    {
+      "name": "nghttp2",
+      "version": "1.71.0#0"
+    },
+    {
+      "name": "openssl",
+      "version": "3.6.5#1"
+    },
+    {
+      "name": "pdfjs",
+      "version": "6.5.438#0"
+    },
+    {
+      "name": "pthread",
+      "version": "3.0.0#2"
+    },
+    {
+      "name": "qtbase",
+      "version": "6.11.3#1"
+    },
+    {
+      "name": "qtpositioning",
+      "version": "6.11.3#0"
+    },
+    {
+      "name": "qtserialport",
+      "version": "6.11.3#0"
+    },
+    {
+      "name": "qtsvg",
+      "version": "6.11.3#0"
+    },
+    {
+      "name": "sdl3",
+      "version": "3.4.20#0"
+    },
+    {
+      "name": "simdjson",
+      "version": "5.1.1#0"
+    },
+    {
+      "name": "simdutf",
+      "version": "9.5.0#0"
+    },
+    {
+      "name": "skia",
+      "version": "148#0"
+    },
+    {
+      "name": "sparkle",
+      "version": "2.10.1#0"
+    },
+    {
+      "name": "sqlite3",
+      "version": "3.54.1#0"
+    },
+    {
+      "name": "tiff",
+      "version": "4.7.2#0"
+    },
+    {
+      "name": "vcpkg-tool-meson",
+      "version": "1.9.0#10",
+      "$comment": "Meson 1.12 builds harfbuzz 10.2.0 with -std=c++11 under clang-cl, which MSVC's headers reject."
+    },
+    {
+      "name": "vulkan",
+      "version": "2023-12-17#0"
+    },
+    {
+      "name": "vulkan-headers",
+      "version": "1.4.363.0#0"
+    },
+    {
+      "name": "vulkan-memory-allocator",
+      "version": "3.5.0#0"
+    },
+    {
+      "name": "woff2",
+      "version": "1.0.2#5"
+    },
+    {
+      "name": "wuffs",
+      "version": "0.3.5#0"
+    },
+    {
+      "name": "zlib",
+      "version": "1.4#0"
+    },
+    {
+      "name": "zmij",
+      "version": "1.2#1"
+    }
+  ]
+}

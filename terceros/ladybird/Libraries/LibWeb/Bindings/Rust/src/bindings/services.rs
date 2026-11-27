@@ -1,0 +1,102 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+//! The services of LibWeb's C++ bindings that the Rust bindings use, which the bindings generator defines in
+//! Bindings/IntrinsicDefinitions.cpp and Bindings/RustBindingsServices.cpp defines by hand.
+
+use core::ffi::c_void;
+
+unsafe extern "C" {
+    /// The interface prototype object of the interface in the realm, which the realm's intrinsics create on first use.
+    /// The realm and the object are the runtime's cells, and the interface name is a Web::Bindings::InterfaceName of an
+    /// interface implemented in Rust.
+    pub(crate) fn web_bindings_ensure_web_prototype(realm: *mut c_void, interface_name: u16) -> *mut c_void;
+
+    /// The interface object of the interface in the realm, likewise.
+    pub(crate) fn web_bindings_ensure_web_constructor(realm: *mut c_void, interface_name: u16) -> *mut c_void;
+
+    /// The iterator prototype object of the interface in the realm, likewise, for an interface with a pair iterator.
+    pub(crate) fn web_bindings_ensure_web_iterator_prototype(realm: *mut c_void, interface_name: u16) -> *mut c_void;
+
+    /// The wrapper world of the realm, a cell that the realm keeps alive, and whether it is the main world of its
+    /// agent.
+    pub(crate) fn web_bindings_wrapper_world(realm: *mut c_void, is_main_world: *mut bool) -> *mut c_void;
+
+    /// The wrapper that the world of the realm, which is not a main world, holds for the cell of an object of an
+    /// interface implemented in Rust, or null.
+    pub(crate) fn web_bindings_rust_wrapper_for(realm: *mut c_void, cell: *mut c_void) -> *mut c_void;
+
+    /// Defines the unforgeable attributes of the interface implemented in C++ on the wrapper.
+    pub(crate) fn web_bindings_define_unforgeable_attributes(
+        realm: *mut c_void,
+        wrapper: *mut c_void,
+        interface_name: u16,
+    );
+
+    /// Makes `wrapper` the wrapper that the world of its realm, which is not a main world, holds for the cell.
+    pub(crate) fn web_bindings_set_rust_wrapper(realm: *mut c_void, cell: *mut c_void, wrapper: *mut c_void);
+
+    /// Pushes a new element queue onto the custom element reactions stack of the agent of the main thread.
+    pub(crate) fn web_bindings_push_element_queue();
+
+    /// Pops the element queue from that stack and invokes the custom element reactions in it.
+    pub(crate) fn web_bindings_pop_element_queue_and_invoke_reactions();
+
+    /// Whether the global object of the realm is a Window.
+    pub(crate) fn web_bindings_realm_is_window(realm: *mut c_void) -> bool;
+    pub(crate) fn web_bindings_realm_is_secure_context(realm: *mut c_void) -> bool;
+
+    pub(crate) fn web_bindings_report_an_exception(realm: *mut c_void, exception: u64);
+
+    /// Runs the steps with the context while an execution context of the realm is on the stack, as an
+    /// HTML::TemporaryExecutionContext puts it there, with callbacks enabled if `callbacks_enabled`.
+    pub(crate) fn web_bindings_with_temporary_execution_context(
+        realm: *mut c_void,
+        callbacks_enabled: bool,
+        context: *mut c_void,
+        steps: unsafe extern "C" fn(*mut c_void),
+    );
+
+    /// Whether the object is a wrapper of an object that implements the interface, a Web::Bindings::InterfaceName of
+    /// an interface that LibWeb implements in C++.
+    pub(crate) fn web_bindings_object_implements_interface(object: *mut c_void, interface_name: u16) -> bool;
+
+    /// The cell of the C++ object that the wrapper wraps.
+    pub(crate) fn web_bindings_cell_of_wrapper(wrapper: *mut c_void) -> *mut c_void;
+
+    /// Whether the object is the exotic object of a WindowProxy.
+    pub(crate) fn web_bindings_object_is_window_proxy(object: *mut c_void) -> bool;
+
+    /// The object that scripts of the realm see for the WindowProxy whose exotic object this is: that of the
+    /// WindowProxy of its browsing context for the wrapper world of the realm, or the object itself if it has none.
+    pub(crate) fn web_bindings_window_proxy_object_in_realm(object: *mut c_void, realm: *mut c_void) -> *mut c_void;
+
+    /// Runs the extract an origin operation of the object, https://html.spec.whatwg.org/multipage/browsers.html#extract-an-origin,
+    /// if it is a platform object of an interface implemented in C++ or a WindowProxy, and calls `on_origin` with the
+    /// origin, which it lends for the call, if that is not null. Returns whether it called `on_origin`.
+    pub(crate) fn web_bindings_extract_an_origin(
+        object: *mut c_void,
+        ctx: *mut c_void,
+        on_origin: unsafe extern "C" fn(*mut c_void, *const liburl_rust::FfiOrigin),
+    ) -> bool;
+
+    /// HTML::perform_a_security_check() of the value, with the identifier, which is ASCII, and the
+    /// HTML::SecurityCheckType.
+    pub(crate) fn web_bindings_perform_a_security_check(
+        realm: *mut c_void,
+        platform_object: u64,
+        identifier: ak::Span<'_, u8>,
+        check_type: u8,
+    ) -> libjs_rust::api::RawNativeFunctionResult;
+
+    /// The wrapper in the realm of a new DOMException with the name, which is ASCII, and the message, a borrowed
+    /// AK::Utf16String.
+    pub(crate) fn web_bindings_create_dom_exception(
+        realm: *mut c_void,
+        name: ak::Span<'_, u8>,
+        message: usize,
+    ) -> *mut c_void;
+}

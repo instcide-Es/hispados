@@ -1,0 +1,820 @@
+/*
+ * Copyright (c) 2020, Matthew Olsson <mattco@serenityos.org>
+ * Copyright (c) 2023, Preston Taylor <95388976+PrestonLTaylor@users.noreply.github.com>
+ * Copyright (c) 2025, Jelle Raaijmakers <jelle@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/HashMap.h>
+#include <AK/NeverDestroyed.h>
+#include <LibGC/WeakHashSet.h>
+#include <LibWeb/CSS/ElementBoxKind.h>
+#include <LibWeb/CSS/PropertyID.h>
+#include <LibWeb/CSS/StyleEngineInput.h>
+#include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
+#include <LibWeb/CSS/StyleValues/NumberStyleValue.h>
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOM/ElementRareData.h>
+#include <LibWeb/DOM/ShadowRoot.h>
+#include <LibWeb/HTML/AttributeNames.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
+#include <LibWeb/Layout/Node.h>
+#include <LibWeb/Painting/BoxViews.h>
+#include <LibWeb/SVG/AttributeParsing.h>
+#include <LibWeb/SVG/SVGAnimatedLength.h>
+#include <LibWeb/SVG/SVGDescElement.h>
+#include <LibWeb/SVG/SVGElement.h>
+#include <LibWeb/SVG/SVGFilterElement.h>
+#include <LibWeb/SVG/SVGForeignObjectElement.h>
+#include <LibWeb/SVG/SVGGradientElement.h>
+#include <LibWeb/SVG/SVGGraphicsElement.h>
+#include <LibWeb/SVG/SVGPatternElement.h>
+#include <LibWeb/SVG/SVGSVGElement.h>
+#include <LibWeb/SVG/SVGSymbolElement.h>
+#include <LibWeb/SVG/SVGTitleElement.h>
+#include <LibWeb/SVG/SVGUseElement.h>
+#include <LibWeb/SVG/TagNames.h>
+
+namespace Web::SVG {
+
+GC_DEFINE_ALLOCATOR(SVGElement);
+
+struct SVGElement::RareData final : DOM::Element::RareData {
+    AK_ALLOC_WITH_KMALLOC;
+
+    virtual void visit_edges(Cell::Visitor& visitor) override
+    {
+        DOM::Element::RareData::visit_edges(visitor);
+        visitor.visit(corresponding_element);
+    }
+
+    GC::Ptr<SVGElement> corresponding_element;
+
+    // https://svgwg.org/svg2-draft/struct.html#TermElementInstance
+    GC::WeakHashSet<SVGElement> element_instances;
+};
+
+OwnPtr<DOM::Node::RareData> SVGElement::create_rare_data() const
+{
+    return make<RareData>();
+}
+
+// https://svgwg.org/svg2-draft/struct.html#TermCorrespondingElement
+GC::Ptr<SVGElement const> SVGElement::corresponding_element() const
+{
+    auto const* data = static_cast<RareData const*>(rare_data());
+    if (!data)
+        return nullptr;
+    return data->corresponding_element;
+}
+
+void SVGElement::set_corresponding_element(Badge<SVGUseElement>, SVGElement& corresponding_element)
+{
+    static_cast<RareData&>(ensure_rare_data()).corresponding_element = corresponding_element;
+    static_cast<RareData&>(corresponding_element.ensure_rare_data()).element_instances.set(*this);
+}
+
+SVGElement::SVGElement(DOM::Document& document, DOM::QualifiedName qualified_name)
+    : Element(document, move(qualified_name))
+{
+}
+
+CSS::ElementBoxKind SVGElement::box_kind() const
+{
+    return CSS::ElementBoxKind::NoBox;
+}
+
+// https://svgwg.org/svg2-draft/render.html#TermNeverRenderedElement
+static bool is_never_rendered_element(SVGElement const& element)
+{
+    // Any element type that is never directly rendered, regardless of context or display style value. It includes the
+    // following elements: ‘clipPath’, ‘defs’, ‘desc’, ‘linearGradient’, ‘marker’, ‘mask’, ‘metadata’, ‘pattern’,
+    // ‘radialGradient’, ‘script’, ‘style’ and ‘title’; it also includes a ‘symbol’ element that is not the instance root
+    // of a use-element shadow tree.
+    if (is<SVGSymbolElement>(element))
+        return element.box_kind() == CSS::ElementBoxKind::NoBox;
+
+    // https://drafts.csswg.org/filter-effects-1/#FilterElement
+    // filter elements are never rendered directly; their only usage is as something that can be referenced using the
+    // filter property.
+    return element.local_name().is_one_of(
+        TagNames::clipPath, TagNames::defs, TagNames::desc, TagNames::filter, TagNames::linearGradient,
+        TagNames::marker, TagNames::mask, TagNames::metadata, TagNames::pattern, TagNames::radialGradient,
+        TagNames::script, TagNames::style, TagNames::title);
+}
+
+// https://svgwg.org/svg2-draft/interact.html#Focus
+bool SVGElement::is_focusable() const
+{
+    // The following SVG elements are focusable in an interactive document. [...] For the purpose of the HTML focus
+    // model, interactive user agents must treat them as focusable areas whose tabindex focus flag should be set:
+    // - the document root element
+    if (document().document_element() == this)
+        return meets_focusable_area_rendering_requirements();
+
+    // - any directly rendered element with a valid integer ‘tabindex’ attribute
+    // NB: A never-rendered element and its descendants are never directly rendered.
+    if (is_in_never_rendered_subtree())
+        return false;
+    return Base::is_focusable();
+}
+
+bool SVGElement::is_in_never_rendered_subtree() const
+{
+    // NB: A use-element shadow tree is rendered where its host is, so the walk continues at the host.
+    for (auto element = this; element; element = as_if<SVGElement>(element->parent_or_shadow_host_element())) {
+        if (is_never_rendered_element(*element))
+            return true;
+    }
+    return false;
+}
+
+struct NamedPropertyID {
+    NamedPropertyID(CSS::PropertyID property_id, Utf16FlyString name, std::initializer_list<Utf16FlyString> supported_elements = {})
+        : id(property_id)
+        , name(move(name))
+        , supported_elements(supported_elements)
+    {
+    }
+    NamedPropertyID(CSS::PropertyID property_id, std::initializer_list<Utf16FlyString> supported_elements = {})
+        : NamedPropertyID(property_id, CSS::string_from_property_id(property_id).to_utf16_string(), supported_elements)
+    {
+    }
+
+    CSS::PropertyID id;
+    Utf16FlyString name;
+    Vector<Utf16FlyString> supported_elements;
+};
+
+static ReadonlySpan<NamedPropertyID> attribute_style_properties()
+{
+    // https://svgwg.org/svg2-draft/styling.html#PresentationAttributes
+    static auto const& properties = *new Array {
+        // FIXME: The `fill` attribute and CSS `fill` property are not the same! But our support is limited enough that they are equivalent for now.
+        NamedPropertyID(CSS::PropertyID::Fill),
+        NamedPropertyID(CSS::PropertyID::AlignmentBaseline),
+        NamedPropertyID(CSS::PropertyID::BaselineShift),
+        // FIXME: The `stroke` attribute and CSS `stroke` property are not the same! But our support is limited enough that they are equivalent for now.
+        NamedPropertyID(CSS::PropertyID::ClipPath),
+        NamedPropertyID(CSS::PropertyID::ClipRule),
+        NamedPropertyID(CSS::PropertyID::Color),
+        NamedPropertyID(CSS::PropertyID::ColorInterpolation),
+        NamedPropertyID(CSS::PropertyID::ColorInterpolationFilters),
+        NamedPropertyID(CSS::PropertyID::Cursor),
+        NamedPropertyID(CSS::PropertyID::Cx, { SVG::TagNames::circle, SVG::TagNames::ellipse }),
+        NamedPropertyID(CSS::PropertyID::Cy, { SVG::TagNames::circle, SVG::TagNames::ellipse }),
+        NamedPropertyID(CSS::PropertyID::D, { SVG::TagNames::path }),
+        NamedPropertyID(CSS::PropertyID::Direction),
+        NamedPropertyID(CSS::PropertyID::Display),
+        NamedPropertyID(CSS::PropertyID::DominantBaseline),
+        NamedPropertyID(CSS::PropertyID::FillOpacity),
+        NamedPropertyID(CSS::PropertyID::FillRule),
+        NamedPropertyID(CSS::PropertyID::Filter),
+        NamedPropertyID(CSS::PropertyID::FloodColor),
+        NamedPropertyID(CSS::PropertyID::FloodOpacity),
+        NamedPropertyID(CSS::PropertyID::FontFamily),
+        NamedPropertyID(CSS::PropertyID::FontSize),
+        NamedPropertyID(CSS::PropertyID::FontSizeAdjust),
+        NamedPropertyID(CSS::PropertyID::FontStyle),
+        NamedPropertyID(CSS::PropertyID::FontVariant),
+        NamedPropertyID(CSS::PropertyID::FontWeight),
+        NamedPropertyID(CSS::PropertyID::FontWidth, "font-stretch"_utf16_fly_string),
+        NamedPropertyID(CSS::PropertyID::Height, { SVG::TagNames::foreignObject, SVG::TagNames::image, SVG::TagNames::rect, SVG::TagNames::svg, SVG::TagNames::symbol, SVG::TagNames::use }),
+        NamedPropertyID(CSS::PropertyID::ImageRendering),
+        NamedPropertyID(CSS::PropertyID::LetterSpacing),
+        NamedPropertyID(CSS::PropertyID::Mask),
+        NamedPropertyID(CSS::PropertyID::MaskType),
+        NamedPropertyID(CSS::PropertyID::Opacity),
+        NamedPropertyID(CSS::PropertyID::Overflow),
+        NamedPropertyID(CSS::PropertyID::PaintOrder),
+        NamedPropertyID(CSS::PropertyID::PointerEvents),
+        NamedPropertyID(CSS::PropertyID::R, { SVG::TagNames::circle }),
+        NamedPropertyID(CSS::PropertyID::Rx, { SVG::TagNames::ellipse, SVG::TagNames::rect }),
+        NamedPropertyID(CSS::PropertyID::Ry, { SVG::TagNames::ellipse, SVG::TagNames::rect }),
+        NamedPropertyID(CSS::PropertyID::ShapeRendering),
+        NamedPropertyID(CSS::PropertyID::StopColor),
+        NamedPropertyID(CSS::PropertyID::StopOpacity),
+        NamedPropertyID(CSS::PropertyID::Stroke),
+        NamedPropertyID(CSS::PropertyID::StrokeDasharray),
+        NamedPropertyID(CSS::PropertyID::StrokeDashoffset),
+        NamedPropertyID(CSS::PropertyID::StrokeLinecap),
+        NamedPropertyID(CSS::PropertyID::StrokeLinejoin),
+        NamedPropertyID(CSS::PropertyID::StrokeMiterlimit),
+        NamedPropertyID(CSS::PropertyID::StrokeOpacity),
+        NamedPropertyID(CSS::PropertyID::StrokeWidth),
+        NamedPropertyID(CSS::PropertyID::VectorEffect),
+        NamedPropertyID(CSS::PropertyID::TextAnchor),
+        NamedPropertyID(CSS::PropertyID::TextDecoration),
+        NamedPropertyID(CSS::PropertyID::TextRendering),
+        NamedPropertyID(CSS::PropertyID::TextOverflow),
+        NamedPropertyID(CSS::PropertyID::Transform),
+        NamedPropertyID(CSS::PropertyID::Transform, "gradientTransform"_utf16_fly_string, { SVG::TagNames::linearGradient, SVG::TagNames::radialGradient }),
+        NamedPropertyID(CSS::PropertyID::Transform, "patternTransform"_utf16_fly_string, { SVG::TagNames::pattern }),
+        NamedPropertyID(CSS::PropertyID::TransformOrigin),
+        NamedPropertyID(CSS::PropertyID::UnicodeBidi),
+        NamedPropertyID(CSS::PropertyID::Visibility),
+        NamedPropertyID(CSS::PropertyID::WhiteSpace),
+        NamedPropertyID(CSS::PropertyID::Width, { SVG::TagNames::foreignObject, SVG::TagNames::image, SVG::TagNames::rect, SVG::TagNames::svg, SVG::TagNames::symbol, SVG::TagNames::use }),
+        NamedPropertyID(CSS::PropertyID::WordSpacing),
+        NamedPropertyID(CSS::PropertyID::WritingMode),
+        NamedPropertyID(CSS::PropertyID::X, { SVG::TagNames::foreignObject, SVG::TagNames::image, SVG::TagNames::rect, SVG::TagNames::svg, SVG::TagNames::symbol, SVG::TagNames::use }),
+        NamedPropertyID(CSS::PropertyID::Y, { SVG::TagNames::foreignObject, SVG::TagNames::image, SVG::TagNames::rect, SVG::TagNames::svg, SVG::TagNames::symbol, SVG::TagNames::use }),
+    };
+    return properties;
+}
+
+static HashMap<Utf16FlyString, NamedPropertyID const*> const& attribute_style_properties_by_name()
+{
+    static auto const& properties_by_name = *[] {
+        auto* map = new HashMap<Utf16FlyString, NamedPropertyID const*>;
+        for (auto const& property : attribute_style_properties())
+            map->set(property.name, &property);
+        return map;
+    }();
+    return properties_by_name;
+}
+
+static Optional<CSS::PropertyID> property_id_for_presentational_attribute(Utf16FlyString const& name, Utf16FlyString const& tag_name)
+{
+    // https://svgwg.org/svg2-draft/styling.html#PresentationAttributes
+    // The pattern and gradient elements take patternTransform and gradientTransform instead of the
+    // plain transform presentation attribute.
+    if (name == SVG::AttributeNames::transform
+        && (tag_name == TagNames::pattern || tag_name == TagNames::linearGradient || tag_name == TagNames::radialGradient))
+        return {};
+
+    auto const* property = attribute_style_properties_by_name().get(name).value_or(nullptr);
+    if (!property)
+        return {};
+    if (!property->supported_elements.is_empty() && !property->supported_elements.contains_slow(tag_name))
+        return {};
+    return property->id;
+}
+
+bool SVGElement::is_presentational_hint(Utf16FlyString const& name) const
+{
+    if (Base::is_presentational_hint(name))
+        return true;
+
+    return property_id_for_presentational_attribute(name, local_name()).has_value();
+}
+
+void SVGElement::apply_presentational_hints(Vector<CSS::StyleProperty>& properties) const
+{
+    Base::apply_presentational_hints(properties);
+    properties.extend(presentation_attribute_style());
+}
+
+Vector<CSS::StyleProperty> const& SVGElement::presentation_attribute_style() const
+{
+    if (m_presentation_attribute_style.has_value())
+        return *m_presentation_attribute_style;
+
+    Vector<CSS::StyleProperty> presentation_attribute_style;
+    for_each_attribute([&](DOM::QualifiedName const& name, Utf16View const& value) {
+        if (name.namespace_().has_value())
+            return;
+        if (auto property_id = property_id_for_presentational_attribute(name.as_string(), local_name()); property_id.has_value()) {
+            if (auto style_value = parse_presentation_attribute(*property_id, value))
+                presentation_attribute_style.append({ .property_id = *property_id, .value = style_value.release_nonnull() });
+        }
+    });
+    m_presentation_attribute_style = move(presentation_attribute_style);
+    return *m_presentation_attribute_style;
+}
+
+namespace {
+
+struct PresentationAttributeValueKey {
+    CSS::PropertyID property_id;
+    bool in_quirks_mode;
+    u32 value_hash;
+    Utf16String value;
+
+    static u32 hash(CSS::PropertyID property_id, bool in_quirks_mode, u32 value_hash)
+    {
+        return pair_int_hash(value_hash, (to_underlying(property_id) << 1) | in_quirks_mode);
+    }
+};
+
+struct PresentationAttributeValueKeyTraits : DefaultTraits<PresentationAttributeValueKey> {
+    static unsigned hash(PresentationAttributeValueKey const& key) { return PresentationAttributeValueKey::hash(key.property_id, key.in_quirks_mode, key.value_hash); }
+    static bool equals(PresentationAttributeValueKey const& a, PresentationAttributeValueKey const& b)
+    {
+        return a.property_id == b.property_id && a.in_quirks_mode == b.in_quirks_mode && a.value == b.value;
+    }
+};
+
+}
+
+static RefPtr<CSS::StyleValue const> parse_presentation_attribute_uncached(DOM::Document const& document, CSS::PropertyID property_id, Utf16View value)
+{
+    CSS::Parser::ParsingParams parsing_context { document, CSS::Parser::ParsingMode::SVGPresentationAttribute };
+    // NB: <path>'s `d` presentational attribute is a special case - the attribute and the CSS properties
+    //     syntaxes differ with the attribute being a raw path string but the CSS property only accepting a
+    //     path() function. To account for this we wrap the attribute value in a path function before parsing.
+    if (property_id == CSS::PropertyID::D) {
+        return parse_css_value(parsing_context, Utf16String::formatted("path({})", CSS::serialize_a_string(value)), property_id);
+    }
+
+    // NB: The transform, gradientTransform, and patternTransform attributes use the SVG
+    //     transform-list grammar (optional commas, unitless values, three-argument
+    //     rotate), which the CSS transform property doesn't accept - so parse the SVG
+    //     grammar and re-express the resulting matrix as a single-function transform
+    //     list, the shape the CSS parser produces for the transform property.
+    if (property_id == CSS::PropertyID::Transform) {
+        auto transform_list = parse_transform(Utf16String::from_utf16(value));
+        if (!transform_list.has_value())
+            return {};
+        auto matrix = transform_from_transform_list(*transform_list);
+        CSS::StyleValueVector matrix_parameters {
+            CSS::NumberStyleValue::create(matrix.a()),
+            CSS::NumberStyleValue::create(matrix.b()),
+            CSS::NumberStyleValue::create(matrix.c()),
+            CSS::NumberStyleValue::create(matrix.d()),
+            CSS::NumberStyleValue::create(matrix.e()),
+            CSS::NumberStyleValue::create(matrix.f()),
+        };
+        return CSS::StyleValueList::create(
+            CSS::StyleValueVector { CSS::TransformationStyleValue::create(CSS::PropertyID::Transform, CSS::TransformFunction::Matrix, move(matrix_parameters)) },
+            CSS::StyleValueList::Separator::Space);
+    }
+
+    return parse_css_value(parsing_context, value, property_id);
+}
+
+// Every copy of an icon repeats its presentation attributes, and each copy that gets a style parses them. A value
+// without a function in it, like a path's data and a transform list, parses the same in any document of the same
+// mode, and a parsed value is immutable, so the copies share one.
+RefPtr<CSS::StyleValue const> SVGElement::parse_presentation_attribute(CSS::PropertyID property_id, Utf16View value) const
+{
+    if (property_id != CSS::PropertyID::D && property_id != CSS::PropertyID::Transform && value.contains(u'('))
+        return parse_presentation_attribute_uncached(document(), property_id, value);
+
+    static NeverDestroyed<HashMap<PresentationAttributeValueKey, RefPtr<CSS::StyleValue const>, PresentationAttributeValueKeyTraits>> s_values;
+    auto& values = *s_values;
+    auto const in_quirks_mode = document().in_quirks_mode();
+    auto const value_hash = value.hash();
+    auto hash = PresentationAttributeValueKey::hash(property_id, in_quirks_mode, value_hash);
+    if (auto it = values.find(hash, [&](auto const& entry) { return entry.key.property_id == property_id && entry.key.in_quirks_mode == in_quirks_mode && entry.key.value == value; }); it != values.end())
+        return it->value;
+
+    auto parsed = parse_presentation_attribute_uncached(document(), property_id, value);
+    // A page that generates its attributes would grow this without bound.
+    if (values.size() >= 4096)
+        values.clear();
+    values.set({ property_id, in_quirks_mode, value_hash, Utf16String::from_utf16(value) }, parsed);
+    return parsed;
+}
+
+void SVGElement::update_presentation_attribute_style(Utf16FlyString const& name, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_)
+{
+    if (!m_presentation_attribute_style.has_value() || namespace_.has_value())
+        return;
+
+    auto property_id = property_id_for_presentational_attribute(name, local_name());
+    if (!property_id.has_value())
+        return;
+
+    RefPtr<CSS::StyleValue const> style_value;
+    if (value.has_value())
+        style_value = parse_presentation_attribute(*property_id, *value);
+    auto existing_index = m_presentation_attribute_style->find_first_index_if([&](auto const& property) {
+        return property.property_id == *property_id;
+    });
+    if (style_value) {
+        if (existing_index.has_value()) {
+            (*m_presentation_attribute_style)[*existing_index].value = style_value.release_nonnull();
+        } else {
+            m_presentation_attribute_style->append({ .property_id = *property_id, .value = style_value.release_nonnull() });
+        }
+    } else if (existing_index.has_value()) {
+        m_presentation_attribute_style->remove(*existing_index);
+    } else {
+        return;
+    }
+
+    publish_presentation_attribute_style();
+}
+
+void SVGElement::publish_presentation_attribute_style()
+{
+    document().flush_deferred_style_change_event();
+
+    Vector<CSS::StyleProperty> properties;
+    Base::apply_presentational_hints(properties);
+    ReadonlySpan<CSS::StyleProperty> hints = *m_presentation_attribute_style;
+    if (!properties.is_empty()) {
+        properties.extend(*m_presentation_attribute_style);
+        HashTable<CSS::PropertyID> seen_properties;
+        for (size_t i = properties.size(); i > 0; --i) {
+            if (seen_properties.set(properties[i - 1].property_id) != AK::HashSetResult::InsertedNewEntry)
+                properties.remove(i - 1);
+        }
+        hints = properties;
+    }
+
+    if (presentational_hint_properties_need_publication(hints)
+        && CSS::record_element_presentational_hint_properties(*this, hints))
+        did_publish_presentational_hint_properties(hints);
+}
+
+bool SVGElement::should_include_in_accessibility_tree() const
+{
+    bool has_title_or_desc = false;
+    // Whether the element has a role token decides inclusion, so the name-dependent landmark check doesn't apply
+    // here. It computes the accessible name, and computing that asks for this element's default role, which depends
+    // on this check — so applying it here would recurse until the stack overflows.
+    auto role = role_from_role_value(this->role(), RoleSource::DefaultSemantics);
+    for_each_child_of_type<SVGElement>([&has_title_or_desc](auto& child) {
+        if ((is<SVGTitleElement>(child) || is<SVGDescElement>(child)) && !child.text_content()->utf16_view().trim_ascii_whitespace().is_empty()) {
+            has_title_or_desc = true;
+            return IterationDecision::Break;
+        }
+        return IterationDecision::Continue;
+    });
+    // https://w3c.github.io/svg-aam/#include_elements
+    // TODO: Add support for the SVG tabindex attribute, and include a check for it here.
+    return has_title_or_desc
+        || (aria_label().has_value() && !aria_label()->utf16_view().trim_ascii_whitespace().is_empty())
+        || (aria_labelled_by().has_value() && !aria_labelled_by()->utf16_view().trim_ascii_whitespace().is_empty())
+        || (aria_described_by().has_value() && !aria_described_by()->utf16_view().trim_ascii_whitespace().is_empty())
+        || (role.has_value() && ARIA::is_abstract_role(role.value()) && role != ARIA::Role::none && role != ARIA::Role::presentation);
+}
+
+Optional<ARIA::Role> SVGElement::default_role() const
+{
+    // https://w3c.github.io/svg-aam/#mapping_role_table
+    if (local_name() == TagNames::a && (has_attribute(SVG::AttributeNames::href) || has_attribute(AttributeNames::xlink_href)))
+        return ARIA::Role::link;
+    if (local_name().is_one_of(TagNames::foreignObject, TagNames::g)
+        && should_include_in_accessibility_tree())
+        return ARIA::Role::group;
+    if (local_name() == TagNames::image && should_include_in_accessibility_tree())
+        return ARIA::Role::image;
+    if (local_name() == TagNames::circle && should_include_in_accessibility_tree())
+        return ARIA::Role::graphicssymbol;
+    if (local_name().is_one_of(TagNames::ellipse, TagNames::path, TagNames::polygon, TagNames::polyline)
+        && should_include_in_accessibility_tree())
+        return ARIA::Role::graphicssymbol;
+    return ARIA::Role::generic;
+}
+
+void SVGElement::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_class_name_animated_string);
+    visitor.visit(m_reflected_attribute_cache);
+    visitor.visit(m_reflected_enumeration_cache);
+}
+
+void SVGElement::attribute_changed(Utf16FlyString const& local_name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_)
+{
+    Base::attribute_changed(local_name, old_value, value, namespace_);
+    HTMLOrSVGOrMathMLElement::attribute_changed(local_name, old_value, value, namespace_);
+
+    // https://html.spec.whatwg.org/multipage/webappapis.html#event-handler-attributes:concept-element-attributes-change-ext
+    // 1. If namespace is not null, or localName is not the name of an event handler content attribute on element, then return.
+    if (!namespace_.has_value() && local_name.view().starts_with(u"on"sv)) {
+#undef __ENUMERATE
+#define __ENUMERATE(attribute_name, event_name)                     \
+    if (local_name == HTML::AttributeNames::attribute_name) {       \
+        element_event_handler_attribute_changed(local_name, value); \
+    }
+        ENUMERATE_GLOBAL_EVENT_HANDLERS(__ENUMERATE)
+#undef __ENUMERATE
+    }
+
+    if (old_value != value) {
+        update_presentation_attribute_style(local_name, value, namespace_);
+        invalidate_element_instances(ElementInstancesToInvalidate::All);
+        update_use_elements_that_reference_this();
+    }
+    note_svg_paint_resource_description_may_have_changed();
+}
+
+bool SVGElement::describes_svg_paint_resource() const
+{
+    for (auto const* element = this; element; element = as_if<SVGElement>(element->parent_element().ptr())) {
+        if (is<SVGGradientElement>(*element) || is<SVGPatternElement>(*element) || is<SVGFilterElement>(*element))
+            return true;
+    }
+    return false;
+}
+
+bool SVGElement::is_resource_element() const
+{
+    return is_svg_gradient_element() || is_svg_pattern_element() || is_svg_clip_path_element() || is_svg_mask_element() || is_svg_filter_element();
+}
+
+bool SVGElement::is_referenceable_in_display_none_subtree() const
+{
+    if (is_svg_geometry_element() && id().has_value())
+        return true;
+    for (auto const* element = this; element; element = as_if<SVGElement>(element->parent_or_shadow_host_element())) {
+        if (element->is_resource_element())
+            return true;
+    }
+    return false;
+}
+
+void SVGElement::note_svg_paint_resource_description_may_have_changed()
+{
+    if (describes_svg_paint_resource())
+        document().note_svg_paint_resources_changed();
+}
+
+void SVGElement::moved_from(IsSubtreeRoot is_subtree_root, GC::Ptr<Node> old_ancestor)
+{
+    Base::moved_from(is_subtree_root, old_ancestor);
+    auto const* old_svg_ancestor = as_if<SVGElement>(old_ancestor.ptr());
+    if (describes_svg_paint_resource() || (old_svg_ancestor && old_svg_ancestor->describes_svg_paint_resource()))
+        document().note_svg_paint_resources_changed();
+}
+
+void SVGElement::adopted_from(DOM::Document& old_document)
+{
+    Base::adopted_from(old_document);
+    m_presentation_attribute_style.clear();
+}
+
+WebIDL::ExceptionOr<void> SVGElement::cloned(DOM::Node& copy, bool clone_children) const
+{
+    TRY(Base::cloned(copy, clone_children));
+    TRY(HTMLOrSVGOrMathMLElement::cloned(copy, clone_children));
+    return {};
+}
+
+void SVGElement::inserted()
+{
+    Base::inserted();
+    HTMLOrSVGOrMathMLElement::inserted();
+
+    update_use_elements_that_reference_this();
+    note_svg_paint_resource_description_may_have_changed();
+}
+
+void SVGElement::children_changed(ChildrenChangedMetadata const& metadata)
+{
+    Base::children_changed(metadata);
+
+    invalidate_element_instances(ElementInstancesToInvalidate::All);
+    update_use_elements_that_reference_this();
+    note_svg_paint_resource_description_may_have_changed();
+}
+
+void SVGElement::update_use_elements_that_reference_this()
+{
+    if (is<SVGUseElement>(this)
+        // If this element is in a shadow root, it already represents a clone and is not itself referenced.
+        || is<DOM::ShadowRoot>(this->root())
+        // If this does not have an id it cannot be referenced, no point in notifying use elements.
+        || !id().has_value()
+        // An unconnected node cannot have valid references.
+        // This also prevents searches for elements that are in the process of being constructed - as clones.
+        || !this->is_connected()) {
+
+        return;
+    }
+
+    for (auto& use_element : document().svg_use_elements()) {
+        if (document().readiness() != HTML::DocumentReadyState::Loading)
+            use_element.svg_element_changed(*this);
+        else
+            use_element.svg_element_changed_before_parsing_complete(*this);
+    }
+}
+
+void SVGElement::invalidate_element_instances(ElementInstancesToInvalidate element_instances_to_invalidate)
+{
+    auto* data = static_cast<RareData*>(rare_data());
+    if (!data)
+        return;
+
+    GC::RootVector<GC::Ref<SVGElement>> invalidated_element_instances;
+    for (auto& element_instance : data->element_instances) {
+        if (element_instances_to_invalidate == ElementInstancesToInvalidate::All || element_instance.shadow_including_root().is_document())
+            invalidated_element_instances.append(element_instance);
+    }
+
+    for (auto& element_instance : invalidated_element_instances) {
+        data->element_instances.remove(element_instance);
+        static_cast<RareData&>(*element_instance->rare_data()).corresponding_element = nullptr;
+        auto* shadow_root = as_if<DOM::ShadowRoot>(element_instance->root());
+        if (auto* use_element = shadow_root ? as_if<SVGUseElement>(shadow_root->host()) : nullptr)
+            use_element->element_instance_changed({});
+    }
+}
+
+void SVGElement::removed_from(IsSubtreeRoot is_subtree_root, Node* old_ancestor, Node& old_root)
+{
+    Base::removed_from(is_subtree_root, old_ancestor, old_root);
+    note_svg_paint_resource_description_may_have_changed();
+
+    auto is_use_element_shadow_root = [](Node& node) {
+        auto* shadow_root = as_if<DOM::ShadowRoot>(node);
+        return shadow_root && shadow_root->host() && is<SVGUseElement>(*shadow_root->host());
+    };
+
+    if (auto* data = static_cast<RareData*>(rare_data()); data && data->corresponding_element && !is_use_element_shadow_root(root())) {
+        static_cast<RareData&>(*data->corresponding_element->rare_data()).element_instances.remove(*this);
+        data->corresponding_element = nullptr;
+    }
+
+    // If this element is in a shadow root hosted by a use element,
+    // it already represents a clone and is not itself referenced.
+    // NB: We check both old_root (for when the element is removed from the shadow tree directly)
+    //     and root() (for when the use element host is removed from the document).
+    if (is_use_element_shadow_root(old_root) || is_use_element_shadow_root(root()))
+        return;
+
+    remove_from_use_element_that_reference_this();
+    invalidate_element_instances(ElementInstancesToInvalidate::InDocument);
+
+    // A <mask>, <clipPath>, or <pattern> referenced via url(#id) is laid out as a resource box attached to the
+    // referencing element's layout subtree. So it outlives this element's own DOM node. Rebuild those referencing
+    // subtrees while this element is still alive — so the stale resource boxes are dropped before this node is
+    // collected.
+    mark_resource_box_referencing_elements_for_layout_tree_update();
+
+    // References that resolve during display list recording (e.g. gradient or filter url(#id) references) don't
+    // build resource boxes, so there may be no layout invalidation to trigger re-recording. Request it explicitly
+    // to drop the visual effects of the removed element.
+    if (id().has_value())
+        document().set_needs_repaint(Badge<SVGElement> {}, InvalidateDisplayList::PaintCommands);
+}
+
+void SVGElement::register_resource_box_referencing_element(Badge<DOM::CommitMessages>, DOM::Element& referencing_element)
+{
+    m_resource_box_referencing_elements.remove_all_matching([&](auto& weak_element) {
+        return !weak_element || weak_element == &referencing_element;
+    });
+    m_resource_box_referencing_elements.append(referencing_element);
+}
+
+void SVGElement::mark_resource_box_referencing_elements_for_layout_tree_update()
+{
+    for (auto& weak_referencing_element : m_resource_box_referencing_elements) {
+        if (auto referencing_element = weak_referencing_element.ptr())
+            referencing_element->set_needs_layout_tree_update(true, DOM::SetNeedsLayoutTreeUpdateReason::SVGResourceElementRemoved);
+    }
+    m_resource_box_referencing_elements.clear();
+}
+
+void SVGElement::mark_resource_box_referencing_elements_for_content_change()
+{
+    m_resource_box_referencing_elements.remove_all_matching([](auto& weak_element) { return !weak_element; });
+    for (auto& weak_referencing_element : m_resource_box_referencing_elements)
+        weak_referencing_element->set_needs_layout_tree_update(true, DOM::SetNeedsLayoutTreeUpdateReason::SVGResourceContentChange);
+}
+
+void SVGElement::mark_resource_box_referencing_elements_for_layout_update()
+{
+    m_resource_box_referencing_elements.remove_all_matching([](auto& weak_element) { return !weak_element; });
+    for (auto& weak_referencing_element : m_resource_box_referencing_elements)
+        weak_referencing_element->set_needs_layout_update(DOM::SetNeedsLayoutReason::SVGResourceElementAttributeChange);
+}
+
+void SVGElement::remove_from_use_element_that_reference_this()
+{
+    if (is<SVGUseElement>(this) || !id().has_value()) {
+        return;
+    }
+
+    for (auto& use_element : document().svg_use_elements()) {
+        // Use elements that are part of the same subtree removal may still be registered, since removal hooks run
+        // after the subtree has been detached. They are no longer reachable from the document and should not be
+        // notified. NB: This must check the tree structure, not Node::is_connected(), because the connected flag of
+        // nodes later in tree order has not been updated yet when we get here.
+        if (!use_element.root().is_document())
+            continue;
+        use_element.svg_element_removed(*this);
+    }
+}
+
+// https://svgwg.org/svg2-draft/types.html#__svg__SVGElement__classNames
+GC::Ref<SVGAnimatedString> SVGElement::class_name()
+{
+    // The className IDL attribute reflects the ‘class’ attribute.
+    if (!m_class_name_animated_string)
+        m_class_name_animated_string = SVGAnimatedString::create(*this, DOM::QualifiedName { AttributeNames::class_, OptionalNone {}, OptionalNone {} });
+
+    return *m_class_name_animated_string;
+}
+
+void SVGElement::publish_svg_attribute_facts()
+{
+    // An element that has not been named by the style tree yet publishes when it is: its style node is what the
+    // publication is keyed by.
+    if (style_node_id() != 0)
+        Layout::publish_svg_attribute_facts(*this);
+}
+
+// https://svgwg.org/svg2-draft/types.html#__svg__SVGElement__ownerSVGElement
+GC::Ptr<SVGSVGElement> SVGElement::owner_svg_element()
+{
+    // The ownerSVGElement IDL attribute represents the nearest ancestor ‘svg’ element.
+    // On getting ownerSVGElement, the nearest ancestor ‘svg’ element is returned;
+    // if the current element is the outermost svg element, then null is returned.
+    if (is_svg_svg_element()) {
+        auto const* parent = this->parent();
+
+        if (!parent)
+            return nullptr;
+
+        if (is<SVGForeignObjectElement>(parent))
+            return nullptr;
+
+        // NB: A shadow root belonging to a use element is the only non-SVG parent node for which we are not the
+        //     outermost svg element.
+        if (auto const* shadow_root = as_if<DOM::ShadowRoot>(parent)) {
+            if (!is<SVGUseElement>(shadow_root->host()))
+                return nullptr;
+        } else if (!is<SVGElement>(parent)) {
+            return nullptr;
+        }
+    }
+
+    for (auto* element = parent_or_shadow_host_element(); element; element = element->parent_or_shadow_host_element()) {
+        if (auto* svg_element = as_if<SVGSVGElement>(element))
+            return svg_element;
+    }
+
+    return nullptr;
+}
+
+// https://svgwg.org/svg2-draft/struct.html#TermOutermostSVGElement
+GC::Ptr<SVGSVGElement> SVGElement::outermost_svg_element()
+{
+    // The furthest ‘svg’ ancestor element that remains in the current SVG document fragment.
+    GC::Ptr<SVGSVGElement> outermost_svg_element = as_if<SVGSVGElement>(*this);
+    for (auto ancestor = owner_svg_element(); ancestor; ancestor = ancestor->owner_svg_element())
+        outermost_svg_element = ancestor;
+    return outermost_svg_element;
+}
+
+// https://svgwg.org/svg2-draft/types.html#__svg__SVGElement__viewportElement
+GC::Ptr<SVGElement> SVGElement::viewport_element()
+{
+    for (auto* node = parent(); node; node = node->parent_or_shadow_host()) {
+        // https://svgwg.org/svg2-draft/coords.html#EstablishingANewSVGViewport
+        // The following elements establish new SVG viewports:
+        // - The ‘svg’ element
+        // - A ‘symbol’ element that is instanced by a ‘use’ element.
+        if (is<SVGSVGElement>(*node) || is<SVGSymbolElement>(*node)) {
+            return static_cast<SVGElement*>(node);
+        }
+    }
+    return nullptr;
+}
+
+Gfx::Size<double> SVGElement::viewport_size_for_percentage_resolution(Layout::BegunRead const& read)
+{
+    auto committed_geometry = [&](SVGElement const& element) -> Optional<Layout::RustFFI::SvgGeometry> {
+        // NB: A disconnected element may have stale layout objects from before it was removed.
+        auto const* layout_node = element.is_connected() ? element.layout_node(read) : nullptr;
+        if (!layout_node)
+            return {};
+        return Painting::svg_geometry(*layout_node);
+    };
+
+    // NB: Layout committed the SVG viewport that a rendered element's own lengths resolve against. An outermost svg
+    //     element resolves against its own size, irrespective of its viewBox.
+    if (auto geometry = committed_geometry(*this); geometry.has_value())
+        return geometry->viewport_user_rect.size().to_type<double>();
+
+    // An element without geometry resolves against the SVG viewport that its nearest svg ancestor establishes.
+    auto viewport_element = owner_svg_element();
+    if (!viewport_element)
+        return {};
+    if (auto geometry = committed_geometry(*viewport_element); geometry.has_value() && geometry->establishes_viewport)
+        return geometry->established_viewport_user_rect.size().to_type<double>();
+    if (auto view_box = viewport_element->active_view_box(); view_box.has_value() && view_box->width > 0 && view_box->height > 0)
+        return { view_box->width, view_box->height };
+    return {};
+}
+
+GC::Ref<SVGAnimatedLength> SVGElement::svg_animated_length_for_attribute(Utf16FlyString const& attribute_name, SVGLength::Directionality directionality, SVGLengthValue default_value)
+{
+    if (auto cached = m_reflected_attribute_cache.get(attribute_name); cached.has_value())
+        return as<SVGAnimatedLength>(*cached.value());
+
+    auto base_length = SVGLength::create_reflected_attribute(document().relevant_settings_object().realm(), *this, attribute_name, directionality, SVGLength::ReflectedAttributeType::BaseValue, default_value, SVGLength::ReadOnly::No);
+    // AD-HOC: The spec says this should reflect the base value of the attribute but other browsers reflect the SMIL
+    //         animated value instead.
+    auto anim_length = SVGLength::create_reflected_attribute(document().relevant_settings_object().realm(), *this, attribute_name, directionality, SVGLength::ReflectedAttributeType::AnimatedValue, default_value, SVGLength::ReadOnly::Yes);
+
+    auto animated_length = SVGAnimatedLength::create(base_length, anim_length);
+    m_reflected_attribute_cache.set(attribute_name, animated_length);
+    return animated_length;
+}
+
+GC::Ref<SVGAnimatedEnumeration> SVGElement::svg_animated_enumeration_for_attribute(Utf16FlyString const& attribute_name, ReadonlySpan<SVGAnimatedEnumeration::Keyword> keywords, u16 initial_value)
+{
+    return m_reflected_enumeration_cache.ensure(attribute_name, [&] {
+        return SVGAnimatedEnumeration::create(*this, attribute_name, keywords, initial_value);
+    });
+}
+
+}

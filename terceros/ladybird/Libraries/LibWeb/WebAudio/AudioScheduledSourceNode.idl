@@ -1,0 +1,7 @@
+// https://webaudio.github.io/web-audio-api/#AudioScheduledSourceNode
+[Exposed=Window, ImplementedIn=Rust]
+interface AudioScheduledSourceNode : AudioNode {
+    attribute EventHandler onended;
+    undefined start(optional double when = 0);
+    undefined stop(optional double when = 0);
+};

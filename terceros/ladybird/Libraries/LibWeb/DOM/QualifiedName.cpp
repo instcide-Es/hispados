@@ -1,0 +1,105 @@
+/*
+ * Copyright (c) 2022, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/HashTable.h>
+#include <AK/NeverDestroyed.h>
+#include <AK/Utf16StringBuilder.h>
+#include <LibWeb/DOM/QualifiedName.h>
+
+namespace Web::DOM {
+
+static unsigned hash_impl(Utf16FlyString const& local_name, Optional<Utf16FlyString> const& prefix, Optional<Utf16FlyString> const& namespace_)
+{
+    unsigned hash = ptr_hash(local_name.raw_identity());
+    if (prefix.has_value())
+        hash = pair_int_hash(hash, ptr_hash(prefix->raw_identity()));
+    if (namespace_.has_value())
+        hash = pair_int_hash(hash, ptr_hash(namespace_->raw_identity()));
+    return hash;
+}
+
+struct ImplTraits : public Traits<QualifiedName::Impl*> {
+    static unsigned hash(QualifiedName::Impl* impl)
+    {
+        return hash_impl(impl->local_name, impl->prefix, impl->namespace_);
+    }
+
+    static bool equals(QualifiedName::Impl* a, QualifiedName::Impl* b)
+    {
+        return a->local_name == b->local_name
+            && a->prefix == b->prefix
+            && a->namespace_ == b->namespace_;
+    }
+};
+
+static HashTable<QualifiedName::Impl*, ImplTraits>& impls()
+{
+    static NeverDestroyed<HashTable<QualifiedName::Impl*, ImplTraits>> impls;
+    return *impls;
+}
+
+static NonnullRefPtr<QualifiedName::Impl> ensure_impl(Utf16FlyString const& local_name, Optional<Utf16FlyString> const& prefix, Optional<Utf16FlyString> const& namespace_)
+{
+    unsigned hash = hash_impl(local_name, prefix, namespace_);
+
+    auto it = impls().find(hash, [&](QualifiedName::Impl* entry) {
+        return entry->local_name == local_name
+            && entry->prefix == prefix
+            && entry->namespace_ == namespace_;
+    });
+    if (it != impls().end())
+        return *(*it);
+    return adopt_ref(*new QualifiedName::Impl(local_name, prefix, namespace_));
+}
+
+QualifiedName::QualifiedName(Utf16FlyString const& local_name, Optional<Utf16FlyString> const& prefix, Optional<Utf16FlyString> const& namespace_)
+    : m_impl(ensure_impl(local_name, prefix, namespace_))
+{
+}
+
+QualifiedName::Impl::Impl(Utf16FlyString const& a_local_name, Optional<Utf16FlyString> const& a_prefix, Optional<Utf16FlyString> const& a_namespace)
+    : local_name(a_local_name)
+    , lowercased_local_name(local_name.to_ascii_lowercase())
+    , prefix(a_prefix)
+    , namespace_(a_namespace)
+{
+    impls().set(this);
+    make_internal_string();
+}
+
+QualifiedName::Impl::~Impl()
+{
+    impls().remove(this);
+}
+
+// https://dom.spec.whatwg.org/#concept-attribute-qualified-name
+// https://dom.spec.whatwg.org/#concept-element-qualified-name
+void QualifiedName::Impl::make_internal_string()
+{
+    // This is possible to do according to the spec: "User agents could have this as an internal slot as an optimization."
+    if (!prefix.has_value()) {
+        as_string = local_name;
+        return;
+    }
+
+    Utf16StringBuilder builder;
+    builder.append(prefix->view());
+    builder.append_ascii(':');
+    builder.append(local_name.view());
+    as_string = builder.to_string();
+}
+
+Utf16FlyString const& QualifiedName::ascii_uppercased_as_string() const
+{
+    return m_impl->ascii_uppercased_as_string.ensure([&] { return m_impl->as_string.to_ascii_uppercase(); });
+}
+
+void QualifiedName::set_prefix(Optional<Utf16FlyString> value)
+{
+    m_impl = ensure_impl(m_impl->local_name, move(value), m_impl->namespace_);
+}
+
+}

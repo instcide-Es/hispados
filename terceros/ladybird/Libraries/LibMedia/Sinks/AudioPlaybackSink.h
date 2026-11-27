@@ -1,0 +1,93 @@
+/*
+ * Copyright (c) 2025, Gregory Bertilson <gregory@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Function.h>
+#include <AK/NonnullRefPtr.h>
+#include <AK/RefPtr.h>
+#include <AK/ThreadSafeWeakable.h>
+#include <LibAudio/Forward.h>
+#include <LibCore/EventLoop.h>
+#include <LibCore/Forward.h>
+#include <LibMedia/Export.h>
+#include <LibMedia/Forward.h>
+#include <LibMedia/MediaClock.h>
+#include <LibMedia/MediaTime.h>
+#include <LibMedia/PipelineStatus.h>
+#include <LibMedia/Producers/AudioProducer.h>
+#include <LibMedia/Sinks/AudioOutputFactory.h>
+#include <LibMedia/Sinks/AudioSink.h>
+
+namespace Media {
+
+class MEDIA_API AudioPlaybackSink final : public AudioSink
+    , public MediaClock
+    , public ThreadSafeWeakable<AudioPlaybackSink> {
+private:
+    class OutputThreadData;
+
+public:
+    static ErrorOr<NonnullRefPtr<AudioPlaybackSink>> try_create(PipelineStateChangeHandler on_state_changed, NonnullRefPtr<AudioOutputFactory>);
+    AudioPlaybackSink(NonnullRefPtr<OutputThreadData>, MediaTimeReader, PipelineStateChangeHandler, NonnullRefPtr<AudioOutputFactory>);
+    virtual ~AudioPlaybackSink() override;
+
+    virtual ErrorOr<void> connect_input(NonnullRefPtr<AudioProducer> const&) override;
+    virtual void disconnect_input(NonnullRefPtr<AudioProducer> const&) override;
+
+    void start();
+
+    virtual MediaTimeReader time_reader() const override;
+    virtual void resume() override;
+    virtual void pause() override;
+    virtual void seek(AK::Duration) override;
+    // Replaces the queued output with data read again from the input, without moving the clock.
+    void reseek_input_keeping_clock();
+    void reseek_input_continuing_at_output_frame(Optional<i64> output_frame);
+
+    virtual void set_playback_rate(float) override;
+
+    void set_volume(double);
+
+    Function<void(Error&&)> on_audio_output_error;
+
+private:
+    enum class StreamState {
+        Suspended,
+        // Playback is wanted, but the stream is still stopping for a seek or has yet to open. The clock holds meanwhile.
+        Resuming,
+        Playing,
+    };
+
+    void reopen_playback_stream_after_loss();
+    bool playback_stream_is_current(Audio::PlaybackStream const&) const;
+
+    void create_playback_stream();
+    bool playback_is_wanted() const;
+    void set_stream_state(StreamState);
+    void update_playback_stream_state();
+    void resume_playback_stream();
+    void pause_playback_stream();
+    void hold_clock_until_stream_can_resume();
+    void resume_input_from_suspension();
+    void dispatch_waiting_status_once_played_out();
+
+    Core::EventLoop& m_main_thread_event_loop;
+    PipelineStateChangeHandler m_on_state_changed;
+    NonnullRefPtr<AudioOutputFactory> m_output_factory;
+
+    bool m_started_creating_playback_stream { false };
+    bool m_playing { false };
+    double m_volume { 1 };
+
+    Optional<AK::Duration> m_seek_target_awaiting_discard;
+
+    NonnullRefPtr<OutputThreadData> m_output_thread_data;
+    RefPtr<Core::Timer> m_played_out_timer;
+    MediaTimeReader m_time_reader;
+};
+
+}

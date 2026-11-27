@@ -1,0 +1,119 @@
+/*
+ * Copyright (c) 2020, the SerenityOS developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibWeb/CSS/ElementBoxKind.h>
+#include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOM/Event.h>
+#include <LibWeb/HTML/BrowsingContext.h>
+#include <LibWeb/HTML/EventNames.h>
+#include <LibWeb/HTML/HTMLFrameElement.h>
+#include <LibWeb/HTML/HTMLFrameSetElement.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HighResolutionTime/TimeOrigin.h>
+#include <LibWebCommon/ReferrerPolicy/ReferrerPolicy.h>
+
+namespace Web::HTML {
+
+GC_DEFINE_ALLOCATOR(HTMLFrameElement);
+
+static GC::Ref<DOM::Event> create_event_for_element(HTMLElement& element, Utf16FlyString const& event_name)
+{
+    return DOM::Event::create(event_name, HighResolutionTime::current_high_resolution_time(relevant_global_object(element)));
+}
+
+HTMLFrameElement::HTMLFrameElement(DOM::Document& document, DOM::QualifiedName qualified_name)
+    : NavigableContainer(document, move(qualified_name))
+{
+    // https://html.spec.whatwg.org/multipage/obsolete.html#frames:potentially-delays-the-load-event
+    // The frame element potentially delays the load event.
+    set_potentially_delays_the_load_event(true);
+}
+
+HTMLFrameElement::~HTMLFrameElement() = default;
+
+// https://html.spec.whatwg.org/multipage/rendering.html#frames-and-framesets
+CSS::ElementBoxKind HTMLFrameElement::box_kind() const
+{
+    // The contents of a frame element that does not have a frameset parent are expected to be rendered as transparent
+    // black; the user agent is expected to not render its content navigable in this case, and its content navigable is
+    // expected to have a viewport with zero width and zero height.
+    if (is<HTMLFrameSetElement>(parent()))
+        return CSS::ElementBoxKind::Frame;
+    return CSS::ElementBoxKind::FromDisplay;
+}
+
+// https://html.spec.whatwg.org/multipage/obsolete.html#frames:html-element-post-connection-steps
+void HTMLFrameElement::post_connection()
+{
+    // 1. If insertedNode's node document's browsing context is null, then return.
+    if (document().browsing_context() == nullptr)
+        return;
+
+    // 2. Create a new child navigable for insertedNode.
+    create_new_child_navigable();
+
+    // 3. Process the frame attributes for insertedNode, with initialInsertion set to true.
+    process_the_frame_attributes(InitialInsertion::Yes);
+}
+
+// https://html.spec.whatwg.org/multipage/obsolete.html#frames:html-element-removing-steps
+void HTMLFrameElement::removed_from(IsSubtreeRoot is_subtree_root, DOM::Node* old_ancestor, DOM::Node& old_root)
+{
+    Base::removed_from(is_subtree_root, old_ancestor, old_root);
+
+    // The frame HTML element removing steps, given removedNode, are to destroy a child navigable given removedNode.
+    destroy_the_child_navigable();
+}
+
+// https://html.spec.whatwg.org/multipage/obsolete.html#frames:frame-3
+void HTMLFrameElement::attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_)
+{
+    Base::attribute_changed(name, old_value, value, namespace_);
+
+    // Whenever a frame element with a non-null content navigable has its src attribute set, changed, or removed, the
+    // user agent must process the frame attributes.
+    if (content_navigable() && name == HTML::AttributeNames::src)
+        process_the_frame_attributes();
+
+    if (first_is_one_of(name, HTML::AttributeNames::frameborder, HTML::AttributeNames::bordercolor)) {
+        if (auto* frameset = as_if<HTMLFrameSetElement>(parent()))
+            frameset->layout_data_changed();
+    }
+}
+
+// https://html.spec.whatwg.org/multipage/interaction.html#dom-tabindex
+i32 HTMLFrameElement::default_tab_index_value() const
+{
+    // See the base function for the spec comments.
+    return 0;
+}
+
+// https://html.spec.whatwg.org/multipage/obsolete.html#process-the-frame-attributes
+void HTMLFrameElement::process_the_frame_attributes(InitialInsertion initial_insertion)
+{
+    // 1. Let url be the result of running the shared attribute processing steps for iframe and frame elements given
+    //    element and initialInsertion.
+    auto url = shared_attribute_processing_steps_for_iframe_and_frame(initial_insertion);
+
+    // 2. If url is null, then return.
+    if (!url.has_value())
+        return;
+
+    // 3. If url matches about:blank and initialInsertion is true, then:
+    if (url_matches_about_blank(*url) && initial_insertion == InitialInsertion::Yes) {
+        // 1. Fire an event named load at element.
+        dispatch_event(create_event_for_element(*this, HTML::EventNames::load));
+
+        // 2. Return.
+        return;
+    }
+
+    // 4. Navigate an iframe or frame given element, url, the empty string, null, and initialInsertion.
+    navigate_an_iframe_or_frame(*url, ReferrerPolicy::ReferrerPolicy::EmptyString, {}, initial_insertion);
+}
+
+}

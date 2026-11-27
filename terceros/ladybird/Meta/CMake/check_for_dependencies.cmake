@@ -1,0 +1,224 @@
+include_guard()
+
+find_package(PkgConfig REQUIRED)
+
+if (NOT WIN32 AND NOT ANDROID)
+    pkg_check_modules(LIBEDIT REQUIRED IMPORTED_TARGET libedit)
+endif()
+
+find_package(mimalloc CONFIG REQUIRED)
+
+# AK dependencies
+find_package(Backtrace)
+find_package(cpptrace CONFIG)
+find_package(FastFloat CONFIG REQUIRED)
+find_path(LLVM_LIBC_INCLUDE_DIR NAMES llvm-libc/shared/math.h REQUIRED)
+find_package(simdutf REQUIRED)
+find_package(zmij CONFIG REQUIRED)
+
+# LibGfx dependencies
+find_package(harfbuzz REQUIRED)
+find_package(JPEG REQUIRED)
+find_package(LIBAVIF REQUIRED)
+find_package(PDFJS QUIET)
+find_package(WebP REQUIRED)
+find_path(WUFFS_INCLUDE_DIR NAMES wuffs/wuffs-v0.3.c REQUIRED)
+
+pkg_check_modules(WOFF2 REQUIRED IMPORTED_TARGET libwoff2dec)
+
+# TODO: Figure out if we can do this the same way on all platforms
+if (NOT ANDROID)
+    pkg_check_modules(AVCODEC REQUIRED IMPORTED_TARGET libavcodec-ladybird)
+    pkg_check_modules(AVUTIL REQUIRED IMPORTED_TARGET libavutil-ladybird)
+    pkg_check_modules(LIBSWRESAMPLE REQUIRED IMPORTED_TARGET libswresample-ladybird)
+else()
+    find_package(FFMPEG REQUIRED)
+endif()
+
+# LibMediaCodecs loads these at runtime on Linux, rather than linking them, and the install rules ship them. CMake 3.25.0
+# also sets LINUX for Android, which links FFmpeg.
+if (LINUX AND NOT ANDROID)
+    foreach (library IN ITEMS AVCODEC LIBSWRESAMPLE)
+        # pkg-config leaves out the directory of a library in a default one, so the path it was resolved to is used.
+        set(LADYBIRD_BUNDLED_${library}_LIBRARY "${${library}_LINK_LIBRARIES}")
+        list(FILTER LADYBIRD_BUNDLED_${library}_LIBRARY INCLUDE REGEX "/lib${${library}_LIBRARIES}\\.so$")
+        if (NOT LADYBIRD_BUNDLED_${library}_LIBRARY)
+            message(FATAL_ERROR "The bundled lib${${library}_LIBRARIES} is not a shared library")
+        endif()
+        file(REAL_PATH "${LADYBIRD_BUNDLED_${library}_LIBRARY}" library_file)
+        # FFmpeg names each library's soname after its major version, which the file's name starts with.
+        cmake_path(GET library_file FILENAME library_file_name)
+        if (NOT library_file_name MATCHES "^(.+\\.so\\.[0-9]+)")
+            message(FATAL_ERROR "Cannot tell the soname of the bundled ${library_file_name}")
+        endif()
+        set(LADYBIRD_BUNDLED_${library}_SONAME "${CMAKE_MATCH_1}")
+        add_library(BundledFFmpeg::${library} SHARED IMPORTED)
+        set_target_properties(BundledFFmpeg::${library} PROPERTIES IMPORTED_LOCATION "${library_file}")
+
+        # Without vcpkg, installs do not carry the bundled FFmpeg, so binaries look for it where it was found, as they do
+        # for the libraries they link.
+        if ("${VCPKG_INSTALLED_DIR}" STREQUAL "")
+            cmake_path(GET LADYBIRD_BUNDLED_${library}_LIBRARY PARENT_PATH library_directory)
+            if (NOT library_directory IN_LIST CMAKE_CXX_IMPLICIT_LINK_DIRECTORIES AND NOT library_directory IN_LIST CMAKE_INSTALL_RPATH)
+                list(APPEND CMAKE_INSTALL_RPATH "${library_directory}")
+            endif()
+        endif()
+    endforeach()
+endif()
+
+# Compiles a target against the bundled FFmpeg's headers without linking it, for code that calls it through the
+# functions LibMediaCodecs loads.
+function(ladybird_use_bundled_ffmpeg_headers target)
+    foreach (library IN ITEMS AVCODEC AVUTIL LIBSWRESAMPLE)
+        target_include_directories(${target} SYSTEM PRIVATE $<TARGET_PROPERTY:PkgConfig::${library},INTERFACE_INCLUDE_DIRECTORIES>)
+        target_compile_options(${target} PRIVATE $<TARGET_PROPERTY:PkgConfig::${library},INTERFACE_COMPILE_OPTIONS>)
+    endforeach()
+endfunction()
+
+if (NOT APPLE AND NOT ANDROID AND NOT WIN32)
+    find_package(Fontconfig REQUIRED)
+    set(HAS_FONTCONFIG ON CACHE BOOL "" FORCE)
+    add_cxx_compile_definitions(USE_FONTCONFIG=1)
+endif()
+
+if (NOT APPLE AND NOT WIN32)
+    find_package(VulkanHeaders CONFIG QUIET)
+    find_package(Vulkan QUIET)
+    find_program(GLSLANG_VALIDATOR glslangValidator)
+    if (VulkanHeaders_FOUND AND Vulkan_FOUND)
+        set(HAS_VULKAN ON CACHE BOOL "" FORCE)
+        add_cxx_compile_definitions(USE_VULKAN=1)
+        find_package(VulkanMemoryAllocator CONFIG REQUIRED)
+
+        # Sharable Vulkan images are currently only implemented on Linux and BSDs
+        if (((LINUX AND NOT ANDROID) OR BSD) AND GLSLANG_VALIDATOR)
+            set(USE_VULKAN_DMABUF_IMAGES ON CACHE BOOL "" FORCE)
+            add_cxx_compile_definitions(USE_VULKAN_DMABUF_IMAGES=1)
+        else()
+            set(USE_VULKAN_DMABUF_IMAGES OFF CACHE BOOL "" FORCE)
+        endif()
+    else()
+        set(HAS_VULKAN OFF CACHE BOOL "" FORCE)
+        set(USE_VULKAN_DMABUF_IMAGES OFF CACHE BOOL "" FORCE)
+    endif()
+else()
+    set(HAS_VULKAN OFF CACHE BOOL "" FORCE)
+    set(USE_VULKAN_DMABUF_IMAGES OFF CACHE BOOL "" FORCE)
+endif()
+
+find_package(CURL REQUIRED)
+find_package(ICU 78.3 EXACT REQUIRED COMPONENTS data i18n uc)
+find_package(OpenSSL REQUIRED)
+find_package(SDL3 CONFIG REQUIRED)
+find_package(simdjson CONFIG REQUIRED)
+find_package(SQLite3 REQUIRED)
+find_package(Threads REQUIRED)
+find_package(ZLIB REQUIRED)
+
+pkg_check_modules(LIBPSL REQUIRED IMPORTED_TARGET libpsl)
+
+find_package(unofficial-angle CONFIG)
+if(unofficial-angle_FOUND)
+    set(ANGLE_TARGETS unofficial::angle::libEGL unofficial::angle::libGLESv2)
+else()
+    pkg_check_modules(angle REQUIRED IMPORTED_TARGET angle)
+    set(ANGLE_TARGETS PkgConfig::angle)
+endif()
+
+if (WIN32)
+    find_package(pthread REQUIRED)
+    find_package(mman REQUIRED)
+endif()
+
+find_package(Git REQUIRED)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+find_package(unofficial-skia CONFIG)
+if(unofficial-skia_FOUND)
+    set(SKIA_TARGET unofficial::skia::skia)
+    if (HAS_FONTCONFIG AND NOT WIN32)
+        set(CMAKE_LINK_GROUP_USING_no_as_needed_SUPPORTED TRUE CACHE BOOL "Link group using no-as-needed supported")
+        set(CMAKE_LINK_GROUP_USING_no_as_needed "LINKER:--push-state,--no-as-needed" "LINKER:--pop-state" CACHE STRING "Link group using no-as-needed")
+        set_property(TARGET unofficial::skia::skia APPEND PROPERTY INTERFACE_LINK_LIBRARIES "$<LINK_GROUP:no_as_needed,Fontconfig::Fontconfig>")
+    endif()
+    if (ANDROID)
+        # FIXME: Submit a proper patch to vcpkg in order not to bring host's libc++ when compiling for Android
+        get_target_property(link_libs unofficial::skia::skia INTERFACE_LINK_LIBRARIES)
+        set(filtered_libs)
+        foreach(lib ${link_libs})
+            if (NOT lib MATCHES "lib/libc\\+\\+.so$")
+                list(APPEND filtered_libs ${lib})
+            endif()
+        endforeach()
+        set_property(TARGET unofficial::skia::skia PROPERTY INTERFACE_LINK_LIBRARIES ${filtered_libs})
+    endif()
+else()
+    # Get skia version from vcpkg.json
+    file(READ ${LADYBIRD_SOURCE_DIR}/vcpkg.json VCPKG_DOT_JSON)
+    string(JSON VCPKG_OVERRIDES_LENGTH LENGTH ${VCPKG_DOT_JSON} overrides)
+    MATH(EXPR VCPKG_OVERRIDES_END_RANGE "${VCPKG_OVERRIDES_LENGTH}-1")
+    foreach(IDX RANGE ${VCPKG_OVERRIDES_END_RANGE})
+      string(JSON VCPKG_OVERRIDE_NAME GET ${VCPKG_DOT_JSON} overrides ${IDX} name)
+      if(VCPKG_OVERRIDE_NAME STREQUAL "skia")
+        string(JSON SKIA_REQUIRED_VERSION GET ${VCPKG_DOT_JSON} overrides ${IDX} version)
+        string(REGEX MATCH "[0-9]+" SKIA_REQUIRED_VERSION ${SKIA_REQUIRED_VERSION})
+      endif()
+    endforeach()
+
+    pkg_check_modules(skia skia=${SKIA_REQUIRED_VERSION} REQUIRED IMPORTED_TARGET skia)
+    set(SKIA_TARGET PkgConfig::skia)
+    set_property(TARGET PkgConfig::skia APPEND PROPERTY INTERFACE_COMPILE_DEFINITIONS "SKCMS_DLL")
+endif()
+add_library(skia ALIAS ${SKIA_TARGET})
+
+if (WIN32)
+    get_target_property(SKIA_COMPILE_DEFINITIONS ${SKIA_TARGET} INTERFACE_COMPILE_DEFINITIONS)
+    if (SKIA_COMPILE_DEFINITIONS AND "${SKIA_COMPILE_DEFINITIONS}" MATCHES "SK_DIRECT3D")
+        set(HAS_DIRECTX ON CACHE BOOL "" FORCE)
+        add_cxx_compile_definitions(USE_DIRECTX=1)
+    else()
+        set(HAS_DIRECTX OFF CACHE BOOL "" FORCE)
+        message(WARNING "Skia was not built with Direct3D support; Windows GPU painting will be disabled")
+    endif()
+else()
+    set(HAS_DIRECTX OFF CACHE BOOL "" FORCE)
+endif()
+
+if (ENABLE_GUI_TARGETS AND NOT ANDROID)
+    set(LADYBIRD_QT_COMPONENTS Core Gui Widgets)
+    if (NOT APPLE)
+        list(APPEND LADYBIRD_QT_COMPONENTS Positioning)
+    endif()
+
+    if (APPLE OR HAS_DIRECTX)
+        # The native presentation paths use platform GPU buffer handles directly instead of copying frames through CPU
+        # memory.
+        list(APPEND LADYBIRD_QT_COMPONENTS GuiPrivate)
+        set(QT_NO_PRIVATE_MODULE_WARNING ON)
+    endif()
+
+    if (LINUX AND "qt" IN_LIST VCPKG_MANIFEST_FEATURES)
+        set(vcpkg_qt_package_dir "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share")
+        set(vcpkg_qt_dir "${vcpkg_qt_package_dir}/Qt6")
+
+        # Cached package directories take priority over the search paths, including for Qt modules.
+        get_cmake_property(cached_qt_dirs CACHE_VARIABLES)
+        list(FILTER cached_qt_dirs INCLUDE REGEX "^Qt6.*_DIR$")
+        foreach (cached_qt_dir IN LISTS cached_qt_dirs)
+            cmake_path(IS_PREFIX vcpkg_qt_package_dir "$CACHE{${cached_qt_dir}}" NORMALIZE is_vcpkg_qt_dir)
+            if (NOT is_vcpkg_qt_dir)
+                unset("${cached_qt_dir}" CACHE)
+            endif()
+        endforeach()
+
+        list(APPEND LADYBIRD_QT_COMPONENTS Svg)
+        find_package(Qt6 6.10 REQUIRED COMPONENTS ${LADYBIRD_QT_COMPONENTS} PATHS "${vcpkg_qt_dir}" NO_DEFAULT_PATH)
+
+        get_target_property(qt_core_type Qt6::Core TYPE)
+        if (NOT qt_core_type STREQUAL "SHARED_LIBRARY" OR NOT Qt6_DIR STREQUAL vcpkg_qt_dir)
+            message(FATAL_ERROR "The qt feature requires shared Qt from vcpkg.")
+        endif()
+    else()
+        find_package(Qt6 6.10 REQUIRED COMPONENTS ${LADYBIRD_QT_COMPONENTS})
+    endif()
+endif()

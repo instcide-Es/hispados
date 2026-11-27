@@ -1,0 +1,47 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Time.h>
+#include <LibAudio/SampleSpecification.h>
+#include <LibMedia/MediaPipelineNode.h>
+#include <LibMedia/PipelineStatus.h>
+#include <LibMediaCodecs/AudioBlock.h>
+
+namespace Media {
+
+struct AudioProducerOutput {
+    AudioBlock const* block { nullptr };
+    PipelineStatus status;
+    PipelineCheckpoint checkpoint { 0 };
+};
+
+class AudioProducer : public virtual MediaPipelineNode {
+public:
+    virtual ~AudioProducer() = default;
+
+    virtual void start() = 0;
+    virtual ErrorOr<void> set_output_sample_specification(Audio::SampleSpecification) = 0;
+
+    virtual AudioProducerOutput peek() = 0;
+    virtual void consume() = 0;
+    virtual void set_wake_handler(PipelineWakeHandler) = 0;
+
+    virtual void seek(AK::Duration timestamp) = 0;
+    virtual void seek_continuing_at_output_frame(AK::Duration timestamp, i64 output_frame_index)
+    {
+        (void)output_frame_index;
+        seek(timestamp);
+    }
+
+    virtual void set_playback_rate(float rate)
+    {
+        VERIFY(rate == 1.0f);
+    }
+};
+
+}

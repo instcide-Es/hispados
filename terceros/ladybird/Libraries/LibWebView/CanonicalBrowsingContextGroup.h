@@ -1,0 +1,113 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/HashMap.h>
+#include <AK/HashTable.h>
+#include <AK/NonnullRefPtr.h>
+#include <AK/RefCounted.h>
+#include <AK/RefPtr.h>
+#include <AK/Variant.h>
+#include <AK/WeakPtr.h>
+#include <LibURL/Origin.h>
+#include <LibURL/Site.h>
+#include <LibWebCommon/HTML/CrossOriginIsolationMode.h>
+#include <LibWebView/Export.h>
+#include <LibWebView/Forward.h>
+
+namespace WebView {
+
+// https://html.spec.whatwg.org/multipage/webappapis.html#similar-origin-window-agent
+class WEBVIEW_API CanonicalSimilarOriginWindowAgent final : public RefCounted<CanonicalSimilarOriginWindowAgent> {
+public:
+    static NonnullRefPtr<CanonicalSimilarOriginWindowAgent> create(Web::HTML::CrossOriginIsolationMode, bool agent_cluster_is_origin_keyed);
+
+    RefPtr<WebContentClient> hosting_process() const;
+    void set_hosting_process_if_unset(WebContentClient&);
+
+    u64 agent_cluster_id() const { return m_agent_cluster_id; }
+    bool agent_cluster_is_origin_keyed() const { return m_agent_cluster_is_origin_keyed; }
+
+    // https://html.spec.whatwg.org/multipage/webappapis.html#agent-cluster-cross-origin-isolation
+    Web::HTML::CrossOriginIsolationMode agent_cluster_cross_origin_isolation_mode() const { return m_agent_cluster_cross_origin_isolation_mode; }
+
+private:
+    explicit CanonicalSimilarOriginWindowAgent(Web::HTML::CrossOriginIsolationMode, bool agent_cluster_is_origin_keyed);
+
+    WeakPtr<WebContentClient> m_hosting_process;
+    u64 m_agent_cluster_id { 0 };
+    bool m_agent_cluster_is_origin_keyed { false };
+    Web::HTML::CrossOriginIsolationMode m_agent_cluster_cross_origin_isolation_mode { Web::HTML::CrossOriginIsolationMode::None };
+};
+
+// https://html.spec.whatwg.org/multipage/document-sequences.html#browsing-context-group
+class WEBVIEW_API CanonicalBrowsingContextGroup : public RefCounted<CanonicalBrowsingContextGroup> {
+public:
+    static NonnullRefPtr<CanonicalBrowsingContextGroup> create();
+    static void append_to_user_agent_browsing_context_group_set(CanonicalBrowsingContextGroup&);
+
+    u64 id() const { return m_id; }
+
+    // https://html.spec.whatwg.org/multipage/document-sequences.html#browsing-context-set
+    OrderedHashTable<CanonicalBrowsingContext*> const& browsing_context_set() const { return m_browsing_context_set; }
+
+    void append(CanonicalBrowsingContext&);
+    void remove(CanonicalBrowsingContext&);
+
+    // https://html.spec.whatwg.org/multipage/document-sequences.html#bcg-cross-origin-isolation
+    Web::HTML::CrossOriginIsolationMode cross_origin_isolation_mode() const { return m_cross_origin_isolation_mode; }
+    void set_cross_origin_isolation_mode(Web::HTML::CrossOriginIsolationMode mode) { m_cross_origin_isolation_mode = mode; }
+
+    // https://html.spec.whatwg.org/multipage/webappapis.html#obtain-similar-origin-window-agent
+    NonnullRefPtr<CanonicalSimilarOriginWindowAgent> obtain_similar_origin_window_agent(URL::Origin const&, bool requests_oac);
+    RefPtr<CanonicalSimilarOriginWindowAgent> similar_origin_window_agent_for(URL::Origin const&) const;
+
+    // The process hosting this group's sandboxed documents of an origin, named by the serialized origin. It hosts no
+    // other documents of the origin, since a sandbox exists to keep its content away from them.
+    RefPtr<WebContentClient> process_hosting_sandboxed_documents_of_origin(String const&) const;
+    void set_process_hosting_sandboxed_documents_of_origin(String const&, WebContentClient&);
+
+private:
+    CanonicalBrowsingContextGroup() = default;
+
+    // https://html.spec.whatwg.org/multipage/webappapis.html#agent-cluster-key
+    // An agent cluster key is equivalently a scheme-and-host or an origin. URL::Site wraps both cases, so normalize
+    // an opaque site to its origin to keep the alternatives disjoint.
+    struct AgentClusterKey {
+        bool operator==(AgentClusterKey const&) const = default;
+
+        Variant<URL::Site, URL::Origin> value;
+    };
+
+    struct AgentClusterKeyTraits : public DefaultTraits<AgentClusterKey> {
+        static unsigned hash(AgentClusterKey const&);
+        static bool equals(AgentClusterKey const& a, AgentClusterKey const& b) { return a == b; }
+        static constexpr bool may_have_slow_equality_check() { return true; }
+    };
+
+    struct AgentCluster {
+        NonnullRefPtr<CanonicalSimilarOriginWindowAgent> similar_origin_window_agent;
+    };
+
+    u64 m_id { 0 };
+
+    // Browsing contexts own their group, so this inverse membership relation must remain non-owning.
+    OrderedHashTable<CanonicalBrowsingContext*> m_browsing_context_set;
+
+    Web::HTML::CrossOriginIsolationMode m_cross_origin_isolation_mode { Web::HTML::CrossOriginIsolationMode::None };
+
+    // https://html.spec.whatwg.org/multipage/document-sequences.html#agent-cluster-map
+    // FIXME: Make this weak once canonical agent clusters have a lifetime independent of the browsing context group.
+    HashMap<AgentClusterKey, AgentCluster, AgentClusterKeyTraits> m_agent_cluster_map;
+
+    // https://html.spec.whatwg.org/multipage/document-sequences.html#historical-agent-cluster-key-map
+    HashMap<URL::Origin, AgentClusterKey> m_historical_agent_cluster_key_map;
+
+    HashMap<String, WeakPtr<WebContentClient>> m_processes_hosting_sandboxed_documents;
+};
+
+}

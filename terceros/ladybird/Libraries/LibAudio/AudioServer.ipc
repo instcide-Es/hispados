@@ -1,0 +1,24 @@
+#include <LibAudio/PlaybackGroupId.h>
+#include <LibAudio/SharedAudioFrameRing.h>
+
+endpoint AudioServer {
+    // The streams of a session play as part of its group, and follow it when it changes.
+    declare_session(u64 session_id, Audio::PlaybackGroupId group) =|
+    rebind_session(u64 session_id, Audio::PlaybackGroupId group) =|
+    destroy_session(u64 session_id) =|
+
+    create_stream(u64 stream_id, u64 session_id) =|
+    destroy_stream(u64 stream_id) =|
+
+    attach_stream_ring(u64 stream_id, Audio::SharedAudioFrameRing ring) =|
+    resume_stream(u64 stream_id, u64 request_id) =|
+    drain_stream(u64 stream_id, u64 request_id) =|
+    discard_stream(u64 stream_id, u64 request_id) =|
+    set_stream_volume(u64 stream_id, float volume) =|
+
+    watch_devices() =|
+
+    // The group names the page the stream captures for, which the client vouches for alone.
+    create_record_stream(u64 stream_id, ByteString device_id, Audio::PlaybackGroupId group) =|
+    destroy_record_stream(u64 stream_id) =|
+}

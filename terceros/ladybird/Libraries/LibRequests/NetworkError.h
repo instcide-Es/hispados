@@ -1,0 +1,81 @@
+/*
+ * Copyright (c) 2024-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/StringView.h>
+
+namespace Requests {
+
+enum class NetworkError {
+    UnableToResolveProxy,
+    UnableToResolveHost,
+    UnableToConnect,
+    TimeoutReached,
+    TooManyRedirects,
+    SSLHandshakeFailed,
+    SSLVerificationFailed,
+    SSLSelfSignedCertificate,
+    SSLCertificateUnknownIssuer,
+    SSLCertificateExpired,
+    SSLCertificateNotYetValid,
+    SSLCertificateNameMismatch,
+    SSLCertificateInvalid,
+    MalformedUrl,
+    IncompleteContent,
+    InvalidContentEncoding,
+    RequestServerDied,
+    CacheReadFailed,
+    Unknown,
+};
+
+constexpr StringView network_error_to_string(NetworkError network_error)
+{
+    switch (network_error) {
+    case NetworkError::UnableToResolveProxy:
+        return "Unable to resolve proxy"sv;
+    case NetworkError::UnableToResolveHost:
+        return "Unable to resolve host"sv;
+    case NetworkError::UnableToConnect:
+        return "Unable to connect"sv;
+    case NetworkError::TimeoutReached:
+        return "Timeout reached"sv;
+    case NetworkError::TooManyRedirects:
+        return "Too many redirects"sv;
+    case NetworkError::SSLHandshakeFailed:
+        return "SSL handshake failed"sv;
+    case NetworkError::SSLVerificationFailed:
+        return "SSL verification failed"sv;
+    case NetworkError::SSLSelfSignedCertificate:
+        return "The server's certificate is self-signed"sv;
+    case NetworkError::SSLCertificateUnknownIssuer:
+        return "The server's certificate comes from an issuer that isn't trusted"sv;
+    case NetworkError::SSLCertificateExpired:
+        return "The server's certificate has expired"sv;
+    case NetworkError::SSLCertificateNotYetValid:
+        return "The server's certificate isn't valid yet"sv;
+    case NetworkError::SSLCertificateNameMismatch:
+        return "The server's certificate was issued for another site"sv;
+    case NetworkError::SSLCertificateInvalid:
+        return "The server's certificate is invalid"sv;
+    case NetworkError::MalformedUrl:
+        return "The URL is not formatted properly"sv;
+    case NetworkError::IncompleteContent:
+        return "Connection was closed before entire response was received"sv;
+    case NetworkError::InvalidContentEncoding:
+        return "Response could not be decoded with its Content-Encoding"sv;
+    case NetworkError::RequestServerDied:
+        return "RequestServer is currently unavailable"sv;
+    case NetworkError::CacheReadFailed:
+        return "RequestServer encountered an error reading a cached HTTP response"sv;
+    case NetworkError::Unknown:
+        return "An unexpected network error occurred"sv;
+    }
+
+    VERIFY_NOT_REACHED();
+}
+
+}

@@ -1,0 +1,75 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/HashFunctions.h>
+#include <AK/Traits.h>
+#include <AK/Types.h>
+#include <LibIPC/Forward.h>
+#include <LibWebCommon/Export.h>
+#include <LibWebCommon/Forward.h>
+#include <LibWebCommon/Page/CompositorContextId.h>
+#include <LibWebCommon/PixelUnits.h>
+
+namespace Web {
+
+enum class AsyncScrollNodeKind : u8 {
+    Viewport,
+    Element,
+    PseudoElement,
+    VisualViewport,
+};
+
+// Stable identity for reconciling compositor-side scroll offsets after the paint snapshot has been rebuilt.
+struct AsyncScrollNodeStableID {
+    UniqueNodeID node_id;
+    AsyncScrollNodeKind kind { AsyncScrollNodeKind::Element };
+    u8 pseudo_element_type { 0 };
+
+    bool operator==(AsyncScrollNodeStableID const&) const = default;
+};
+
+// Where the compositor has scrolled a scroll node to, in CSS pixels.
+struct CompositorScrollOffset {
+    AsyncScrollNodeStableID scroll_node;
+    CSSPixelPoint offset;
+
+    bool operator==(CompositorScrollOffset const&) const = default;
+};
+
+// The compositor drags the thumb of a scrollbar the display list paints, while the mouse events of that drag still
+// reach the main thread so that everything but the scrolling stays there.
+struct ScrollbarDraggedByCompositor {
+    // The context of the document the scroller is in, which may be nested in the one the event is dispatched to. Only
+    // the process that owns that context can tell which node the scroller's id names.
+    CompositorContextId context_id;
+    AsyncScrollNodeStableID scroller_stable_node_id;
+
+    bool operator==(ScrollbarDraggedByCompositor const&) const = default;
+};
+
+// Whether an overlay scrollbar that the compositor fades has faded out, so that it takes no pointer input.
+struct OverlayScrollbarVisibility {
+    AsyncScrollNodeStableID scroller_stable_node_id;
+    bool vertical { false };
+    bool hidden { false };
+
+    bool operator==(OverlayScrollbarVisibility const&) const = default;
+};
+
+}
+
+template<>
+struct AK::Traits<Web::AsyncScrollNodeStableID> : DefaultTraits<Web::AsyncScrollNodeStableID> {
+    static unsigned hash(Web::AsyncScrollNodeStableID const& stable_node_id)
+    {
+        return pair_int_hash(u64_hash(static_cast<u64>(stable_node_id.node_id.value())),
+            pair_int_hash(to_underlying(stable_node_id.kind), stable_node_id.pseudo_element_type));
+    }
+};
+
+#include <LibWebCommon/Page/AsyncScrollNodeStableIDCodecs.h>

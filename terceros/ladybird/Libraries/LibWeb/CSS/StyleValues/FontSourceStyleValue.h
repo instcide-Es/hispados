@@ -1,0 +1,38 @@
+/*
+ * Copyright (c) 2025, Sam Atkins <sam@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Utf16FlyString.h>
+#include <LibWeb/CSS/StyleValues/StyleValue.h>
+#include <LibWeb/CSS/URL.h>
+
+namespace Web::CSS {
+
+class FontSourceStyleValue final : public StyleValueWithDefaultOperators<FontSourceStyleValue> {
+public:
+    struct Local {
+        NonnullRefPtr<StyleValue const> name;
+    };
+    using Source = Variant<Local, URL>;
+
+    virtual ~FontSourceStyleValue() override;
+
+    Source source() const;
+    Optional<Utf16FlyString> format() const
+    {
+        if (!m_value->font_source._0->has_format)
+            return {};
+        return css_string_from_rust(&m_value->font_source._0->format);
+    }
+
+private:
+    friend class StyleValue;
+
+    explicit FontSourceStyleValue(StyleValueFFI::StyleValueData const*);
+};
+
+}

@@ -1,0 +1,74 @@
+/*
+ * Copyright (c) 2018-2020, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2023, Sam Atkins <atkinssj@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <LibJS/Forward.h>
+#include <LibWeb/CSS/StyleEngineIdentifiers.h>
+#include <LibWeb/DOM/CharacterData.h>
+#include <LibWeb/DOM/Element.h>
+#include <LibWeb/DOM/Slottable.h>
+#include <LibWeb/Export.h>
+#include <LibWeb/Forward.h>
+
+namespace Web::DOM {
+
+class WEB_API Text
+    : public CharacterData
+    , public SlottableMixin {
+    WEB_WRAPPABLE(Text, CharacterData);
+    GC_DECLARE_ALLOCATOR(Text);
+
+public:
+    virtual ~Text() override = default;
+
+    [[nodiscard]] static GC::Ref<Text> create(Document&, Utf16String data);
+    [[nodiscard]] static GC::Ref<Text> create_for_constructor(JS::Object&, Utf16String data);
+
+    // ^Node
+    virtual Utf16FlyString node_name() const override { return "#text"_utf16_fly_string; }
+
+    virtual Node& slottable_as_node() override { return *this; }
+
+    Optional<size_t> max_length() const { return m_max_length; }
+    void set_max_length(Optional<size_t> max_length) { m_max_length = move(max_length); }
+
+    WebIDL::ExceptionOr<GC::Ref<Text>> split_text(size_t offset);
+    Utf16String whole_text();
+
+    bool is_password_input() const { return m_is_password_input; }
+    void set_is_password_input(Badge<HTML::HTMLInputElement>, bool b) { m_is_password_input = b; }
+
+    Optional<Element::Directionality> directionality() const;
+
+    // The text node's StyleEngine identity, or 0 while it is disconnected.
+    [[nodiscard]] CSS::StyleNodeID style_node_id() const { return m_style_node_id; }
+    void set_style_node_id(CSS::StyleNodeID);
+
+protected:
+    Text(Document&, Utf16String);
+    Text(Document&, NodeType, Utf16String);
+
+    virtual void visit_edges(Cell::Visitor&) override;
+    virtual void adopted_from(Document&) override;
+
+private:
+    struct RareData;
+    virtual OwnPtr<Node::RareData> create_rare_data() const override;
+    virtual SlottableMixin::RareData* slottable_rare_data() override;
+    virtual SlottableMixin::RareData const* slottable_rare_data() const override;
+    virtual SlottableMixin::RareData& ensure_slottable_rare_data() override;
+
+    Optional<size_t> m_max_length {};
+    bool m_is_password_input { false };
+    CSS::StyleNodeID m_style_node_id;
+};
+
+template<>
+inline bool Node::fast_is<Text>() const { return is_text(); }
+
+}

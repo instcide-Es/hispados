@@ -1,0 +1,4 @@
+interface mixin GenericTransformStream {
+    readonly attribute ReadableStream readable;
+    readonly attribute WritableStream writable;
+};

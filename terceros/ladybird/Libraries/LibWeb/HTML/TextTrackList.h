@@ -1,0 +1,51 @@
+/*
+ * Copyright (c) 2024, Jamie Mansfield <jmansfield@cadixdev.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Utf16View.h>
+#include <LibGC/RootVector.h>
+#include <LibWeb/DOM/EventTarget.h>
+#include <LibWeb/HTML/TextTrack.h>
+
+namespace Web::HTML {
+
+class TextTrackList final : public DOM::EventTarget {
+    WEB_WRAPPABLE(TextTrackList, DOM::EventTarget);
+    GC_DECLARE_ALLOCATOR(TextTrackList);
+
+public:
+    static GC::Ref<TextTrackList> create();
+
+    virtual ~TextTrackList() override;
+
+    void add_track(GC::Ref<TextTrack>);
+    void remove_track(GC::Ref<TextTrack>);
+    bool contains(TextTrack const&) const;
+
+    size_t length() const;
+
+    GC::Ptr<TextTrack> item(size_t index) const;
+    GC::Ptr<TextTrack> get_track_by_id(Utf16View id) const;
+
+    void set_onchange(WebIDL::CallbackType*);
+    WebIDL::CallbackType* onchange();
+
+    void set_onaddtrack(WebIDL::CallbackType*);
+    WebIDL::CallbackType* onaddtrack();
+
+    void set_onremovetrack(WebIDL::CallbackType*);
+    WebIDL::CallbackType* onremovetrack();
+
+private:
+    TextTrackList();
+
+    virtual void visit_edges(Visitor&) override;
+
+    Vector<GC::Ref<TextTrack>> m_text_tracks;
+};
+
+}

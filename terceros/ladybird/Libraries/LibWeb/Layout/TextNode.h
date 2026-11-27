@@ -1,0 +1,56 @@
+/*
+ * Copyright (c) 2018-2020, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Span.h>
+#include <AK/String.h>
+#include <AK/Utf16String.h>
+#include <AK/Utf16View.h>
+#include <AK/Vector.h>
+#include <LibWeb/CSS/Enums.h>
+#include <LibWeb/DOM/Text.h>
+#include <LibWeb/Layout/Box.h>
+#include <LibWeb/Layout/RenderedText.h>
+
+namespace Web::Layout {
+
+class GeneratedTextNode;
+
+class TextNode : public Node {
+public:
+    TextNode(DOM::Document&, BindToPreparedArenaSlot, Compositing::RustFFI::NodeSlotId, RustFFI::NodeKind);
+    virtual ~TextNode() override;
+
+    DOM::Text const& dom_node() const
+    {
+        auto const* text = TextNode::dom_text();
+        VERIFY(text);
+        return *text;
+    }
+    // Null for generated text, and for a text node kept after its DOM node was removed.
+    virtual DOM::Text const* dom_text() const { return static_cast<DOM::Text const*>(Node::dom_node()); }
+
+    Utf16String rendered_text_for_dom() const;
+    RenderedTextForDOM rendered_text_for_dom_with_offset_mapping() const;
+    RustFFI::FfiTextSourceRange word_range_at(size_t dom_offset) const;
+
+private:
+    virtual bool is_text_node() const final { return true; }
+};
+
+class GeneratedTextNode final : public TextNode {
+public:
+    GeneratedTextNode(DOM::Document&, BindToPreparedArenaSlot, Compositing::RustFFI::NodeSlotId, RustFFI::NodeKind);
+    virtual ~GeneratedTextNode() override;
+
+    virtual DOM::Text const* dom_text() const override { return nullptr; }
+};
+
+template<>
+inline bool Node::fast_is<TextNode>() const { return is_text_node(); }
+
+}

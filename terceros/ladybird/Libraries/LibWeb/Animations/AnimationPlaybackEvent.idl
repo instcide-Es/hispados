@@ -1,0 +1,13 @@
+// https://drafts.csswg.org/web-animations-2/#animationplaybackevent
+[Exposed=Window, ImplementedIn=Rust]
+interface AnimationPlaybackEvent : Event {
+    constructor(DOMString type, optional AnimationPlaybackEventInit eventInitDict = {});
+    readonly attribute CSSNumberish? currentTime;
+    readonly attribute CSSNumberish? timelineTime;
+};
+
+// https://drafts.csswg.org/web-animations-2/#dictdef-animationplaybackeventinit
+dictionary AnimationPlaybackEventInit : EventInit {
+    CSSNumberish? currentTime = null;
+    CSSNumberish? timelineTime = null;
+};

@@ -1,0 +1,210 @@
+/*
+ * Copyright (c) 2023, Andrew Kaster <akaster@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/ByteString.h>
+#include <AK/NumericLimits.h>
+#include <AK/Optional.h>
+#include <AK/String.h>
+#include <AK/Time.h>
+#include <AK/Vector.h>
+#include <LibHTTP/Proxy.h>
+#include <LibURL/URL.h>
+#include <LibWebView/ProcessType.h>
+
+namespace WebView {
+
+enum class HeadlessMode {
+    Screenshot,
+    LayoutTree,
+    Text,
+    Manual,
+    Terminal,
+    Test,
+};
+
+enum class NewWindow {
+    No,
+    Yes,
+};
+
+enum class AllowPopups {
+    No,
+    Yes,
+};
+
+enum class DisableScripting {
+    No,
+    Yes,
+};
+
+enum class DisableSQLDatabase {
+    No,
+    Yes,
+};
+
+enum class EnableAutoplay {
+    No,
+    Yes,
+};
+
+struct SystemDNS { };
+struct DNSOverTLS {
+    ByteString server_address;
+    u16 port;
+    bool validate_dnssec_locally;
+};
+struct DNSOverUDP {
+    ByteString server_address;
+    u16 port;
+    bool validate_dnssec_locally;
+};
+
+using DNSSettings = Variant<SystemDNS, DNSOverTLS, DNSOverUDP>;
+
+constexpr inline u16 default_devtools_port = 6000;
+
+enum class EnableContentBlocker {
+    No,
+    Yes,
+};
+
+enum class DisableSandbox {
+    No,
+    Yes,
+};
+
+enum class ForceVideoDecoderServer {
+    No,
+    Yes,
+};
+
+enum class ProfileTool {
+    Callgrind,
+    CPU,
+};
+
+struct BrowserOptions {
+    Vector<String> additional_font_directories {};
+    Vector<URL::URL> urls;
+    Vector<ByteString> raw_urls;
+    Optional<HeadlessMode> headless_mode;
+    Optional<ByteString> screenshot_path {};
+    u32 screenshot_delay { 1 };
+    int window_width { 800 };
+    int window_height { 600 };
+    double device_pixel_ratio { 1.0 };
+    NewWindow new_window { NewWindow::No };
+    AllowPopups allow_popups { AllowPopups::No };
+    DisableScripting disable_scripting { DisableScripting::No };
+    DisableSQLDatabase disable_sql_database { DisableSQLDatabase::No };
+    Vector<ProcessType> debug_helper_processes {};
+    Optional<ProcessType> profile_helper_process {};
+    ProfileTool profile_tool { ProfileTool::Callgrind };
+    Optional<ByteString> profile_output {};
+    Optional<ByteString> webdriver_browser_endpoint {};
+    Optional<DNSSettings> dns_settings {};
+    Optional<u16> devtools_port;
+    EnableContentBlocker enable_content_blocker { EnableContentBlocker::Yes };
+    DisableSandbox disable_sandbox { DisableSandbox::No };
+    ForceVideoDecoderServer force_video_decoder_server { ForceVideoDecoderServer::No };
+    Vector<ByteString> content_blocker_list_paths {};
+    // How much memory a WebContent process may use before it is ended. Zero means that there is no limit, and no value
+    // means the default limit for this machine.
+    Optional<u64> web_content_memory_limit_in_bytes {};
+};
+
+enum class HTTPDiskCacheMode {
+    Disabled,
+    Enabled,
+    Testing,
+};
+
+struct RequestServerOptions {
+    Vector<ByteString> certificates;
+    ByteString cache_path;
+    HTTPDiskCacheMode http_disk_cache_mode { HTTPDiskCacheMode::Disabled };
+    Optional<ByteString> resource_substitution_map_path;
+    HTTP::ProxyConfiguration proxy_configuration;
+    // Per-session limit, excluding the RequestServer with no site. Sites beyond the limit share that server;
+    // zero makes every process share it.
+    size_t maximum_site_request_servers { NumericLimits<size_t>::max() };
+    // How long a site's RequestServer is kept around once its last client is gone, in case the site is visited again.
+    AK::Duration idle_site_request_server_timeout { AK::Duration::from_seconds(60) };
+};
+
+enum class IsTestMode {
+    No,
+    Yes,
+};
+
+enum class LogAllJSExceptions {
+    No,
+    Yes,
+};
+
+enum class EnableMemoryHTTPCache {
+    No,
+    Yes,
+};
+
+enum class ExposeExperimentalInterfaces {
+    No,
+    Yes,
+};
+
+enum class ExposeInternalsObject {
+    No,
+    Yes,
+};
+
+enum class ForceCPUPainting {
+    No,
+    Yes,
+};
+
+enum class ForceFontconfig {
+    No,
+    Yes,
+};
+
+enum class CollectGarbageOnEveryAllocation {
+    No,
+    Yes,
+};
+
+enum class PaintViewportScrollbars {
+    Yes,
+    No,
+};
+
+enum class FileSchemeUrlsHaveTupleOrigins {
+    No,
+    Yes,
+};
+
+struct WebContentOptions {
+    Optional<ByteString> cache_path {};
+    Optional<StringView> user_agent_preset {};
+    IsTestMode is_test_mode { IsTestMode::No };
+    LogAllJSExceptions log_all_js_exceptions { LogAllJSExceptions::No };
+    EnableMemoryHTTPCache enable_http_memory_cache { EnableMemoryHTTPCache::No };
+    ExposeExperimentalInterfaces expose_experimental_interfaces { ExposeExperimentalInterfaces::No };
+    ExposeInternalsObject expose_internals_object { ExposeInternalsObject::No };
+    ForceCPUPainting force_cpu_painting { ForceCPUPainting::No };
+    ForceFontconfig force_fontconfig { ForceFontconfig::No };
+    EnableAutoplay enable_autoplay { EnableAutoplay::No };
+    CollectGarbageOnEveryAllocation collect_garbage_on_every_allocation { CollectGarbageOnEveryAllocation::No };
+    Optional<u16> echo_server_port {};
+    Optional<u16> https_echo_server_port {};
+    PaintViewportScrollbars paint_viewport_scrollbars { PaintViewportScrollbars::Yes };
+    FileSchemeUrlsHaveTupleOrigins file_scheme_urls_have_tuple_origins { FileSchemeUrlsHaveTupleOrigins::No };
+    Optional<StringView> default_time_zone {};
+    Optional<ByteString> proxy_autoconfig_url {};
+};
+
+}

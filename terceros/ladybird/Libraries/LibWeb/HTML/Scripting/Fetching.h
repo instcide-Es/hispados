@@ -1,0 +1,95 @@
+/*
+ * Copyright (c) 2022-2023, networkException <networkexception@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Utf16String.h>
+#include <LibWeb/Export.h>
+#include <LibWeb/Fetch/Infrastructure/FetchAlgorithms.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/Requests.h>
+#include <LibWeb/HTML/CORSSettingAttribute.h>
+#include <LibWeb/HTML/Scripting/FetchClient.h>
+#include <LibWeb/HTML/Scripting/ImportMap.h>
+#include <LibWeb/HTML/Scripting/ModuleMap.h>
+#include <LibWeb/HTML/Scripting/ModuleScript.h>
+#include <LibWeb/HTML/Scripting/ScriptFetchOptions.h>
+#include <LibWebCommon/ReferrerPolicy/ReferrerPolicy.h>
+
+namespace Web::HTML {
+
+enum class TopLevelModule {
+    Yes,
+    No
+};
+
+using OnFetchScriptComplete = GC::Ref<GC::Function<void(GC::Ptr<Script>)>>;
+using ProcessCustomFetchResponse = GC::Ref<GC::Function<Fetch::Infrastructure::FetchAlgorithms::ProcessResponseConsumeBodyFunction::FunctionType>>;
+using PerformTheFetchHook = GC::Ptr<GC::Function<WebIDL::ExceptionOr<void>(NonnullRefPtr<Fetch::Infrastructure::Request>, TopLevelModule, ProcessCustomFetchResponse)>>;
+
+template<typename... Values, typename Callable>
+OnFetchScriptComplete create_on_fetch_script_complete(GC::Heap& heap, GC::CaptureList<Values...>&& captures, Callable&& callable)
+{
+    return GC::create_function<void(GC::Ptr<Script>)>(heap, move(captures), forward<Callable>(callable));
+}
+
+template<typename Callable>
+OnFetchScriptComplete create_on_fetch_script_complete(GC::Heap& heap, Callable&& callable)
+{
+    return GC::create_function<void(GC::Ptr<Script>)>(heap, GC::CaptureList<> {}, forward<Callable>(callable));
+}
+
+class FetchContext : public JS::Cell {
+    GC_CELL(FetchContext, JS::Cell);
+    GC_DECLARE_ALLOCATOR(FetchContext);
+
+public:
+    JS::Value error_to_rethrow;                              // [[ErrorToRethrow]]
+    Fetch::Infrastructure::Request::Destination destination; // [[Destination]]
+    PerformTheFetchHook perform_fetch;                       // [[PerformFetch]]
+    FetchClient fetch_client;                                // [[FetchClient]]
+
+private:
+    FetchContext(JS::Value error_to_rethrow, Fetch::Infrastructure::Request::Destination destination, PerformTheFetchHook perform_fetch, FetchClient const& fetch_client)
+        : error_to_rethrow(error_to_rethrow)
+        , destination(destination)
+        , perform_fetch(perform_fetch)
+        , fetch_client(fetch_client)
+    {
+    }
+
+    void visit_edges(Visitor& visitor) override
+    {
+        Base::visit_edges(visitor);
+        visitor.visit(error_to_rethrow);
+        visitor.visit(perform_fetch);
+        visitor.visit(fetch_client);
+    }
+};
+
+Utf16String module_type_from_module_request(JS::ModuleRequest const&);
+WebIDL::ExceptionOr<URL::URL> resolve_module_specifier(Optional<Script&> referring_script, Utf16View specifier);
+WebIDL::ExceptionOr<Optional<URL::URL>> resolve_imports_match(Utf16View normalized_specifier, Optional<URL::URL> as_url, ModuleSpecifierMap const&);
+Optional<URL::URL> resolve_url_like_module_specifier(Utf16View specifier, URL::URL const& base_url);
+ScriptFetchOptions get_descendant_script_fetch_options(ScriptFetchOptions const& original_options, URL::URL const& url, EnvironmentSettingsObject& settings_object);
+Utf16String resolve_a_module_integrity_metadata(URL::URL const& url, EnvironmentSettingsObject& settings_object);
+void set_up_module_script_request(Fetch::Infrastructure::Request&, ScriptFetchOptions const&);
+void fetch_classic_script(JS::Realm&, URL::URL const&, EnvironmentSettingsObject& settings_object, ScriptFetchOptions options, CORSSettingAttribute cors_setting, Utf16String character_encoding, OnFetchScriptComplete on_complete);
+WEB_API WebIDL::ExceptionOr<void> fetch_classic_worker_script(URL::URL const&, FetchClient const& fetch_client, Fetch::Infrastructure::Request::Destination, EnvironmentSettingsObject& settings_object, PerformTheFetchHook, OnFetchScriptComplete);
+WebIDL::ExceptionOr<GC::Ref<ClassicScript>> fetch_a_classic_worker_imported_script(URL::URL const&, HTML::EnvironmentSettingsObject&, PerformTheFetchHook = nullptr);
+WEB_API WebIDL::ExceptionOr<void> fetch_module_worker_script_graph(URL::URL const&, FetchClient const& fetch_client, Fetch::Infrastructure::Request::Destination, EnvironmentSettingsObject& settings_object, PerformTheFetchHook, OnFetchScriptComplete, Fetch::Infrastructure::Request::CredentialsMode = Fetch::Infrastructure::Request::CredentialsMode::SameOrigin);
+WebIDL::ExceptionOr<void> fetch_worklet_module_worker_script_graph(URL::URL const&, FetchClient const& fetch_client, Fetch::Infrastructure::Request::Destination, EnvironmentSettingsObject& settings_object, PerformTheFetchHook, OnFetchScriptComplete, Fetch::Infrastructure::Request::CredentialsMode = Fetch::Infrastructure::Request::CredentialsMode::SameOrigin);
+void fetch_external_module_script_graph(JS::Realm&, URL::URL const&, EnvironmentSettingsObject& settings_object, ScriptFetchOptions const&, OnFetchScriptComplete on_complete);
+void fetch_modulepreload_module_script_graph(JS::Realm&, URL::URL const&, Fetch::Infrastructure::Request::Destination, EnvironmentSettingsObject& settings_object, ScriptFetchOptions const&, OnFetchScriptComplete on_complete);
+void fetch_inline_module_script_graph(JS::Realm&, ByteString const& filename, Utf16View source_text, URL::URL const& base_url, EnvironmentSettingsObject& settings_object, ScriptFetchOptions const& options, size_t source_line_number, OnFetchScriptComplete on_complete);
+void fetch_single_imported_module_script(JS::Realm&, URL::URL const&, FetchClient const& fetch_client, Fetch::Infrastructure::Request::Destination, ScriptFetchOptions const&, EnvironmentSettingsObject&, Fetch::Infrastructure::Request::ReferrerType, JS::ModuleRequest const&, PerformTheFetchHook, OnFetchScriptComplete on_complete);
+
+void fetch_descendants_of_and_link_a_module_script(JS::Realm&, ModuleScript&, FetchClient const&, Fetch::Infrastructure::Request::Destination, PerformTheFetchHook, OnFetchScriptComplete on_complete);
+
+Fetch::Infrastructure::Request::Destination fetch_destination_from_module_type(Fetch::Infrastructure::Request::Destination, Utf16View);
+
+void fetch_single_module_script(JS::Realm&, URL::URL const&, FetchClient const& fetch_client, Fetch::Infrastructure::Request::Destination, ScriptFetchOptions const&, EnvironmentSettingsObject&, Web::Fetch::Infrastructure::Request::ReferrerType const&, Optional<JS::ModuleRequest> const&, TopLevelModule, PerformTheFetchHook, OnFetchScriptComplete callback);
+
+}

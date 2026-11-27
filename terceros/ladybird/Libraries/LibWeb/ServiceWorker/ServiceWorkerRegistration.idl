@@ -1,0 +1,23 @@
+// https://w3c.github.io/ServiceWorker/#serviceworkerregistration-interface
+[SecureContext, Exposed=(Window,Worker), Experimental]
+interface ServiceWorkerRegistration : EventTarget {
+    [DirectGetter] readonly attribute ServiceWorker? installing;
+    [DirectGetter] readonly attribute ServiceWorker? waiting;
+    [DirectGetter] readonly attribute ServiceWorker? active;
+    [FIXME, SameObject] readonly attribute NavigationPreloadManager navigationPreload;
+
+    readonly attribute USVString scope;
+    [ImplementedAs=update_via_cache] readonly attribute ServiceWorkerUpdateViaCache updateViaCache;
+
+    [FIXME, NewObject] Promise<undefined> update();
+    [FIXME, NewObject] Promise<boolean> unregister();
+
+    // event
+    [FIXME] attribute EventHandler onupdatefound;
+};
+
+enum ServiceWorkerUpdateViaCache {
+    "imports",
+    "all",
+    "none"
+};

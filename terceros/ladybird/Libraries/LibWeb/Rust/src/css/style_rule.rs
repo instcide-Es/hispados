@@ -1,0 +1,246 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+use crate::css::css_tokenizer::TokenizerInput;
+use crate::css::declaration_block::{DeclarationBlock, SharedDeclarationBlock};
+use crate::css::selector_parser::{
+    RustParsedSelectorList, SelectorParsingMode, SelectorType, StyleNestingParent, parse_selector_list,
+};
+use std::cell::RefCell;
+
+pub(crate) struct StyleRule {
+    selectors: RefCell<RustParsedSelectorList>,
+    pub(crate) declarations: DeclarationBlock,
+}
+
+impl StyleRule {
+    pub(crate) fn new(selectors: RustParsedSelectorList, declarations: SharedDeclarationBlock) -> Self {
+        Self {
+            selectors: RefCell::new(selectors),
+            declarations: DeclarationBlock::new(declarations),
+        }
+    }
+
+    pub(crate) fn selectors(&self) -> RustParsedSelectorList {
+        self.selectors.borrow().clone()
+    }
+
+    /// The selectors, which live until they are next replaced.
+    pub(crate) fn selectors_pointer(&self) -> *const RustParsedSelectorList {
+        self.selectors.as_ptr()
+    }
+
+    pub(crate) fn replace_selectors(&self, selectors: RustParsedSelectorList) {
+        *self.selectors.borrow_mut() = selectors;
+    }
+
+    pub(crate) fn set_selector_text(
+        &self,
+        input: TokenizerInput<'_>,
+        namespaces: &[TokenizerInput<'_>],
+        declarations: crate::css::selector_arena::NamespaceDeclarations,
+        nesting_parent: StyleNestingParent,
+    ) -> bool {
+        let selector_type = if nesting_parent == StyleNestingParent::None {
+            SelectorType::Standalone
+        } else {
+            SelectorType::Relative
+        };
+        let Ok(selectors) = parse_selector_list(input, namespaces, selector_type, SelectorParsingMode::Standard) else {
+            return false;
+        };
+        *self.selectors.borrow_mut() = selectors
+            .adapt_for_nesting(nesting_parent)
+            .into_list_declaring(nesting_parent, declarations);
+        true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::css::parser::syntax_parser::parse_shared_stylesheet;
+    use crate::css::parser::value_parser::ParseContext;
+    use crate::css::rule::{NativeRuleList, rust_rule_list_visit_images};
+    use std::ffi::c_void;
+    use std::rc::Rc;
+
+    fn rules(source: &str) -> Rc<NativeRuleList> {
+        let units: Vec<_> = source.encode_utf16().collect();
+        let source = crate::css::css_tokenizer::TokenizerInput::Utf16(&units);
+        // All context fields are booleans, integers, or nullable pointers.
+        let context = ParseContext::default();
+        let parsed = parse_shared_stylesheet(source, Some(&context));
+        crate::css::rule::NativeRuleList::from_parsed(parsed)
+    }
+
+    #[test]
+    fn native_publication_and_image_discovery_keep_style_data_immutable() {
+        use crate::css::style::StyleEngine;
+        use crate::css::style::pipeline::rule_store::{CascadeOrigin, RuleKind};
+        let rules = rules(".文字 { width: 13px; transition: width 1s; background-image: url(image.png); }");
+        let rule = &rules.rule_at(0);
+        let style = rule.style_rule();
+        assert!(style.declarations.is_immutable());
+        assert!(style.selectors().is_same_list(&style.selectors.borrow()));
+        let declarations = rule.cascade_declarations().unwrap();
+        assert!(SharedDeclarationBlock::ptr_eq(
+            &declarations,
+            &style.declarations.data()
+        ));
+        assert!(
+            declarations
+                .properties()
+                .entries()
+                .iter()
+                .any(|entry| { crate::css::property_metadata::property_defines_a_css_transition(entry.property()) })
+        );
+        let mut engine = StyleEngine::new();
+        let sheet = engine.add_sheet(CascadeOrigin::Author);
+        let id = engine.add_non_matching_rule(sheet, None, RuleKind::Style);
+        engine.publish_block_declarations(id, &declarations);
+        extern "C" fn image(context: *mut c_void, _: *const c_void) {
+            unsafe {
+                *context.cast::<usize>() += 1;
+            }
+        }
+        let mut images = 0_usize;
+        unsafe {
+            rust_rule_list_visit_images(&rules, (&raw mut images).cast(), image);
+        }
+        assert_eq!(images, 1);
+        assert!(style.declarations.is_immutable());
+    }
+
+    #[test]
+    fn cascade_targets_retain_immutable_snapshots_without_promoting_style_owners() {
+        use crate::css::media_list::MediaList;
+        use crate::css::property_metadata::property_id;
+        use crate::css::rule::rust_rule_list_clear;
+        use crate::css::style::StyleEngine;
+        use crate::css::style::bridge::{FfiNativeRuleTarget, native_rule_target};
+        use crate::css::style::pipeline::rule_store::{CascadeOrigin, RuleKind};
+        use crate::css::style::rule_writes::publish_native_rule_declarations;
+        use crate::css::style_sheet::NativeStyleSheet;
+
+        let rules = rules(".文字 { width: 13px; --幅: 19px; }");
+        let media = MediaList::new(Default::default());
+        let source = NativeStyleSheet::new(rules.clone(), media);
+        let source_lifetime = Rc::downgrade(&source);
+        let source_identity = source.identity();
+        let rule = rules.rule_at(0);
+        let retained_rule = Rc::clone(&rule);
+        let rule_lifetime = Rc::downgrade(&retained_rule);
+        drop(retained_rule);
+        let style = rule.style_rule();
+        let mut engine = StyleEngine::new();
+        let sheet = engine.add_sheet(CascadeOrigin::Author);
+        let id = engine.add_non_matching_rule(sheet, None, RuleKind::Style);
+        engine.register_native_rule(
+            id,
+            crate::css::rule::rust_rule_identity(&rule),
+            source.identity(),
+            std::sync::Arc::default(),
+            Box::default(),
+        );
+        // NB: The engine reads the declarations through the rule, which holds the block published to it.
+        publish_native_rule_declarations(&mut engine, rule.cascade_declarations(), id);
+        // All fields are integers, nullable pointers, booleans, or enums whose zero variant is valid.
+        let mut target: FfiNativeRuleTarget = unsafe { std::mem::zeroed() };
+        assert!(native_rule_target(&mut engine, id.0 + 1, &mut target,));
+        let snapshot = unsafe { SharedDeclarationBlock::from_raw(target.declarations.cast()) };
+        assert_eq!(target.source_identity, source_identity);
+        assert!(style.declarations.is_immutable());
+        assert!(SharedDeclarationBlock::ptr_eq(&snapshot, &style.declarations.data()));
+        let identity = target.identity;
+        let version = target.declaration_version;
+
+        let mut declarations = style.declarations.clone();
+        assert!(declarations.remove(property_id::WIDTH));
+        let owner = rule
+            .declaration_owner_identity()
+            .and_then(|identity| engine.native_rule_id(identity))
+            .expect("the rule owns its declarations");
+        publish_native_rule_declarations(&mut engine, rule.cascade_declarations(), owner);
+        assert!(native_rule_target(&mut engine, id.0 + 1, &mut target,));
+        let edited_snapshot = unsafe { SharedDeclarationBlock::from_raw(target.declarations.cast()) };
+        assert_eq!(target.identity, identity);
+        assert_ne!(target.declaration_version, version);
+        assert!(!SharedDeclarationBlock::ptr_eq(&snapshot, &edited_snapshot));
+        drop(declarations);
+        drop(rule);
+        rust_rule_list_clear(&rules);
+        drop(source);
+        drop(rules);
+        assert!(source_lifetime.upgrade().is_none());
+        assert!(rule_lifetime.upgrade().is_none());
+        // The program reads its published snapshot, not a live document-local rule record.
+        assert!(native_rule_target(&mut engine, id.0 + 1, &mut target,));
+        let surviving_snapshot = unsafe { SharedDeclarationBlock::from_raw(target.declarations.cast()) };
+        assert!(SharedDeclarationBlock::ptr_eq(&edited_snapshot, &surviving_snapshot));
+        assert_eq!(target.identity, identity);
+        assert_eq!(target.source_identity, source_identity);
+        engine.remove_style_rule(id);
+        assert!(!native_rule_target(&mut engine, id.0 + 1, &mut target,));
+        drop(engine);
+        assert!(
+            snapshot
+                .properties()
+                .iter()
+                .any(|property| property.property_id == property_id::WIDTH)
+        );
+        assert!(edited_snapshot.properties().is_empty());
+        assert_eq!(
+            snapshot.custom_properties().get(0).unwrap().name.units(),
+            "--幅".encode_utf16().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            edited_snapshot.custom_properties().get(0).unwrap().name.units(),
+            snapshot.custom_properties().get(0).unwrap().name.units()
+        );
+    }
+
+    #[test]
+    fn retained_rules_share_mutation_without_changing_parsed_snapshots() {
+        use crate::css::property_metadata::property_id;
+        let rules = rules(".文字 { width: 13px; height: 19px; }");
+        let rule = &rules.rule_at(0);
+        let style = rule.style_rule();
+        let snapshot = style.declarations.data();
+        let fork = StyleRule::new(style.selectors(), style.declarations.data());
+        assert!(style.declarations.is_immutable());
+        assert!(fork.declarations.is_immutable());
+        let retained_rule = Rc::clone(rule);
+        let retained = retained_rule.style_rule();
+        assert!(std::ptr::eq(style, retained));
+        let mut declarations = retained.declarations.clone();
+        assert!(declarations.remove(property_id::WIDTH));
+        assert!(
+            !style
+                .declarations
+                .data()
+                .properties()
+                .iter()
+                .any(|property| property.property_id == property_id::WIDTH)
+        );
+        assert!(SharedDeclarationBlock::ptr_eq(&fork.declarations.data(), &snapshot));
+        assert!(
+            snapshot
+                .properties()
+                .iter()
+                .any(|property| property.property_id == property_id::WIDTH)
+        );
+        let selectors: Vec<_> = ".編集".encode_utf16().collect();
+        assert!(retained.set_selector_text(
+            TokenizerInput::Utf16(&selectors),
+            &[],
+            Default::default(),
+            StyleNestingParent::None
+        ));
+        assert!(style.selectors().is_same_list(&retained.selectors()));
+        assert!(!style.selectors().is_same_list(&fork.selectors()));
+    }
+}

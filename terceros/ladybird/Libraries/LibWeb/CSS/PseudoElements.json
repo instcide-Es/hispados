@@ -1,0 +1,263 @@
+{
+  "-moz-color-swatch": {
+    "alias-for": "color-swatch"
+  },
+  "-moz-meter-bar": {
+    "alias-for": "slider-fill"
+  },
+  "-moz-placeholder": {
+    "alias-for": "placeholder"
+  },
+  "-moz-progress-bar": {
+    "alias-for": "slider-fill"
+  },
+  "-moz-range-progress": {
+    "alias-for": "slider-fill"
+  },
+  "-moz-range-track": {
+    "alias-for": "slider-track"
+  },
+  "-moz-range-thumb": {
+    "alias-for": "slider-thumb"
+  },
+  "-webkit-color-swatch": {
+    "alias-for": "color-swatch"
+  },
+  "-webkit-color-swatch-wrapper": {
+    "spec": "https://drafts.csswg.org/css-forms-1/#vendor-pseudo-element-compatibility",
+    "implementation": "element-reference"
+  },
+  "-webkit-input-placeholder": {
+    "alias-for": "placeholder"
+  },
+  "-webkit-meter-bar": {
+    "alias-for": "slider-track"
+  },
+  "-webkit-progress-bar": {
+    "alias-for": "slider-track"
+  },
+  "-webkit-progress-value": {
+    "alias-for": "slider-fill"
+  },
+  "-webkit-search-cancel-button": {
+    "spec": "https://drafts.csswg.org/css-forms-1/#selectordef-clear-icon",
+    "implementation": "element-reference"
+  },
+  "-webkit-slider-runnable-track": {
+    "alias-for": "slider-track"
+  },
+  "-webkit-slider-thumb": {
+    "alias-for": "slider-thumb"
+  },
+  "after": {
+    "spec": "https://drafts.csswg.org/css-pseudo-4/#selectordef-after",
+    "is-tree-abiding": true,
+    "implementation": "synthetic"
+  },
+  "backdrop": {
+    "spec": "https://drafts.csswg.org/css-position-4/#selectordef-backdrop",
+    "implementation": "synthetic"
+  },
+  "before": {
+    "spec": "https://drafts.csswg.org/css-pseudo-4/#selectordef-before",
+    "is-tree-abiding": true,
+    "implementation": "synthetic"
+  },
+  "color-swatch": {
+    "spec": "https://drafts.csswg.org/css-forms-1/#selectordef-color-swatch",
+    "implementation": "element-reference"
+  },
+  "details-content": {
+    "spec": "https://drafts.csswg.org/css-pseudo-4/#selectordef-details-content",
+    "is-element-backed": true,
+    "implementation": "element-reference"
+  },
+  "file-selector-button": {
+    "spec": "https://drafts.csswg.org/css-pseudo-4/#selectordef-file-selector-button",
+    "is-element-backed": true,
+    "implementation": "element-reference"
+  },
+  "first-letter": {
+    "spec": "https://drafts.csswg.org/css-pseudo-4/#selectordef-first-letter",
+    "property-whitelist": [
+      "#font-properties",
+      "color",
+      "opacity",
+      "#background-properties",
+      "#inline-typesetting-properties",
+      "#text-decoration-properties",
+      "#inline-layout-properties",
+      "#margin-properties",
+      "#padding-properties",
+      "#border-properties",
+      "box-shadow",
+      "float",
+      "#custom-properties"
+    ],
+    "accepts-animations": false,
+    "implementation": "synthetic"
+  },
+  "first-line": {
+    "spec": "https://drafts.csswg.org/css-pseudo-4/#selectordef-first-line",
+    "property-whitelist": [
+      "#font-properties",
+      "color",
+      "opacity",
+      "#background-properties",
+      "#inline-typesetting-properties",
+      "#text-decoration-properties",
+      "#custom-properties",
+      "FIXME: ruby-position",
+      "#inline-layout-properties"
+    ],
+    "accepts-animations": false,
+    "implementation": "synthetic"
+  },
+  "highlight": {
+    "spec": "https://drafts.csswg.org/css-pseudo-4/#selectordef-highlight",
+    "type": "function",
+    "function-syntax": "<highlight-name-selector>",
+    "is-highlight": true,
+    "property-whitelist": [
+      "color",
+      "background-color",
+      "#text-decoration-properties",
+      "FIXME: stroke-color",
+      "FIXME: fill-color",
+      "stroke-width",
+      "#custom-properties"
+    ],
+    "accepts-animations": false
+  },
+  "marker": {
+    "spec": "https://drafts.csswg.org/css-pseudo-4/#selectordef-marker",
+    "is-tree-abiding": true,
+    "implementation": "synthetic"
+  },
+  "part": {
+    "spec": "https://drafts.csswg.org/css-shadow-1/#selectordef-part",
+    "type": "function",
+    "function-syntax": "<ident>+",
+    "is-element-backed": true
+  },
+  "placeholder": {
+    "spec": "https://drafts.csswg.org/css-pseudo-4/#selectordef-placeholder",
+    "is-tree-abiding": true,
+    "property-whitelist": [
+      "#font-properties",
+      "color",
+      "opacity",
+      "#background-properties",
+      "#inline-typesetting-properties",
+      "#text-decoration-properties",
+      "#custom-properties",
+      "FIXME: ruby-position"
+    ],
+    "implementation": "element-reference"
+  },
+  "search-text": {
+    "spec": "https://drafts.csswg.org/css-pseudo-4/#selectordef-search-text",
+    "is-highlight": true,
+    "property-whitelist": [
+      "color",
+      "background-color",
+      "#text-decoration-properties",
+      "FIXME: stroke-color",
+      "FIXME: fill-color",
+      "stroke-width",
+      "#custom-properties"
+    ],
+    "accepts-animations": false,
+    "implementation": "synthetic"
+  },
+  "search-text-current": {
+    "spec": "https://drafts.csswg.org/css-pseudo-4/#selectordef-search-text",
+    "is-highlight": true,
+    "is-internal": true,
+    "property-whitelist": [
+      "color",
+      "background-color",
+      "#text-decoration-properties",
+      "FIXME: stroke-color",
+      "FIXME: fill-color",
+      "stroke-width",
+      "#custom-properties"
+    ],
+    "accepts-animations": false,
+    "implementation": "synthetic"
+  },
+  "selection": {
+    "spec": "https://drafts.csswg.org/css-pseudo-4/#selectordef-selection",
+    "is-highlight": true,
+    "property-whitelist": [
+      "color",
+      "background-color",
+      "#text-decoration-properties",
+      "FIXME: stroke-color",
+      "FIXME: fill-color",
+      "stroke-width",
+      "#custom-properties"
+    ],
+    "accepts-animations": false,
+    "implementation": "synthetic"
+  },
+  "slider-fill": {
+    "spec": "https://drafts.csswg.org/css-forms-1/#selectordef-slider-fill",
+    "implementation": "element-reference"
+  },
+  "slider-thumb": {
+    "spec": "https://drafts.csswg.org/css-forms-1/#selectordef-slider-thumb",
+    "implementation": "element-reference"
+  },
+  "slider-track": {
+    "spec": "https://drafts.csswg.org/css-forms-1/#selectordef-slider-track",
+    "implementation": "element-reference"
+  },
+  "slotted": {
+    "spec": "https://drafts.csswg.org/css-shadow-1/#slotted-pseudo",
+    "type": "function",
+    "function-syntax": "<compound-selector>",
+    "is-element-backed": true,
+    "implementation": "element-reference"
+  },
+  "spelling-error": {
+    "spec": "https://drafts.csswg.org/css-pseudo-4/#selectordef-spelling-error",
+    "is-highlight": true,
+    "property-whitelist": [
+      "color",
+      "background-color",
+      "#text-decoration-properties",
+      "FIXME: stroke-color",
+      "FIXME: fill-color",
+      "stroke-width",
+      "#custom-properties"
+    ],
+    "accepts-animations": false,
+    "implementation": "synthetic"
+  },
+  "view-transition": {
+    "spec": "https://drafts.csswg.org/css-view-transitions-1/#selectordef-view-transition",
+    "is-pseudo-root": true,
+    "implementation": "synthetic"
+  },
+  "view-transition-group": {
+    "spec": "https://drafts.csswg.org/css-view-transitions-1/#selectordef-view-transition-group",
+    "type": "function",
+    "function-syntax": "<pt-name-and-class-selector>"
+  },
+  "view-transition-image-pair": {
+    "spec": "https://drafts.csswg.org/css-view-transitions-1/#selectordef-view-transition-image-pair",
+    "type": "function",
+    "function-syntax": "<pt-name-and-class-selector>"
+  },
+  "view-transition-new": {
+    "spec": "https://drafts.csswg.org/css-view-transitions-1/#selectordef-view-transition-new",
+    "type": "function",
+    "function-syntax": "<pt-name-and-class-selector>"
+  },
+  "view-transition-old": {
+    "spec": "https://drafts.csswg.org/css-view-transitions-1/#selectordef-view-transition-old",
+    "type": "function",
+    "function-syntax": "<pt-name-and-class-selector>"
+  }
+}

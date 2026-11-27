@@ -1,0 +1,699 @@
+/*
+ * Copyright (c) 2020, the SerenityOS developers.
+ * Copyright (c) 2023, Tim Flynn <trflynn89@serenityos.org>
+ * Copyright (c) 2026, Gregory Bertilson <gregory@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/ScopeGuard.h>
+#include <LibGC/Heap.h>
+#include <LibGfx/Bitmap.h>
+#include <LibGfx/DecodedImageFrame.h>
+#include <LibJS/Runtime/Object.h>
+#include <LibWeb/Bindings/Wrappable.h>
+#include <LibWeb/Bindings/WrapperWorld.h>
+#include <LibWeb/CSS/ElementBoxKind.h>
+#include <LibWeb/CSS/StyleEngineInput.h>
+#include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOM/Event.h>
+#include <LibWeb/Fetch/Fetching/Fetching.h>
+#include <LibWeb/Fetch/Infrastructure/FetchAlgorithms.h>
+#include <LibWeb/Fetch/Infrastructure/FetchController.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/Bodies.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/Requests.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/ResponseView.h>
+#include <LibWeb/HTML/AudioTrackList.h>
+#include <LibWeb/HTML/EventNames.h>
+#include <LibWeb/HTML/HTMLVideoElement.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HTML/Scripting/ExceptionReporter.h>
+#include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
+#include <LibWeb/HTML/VideoPlaybackQuality.h>
+#include <LibWeb/HTML/VideoTrack.h>
+#include <LibWeb/HTML/VideoTrackList.h>
+#include <LibWeb/HTML/Window.h>
+#include <LibWeb/HighResolutionTime/TimeOrigin.h>
+#include <LibWeb/Layout/Box.h>
+#include <LibWeb/Page/Page.h>
+#include <LibWeb/PaintTiming/PaintTiming.h>
+#include <LibWeb/Painting/PaintFacts.h>
+#include <LibWeb/PictureInPicture/PictureInPictureController.h>
+#include <LibWeb/PictureInPicture/PictureInPictureWindow.h>
+#include <LibWeb/Platform/ImageCodecPlugin.h>
+#include <LibWeb/WebIDL/AbstractOperations.h>
+#include <LibWeb/WebIDL/DOMException.h>
+#include <LibWeb/WebIDL/Promise.h>
+
+namespace Web::HTML {
+
+GC_DEFINE_ALLOCATOR(HTMLVideoElement);
+
+HTMLVideoElement::HTMLVideoElement(DOM::Document& document, DOM::QualifiedName qualified_name)
+    : HTMLMediaElement(document, move(qualified_name))
+{
+}
+
+HTMLVideoElement::~HTMLVideoElement() = default;
+
+void HTMLVideoElement::finalize()
+{
+    Base::finalize();
+}
+
+void HTMLVideoElement::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_video_track);
+    visitor.visit(m_fetch_controller);
+    visitor.visit(m_picture_in_picture_window);
+    visitor.visit(m_pending_picture_in_picture_promises);
+    visitor.visit(m_visual_source);
+    for (auto const& entry : m_list_of_video_frame_request_callbacks)
+        visitor.visit(entry.callback);
+    for (auto const& entry : m_running_video_frame_request_callbacks)
+        visitor.visit(entry.callback);
+}
+
+void HTMLVideoElement::set_visual_source(GC::Ptr<HTMLVideoElement> source)
+{
+    if (m_visual_source == source)
+        return;
+
+    if (auto previous_source = exchange(m_visual_source, source)) {
+        previous_source->m_visual_clones.remove_all_matching([&](auto const& clone) { return !clone || clone.ptr().ptr() == this; });
+        previous_source->video_sink_ticking_inputs_changed();
+    }
+    if (source) {
+        source->m_visual_clones.append(*this);
+        source->video_sink_ticking_inputs_changed();
+    }
+    Painting::push_video_paint_facts(*this);
+    media_element_for_controls_changed();
+}
+
+void HTMLVideoElement::for_each_visual_clone(Function<void(HTMLVideoElement&)> const& callback) const
+{
+    for (auto const& clone : m_visual_clones) {
+        if (clone)
+            callback(*clone);
+    }
+}
+
+void HTMLVideoElement::clear_visual_clones()
+{
+    auto clones = move(m_visual_clones);
+    for (auto const& clone : clones) {
+        if (clone)
+            clone->set_visual_source(nullptr);
+    }
+}
+
+bool HTMLVideoElement::is_shown_elsewhere() const
+{
+    return any_of(m_visual_clones, [](auto const& clone) { return clone.ptr() != nullptr; });
+}
+
+// The controls of an element that shows another element's frames play that element's media.
+HTMLMediaElement& HTMLVideoElement::media_element_for_controls()
+{
+    if (m_visual_source)
+        return *m_visual_source;
+    return *this;
+}
+
+void HTMLVideoElement::adopted_from(DOM::Document& old_document)
+{
+    Base::adopted_from(old_document);
+
+    if (m_load_event_delayer.has_value())
+        m_load_event_delayer.emplace(document());
+
+    release_presented_video_frame_held_for_callbacks();
+
+    // NB: See determine_element_poster_frame().
+    if (old_document.is_temporary_document_for_fragment_parsing())
+        determine_element_poster_frame(attribute(HTML::AttributeNames::poster)).release_value_but_fixme_should_propagate_errors();
+}
+
+void HTMLVideoElement::attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_)
+{
+    Base::attribute_changed(name, old_value, value, namespace_);
+
+    if (name == HTML::AttributeNames::poster) {
+        determine_element_poster_frame(value).release_value_but_fixme_should_propagate_errors();
+    } else if (name == HTML::AttributeNames::disablepictureinpicture && !namespace_.has_value()) {
+        // When the disablePictureInPicture attribute is added to a video element, the user agent MAY run these steps:
+        if (!old_value.has_value() && value.has_value())
+            run_disable_picture_in_picture_steps();
+    }
+}
+
+CSS::ElementBoxKind HTMLVideoElement::box_kind() const
+{
+    return CSS::ElementBoxKind::Video;
+}
+
+void HTMLVideoElement::set_intrinsic_video_dimensions(Optional<Gfx::Size<u32>> dimensions)
+{
+    if (m_intrinsic_video_dimensions == dimensions)
+        return;
+    m_intrinsic_video_dimensions = dimensions;
+
+    // Whenever the natural width or natural height of the video changes (including, for example, because the
+    // selected video track was changed), if the element's readyState attribute is not HAVE_NOTHING,
+    // AD-HOC: We also use this to set the resolution in the steps that advance the ready state to HAVE_METADATA,
+    //         otherwise we could assert the readyState condition, since any other calls should already have metadata.
+    //         Also, the spec is not explicit on whether to fire the event when the element is emptied, but the check
+    //         for HAVE_NOTHING implies that it should not fire in that case. Therefore, skip the event if the
+    //         dimensions are not available. This matches other browsers.
+    if (dimensions.has_value()) {
+        // the user agent must queue a media element task given the media element to fire an event named resize at the media element.
+        queue_a_media_element_task(GC::create_function(GC::Heap::the(), [](HTMLMediaElement& self) {
+            self.dispatch_event(DOM::Event::create(HTML::relevant_global_object(self), HTML::EventNames::resize));
+        }));
+
+        document().page().picture_in_picture_controller().video_size_did_change(*this, dimensions->to_type<int>());
+    }
+
+    update_representation();
+}
+
+// https://html.spec.whatwg.org/multipage/media.html#dom-video-videowidth
+u32 HTMLVideoElement::video_width() const
+{
+    // The videoWidth IDL attribute must return the intrinsic width of the video in CSS pixels. The videoHeight IDL
+    // attribute must return the intrinsic height of the video in CSS pixels. If the element's readyState attribute
+    // is HAVE_NOTHING, then the attributes must return 0.
+    if (ready_state() == ReadyState::HaveNothing)
+        return 0;
+    if (m_intrinsic_video_dimensions.has_value())
+        return m_intrinsic_video_dimensions->width();
+    // AD-HOC: If the natural dimensions are not available, return 0. The non-normative text says that it should
+    //         return 0 if the dimensions are not known. The HAVE_NOTHING check is likely assumed to cover this
+    //         possibility.
+    return 0;
+}
+
+// https://html.spec.whatwg.org/multipage/media.html#dom-video-videoheight
+u32 HTMLVideoElement::video_height() const
+{
+    // The videoWidth IDL attribute must return the intrinsic width of the video in CSS pixels. The videoHeight IDL
+    // attribute must return the intrinsic height of the video in CSS pixels. If the element's readyState attribute
+    // is HAVE_NOTHING, then the attributes must return 0.
+    if (ready_state() == ReadyState::HaveNothing)
+        return 0;
+    if (m_intrinsic_video_dimensions.has_value())
+        return m_intrinsic_video_dimensions->height();
+    // AD-HOC: If the natural dimensions is not available, return 0. The non-normative text says that it should
+    //         return 0 if the dimensions are not known. The HAVE_NOTHING check is likely assumed to cover this
+    //         possibility.
+    return 0;
+}
+
+void HTMLVideoElement::update_representation()
+{
+    auto representation = current_representation();
+
+    // https://html.spec.whatwg.org/multipage/media.html#concept-video-intrinsic-width
+    // The natural width of a video element's playback area is the natural width of the poster frame, if that is
+    // available and the element currently represents its poster frame; otherwise, it is the natural width of the video
+    // resource, if that is available; otherwise the natural width is missing.
+
+    // The natural height of a video element's playback area is the natural height of the poster frame, if that is
+    // available and the element currently represents its poster frame; otherwise it is the natural height of the video
+    // resource, if that is available; otherwise the natural height is missing.
+    auto natural_dimensions = m_intrinsic_video_dimensions.map([](Gfx::Size<u32> size) { return size.to_type<CSSPixels>(); });
+
+    Optional<u64> poster_frame_id;
+    if (representation == Representation::PosterFrame && m_poster_frame.has_value()) {
+        natural_dimensions = m_poster_frame->size().to_type<CSSPixels>();
+        poster_frame_id = m_poster_frame->id();
+    }
+
+    if (representation == m_representation && poster_frame_id == m_represented_poster_frame_id && natural_dimensions == m_natural_dimensions)
+        return;
+    m_representation = representation;
+    m_represented_poster_frame_id = poster_frame_id;
+
+    if (natural_dimensions != m_natural_dimensions) {
+        set_needs_layout_update(DOM::SetNeedsLayoutReason::HTMLVideoElementNaturalDimensionsChanged);
+        m_natural_dimensions = natural_dimensions;
+        CSS::record_element_replaced_content_input(*this);
+    }
+    Painting::push_video_paint_facts(*this);
+}
+
+Optional<Gfx::Size<u32>> HTMLVideoElement::natural_media_size() const
+{
+    return m_intrinsic_video_dimensions;
+}
+
+Optional<CSSPixelSize> HTMLVideoElement::natural_element_size() const
+{
+    return m_natural_dimensions;
+}
+
+// https://html.spec.whatwg.org/multipage/media.html#attr-video-poster
+WebIDL::ExceptionOr<void> HTMLVideoElement::determine_element_poster_frame(Optional<Utf16String> const& poster)
+{
+    // AD-HOC: An element in a temporary document for fragment parsing does not fetch anything, so that markup parsed
+    //         into such a document, for example by the Sanitizer API, causes no network requests for elements that
+    //         are never inserted anywhere. The poster frame is determined once the element is adopted into another
+    //         document.
+    if (document().is_temporary_document_for_fragment_parsing())
+        return {};
+
+    auto& realm = HTML::relevant_realm(*this);
+    // 1. If there is an existing instance of this algorithm running for this video element, abort that instance of
+    //    this algorithm without changing the poster frame.
+    if (m_fetch_controller)
+        m_fetch_controller->stop_fetch();
+
+    static constexpr auto finalize = [](HTMLVideoElement& self, RefPtr<Gfx::Bitmap> poster_frame) {
+        self.m_poster_frame.clear();
+        if (poster_frame) {
+            if (auto frame = Gfx::DecodedImageFrame::create(*poster_frame); !frame.is_error())
+                self.m_poster_frame = frame.release_value();
+        }
+        self.m_load_event_delayer.clear();
+        self.m_fetch_controller = nullptr;
+        self.update_representation();
+    };
+
+    // 2. If the poster attribute's value is the empty string or if the attribute is absent, then there is no poster
+    //    frame; return.
+    if (!poster.has_value() || poster->is_empty()) {
+        finalize(*this, nullptr);
+        return {};
+    }
+
+    // 3. Let url be the result of encoding-parsing a URL given the poster attribute's value, relative to the element's node document.
+    auto url_record = document().encoding_parse_url(*poster);
+
+    // 4. If url is failure, then return.
+    if (!url_record.has_value()) {
+        finalize(*this, nullptr);
+        return {};
+    }
+
+    // 5. Let request be a new request whose URL is the resulting URL record, client is the element's node document's
+    //    relevant settings object, destination is "image", initiator type is "video", credentials mode is "include",
+    //    and whose use-URL-credentials flag is set.
+    auto request = Fetch::Infrastructure::Request::create();
+    request->set_url(url_record.release_value());
+    request->set_client(document().relevant_settings_object().address());
+    request->set_destination(Fetch::Infrastructure::Request::Destination::Image);
+    request->set_initiator_type(Fetch::Infrastructure::Request::InitiatorType::Video);
+    request->set_credentials_mode(Fetch::Infrastructure::Request::CredentialsMode::Include);
+    request->set_use_url_credentials(true);
+
+    // 6. Fetch request. This must delay the load event of the element's node document.
+    Fetch::Infrastructure::FetchAlgorithms::Input fetch_algorithms_input { Fetch::Engine::BodyIntent::DeliverStreamToConsumerAgent };
+    m_load_event_delayer.emplace(document());
+
+    // 7. If an image is thus obtained, the poster frame is that image. Otherwise, there is no poster frame.
+    fetch_algorithms_input.process_response = GC::create_function(GC::Heap::the(), GC::captures(GC::Weak(*this), request->url()), [](auto& weak_self, auto& poster_url, GC::Ref<Fetch::Infrastructure::ResponseView> response) {
+        if (!weak_self)
+            return;
+        auto& self = *weak_self;
+        auto& realm = HTML::relevant_realm(self);
+        auto& global = self.document().relevant_settings_object().realm().global_object();
+
+        if (response->is_network_error()) {
+            finalize(self, nullptr);
+            return;
+        }
+
+        if (response->type() == Fetch::Infrastructure::Response::Type::Opaque || response->type() == Fetch::Infrastructure::Response::Type::OpaqueRedirect)
+            response = response->unsafe_response();
+
+        if (!response->body()) {
+            finalize(self, nullptr);
+            return;
+        }
+
+        auto on_image_data_read = GC::create_function(GC::Heap::the(), GC::captures(weak_self, poster_url), [](auto& weak_self, auto& poster_url, ByteBuffer image_data) {
+            if (!weak_self)
+                return;
+            // 6. If an image is thus obtained, the poster frame is that image. Otherwise, there is no poster frame.
+            (void)Platform::ImageCodecPlugin::the().decode_image(
+                image_data,
+                [weak_self, poster_url](Web::Platform::DecodedImage& image) -> ErrorOr<void> {
+                    // NB: Only the first frame is used, so an animation the decoder opened is stopped right away.
+                    if (image.session_id != 0)
+                        Platform::ImageCodecPlugin::the().stop_animation_decode(image.session_id);
+                    if (!weak_self)
+                        return {};
+                    RefPtr<Gfx::Bitmap> poster_frame;
+                    if (!image.frames.is_empty())
+                        poster_frame = move(image.frames[0].bitmap);
+                    Optional<CSSPixelSize> natural_size;
+                    if (poster_frame)
+                        natural_size = CSSPixelSize { poster_frame->width(), poster_frame->height() };
+                    finalize(*weak_self, move(poster_frame));
+
+                    // https://w3c.github.io/paint-timing/#sec-modifications-dom
+                    // When an Element element's associated image request has become completely available, run the
+                    // algorithm to process an image that finished loading passing in element and its associated image
+                    // request as inputs.
+                    if (natural_size.has_value())
+                        PaintTiming::process_an_image_that_finished_loading(*weak_self, { .url = Utf16String::from_utf8(poster_url.serialize()), .natural_size = natural_size });
+                    return {};
+                },
+                [weak_self](auto&) {
+                    if (!weak_self)
+                        return;
+                    finalize(*weak_self, nullptr);
+                });
+        });
+
+        auto on_body_read_error = GC::create_function(GC::Heap::the(), GC::captures(weak_self), [](auto& weak_self, JS::Value) {
+            if (!weak_self)
+                return;
+            finalize(*weak_self, nullptr);
+        });
+
+        response->body()->fully_read(realm, on_image_data_read, on_body_read_error, GC::Ref { global });
+    });
+
+    m_fetch_controller = Fetch::Fetching::fetch(realm, request, Fetch::Infrastructure::FetchAlgorithms::create(move(fetch_algorithms_input)));
+
+    return {};
+}
+
+HTMLVideoElement::Representation HTMLVideoElement::current_representation() const
+{
+    // https://html.spec.whatwg.org/multipage/media.html#the-video-element:the-video-element-7
+    // A video element represents what is given for the first matching condition in the list below:
+
+    // -> When no video data is available (the element's readyState attribute is either HAVE_NOTHING, or HAVE_METADATA
+    //    but no video data has yet been obtained at all, or the element's readyState attribute is any subsequent value
+    //    but the media resource does not have a video channel)
+    if (ready_state() == ReadyState::HaveNothing || video_tracks()->length() == 0) {
+        // The video element represents its poster frame, if any, or else transparent black with no intrinsic dimensions.
+        return poster_frame().has_value() ? Representation::PosterFrame : Representation::TransparentBlack;
+    }
+
+    // -> When the video element is paused, the current playback position is the first frame of video, and the element's
+    //    show poster flag is set
+    if (paused() && current_playback_position() == 0 && show_poster()) {
+        // The video element represents its poster frame, if any, or else the first frame of the video.
+        return poster_frame().has_value() ? Representation::PosterFrame : Representation::FirstVideoFrame;
+    }
+
+    // -> When the video element is paused, and the frame of video corresponding to the current playback position
+    //    is not available (e.g. because the video is seeking or buffering)
+    //
+    //     The video element represents the last frame of the video to have been rendered.
+    //
+    // NOTE: We don't need to check this condition, as seeking is asynchronous, and the last available frame
+    //       will be kept until the seek completes.
+
+    // -> When the video element is neither potentially playing nor paused (e.g. when seeking or stalled)
+    if (!potentially_playing() && !paused()) {
+        // The video element represents the last frame of the video to have been rendered.
+        return Representation::VideoFrame;
+    }
+
+    // -> When the video element is paused
+    if (paused()) {
+        // The video element represents the frame of video corresponding to the current playback position.
+        return Representation::VideoFrame;
+    }
+
+    // -> Otherwise (the video element has a video channel and is potentially playing)
+    //
+    //     The video element represents the frame of video at the continuously increasing "current" position. When the
+    //     current playback position changes such that the last frame rendered is no longer the frame corresponding to
+    //     the current playback position in the video, the new frame must be rendered.
+    return Representation::VideoFrame;
+}
+
+// https://w3c.github.io/picture-in-picture/#request-picture-in-picture
+GC::Ref<WebIDL::Promise> HTMLVideoElement::request_picture_in_picture()
+{
+    auto& realm = HTML::relevant_realm(*this);
+    auto& controller = document().page().picture_in_picture_controller();
+
+    // 1. If Picture-in-Picture support is false, return a promise rejected with NotSupportedError DOMException.
+    if (!controller.has_picture_in_picture_support())
+        return WebIDL::create_rejected_promise(realm, WebIDL::NotSupportedError::create("Picture-in-Picture is not supported"_utf16));
+
+    // 2. Let doc be this's node document.
+    auto& document = this->document();
+
+    // 3. If doc is not allowed to use the policy-controlled feature named "picture-in-picture", return a promise
+    //    rejected with NotAllowedError DOMException.
+    if (!document.is_allowed_to_use_feature(DOM::PolicyControlledFeature::PictureInPicture))
+        return WebIDL::create_rejected_promise(realm, WebIDL::NotAllowedError::create("Picture-in-Picture is not allowed in this document"_utf16));
+
+    // 4. If this's readyState attribute is HAVE_NOTHING, return a promise rejected with InvalidStateError DOMException.
+    if (ready_state() == ReadyState::HaveNothing)
+        return WebIDL::create_rejected_promise(realm, WebIDL::InvalidStateError::create("The video has no data"_utf16));
+
+    // 5. If this has no video track, return a promise rejected with InvalidStateError DOMException.
+    if (video_tracks()->length() == 0)
+        return WebIDL::create_rejected_promise(realm, WebIDL::InvalidStateError::create("The video has no video track"_utf16));
+
+    // 6. If this's disablePictureInPicture is true, user agent may return a promise rejected with InvalidStateError
+    //    DOMException.
+    if (has_attribute(AttributeNames::disablepictureinpicture))
+        return WebIDL::create_rejected_promise(realm, WebIDL::InvalidStateError::create("Picture-in-Picture is disabled for the video"_utf16));
+
+    // 7. If doc's Picture-in-Picture element is null:
+    if (!document.picture_in_picture_element()) {
+        auto& window = relevant_window(*this);
+
+        // 1. If this's relevant global object does not have a transient activation, then return a promise rejected
+        //    with NotAllowedError DOMException.
+        if (!window.has_transient_activation())
+            return WebIDL::create_rejected_promise(realm, WebIDL::NotAllowedError::create("Picture-in-Picture requires a user gesture"_utf16));
+
+        // 2. Consume user activation given this's relevant global object.
+        window.consume_user_activation();
+    }
+
+    // 8. If this is doc's Picture-in-Picture element:
+    if (is_picture_in_picture_element()) {
+        // 1. Return a promise resolved with the Picture-in-Picture window associated with doc's Picture-in-Picture
+        //    element.
+        return WebIDL::create_resolved_promise(realm, Bindings::wrap(Bindings::host_defined_wrapper_world(realm), realm, GC::Ref { *m_picture_in_picture_window }));
+    }
+
+    // 9. Let global be this's relevant global object.
+    // NB: The controller takes the global from this when it queues its tasks.
+
+    // 10. Let p be a new promise created in this's relevant realm.
+    auto promise = WebIDL::create_promise(realm);
+    m_pending_picture_in_picture_promises.append(promise);
+
+    // 11. Return p, and enqueue the following steps to doc's picture-in-picture parallel queue:
+    controller.enqueue_request(*this, promise);
+    return promise;
+}
+
+// NB: These are the checks of requestPictureInPicture() that come before the one for user activation.
+bool HTMLVideoElement::can_enter_picture_in_picture() const
+{
+    return document().picture_in_picture_enabled()
+        && ready_state() != ReadyState::HaveNothing
+        && video_tracks()->length() != 0
+        && !has_attribute(AttributeNames::disablepictureinpicture);
+}
+
+bool HTMLVideoElement::has_pending_picture_in_picture_promise(WebIDL::Promise const& promise) const
+{
+    return any_of(m_pending_picture_in_picture_promises, [&](auto const& pending_promise) {
+        return pending_promise.ptr() == &promise;
+    });
+}
+
+bool HTMLVideoElement::take_pending_picture_in_picture_promise(WebIDL::Promise const& promise)
+{
+    return m_pending_picture_in_picture_promises.remove_first_matching([&](auto const& pending_promise) {
+        return pending_promise.ptr() == &promise;
+    });
+}
+
+// https://w3c.github.io/picture-in-picture/#disable-pip
+void HTMLVideoElement::run_disable_picture_in_picture_steps()
+{
+    // 1. Reject any pending promises returned by the requestPictureInPicture() method with InvalidStateError.
+    GC::RootVector pending_promises { move(m_pending_picture_in_picture_promises) };
+    for (auto const& promise : pending_promises) {
+        auto& realm = WebIDL::promise_realm(promise);
+        TemporaryExecutionContext execution_context { realm, TemporaryExecutionContext::CallbacksEnabled::Yes };
+        WebIDL::reject_promise(promise, WebIDL::InvalidStateError::create("Picture-in-Picture was disabled for the video"_utf16));
+    }
+
+    // 2. If video is pictureInPictureElement, run the exit Picture-in-Picture algorithm.
+    // AD-HOC: The overhaul proposed in https://github.com/w3c/picture-in-picture/pull/260 runs the exit algorithm on
+    //         the picture-in-picture parallel queue, given the document and no promise.
+    if (is_picture_in_picture_element())
+        document().page().picture_in_picture_controller().enqueue_exit(document(), nullptr);
+}
+
+WebIDL::CallbackType* HTMLVideoElement::onenterpictureinpicture()
+{
+    return event_handler_attribute(HTML::EventNames::enterpictureinpicture);
+}
+
+void HTMLVideoElement::set_onenterpictureinpicture(WebIDL::CallbackType* event_handler)
+{
+    set_event_handler_attribute(HTML::EventNames::enterpictureinpicture, event_handler);
+}
+
+WebIDL::CallbackType* HTMLVideoElement::onleavepictureinpicture()
+{
+    return event_handler_attribute(HTML::EventNames::leavepictureinpicture);
+}
+
+void HTMLVideoElement::set_onleavepictureinpicture(WebIDL::CallbackType* event_handler)
+{
+    set_event_handler_attribute(HTML::EventNames::leavepictureinpicture, event_handler);
+}
+
+// https://wicg.github.io/video-rvfc/#dom-htmlvideoelement-requestvideoframecallback
+WebIDL::UnsignedLong HTMLVideoElement::request_video_frame_callback(GC::Ref<WebIDL::CallbackType> callback)
+{
+    // 1. Let video be the HTMLVideoElement on which requestVideoFrameCallback is invoked.
+    // 2. Increment video's ownerDocument's video frame request callback identifier by one.
+    // 3. Let callbackId be video's ownerDocument's video frame request callback identifier
+    auto callback_id = document().increment_video_frame_request_callback_identifier();
+
+    // AD-HOC: Callbacks are "fired the next time a frame is presented to the compositor", so to ensure we don't invoke
+    //         the callback on a frame that was presented before the request, update the identifier here.
+    if (m_list_of_video_frame_request_callbacks.is_empty())
+        m_last_presented_frame_identifier = video_frame_counts().presented;
+
+    // 4. Append callback to video's list of video frame request callbacks, associated with callbackId.
+    m_list_of_video_frame_request_callbacks.append({ .handle = callback_id, .callback = callback });
+
+    // AD-HOC: A video that is not shown still presents frames while it has callbacks waiting for them.
+    if (m_list_of_video_frame_request_callbacks.size() == 1)
+        sync_video_sink_ticking();
+
+    request_rendering_update_for_video_frame_callbacks();
+
+    // 5. Return callbackId.
+    return callback_id;
+}
+
+// https://wicg.github.io/video-rvfc/#dom-htmlvideoelement-cancelvideoframecallback
+void HTMLVideoElement::cancel_video_frame_callback(WebIDL::UnsignedLong handle)
+{
+    // 1. Let video be the target HTMLVideoElement object on which cancelVideoFrameCallback is invoked.
+    // 2. Find the entry in video's list of video frame request callbacks that is associated with the value handle.
+    // 3. If there is such an entry, set its canceled boolean to true and remove it from video's list of video frame
+    //    request callbacks.
+    m_list_of_video_frame_request_callbacks.remove_first_matching([&](auto const& entry) { return entry.handle == handle; });
+    if (m_list_of_video_frame_request_callbacks.is_empty())
+        video_sink_ticking_inputs_changed();
+    // NB: A canceled entry that is already being run keeps its place without its callback.
+    for (auto& entry : m_running_video_frame_request_callbacks) {
+        if (entry.handle == handle)
+            entry.callback = nullptr;
+    }
+}
+
+// https://wicg.github.io/video-rvfc/#run-the-video-frame-request-callbacks
+void HTMLVideoElement::run_the_video_frame_request_callbacks(HighResolutionTime::DOMHighResTimeStamp now)
+{
+    // 1. If video's list of video frame request callbacks is empty, abort these steps.
+    if (m_list_of_video_frame_request_callbacks.is_empty())
+        return;
+
+    // NB: The video may present the frame for the callbacks in a later rendering update.
+    ScopeGuard request_rendering_update_for_pending_callbacks = [&] {
+        request_rendering_update_for_video_frame_callbacks();
+    };
+
+    // AD-HOC: The playback state change that updates the ready state may arrive after the presented frame changes,
+    //         and createImageBitmap() requires at least HAVE_CURRENT_DATA. Don't let a callback run until it can
+    //         capture a frame.
+    if (ready_state() < ReadyState::HaveCurrentData)
+        return;
+
+    // 2. Let metadata be the VideoFrameCallbackMetadata dictionary built from video's latest presented frame.
+    // AD-HOC: The frame stays held until the rendering update has run its animation frame callbacks, so that the
+    //         callbacks capture the frame that metadata describes.
+    auto presented_frame = hold_presented_video_frame_for_callbacks();
+    if (!presented_frame.has_value())
+        return;
+
+    // 3. Let presentedFrames be the value of metadata's presentedFrames field.
+    auto presented_frames = presented_frame->presented_frames;
+
+    // 4. If the last presented frame identifier is equal to presentedFrames, abort these steps.
+    if (m_last_presented_frame_identifier == presented_frames) {
+        release_presented_video_frame_held_for_callbacks();
+        return;
+    }
+
+    // 5. Set the last presented frame identifier to presentedFrames.
+    m_last_presented_frame_identifier = presented_frames;
+
+    auto& realm = relevant_realm(*this);
+    auto& global = relevant_global_object(*this);
+    auto metadata = JS::Object::create(realm, realm.intrinsics().object_prototype());
+    auto presentation_time = HighResolutionTime::relative_high_resolution_time(presented_frame->presentation_time.to_seconds_f64() * 1000.0, global);
+    MUST(metadata->create_data_property_or_throw("presentationTime"_utf16_fly_string, JS::Value(max(0.0, presentation_time))));
+    MUST(metadata->create_data_property_or_throw("expectedDisplayTime"_utf16_fly_string, JS::Value(now + document().page().client().rendering_frame_interval_in_milliseconds())));
+    MUST(metadata->create_data_property_or_throw("width"_utf16_fly_string, JS::Value(presented_frame->width)));
+    MUST(metadata->create_data_property_or_throw("height"_utf16_fly_string, JS::Value(presented_frame->height)));
+    MUST(metadata->create_data_property_or_throw("mediaTime"_utf16_fly_string, JS::Value(presented_frame->media_time.to_seconds_f64())));
+    MUST(metadata->create_data_property_or_throw("presentedFrames"_utf16_fly_string, JS::Value(static_cast<double>(presented_frames))));
+
+    // 6. Let callbacks be the list of video frame request callbacks.
+    // 7. Set video's list of video frame request callbacks to be empty.
+    m_running_video_frame_request_callbacks = move(m_list_of_video_frame_request_callbacks);
+    ScopeGuard clear_running_callbacks = [&] {
+        m_running_video_frame_request_callbacks.clear();
+        if (m_list_of_video_frame_request_callbacks.is_empty())
+            video_sink_ticking_inputs_changed();
+    };
+
+    // 8. For each entry of callbacks:
+    for (size_t index = 0; index < m_running_video_frame_request_callbacks.size(); index++) {
+        // 1. If entry's canceled boolean is true, continue.
+        auto callback = m_running_video_frame_request_callbacks[index].callback;
+        if (!callback)
+            continue;
+
+        // 2. Invoke entry with « now, metadata » and "report".
+        auto result = WebIDL::invoke_callback(*callback, {}, { { JS::Value(now), metadata } });
+        if (result.is_error())
+            report_exception(result, realm);
+    }
+}
+
+void HTMLVideoElement::request_rendering_update_for_video_frame_callbacks()
+{
+    if (m_list_of_video_frame_request_callbacks.is_empty())
+        return;
+    auto may_present_a_frame = potentially_playing() || seeking() || ready_state() < ReadyState::HaveCurrentData;
+    if (may_present_a_frame)
+        document().page().client().request_frame();
+}
+
+// https://w3c.github.io/media-playback-quality/#dom-htmlvideoelement-getvideoplaybackquality
+GC::Ref<VideoPlaybackQuality> HTMLVideoElement::get_video_playback_quality()
+{
+    auto frame_counts = video_frame_counts_since_last_load();
+    auto clamp_count = [](u64 count) { return static_cast<WebIDL::UnsignedLong>(min(count, NumericLimits<WebIDL::UnsignedLong>::max())); };
+
+    // 1. Let playbackQuality be a new instance of VideoPlaybackQuality.
+    // 2. Set playbackQuality.creationTime to the current high resolution time.
+    // 3. Set playbackQuality.totalVideoFrames to the current value of the total video frame count.
+    // 4. Set playbackQuality.droppedVideoFrames to the current value of the dropped video frame count.
+    // 5. [DEPRECATED] Set playbackQuality.corruptedVideoFrames to the current value of the corrupted video frame count.
+    // 6. Return playbackQuality.
+    return VideoPlaybackQuality::create(
+        HighResolutionTime::current_high_resolution_time(relevant_global_object(*this)),
+        clamp_count(frame_counts.dropped),
+        clamp_count(frame_counts.presented + frame_counts.dropped));
+}
+
+}

@@ -1,0 +1,28 @@
+/*
+ * Copyright (c) 2024-2025, Sam Atkins <sam@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/FlyString.h>
+#include <LibWeb/CSS/StyleValues/StyleValue.h>
+
+namespace Web::CSS {
+
+class WEB_API DimensionStyleValue : public StyleValue {
+public:
+    virtual ~DimensionStyleValue() override = default;
+
+    virtual double raw_value() const = 0;
+    virtual Utf16FlyString unit_name() const = 0;
+
+protected:
+    DimensionStyleValue(Type type, StyleValueFFI::StyleValueData const* value)
+        : StyleValue(type, value)
+    {
+    }
+};
+
+}

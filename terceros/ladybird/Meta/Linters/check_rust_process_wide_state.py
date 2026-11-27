@@ -1,0 +1,326 @@
+#!/usr/bin/env python3
+"""Keeps process-wide state out of the Rust crates that are compiled into more than one library.
+
+A Rust crate that another Rust crate depends on is compiled into both of their libraries, and so
+is every `static` in it. A dynamic linker with a flat namespace binds most calls to one of the
+copies and the duplication never shows; one with two-level namespaces, as macOS has, gives each
+library its own copy of the state, and a library that hides its symbols has its own copy
+everywhere. A counter one library increments is then not the counter the other reads, and nothing
+about the Rust says so.
+
+So state that has to be shared lives on the C++ side, in a library there is only one of, and the
+crate reaches it through `extern "C"` accessors (see Libraries/LibGfx/RustProcessState.cpp).
+Everything that stays in such a crate has to be listed below with the reason it may be per copy.
+
+It also keeps count of the state in libweb_rust, whose render states are to move to a thread that
+renders. A thread other than the document's either shares a `static` with it or silently gets a
+fresh `thread_local!` of its own, and either can be wrong, so every one there has to be listed
+below with the reason it is fine on another thread.
+
+The check is a line-based heuristic, not a parser: it misses a static whose type starts on the next
+line or hides its interior mutability behind a type alias.
+"""
+
+import pathlib
+import re
+import subprocess
+import sys
+
+# `file:name` -> why a per-copy instance is harmless: a cache of a pure function, per-thread scratch,
+# or a stub in a test binary.
+ALLOWED = {
+    "Libraries/LibGfx/Rust/src/text_layout.rs:SHAPING_CACHE": "per-thread memo of a pure function; a second copy costs memory, never an answer",
+    "AK/Rust/src/row_block.rs:NEXT_BLOCK": "numbers the blocks, so that a block only gives the rows of its own lists; a block and its lists stay in the library that made them, so two copies never compare numbers; a block that another library reads needs the counter moved to C++",
+    "AK/Rust/src/waiter_list.rs:LISTS": "only libjs_rust and libwasm_engine use it, which are in one library of a process, so they share a copy; a caller in another library needs the state moved to C++",
+    "Libraries/LibCompositing/Rust/src/test_stubs.rs:NEXT": "test stub for LibGfx's C++ counters, in the cargo test binary that has no C++ side",
+    "Libraries/LibCompositing/Rust/src/display_list/replay.rs:WARM_REPLAY_SCRATCH_STORAGE": "per-thread replay scratch; a second copy costs memory, never an answer",
+    "Libraries/LibIPC/Rust/src/transport_mach_port.rs:IO_THREAD": "the IO thread of the Mach transports that one copy of the crate makes; a transport stays with the thread of its copy, so a second copy that makes transports, as a test binary that also links LibIPC does, only costs a second thread. Its claims on send-possible requests are per copy too, which holds while no two copies send to the same port: a shipped process makes transports through one copy, and the test binary's two copies send to each other",
+    "Libraries/LibIPC/Rust/src/transport_socket.rs:IO_THREAD": "the IO thread of the socket transports that one copy of the crate makes; a transport stays with the thread of its copy, and registers its socket with that thread's poller under a token only that thread hands out, so a second copy that makes transports, as a test binary that also links LibIPC does, only costs a second thread",
+    "Libraries/LibIPC/Rust/src/transport.rs:STARTING": "serializes the start of a shared IO thread, and is per copy of the crate with the thread",
+    "Libraries/LibIPC/Rust/src/transport.rs:IS_SHARED_IO_THREAD": "per-thread marker of the shared IO thread of this copy of the crate, which only that copy's code reads",
+    "Libraries/LibJS/Flap/src/low_ir/lowering.rs:LABELS": "per-thread scratch buffer; a second copy costs memory, never an answer",
+    "Libraries/LibJS/JIT/Rust/src/asm/x86_64/sse.rs:FEATURES": "immutable CPU/OS feature cache; each copy computes the same supported instructions",
+    "Libraries/LibJS/JIT/Rust/src/codegen/tests.rs:REGION": "the fake heap region of JIT unit tests, in the cargo test binary that has no runtime",
+    "Libraries/LibJS/JIT/Rust/src/lib.rs:BLOCKS": "per-thread count of the allocator of JIT unit tests, in the cargo test binary that has no runtime",
+    "Libraries/LibJS/JIT/Rust/src/lib.rs:COUNTING": "per-thread switch of the allocator of JIT unit tests, in the cargo test binary that has no runtime",
+    "Libraries/LibRegex/Rust/src/vm.rs:INTERRUPT_FLAG": "per-thread, and only libjs_rust's copy sets it; the copy of LibURL's crate has no VM to interrupt, so it only ever sees null",
+    "Libraries/LibRegex/Rust/src/work_zone.rs:SPARE_ZONE": "per-thread allocation pool; a second copy costs memory, never an answer",
+    "Libraries/LibWeb/HTML/Parser/Rust/src/fragment.rs:SPARE_TAPE": "per-thread allocation pool; a second copy costs memory, never an answer",
+    "Libraries/LibWeb/HTML/Parser/Rust/src/fragment.rs:TAG_NAMES": "immutable table of the C++ fly strings of tag names; each copy reads the same strings",
+    "Libraries/LibWeb/HTML/Parser/Rust/src/parser/test_host.rs:FAKE_DOM": "the fake DOM of tree builder unit tests, in the cargo test binary that has no C++ side",
+    "Libraries/LibWeb/HTML/Parser/Rust/src/token.rs:SPARE_ATTRIBUTE_LISTS": "per-thread allocation pool; a second copy costs memory, never an answer",
+    "Libraries/LibWeb/HTML/Parser/Rust/src/token.rs:SPARE_ATTRIBUTE_VALUES": "per-thread allocation pool; a second copy costs memory, never an answer",
+}
+
+# The crates that another crate depends on by path but that are in one library of a process all the same: the crates
+# that depend on each, which have to be exactly these for the claim to hold, and the reason. The state of libweb_rust
+# is still checked below, for the threads that share it.
+IN_ONE_LIBRARY = {
+    "libjs_rust": (
+        {"libweb_bindings_rust"},
+        "a dependency of libweb_bindings_rust alone, whose archive LibWeb's library links; standalone JavaScript "
+        "tools link the crate independently, and no process uses both (Libraries/LibJS/CMakeLists.txt)",
+    ),
+    "libweb_rust": (
+        {"libweb_bindings_rust"},
+        "a dependency of libweb_bindings_rust alone, whose archive LibWeb's library links",
+    ),
+    "libwasm_engine": (
+        {"libwasm_jit", "libweb_bindings_rust"},
+        "a dev-dependency of libwasm_jit, whose tests run compiled code against it, and a dependency of "
+        "libweb_bindings_rust, whose archive LibWeb's library links; LibWasm's library builds the other copy, with the "
+        "C ABI, for the tools, and no process uses both (Libraries/LibWasm/CMakeLists.txt)",
+    ),
+}
+
+# libweb_rust: `file:name` -> why the state is fine on a thread other than the document's.
+RENDER_STATE_CRATE = "Libraries/LibWeb/Rust"
+
+SCRATCH = "per-thread allocation pool; a thread without one only allocates more"
+DIAGNOSTIC = "counter diagnostics; off unless an environment variable turns them on"
+ENVIRONMENT_SWITCH = "read-once environment switch; every thread sees the same answer"
+IDENTITY = "process-wide atomic counter handing out unique identities"
+BUILT_ONCE = "built once and read-only after; every thread shares the same table"
+LOCKED = "process-wide and behind a mutex or a lock"
+TEST_ONLY = "test only"
+
+
+def render_state_entries(reason, entries):
+    return {f"{RENDER_STATE_CRATE}/src/{entry}": reason for entry in entries}
+
+
+RENDER_STATE_ALLOWED = {
+    **render_state_entries(
+        SCRATCH,
+        [
+            "css/cascaded_properties.rs:STORE_POOL",
+            "css/parser/syntax_parser/structure.rs:CHILDREN",
+            "css/parser/value_parser.rs:UNRESOLVED_SOURCE",
+            "css/serialize.rs:SERIALIZATION_SINK",
+        ],
+    ),
+    **render_state_entries(
+        DIAGNOSTIC,
+        [
+            "css/ffi_stats.rs:COMPLETE_STYLE_UPDATE_STATE",
+            "css/ffi_stats.rs:CPP_CALLBACK_COUNT",
+            "css/ffi_stats.rs:THREAD_UNSAFE_CPP_CALLBACK_COUNT",
+        ],
+    ),
+    **render_state_entries(
+        ENVIRONMENT_SWITCH,
+        [
+            "layout/parallel_layout.rs:FORK_SETTINGS",
+            "layout/parallel_layout.rs:SUBTREE_LEASES_ARE_VERIFIED",
+            "layout/run_repeatability.rs:ENABLED",
+            "layout/run_repeatability.rs:VERIFICATION",
+            "layout/tree_builder/list_unit.rs:ENABLED",
+            "painting/hit_test/walk.rs:VERIFIED",
+            "painting/paint_passes.rs:PAINTING_TIMING_ENABLED",
+            "painting/record/ink_bounds.rs:VERIFICATION",
+            "painting/record/traversal.rs:VERIFIED",
+            "render_state/clock/hover.rs:LOGS",
+        ],
+    ),
+    **render_state_entries(
+        IDENTITY,
+        [
+            "animations/animation.rs:NEXT",
+            "animations/effect.rs:NEXT",
+            "animations/timeline.rs:NEXT",
+            "cow_column.rs:NEXT",
+            "css/declaration_block.rs:NEXT_DECLARATION_BLOCK_IDENTITY",
+            "css/rule.rs:NEXT_RULE_IDENTITY",
+            "css/style_sheet.rs:NEXT_SHEET_IDENTITY",
+            "layout/fragment_tree.rs:NEXT_UNRESERVED_IDENTITY",
+            "render_state/owner.rs:NEXT",
+        ],
+    ),
+    **render_state_entries(
+        "the render owner's slot; only the thread that holds it reaches its documents' render states",
+        ["render_state/owner.rs:SLOT"],
+    ),
+    **render_state_entries(
+        "per-thread count of the holds of the render owner's slot the thread is in",
+        ["render_state/owner.rs:HOLDS"],
+    ),
+    **render_state_entries(
+        "per-thread list of what the thread let go of in its hold of the render owner's slot, dropped as the hold ends",
+        ["render_state/owner.rs:DROPPED_AFTER_HOLD"],
+    ),
+    f"{RENDER_STATE_CRATE}/src/css/parser/value_parser.rs:INITIAL_VALUES": "per-thread cache of the initial values of longhands, parsed outside any document; every thread parses the same values",
+    f"{RENDER_STATE_CRATE}/src/render_state.rs:STACK_BASE": "per-thread cache of the thread's own stack bounds",
+    f"{RENDER_STATE_CRATE}/src/layout/parallel_layout.rs:SUBTREE_LEASE_OF_THIS_THREAD": "per-thread lease of the subtree the layout task running on the thread may write, held only while LIBWEB_VERIFY_LAYOUT_FORK_SCOPE checks it and only for that task",
+    f"{RENDER_STATE_CRATE}/src/layout/layout_pass.rs:WORKER_SCRATCH_OF_THIS_THREAD": "per-thread spare layout buffers and the fragment identities the thread reserved; a thread without one only allocates more and reserves another range",
+    f"{RENDER_STATE_CRATE}/src/stage_thread.rs:UNFINISHED_HANDED": "per-thread count of the jobs the thread made for each stage thread that have yet to run",
+    **render_state_entries(
+        BUILT_ONCE,
+        [
+            "animations/easing.rs:LINEAR",
+            "css/counter_representation.rs:DECIMAL",
+            "css/css_string.rs:EMPTY",
+            "css/custom_properties.rs:EMPTY",
+            "css/parser/stylesheet_cache.rs:HASHER",
+            "css/parser/stylesheet_cache.rs:KEYS",
+            "css/property_metadata.rs:SHORTHAND_LEAVES",
+            "css/style_compute.rs:DIRECT",
+            "css/style_compute.rs:FONT_ORDER",
+            "css/style_compute.rs:FONT_PHASES",
+            "css/style_compute.rs:KINDS",
+            "css/style_compute.rs:PHASE_BOUNDARIES",
+            "css/style_compute.rs:PX",
+            "css/style_compute.rs:RANKS",
+            "css/style_compute.rs:REMAINING_ORDER",
+            "css/style_compute.rs:TABLE",
+            "style_layout_pool.rs:THREAD_COUNT",
+            "web_audio/rendering/render_nodes.rs:COEFFICIENTS",
+        ],
+    ),
+    **render_state_entries(
+        LOCKED,
+        [
+            "css/parser/sheet_source_text.rs:QUEUE",
+            "css/parser/stylesheet_cache.rs:CACHE",
+        ],
+    ),
+    **render_state_entries(
+        TEST_ONLY,
+        [
+            "css/custom_properties.rs:CUSTOM_PROPERTY_COMPUTATIONS",
+            "css/declaration_block.rs:DECLARATION_OWNER_ALLOCATIONS",
+            "css/descriptor_block.rs:DESCRIPTOR_OWNER_ALLOCATIONS",
+            "css/rule.rs:RULE_OWNER_ALLOCATIONS",
+            "css/style/font_resolution.rs:RESOLVES",
+            "css/style/pipeline/allocation_count.rs:ALLOCATIONS",
+            "css/style/pipeline/allocation_count.rs:COUNTING",
+            "css/style/pipeline/allocation_count.rs:LIVE_BYTES",
+            "css/style/pipeline/allocation_count.rs:PRINTS_BACKTRACES",
+            "css/style/pipeline/allocation_count.rs:PRINTS_BACKTRACES_CACHE",
+            "css/style/pipeline/allocation_count.rs:STYLE_ALLOCATIONS",
+            "css/style/pipeline/allocation_count.rs:STYLE_SECTION_DEPTH",
+            "css/style/pipeline/test_support.rs:NAMES",
+            "css/style_compute/ffi_test_stubs.rs:FLY_STRINGS",
+            "css/style_compute/ffi_test_stubs.rs:FONT_CASCADE_LIST_UNREFS",
+            "css/style_compute/ffi_test_stubs.rs:NEXT",
+        ],
+    ),
+    f"{RENDER_STATE_CRATE}/src/css/custom_properties.rs:COMPARED_STORES": "per-thread memo of comparing immutable stores; a thread without one only walks their values again",
+    f"{RENDER_STATE_CRATE}/src/css/parser/stylesheet_cache.rs:PARSE_DEPENDENCIES": "per-thread record of the parse running on this thread; scoped to that parse",
+    f"{RENDER_STATE_CRATE}/src/css/style_value.rs:VALUES": "built-once keyword values, and a replay-only table of the same name",
+    f"{RENDER_STATE_CRATE}/src/css/parser/value_parser.rs:LISTS": "built-once immutable lists of initial background values",
+    f"{RENDER_STATE_CRATE}/src/painting/recording_slot.rs:RECORDING_HOLD": "a test's hold on the next recording that flies, behind a mutex; only internals arms it",
+    f"{RENDER_STATE_CRATE}/src/painting/recording_slot.rs:RECORDING_HOLD_RELEASED": "wakes the recording a test held once it lets it go",
+    f"{RENDER_STATE_CRATE}/src/painting/recording_slot.rs:CLAIM_HOLD_BLOCKS_RENDER_THREAD": "whether a test's claim hold blocks the Render thread, which a thread about to wait for that thread reads without the hold's mutex",
+    f"{RENDER_STATE_CRATE}/src/stage_thread.rs:THREAD_SETUP": "set once before the first stage thread starts, which runs it; read-only after",
+    f"{RENDER_STATE_CRATE}/src/stage_thread.rs:FLIGHT_FINISHED": "set once before the first job is submitted, which a stage thread calls when one finishes; read-only after",
+    f"{RENDER_STATE_CRATE}/src/stage_thread.rs:RENDER_THREAD": "the process's one Render thread, which every thread hands its jobs to",
+    f"{RENDER_STATE_CRATE}/src/paint_stage.rs:PAINT_THREAD": "the process's one Paint thread, which every thread hands its jobs to, and the stage only its own jobs reach",
+    f"{RENDER_STATE_CRATE}/src/stage_thread.rs:THREAD": "test only",
+}
+
+STATE = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?static\s+(mut\s+)?([A-Z_][A-Z0-9_]*)\s*:\s*(.*)$")
+
+# A `static` whose type has none of these, and that is not `static mut`, cannot be written, so it is
+# constant data, not state. A `thread_local!` value is only writable through one of these too.
+INTERIOR_MUTABILITY = re.compile(r"Cell|Atomic|Mutex|RwLock|Once|Lazy|Condvar")
+
+
+def tracked_files(root, pattern):
+    output = subprocess.run(["git", "ls-files", "--", pattern], cwd=root, capture_output=True, text=True, check=True)
+    return [root / line for line in output.stdout.splitlines()]
+
+
+def crate_name(manifest):
+    match = re.search(r"^name\s*=\s*\"([^\"]+)\"", manifest.read_text(), re.M)
+    return match.group(1) if match else None
+
+
+def path_dependencies(manifest):
+    """The names of the crates the manifest depends on by path, as dependencies of any kind."""
+    return set(re.findall(r"^([a-z_0-9]+)\s*=\s*\{[^}]*\bpath\s*=", manifest.read_text(), re.M))
+
+
+def crates_compiled_into_more_than_one_library(manifests):
+    """Every crate some other crate depends on by path: its code, and its statics, end up in both, unless the crate is
+    one of IN_ONE_LIBRARY, whose claim about the crates that depend on it is checked here."""
+    dependents = {}
+    for manifest in manifests:
+        for dependency in path_dependencies(manifest):
+            dependents.setdefault(dependency, set()).add(crate_name(manifest))
+    for crate, (expected_dependents, _) in IN_ONE_LIBRARY.items():
+        if dependents.get(crate, set()) != expected_dependents:
+            sys.exit(
+                f"{crate} is listed in IN_ONE_LIBRARY as a dependency of {sorted(expected_dependents)} alone, but "
+                f"{sorted(dependents.get(crate, set()))} depend on it; its state is shared unless they are one "
+                "library, so update the list or move the state to C++"
+            )
+    return set(dependents) - set(IN_ONE_LIBRARY)
+
+
+def state_in(root, source_directory, every_thread_local=False):
+    """Yields `(relative path, line number, name)` for every writable static in the crate's sources, and
+    every `thread_local!` where `every_thread_local`, whatever its type."""
+    for source in sorted(source_directory.glob("**/*.rs")):
+        relative = source.relative_to(root).as_posix()
+        in_thread_local = False
+        for number, line in enumerate(source.read_text().splitlines(), start=1):
+            if re.match(r"^\s*thread_local!\s*\{", line):
+                in_thread_local = True
+                continue
+            if in_thread_local and re.match(r"^\s*\}", line):
+                in_thread_local = False
+            match = STATE.match(line)
+            if not match:
+                continue
+            # A shared reference to constant data is not state: nothing can write it.
+            if match.group(3).lstrip().startswith("&"):
+                continue
+            if match.group(1) or INTERIOR_MUTABILITY.search(match.group(3)) or (every_thread_local and in_thread_local):
+                yield relative, number, match.group(2)
+
+
+def main():
+    root = pathlib.Path(__file__).resolve().parent.parent.parent
+    manifests = tracked_files(root, "*Cargo.toml")
+    shared_crates = crates_compiled_into_more_than_one_library(manifests)
+    failures = []
+    present = set()
+    for manifest in manifests:
+        if crate_name(manifest) not in shared_crates:
+            continue
+        for relative, number, name in state_in(root, manifest.parent / "src"):
+            present.add(f"{relative}:{name}")
+            if f"{relative}:{name}" not in ALLOWED:
+                failures.append(f"{relative}:{number}: {name}")
+    # An entry whose state has gone must go too, or it would let the state come back unnoticed.
+    for entry in sorted(ALLOWED.keys() - present):
+        failures.append(f"{entry}: listed in ALLOWED but no longer present")
+
+    render_state_failures = []
+    render_state_present = set()
+    for relative, number, name in state_in(root, root / RENDER_STATE_CRATE / "src", every_thread_local=True):
+        render_state_present.add(f"{relative}:{name}")
+        if f"{relative}:{name}" not in RENDER_STATE_ALLOWED:
+            render_state_failures.append(f"{relative}:{number}: {name}")
+    for entry in sorted(RENDER_STATE_ALLOWED.keys() - render_state_present):
+        render_state_failures.append(f"{entry}: listed in RENDER_STATE_ALLOWED but no longer present")
+
+    if not failures and not render_state_failures:
+        return 0
+    if failures:
+        print("A Rust crate compiled into more than one library must keep no process-wide state:")
+        for failure in failures:
+            print(f"  {failure}")
+        print("Move it behind C++-owned storage (see Libraries/LibGfx/RustProcessState.cpp), or add it")
+        print("to ALLOWED in this script with the reason a per-copy instance is harmless.")
+    if render_state_failures:
+        print("A static or thread_local in libweb_rust is state another thread shares or copies:")
+        for failure in render_state_failures:
+            print(f"  {failure}")
+        print("Move it into a document's render state, or add it to RENDER_STATE_ALLOWED in this")
+        print("script with the reason it is fine on a thread other than the document's.")
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

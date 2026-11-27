@@ -1,0 +1,26 @@
+// https://html.spec.whatwg.org/multipage/media.html#texttrackmode
+enum TextTrackMode { "disabled",  "hidden",  "showing" };
+
+// https://html.spec.whatwg.org/multipage/media.html#texttrackkind
+enum TextTrackKind { "subtitles",  "captions",  "descriptions",  "chapters",  "metadata" };
+
+// https://html.spec.whatwg.org/multipage/media.html#texttrack
+[Exposed=Window]
+interface TextTrack : EventTarget {
+    readonly attribute TextTrackKind kind;
+    readonly attribute DOMString label;
+    readonly attribute DOMString language;
+
+    readonly attribute DOMString id;
+    [FIXME] readonly attribute DOMString inBandMetadataTrackDispatchType;
+
+    attribute TextTrackMode mode;
+
+    readonly attribute TextTrackCueList? cues;
+    readonly attribute TextTrackCueList? activeCues;
+
+    undefined addCue(TextTrackCue cue);
+    undefined removeCue(TextTrackCue cue);
+
+    attribute EventHandler oncuechange;
+};

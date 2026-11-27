@@ -1,0 +1,832 @@
+/*
+ * Copyright (c) 2023, Andrew Kaster <akaster@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/Enumerate.h>
+#include <AK/HashMap.h>
+#include <AK/NeverDestroyed.h>
+#include <AK/ScopeGuard.h>
+#include <AK/StringBuilder.h>
+#include <LibCore/ElapsedTimer.h>
+#include <LibCore/File.h>
+#include <LibCore/Process.h>
+#include <LibCore/System.h>
+#include <LibSandbox/ConnectBroker.h>
+#include <LibURL/Parser.h>
+#include <LibWebView/Application.h>
+#include <LibWebView/AudioServerControlClient.h>
+#include <LibWebView/CompositorClient.h>
+#include <LibWebView/FontService.h>
+#include <LibWebView/FontServiceHost.h>
+#include <LibWebView/HelperProcess.h>
+#include <LibWebView/ImageDecoderControlClient.h>
+#include <LibWebView/RecentLossCounter.h>
+#include <LibWebView/RequestServerManager.h>
+#include <LibWebView/Utilities.h>
+#include <LibWebView/VideoDecoderServerControlClient.h>
+
+#if defined(AK_OS_MACOS)
+#    include <notify.h>
+#    include <signal.h>
+#    include <sys/wait.h>
+#elif defined(AK_OS_LINUX)
+#    include <AudioServer/BrokeredAudioDaemon.h>
+#    include <LibWebView/AudioDaemonSocket.h>
+#    include <signal.h>
+#    include <sys/socket.h>
+#    include <sys/wait.h>
+#endif
+
+namespace WebView {
+
+struct CPUProfiler {
+    Core::Process process;
+    OwnPtr<Core::File> control_socket;
+};
+
+static ErrorOr<CPUProfiler> launch_cpu_profiler(StringView server_name, pid_t pid, Optional<ByteString> const& configured_output)
+{
+#if defined(AK_OS_MACOS)
+    auto output = configured_output.value_or(ByteString::formatted("Ladybird-{}-{}.trace", server_name, pid));
+    auto notification_name = ByteString::formatted("org.ladybird.cpu-profiler-ready.{}.{}", Core::System::getpid(), pid);
+
+    int notification_token = 0;
+    if (notify_register_check(notification_name.characters(), &notification_token) != NOTIFY_STATUS_OK)
+        return Error::from_string_literal("Unable to register for the xctrace startup notification");
+    ScopeGuard cancel_notification = [&] { notify_cancel(notification_token); };
+
+    Vector<ByteString> arguments {
+        "record"sv,
+        "--template"sv,
+        "Time Profiler"sv,
+        "--attach"sv,
+        ByteString::number(pid),
+        "--output"sv,
+        output,
+        "--notify-tracing-started"sv,
+        notification_name,
+        "--no-prompt"sv,
+    };
+    auto profiler = TRY(Core::Process::spawn({
+        .executable = "xctrace"sv,
+        .search_for_executable_in_path = true,
+        .arguments = arguments,
+    }));
+    ArmedScopeGuard stop_profiler = [&] {
+        (void)Core::System::kill(profiler.pid(), SIGINT);
+        (void)profiler.wait_for_termination();
+    };
+
+    auto timer = Core::ElapsedTimer::start_new();
+    for (;;) {
+        int tracing_started = 0;
+        if (notify_check(notification_token, &tracing_started) != NOTIFY_STATUS_OK)
+            return Error::from_string_literal("Unable to check the xctrace startup notification");
+        if (tracing_started)
+            break;
+
+        auto wait_result = TRY(Core::System::waitpid(profiler.pid(), WNOHANG));
+        if (wait_result.pid != 0)
+            return Error::from_string_literal("xctrace exited before profiling started");
+        if (timer.elapsed_milliseconds() >= 30'000)
+            return Error::from_string_literal("Timed out waiting for xctrace to start profiling");
+        TRY(Core::System::sleep_ms(10));
+    }
+
+    dbgln("Launched {} process under Time Profiler; writing {}", server_name, output);
+    stop_profiler.disarm();
+    return CPUProfiler { move(profiler), nullptr };
+#elif defined(AK_OS_LINUX)
+    auto output = configured_output.value_or(ByteString::formatted("perf.data.{}", pid));
+
+    Array<int, 2> control_socket;
+    Array<int, 2> acknowledgement_socket;
+    TRY(Core::System::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, control_socket.data()));
+    TRY(Core::System::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, acknowledgement_socket.data()));
+    ScopeGuard close_sockets = [&] {
+        for (auto fd : control_socket)
+            (void)Core::System::close(fd);
+        for (auto fd : acknowledgement_socket)
+            (void)Core::System::close(fd);
+    };
+
+    Vector<ByteString> arguments {
+        "record"sv,
+        "--pid"sv,
+        ByteString::number(pid),
+        "--output"sv,
+        output,
+        "--delay=-1"sv,
+        ByteString::formatted("--control=fd:{},{}", control_socket[1], acknowledgement_socket[1]),
+    };
+    auto profiler = TRY(Core::Process::spawn({
+        .executable = "perf"sv,
+        .search_for_executable_in_path = true,
+        .arguments = arguments,
+        .file_actions = {
+            Core::FileAction::DupFd { .write_fd = control_socket[1], .fd = control_socket[1] },
+            Core::FileAction::DupFd { .write_fd = acknowledgement_socket[1], .fd = acknowledgement_socket[1] },
+        },
+    }));
+    TRY(Core::System::close(control_socket[1]));
+    control_socket[1] = -1;
+    TRY(Core::System::close(acknowledgement_socket[1]));
+    acknowledgement_socket[1] = -1;
+    ArmedScopeGuard stop_profiler = [&] {
+        (void)Core::System::kill(profiler.pid(), SIGINT);
+        (void)profiler.wait_for_termination();
+    };
+
+    // perf acknowledges this command only after it has attached and configured its events.
+    static constexpr Array<u8, 7> enable_command { 'e', 'n', 'a', 'b', 'l', 'e', '\n' };
+    auto sent = TRY(Core::System::send(control_socket[0], enable_command.span(), MSG_NOSIGNAL));
+    if (sent != enable_command.size())
+        return Error::from_string_literal("Unable to enable perf profiling");
+
+    Array<u8, 4> acknowledgement;
+    size_t received = 0;
+    while (received < acknowledgement.size()) {
+        auto bytes_read = TRY(Core::System::read(acknowledgement_socket[0], acknowledgement.span().slice(received)));
+        if (bytes_read == 0)
+            return Error::from_string_literal("perf exited before profiling started");
+        received += bytes_read;
+    }
+    if (acknowledgement != Array<u8, 4> { 'a', 'c', 'k', '\n' })
+        return Error::from_string_literal("perf returned an invalid startup acknowledgement");
+
+    // Keep the control socket open until perf exits. Some perf versions incorrectly abort the recording on POLLHUP.
+    auto controller = TRY(Core::File::adopt_fd(control_socket[0], Core::File::OpenMode::Write));
+    control_socket[0] = -1;
+
+    dbgln("Launched {} process under perf; writing {}", server_name, output);
+    stop_profiler.disarm();
+    return CPUProfiler { move(profiler), move(controller) };
+#else
+    (void)server_name;
+    (void)pid;
+    (void)configured_output;
+    return Error::from_string_literal("CPU profiling is only supported on macOS and Linux");
+#endif
+}
+
+#if defined(AK_OS_MACOS) || defined(AK_OS_LINUX)
+static Optional<PlatformFeatures::FeatureProcess> feature_process_for(ProcessType process_type)
+{
+    switch (process_type) {
+    case ProcessType::Compositor:
+        return PlatformFeatures::FeatureProcess::Compositor;
+    case ProcessType::VideoDecoderServer:
+        return PlatformFeatures::FeatureProcess::VideoDecoderServer;
+    default:
+        return {};
+    }
+}
+#endif
+
+// Spawns the helper with the given function, which returns the Process to keep track of, and returns the helper's
+// identity.
+template<typename SpawnFunction>
+static ErrorOr<ChildIdentity> launch_helper_process(StringView server_name, Vector<ByteString> arguments, IsPrivate is_private, SpawnFunction&& spawn)
+{
+    auto process_type = WebView::process_type_from_name(server_name);
+    auto const& browser_options = WebView::Application::browser_options();
+
+    auto candidate_server_paths = TRY(get_paths_for_helper_process(server_name));
+
+    if (browser_options.profile_helper_process == process_type && browser_options.profile_tool == ProfileTool::Callgrind) {
+        arguments.prepend({
+            "--tool=callgrind"sv,
+            "--instr-atstart=no"sv,
+            ""sv, // Placeholder for the process path.
+        });
+    }
+
+    if (browser_options.debug_helper_processes.contains_slow(process_type))
+        arguments.append("--wait-for-debugger"sv);
+
+    for (auto [i, path] : enumerate(candidate_server_paths)) {
+        auto process_arguments = arguments;
+        Core::ProcessSpawnOptions options { .name = server_name };
+
+        if (browser_options.profile_helper_process == process_type && browser_options.profile_tool == ProfileTool::Callgrind) {
+            options.executable = "valgrind"sv;
+            options.search_for_executable_in_path = true;
+            process_arguments[2] = path;
+        } else {
+            options.executable = path;
+        }
+
+        OwnPtr<CrashReport> crash_report;
+        OwnPtr<Core::File> crash_report_child_file;
+#if defined(AK_OS_MACOS) || defined(AK_OS_LINUX)
+        if (WebView::Application::web_content_options().is_test_mode == IsTestMode::No) {
+            auto report = CrashReport::create(process_type);
+            if (report.is_error()) {
+                warnln("Could not prepare {} crash reporting: {}", server_name, report.error());
+            } else {
+                crash_report = report.release_value();
+                if (auto feature_process = feature_process_for(process_type); feature_process.has_value())
+                    crash_report->set_platform_features_description(WebView::Application::the().describe_platform_features_for_report(*feature_process));
+                // Reserve a distinct destination so dup2 clears close-on-exec
+                // in the child, including on the Linux fork/exec path.
+                auto child_fd = TRY(Core::System::fcntl(crash_report->fd(), F_DUPFD_CLOEXEC, 0));
+                crash_report_child_file = TRY(Core::File::adopt_fd(child_fd, Core::File::OpenMode::Write));
+                options.file_actions.append(Core::FileAction::DupFd { .write_fd = crash_report->fd(), .fd = child_fd });
+                process_arguments.append("--crash-report-fd"sv);
+                process_arguments.append(ByteString::number(crash_report_child_file->fd()));
+            }
+        }
+#endif
+#if defined(AK_OS_LINUX)
+        OwnPtr<Sandbox::ConnectBroker> connect_broker;
+        OwnPtr<Core::File> connect_broker_child_file;
+
+        // The AudioServer cannot create a socket of its own. It connects to a name nothing listens on, and the
+        // broker connects that socket to the audio daemon wherever it is at the time, so the daemon is found
+        // without anyone knowing its address in advance, and found again should it move.
+        if (process_type == ProcessType::AudioServer) {
+            auto broker = Sandbox::ConnectBroker::create(ByteString { AudioServer::brokered_audio_daemon_path }, [] {
+                return audio_daemon_socket_path();
+            });
+            if (broker.is_error()) {
+                warnln("Could not start the {} connection broker: {}", server_name, broker.error());
+            } else {
+                connect_broker = broker.release_value();
+                // Reserve a distinct destination so dup2 clears close-on-exec in the child.
+                auto child_fd = TRY(Core::System::fcntl(connect_broker->helper_fd(), F_DUPFD_CLOEXEC, 0));
+                connect_broker_child_file = TRY(Core::File::adopt_fd(child_fd, Core::File::OpenMode::ReadWrite));
+                options.file_actions.append(Core::FileAction::DupFd { .write_fd = connect_broker->helper_fd(), .fd = child_fd });
+                process_arguments.append("--connect-broker-fd"sv);
+                process_arguments.append(ByteString::number(connect_broker_child_file->fd()));
+            }
+        }
+#endif
+
+        options.arguments = process_arguments;
+        bool capture_output = WebView::Application::the().should_capture_web_content_output();
+        auto result = spawn(options, capture_output);
+
+        if (!result.is_error()) {
+            auto process = result.release_value();
+            process.set_is_private(is_private);
+            if (crash_report)
+                process.set_crash_report(crash_report.release_nonnull());
+#if defined(AK_OS_LINUX)
+            if (connect_broker)
+                process.set_connect_broker(connect_broker.release_nonnull());
+#endif
+
+            if (WebView::Application::the().claim_cpu_profiler(process_type)) {
+                auto profiler = TRY(launch_cpu_profiler(server_name, process.pid(), browser_options.profile_output));
+                WebView::Application::the().set_cpu_profiler_process(move(profiler.process), move(profiler.control_socket));
+            }
+
+            auto identity = WebView::Application::the().add_child_process(move(process));
+
+            if (browser_options.profile_helper_process == process_type && browser_options.profile_tool == ProfileTool::Callgrind) {
+                dbgln();
+                dbgln("\033[1;34mLaunched {} process under callgrind!\033[0m", server_name);
+                dbgln("\033[1;36mRun `\033[4mcallgrind_control -i on\033[24m` to start instrumentation and `\033[4mcallgrind_control -i off\033[24m` stop it again.\033[0m");
+                dbgln();
+            }
+
+            return identity;
+        }
+
+        if (i == candidate_server_paths.size() - 1) {
+            warnln("Could not launch any of {}: {}", candidate_server_paths, result.error());
+            return result.release_error();
+        }
+    }
+
+    VERIFY_NOT_REACHED();
+}
+
+template<typename ClientType, typename... ClientArguments>
+static ErrorOr<NonnullRefPtr<ClientType>> launch_server_process(
+    StringView server_name,
+    Vector<ByteString> arguments,
+    IsPrivate is_private,
+    ClientArguments&&... client_arguments)
+{
+    RefPtr<ClientType> client;
+    auto identity = TRY(launch_helper_process(server_name, move(arguments), is_private, [&](Core::ProcessSpawnOptions const& options, bool capture_output) -> ErrorOr<WebView::Process> {
+        auto [process, new_client] = TRY(WebView::Process::spawn<ClientType>(WebView::process_type_from_name(server_name), options, capture_output, forward<ClientArguments>(client_arguments)...));
+        client = move(new_client);
+        return move(process);
+    }));
+
+    if constexpr (requires { client->set_child_identity(ChildIdentity {}); })
+        client->set_child_identity(identity);
+    return client.release_nonnull();
+}
+
+// Launches a server that works for the given process, so that the server is listed with it, or with the site if it has one.
+template<typename ClientType>
+static ErrorOr<NonnullRefPtr<ClientType>> launch_server_process_for(u64 owner_child_id, IsPrivate is_private, StringView server_name, Vector<ByteString> arguments, Optional<Utf16String> const& site = {})
+{
+    RefPtr<ClientType> client;
+    auto identity = TRY(launch_helper_process(server_name, move(arguments), is_private, [&](Core::ProcessSpawnOptions const& options, bool capture_output) -> ErrorOr<WebView::Process> {
+        auto [process, new_client] = TRY(WebView::Process::spawn<ClientType>(WebView::process_type_from_name(server_name), options, capture_output));
+        process.set_owner_child_id(owner_child_id);
+        if (site.has_value())
+            process.set_site_url(URL::Parser::basic_parse(*site));
+        client = move(new_client);
+        return move(process);
+    }));
+
+    if constexpr (requires { client->set_child_identity(ChildIdentity {}); })
+        client->set_child_identity(identity);
+    return client.release_nonnull();
+}
+
+// Gives a new process its one connection to the font service. This is the first message it gets, so that every font
+// question it asks, from any thread, can go out on that connection.
+template<typename ClientType>
+static ErrorOr<void> connect_to_font_service(ClientType& client)
+{
+    auto font_catalog = TRY(Application::font_service().clone_catalog());
+    client.async_set_font_service(TRY(Application::font_service_host().connect()), move(font_catalog.file), font_catalog.size, font_catalog.generation);
+    return {};
+}
+
+ErrorOr<NonnullRefPtr<WebView::WebContentClient>> launch_web_content_process(BrowsingSession& session, Web::PageId initial_page_id, Web::HTML::CrossProcessId root_navigable_id)
+{
+    auto const& browser_options = WebView::Application::browser_options();
+    auto const& web_content_options = WebView::Application::web_content_options();
+
+    Vector<ByteString> arguments;
+
+    if (browser_options.headless_mode.has_value())
+        arguments.append("--headless"sv);
+
+    if (web_content_options.is_test_mode == WebView::IsTestMode::Yes)
+        arguments.append("--test-mode"sv);
+    if (web_content_options.log_all_js_exceptions == WebView::LogAllJSExceptions::Yes)
+        arguments.append("--log-all-js-exceptions"sv);
+    if (web_content_options.enable_http_memory_cache == WebView::EnableMemoryHTTPCache::Yes)
+        arguments.append("--enable-http-memory-cache"sv);
+    if (web_content_options.expose_experimental_interfaces == WebView::ExposeExperimentalInterfaces::Yes)
+        arguments.append("--expose-experimental-interfaces"sv);
+    if (web_content_options.expose_internals_object == WebView::ExposeInternalsObject::Yes)
+        arguments.append("--expose-internals-object"sv);
+    if (web_content_options.collect_garbage_on_every_allocation == WebView::CollectGarbageOnEveryAllocation::Yes)
+        arguments.append("--collect-garbage-on-every-allocation"sv);
+    if (web_content_options.paint_viewport_scrollbars == PaintViewportScrollbars::No)
+        arguments.append("--disable-scrollbar-painting"sv);
+    if (web_content_options.file_scheme_urls_have_tuple_origins == FileSchemeUrlsHaveTupleOrigins::Yes)
+        arguments.append("--tuple-file-origins"sv);
+    if (browser_options.disable_sandbox == DisableSandbox::Yes)
+        arguments.append("--disable-sandbox"sv);
+
+    if (auto const maybe_echo_server_port = web_content_options.echo_server_port; maybe_echo_server_port.has_value()) {
+        arguments.append("--echo-server-port"sv);
+        arguments.append(ByteString::number(maybe_echo_server_port.value()));
+    }
+
+    if (auto const maybe_https_echo_server_port = web_content_options.https_echo_server_port; maybe_https_echo_server_port.has_value()) {
+        arguments.append("--https-echo-server-port"sv);
+        arguments.append(ByteString::number(maybe_https_echo_server_port.value()));
+    }
+
+    if (web_content_options.default_time_zone.has_value()) {
+        arguments.append("--default-time-zone");
+        arguments.append(web_content_options.default_time_zone.value());
+    }
+
+    if (web_content_options.proxy_autoconfig_url.has_value())
+        arguments.append(ByteString::formatted("--proxy-autoconfig-url={}", *web_content_options.proxy_autoconfig_url));
+    if (auto server = mach_server_name(); server.has_value()) {
+        arguments.append("--mach-server-name"sv);
+        arguments.append(server.value());
+    }
+
+    auto client = TRY(launch_server_process<WebView::WebContentClient>("WebContent"sv, move(arguments), session.is_private(), session, initial_page_id, root_navigable_id));
+    TRY(connect_to_font_service(*client));
+
+    // The test-only messages live on their own endpoint pair, over a transport that only exists in test mode.
+    if (web_content_options.is_test_mode == WebView::IsTestMode::Yes) {
+        auto test_transport = TRY(IPC::Transport::create_paired());
+        client->async_connect_to_test_endpoint(move(test_transport.remote_handle));
+        client->connect_test_endpoint(move(test_transport.local));
+    }
+
+    if (auto system_font_family = WebView::Application::the().system_font_family(); system_font_family.has_value())
+        client->async_set_system_font_family(system_font_family.release_value());
+    return client;
+}
+
+ErrorOr<NonnullRefPtr<ImageDecoderControlClient>> launch_image_decoder_process(u64 owner_child_id, IsPrivate is_private, Optional<Utf16String> const& site)
+{
+    auto const& browser_options = WebView::Application::browser_options();
+
+    Vector<ByteString> arguments;
+    if (browser_options.disable_sandbox == DisableSandbox::Yes)
+        arguments.append("--disable-sandbox"sv);
+    if (auto server = mach_server_name(); server.has_value()) {
+        arguments.append("--mach-server-name"sv);
+        arguments.append(server.value());
+    }
+
+    return launch_server_process_for<ImageDecoderControlClient>(owner_child_id, is_private, "ImageDecoder"sv, move(arguments), site);
+}
+
+ErrorOr<IPC::TransportHandle> launch_webrtc_client_process(WebContentClient& client)
+{
+    // A renderer only asks again once it has lost its helper, so one that is still around is on its way out. Never let
+    // a renderer hold more than one.
+    Vector<u64> previous_helpers;
+    Application::process_manager().for_each_process([&](Process& process) {
+        if (process.type() == ProcessType::WebRTCClient && process.owner_child_id() == client.child_id())
+            previous_helpers.append(process.child_id());
+    });
+    for (auto child_id : previous_helpers)
+        (void)Application::process_manager().terminate_child(child_id, Core::Process::TerminationMode::Forceful);
+
+    Vector<ByteString> arguments;
+    if (WebView::Application::browser_options().disable_sandbox == DisableSandbox::Yes)
+        arguments.append("--disable-sandbox"sv);
+    // None of WebRTC's traffic could go through a proxy, so with one configured the helper gets no network access at
+    // all rather than reveal the user's address.
+    if (!Application::request_server_options().proxy_configuration.is_empty() || Application::web_content_options().proxy_autoconfig_url.has_value())
+        arguments.append("--disable-network"sv);
+    if (auto server = mach_server_name(); server.has_value()) {
+        arguments.append("--mach-server-name"sv);
+        arguments.append(server.value());
+    }
+
+    // NB: The renderer's sandbox does not let it spawn processes, so the Browser launches the helper and hands its end
+    //     of the transport over.
+    OwnPtr<IPC::Transport> transport;
+    TRY(launch_helper_process("WebRTCClient"sv, move(arguments), client.is_private(), [&](Core::ProcessSpawnOptions const& options, bool capture_output) -> ErrorOr<WebView::Process> {
+        auto [process, new_transport] = TRY(WebView::Process::spawn_with_transport(ProcessType::WebRTCClient, options, capture_output));
+        process.set_owner_child_id(client.child_id());
+        transport = move(new_transport);
+        return move(process);
+    }));
+
+    return transport->release_for_transfer();
+}
+
+ErrorOr<NonnullRefPtr<AudioServerControlClient>> launch_audio_server_process(u64 owner_child_id, IsPrivate is_private)
+{
+    auto const& browser_options = WebView::Application::browser_options();
+
+    Vector<ByteString> arguments;
+    if (browser_options.headless_mode.has_value())
+        arguments.append("--headless"sv);
+    if (browser_options.disable_sandbox == DisableSandbox::Yes)
+        arguments.append("--disable-sandbox"sv);
+    if (auto server = mach_server_name(); server.has_value()) {
+        arguments.append("--mach-server-name"sv);
+        arguments.append(server.value());
+    }
+
+    return launch_server_process_for<AudioServerControlClient>(owner_child_id, is_private, "AudioServer"sv, arguments);
+}
+
+ErrorOr<NonnullRefPtr<MediaClient::Client>> launch_media_server_process(u64 owner_child_id, IsPrivate is_private)
+{
+    auto const& browser_options = WebView::Application::browser_options();
+
+    Vector<ByteString> arguments;
+    if (browser_options.disable_sandbox == DisableSandbox::Yes)
+        arguments.append("--disable-sandbox"sv);
+    if (auto server = mach_server_name(); server.has_value()) {
+        arguments.append("--mach-server-name"sv);
+        arguments.append(server.value());
+    }
+
+    return launch_server_process_for<MediaClient::Client>(owner_child_id, is_private, "MediaServer"sv, arguments);
+}
+
+static NeverDestroyed<Vector<WeakPtr<VideoDecoderServerControlClient>>> s_video_decoder_servers;
+
+// A GPU driver failure tends to take every running VideoDecoderServer with it, some by crashing and others by stalling
+// until they are found stuck, so the window covers the time it takes to find one stuck.
+static NeverDestroyed<RecentLossCounter> s_recent_video_decoder_server_losses {
+    3u, AK::Duration::from_seconds(45), AK::Duration::from_seconds(15)
+};
+static NeverDestroyed<HashMap<u64, RecentLossCounter::Epoch>> s_launch_epochs_of_video_decoder_servers;
+
+static void video_decoder_server_was_lost(u64 child_id)
+{
+    if (auto launch_epoch = s_launch_epochs_of_video_decoder_servers->take(child_id); launch_epoch.has_value())
+        s_recent_video_decoder_server_losses->record_loss(MonotonicTime::now_coarse(), *launch_epoch);
+}
+
+void video_decoder_server_exited(u64 child_id, bool was_lost)
+{
+    if (was_lost)
+        video_decoder_server_was_lost(child_id);
+    s_launch_epochs_of_video_decoder_servers->remove(child_id);
+}
+
+ErrorOr<NonnullRefPtr<VideoDecoderServerControlClient>> launch_video_decoder_server_process(u64 owner_child_id, IsPrivate is_private, Optional<Gfx::GpuDeviceIdentity> const& gpu_device_identity)
+{
+    // The MediaServers decode in software instead until enough time has passed without losses.
+    if (s_recent_video_decoder_server_losses->is_at_maximum(MonotonicTime::now_coarse()))
+        return Error::from_string_literal("VideoDecoderServers were lost too often recently");
+
+    auto const& browser_options = WebView::Application::browser_options();
+
+    Vector<ByteString> arguments;
+    if (browser_options.disable_sandbox == DisableSandbox::Yes)
+        arguments.append("--disable-sandbox"sv);
+    if (browser_options.force_video_decoder_server == ForceVideoDecoderServer::Yes)
+        arguments.append("--host-software-decoders"sv);
+    if (gpu_device_identity.has_value()) {
+        arguments.append("--gpu-device"sv);
+        arguments.append(gpu_device_identity->to_byte_string());
+    }
+    arguments.append(ByteString::formatted("--platform-features={}", WebView::Application::the().platform_features_for(PlatformFeatures::FeatureProcess::VideoDecoderServer).to_byte_string()));
+    if (auto server = mach_server_name(); server.has_value()) {
+        arguments.append("--mach-server-name"sv);
+        arguments.append(server.value());
+    }
+
+    auto server = TRY(launch_server_process_for<VideoDecoderServerControlClient>(owner_child_id, is_private, "VideoDecoderServer"sv, arguments));
+    s_launch_epochs_of_video_decoder_servers->set(server->child_id(), s_recent_video_decoder_server_losses->current_epoch());
+    s_video_decoder_servers->remove_all_matching([](auto const& weak_server) { return !weak_server; });
+    s_video_decoder_servers->append(server->make_weak_ptr<VideoDecoderServerControlClient>());
+    return server;
+}
+
+void shut_down_video_decoder_servers()
+{
+    for (auto& weak_server : *s_video_decoder_servers) {
+        if (weak_server)
+            weak_server->shutdown();
+    }
+    s_video_decoder_servers->clear();
+}
+
+ErrorOr<NonnullRefPtr<WebView::CompositorClient>> launch_compositor_process(ByteString const& platform_features)
+{
+    auto const& browser_options = WebView::Application::browser_options();
+    auto const& web_content_options = WebView::Application::web_content_options();
+
+    Vector<ByteString> arguments;
+
+    if (web_content_options.cache_path.has_value()) {
+        arguments.append("--cache-path"sv);
+        arguments.append(web_content_options.cache_path.value());
+    }
+    arguments.append("--resource-root"sv);
+    arguments.append(s_ladybird_resource_root);
+    if (browser_options.disable_sandbox == DisableSandbox::Yes)
+        arguments.append("--disable-sandbox"sv);
+    if (web_content_options.is_test_mode == WebView::IsTestMode::Yes)
+        arguments.append("--test-mode"sv);
+    arguments.append(ByteString::formatted("--platform-features={}", platform_features));
+    if (web_content_options.force_fontconfig == WebView::ForceFontconfig::Yes)
+        arguments.append("--force-fontconfig"sv);
+    if (auto gpu_device = WebView::Application::the().platform_presentation_gpu_device(); gpu_device.has_value()) {
+        arguments.append("--gpu-device"sv);
+        arguments.append(gpu_device->to_byte_string());
+    }
+    if (auto modifiers = WebView::Application::the().platform_presentation_drm_format_modifiers(); !modifiers.is_empty()) {
+        StringBuilder builder;
+        for (auto modifier : modifiers) {
+            if (!builder.is_empty())
+                builder.append(',');
+            builder.appendff("{:x}", modifier);
+        }
+        arguments.append("--drm-format-modifiers"sv);
+        arguments.append(builder.to_byte_string());
+    }
+    if (auto server = mach_server_name(); server.has_value()) {
+        arguments.append("--mach-server-name"sv);
+        arguments.append(server.value());
+    }
+
+    auto client = TRY(launch_server_process<WebView::CompositorClient>("Compositor"sv, move(arguments), IsPrivate::No));
+    TRY(connect_to_font_service(*client));
+    return client;
+}
+
+void apply_dns_settings(Requests::RequestControlClient& client)
+{
+    Application::settings().dns_settings().visit(
+        [&](SystemDNS) {
+            client.async_set_use_system_dns();
+        },
+        [&](DNSOverTLS const& dns_over_tls) {
+            dbgln("Setting DNS server to {}:{} with TLS ({} local dnssec)", dns_over_tls.server_address, dns_over_tls.port, dns_over_tls.validate_dnssec_locally ? "with" : "without");
+            client.async_set_dns_server(dns_over_tls.server_address, dns_over_tls.port, true, dns_over_tls.validate_dnssec_locally);
+        },
+        [&](DNSOverUDP const& dns_over_udp) {
+            dbgln("Setting DNS server to {}:{} ({} local dnssec)", dns_over_udp.server_address, dns_over_udp.port, dns_over_udp.validate_dnssec_locally ? "with" : "without");
+            client.async_set_dns_server(dns_over_udp.server_address, dns_over_udp.port, false, dns_over_udp.validate_dnssec_locally);
+        });
+}
+
+ErrorOr<NonnullRefPtr<Requests::RequestControlClient>> launch_request_server_process(ByteString const& cache_path, Optional<Utf16String> const& site, IsPrivate is_private, HTTPDiskCacheMode http_disk_cache_mode)
+{
+    auto const& browser_options = Application::browser_options();
+    auto const& request_server_options = Application::request_server_options();
+
+    Vector<ByteString> arguments;
+
+    arguments.append("--cache-path"sv);
+    arguments.append(cache_path);
+
+    if (site.has_value()) {
+        arguments.append("--site"sv);
+        arguments.append(site->to_byte_string());
+    }
+
+    if (browser_options.disable_sandbox == DisableSandbox::Yes)
+        arguments.append("--disable-sandbox"sv);
+    for (auto const& certificate : request_server_options.certificates)
+        arguments.append(ByteString::formatted("--certificate={}", certificate));
+
+    arguments.append("--http-disk-cache-mode"sv);
+
+    switch (http_disk_cache_mode) {
+    case HTTPDiskCacheMode::Disabled:
+        arguments.append("disabled"sv);
+        break;
+    case HTTPDiskCacheMode::Enabled:
+        arguments.append("enabled"sv);
+        break;
+    case HTTPDiskCacheMode::Testing:
+        arguments.append("testing"sv);
+        break;
+    }
+
+    if (auto server = mach_server_name(); server.has_value()) {
+        arguments.append("--mach-server-name"sv);
+        arguments.append(server.value());
+    }
+
+    if (request_server_options.resource_substitution_map_path.has_value())
+        arguments.append(ByteString::formatted("--resource-map={}", *request_server_options.resource_substitution_map_path));
+
+    if (Application::web_content_options().is_test_mode == IsTestMode::Yes)
+        arguments.append("--test-mode"sv);
+
+    RefPtr<Requests::RequestControlClient> client;
+    TRY(launch_helper_process("RequestServer"sv, move(arguments), is_private, [&](Core::ProcessSpawnOptions const& options, bool capture_output) -> ErrorOr<Process> {
+        auto [process, new_client] = TRY(Process::spawn<Requests::RequestControlClient>(ProcessType::RequestServer, options, capture_output));
+        if (site.has_value())
+            process.set_site_url(URL::Parser::basic_parse(*site));
+        client = move(new_client);
+        return move(process);
+    }));
+
+    client->async_set_disk_cache_settings(Application::settings().disk_cache_settings());
+    client->async_set_proxy_configuration(request_server_options.proxy_configuration);
+    if (!Application::settings().dns_settings().has<SystemDNS>())
+        apply_dns_settings(*client);
+
+    return client.release_nonnull();
+}
+
+ErrorOr<RequestServerClientConnection> connect_new_request_server_client(BrowsingSession& session, RequestServer::SiteBinding site_binding)
+{
+    auto instance = TRY(RequestServerManager::the().browser_instance(session));
+    return RequestServerManager::the().connect_new_client(*instance, session, site_binding);
+}
+
+MonotonicTime deadline_for_helper_response()
+{
+    // NB: A helper that waits for a debugger does not answer until the user lets it go on.
+    if (!Application::browser_options().debug_helper_processes.is_empty())
+        return MonotonicTime::now() + AK::Duration::from_seconds(60 * 60 * 24 * 365);
+    return MonotonicTime::now() + helper_response_timeout;
+}
+
+void end_unresponsive_helper(IPC::ConnectionBase& connection)
+{
+    Optional<u64> child_id;
+    Optional<ProcessType> process_type;
+    Application::process_manager().for_each_process([&](Process& process) {
+        if (process.client<IPC::ConnectionBase>() == &connection) {
+            child_id = process.child_id();
+            process_type = process.type();
+        }
+    });
+    if (child_id.has_value()) {
+        warnln("Ending a helper process that did not respond in time");
+        (void)Application::process_manager().terminate_child(*child_id, Core::Process::TerminationMode::Forceful);
+        if (process_type == ProcessType::VideoDecoderServer)
+            video_decoder_server_was_lost(*child_id);
+    }
+    connection.shutdown();
+}
+
+u64 allocate_audio_tab_id()
+{
+    static u64 s_next_audio_tab_id { 1 };
+    return s_next_audio_tab_id++;
+}
+
+ErrorOr<void> ensure_audio_server_is_running(RefPtr<AudioServerControlClient>& controller, u64 owner_child_id, IsPrivate is_private)
+{
+    if (!controller || !controller->is_open())
+        controller = TRY(launch_audio_server_process(owner_child_id, is_private));
+    return {};
+}
+
+ErrorOr<IPC::TransportHandle> connect_new_audio_server_client(AudioServerControlClient& controller, u64 audio_tab_id)
+{
+    if (!controller.is_open())
+        return Error::from_string_literal("The AudioServer is gone");
+
+    auto response = send_sync_to_helper<Messages::AudioServerControl::ConnectNewClient>(controller, audio_tab_id);
+    if (!response || !response->handle().has_value())
+        return Error::from_string_literal("Failed to connect to AudioServer");
+    return response->take_handle().release_value();
+}
+
+namespace {
+
+struct VideoDecoderServerHolder : public RefCounted<VideoDecoderServerHolder> {
+    RefPtr<VideoDecoderServerControlClient> controller;
+};
+
+}
+
+static void end_unresponsive_video_decoder_server(RefPtr<VideoDecoderServerControlClient>& controller)
+{
+    if (!controller)
+        return;
+    dbgln("Ending the VideoDecoderServer that its MediaServer found unresponsive");
+    if (auto result = Application::process_manager().terminate_child(controller->child_id(), Core::Process::TerminationMode::Forceful); result.is_error())
+        dbgln("Could not end the unresponsive VideoDecoderServer: {}", result.error());
+    video_decoder_server_was_lost(controller->child_id());
+    controller = nullptr;
+}
+
+static ErrorOr<IPC::TransportHandle> connect_new_video_decoder_server_client(RefPtr<VideoDecoderServerControlClient>& controller, u64 owner_child_id, IsPrivate is_private, Optional<Gfx::GpuDeviceIdentity> const& gpu_device_identity)
+{
+    if (!controller || !controller->is_open())
+        controller = TRY(launch_video_decoder_server_process(owner_child_id, is_private, gpu_device_identity));
+
+    auto response = send_sync_to_helper<Messages::VideoDecoderServerControl::ConnectNewClient>(*controller);
+    // A server exits once its one client has gone, which this process only notices later, so a server that is exiting
+    // or still holds its old client can get the request. One that does not hand out a client is replaced by a new one.
+    if (!response || !response->handle().has_value()) {
+        controller = TRY(launch_video_decoder_server_process(owner_child_id, is_private, gpu_device_identity));
+        response = send_sync_to_helper<Messages::VideoDecoderServerControl::ConnectNewClient>(*controller);
+    }
+    if (!response || !response->handle().has_value())
+        return Error::from_string_literal("Failed to connect to VideoDecoderServer");
+    return response->take_handle().release_value();
+}
+
+namespace {
+
+struct AudioServerConnectorHolder : public RefCounted<AudioServerConnectorHolder> {
+    explicit AudioServerConnectorHolder(Function<ErrorOr<IPC::TransportHandle>()> connect)
+        : connect(move(connect))
+    {
+    }
+
+    Function<ErrorOr<IPC::TransportHandle>()> connect;
+};
+
+}
+
+ErrorOr<MediaServerClientConnection> connect_new_media_server_client(RefPtr<MediaClient::Client>& controller, u64 owner_child_id, IsPrivate is_private, Function<ErrorOr<IPC::TransportHandle>()> connect_audio_server)
+{
+    auto audio_server_connector = make_ref_counted<AudioServerConnectorHolder>(move(connect_audio_server));
+    auto launch = [&]() -> ErrorOr<void> {
+        controller = TRY(launch_media_server_process(owner_child_id, is_private));
+        controller->on_request_audio_server_connection = [audio_server_connector] { return audio_server_connector->connect(); };
+        // Each MediaServer has a VideoDecoderServer of its own, which lives as long as the controller holding it. The
+        // server is launched once the Compositor has named the GPU that hardware decoders must output to, and once this
+        // launch's probe has decided what the server may use there.
+        auto video_decoder_server = make_ref_counted<VideoDecoderServerHolder>();
+        controller->on_video_decoder_server_unresponsive = [video_decoder_server] {
+            end_unresponsive_video_decoder_server(video_decoder_server->controller);
+        };
+        controller->on_request_video_decoder_server_connection = [video_decoder_server, owner_child_id, is_private](auto answer) {
+            Application::the().when_compositor_gpu_device_identity_is_known([video_decoder_server, owner_child_id, is_private, answer = move(answer)](auto const& gpu_device_identity) mutable {
+                Application::the().when_platform_features_are_current([video_decoder_server, owner_child_id, is_private, gpu_device_identity, answer = move(answer)] {
+                    answer(connect_new_video_decoder_server_client(video_decoder_server->controller, owner_child_id, is_private, gpu_device_identity));
+                });
+            });
+        };
+        return {};
+    };
+
+    if (!controller || !controller->is_open())
+        TRY(launch());
+
+    auto response = send_sync_to_helper<Messages::MediaServer::ConnectNewClient>(*controller);
+    // A server exits once its last renderer has gone, which this process only notices later, so a server that is
+    // already exiting can get the request. One that does not answer is replaced by a new one, which is asked instead.
+    if (!response) {
+        TRY(launch());
+        response = send_sync_to_helper<Messages::MediaServer::ConnectNewClient>(*controller);
+    }
+    if (!response || !response->handle().has_value())
+        return Error::from_string_literal("Failed to connect to MediaServer");
+    return MediaServerClientConnection { response->take_handle().release_value(), response->client_id() };
+}
+
+}

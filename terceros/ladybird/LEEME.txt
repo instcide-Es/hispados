@@ -30,3 +30,18 @@ Lo que cambia para Hispa-64, aparte, en castel/nucleo64/programas/ladybird/
 hispa64 (la capa de Hispa-64, delante en la ruta de cabeceras): wuffs/
 wuffs-v0.3.c, que pone la 0.4 de wuffs (MIT) en vez de la 0.3 (solo Apache-2.0)
 para el GIFLoader de LibGfx.
+
+[Etapa 10 g] (docs/64/HISPA-64.md, sección 24) Del mismo commit, sin cambiar
+nada, el resto de lo que hace falta para compilar Ladybird entero con su
+propio CMake: AK/, Libraries/ (todas), Services/, Meta/ (entero: CMake,
+Generators, Utils...), Utilities/, Base/ (los recursos: Base/res, con sus
+letras, temas e iconos), CMakeLists.txt y vcpkg.json (de consulta: no se usan,
+la raíz es castel/nucleo64/programas/ladybird/hispa64/cmake/raiz), LICENSE, y
+de las pruebas, Tests/LibJS/Runtime y Tests/LibJS/test-js-runtime.cpp (las
+de LibJS y su corredor, que usa MJS). No van UI/
+(Qt), Documentation/ ni el resto de Tests/ (las de LibWeb son de WPT: 299 MB).
+Lo compila castel/nucleo64/programas/ladybird/hazweb.sh, con el CMake de
+Ladybird y la capa de Hispa-64 (hispa64/cmake: la cadena del compilador
+cruzado, las dependencias con nuestras bibliotecas y la raíz sin Qt; hispa64/
+LibCrypto y hispa64/RequestServer, sin OpenSSL; hispa64/incluir, lo poco de
+libedit, D-Bus y OpenSSL que se nombra), sin tocar nada de aquí.

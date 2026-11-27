@@ -1,0 +1,10 @@
+// https://html.spec.whatwg.org/multipage/grouping-content.html#htmlmenuelement
+[Exposed=Window]
+interface HTMLMenuElement : HTMLElement {
+
+    [HTMLConstructor] constructor();
+
+    // Obsolete
+    [CEReactions, Reflect] attribute boolean compact;
+
+};

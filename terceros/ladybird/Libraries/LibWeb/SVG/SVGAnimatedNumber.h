@@ -1,0 +1,66 @@
+/*
+ * Copyright (c) 2023, MacDue <macdue@dueutil.tech>
+ * Copyright (c) 2025, Jelle Raaijmakers <jelle@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/StringView.h>
+#include <LibWeb/Bindings/Wrappable.h>
+#include <LibWeb/SVG/SVGElement.h>
+
+namespace Web::SVG {
+
+// https://svgwg.org/svg2-draft/types.html#InterfaceSVGAnimatedNumber
+class SVGAnimatedNumber final : public Bindings::GCAllocatedWrappable {
+    WEB_WRAPPABLE(SVGAnimatedNumber, Bindings::GCAllocatedWrappable);
+    GC_DECLARE_ALLOCATOR(SVGAnimatedNumber);
+
+public:
+    enum class SupportsSecondValue : u8 {
+        Yes,
+        No,
+    };
+    enum class ValueRepresented : u8 {
+        First,
+        Second,
+    };
+
+    enum class AcceptsPercentage : u8 {
+        Yes,
+        No,
+    };
+
+    [[nodiscard]] static GC::Ref<SVGAnimatedNumber> create(
+        GC::Ref<SVGElement>,
+        DOM::QualifiedName reflected_attribute,
+        float initial_value,
+        SupportsSecondValue = SupportsSecondValue::No,
+        ValueRepresented = ValueRepresented::First,
+        AcceptsPercentage = AcceptsPercentage::No);
+    virtual ~SVGAnimatedNumber() override;
+
+    float base_val() const;
+    void set_base_val(float);
+
+    float anim_val() const;
+
+private:
+    SVGAnimatedNumber(GC::Ref<SVGElement>, DOM::QualifiedName, float, SupportsSecondValue, ValueRepresented, AcceptsPercentage);
+
+    virtual void visit_edges(GC::Cell::Visitor&) override;
+
+    float parse_value_or_initial(Utf16View) const;
+    float get_base_or_anim_value() const;
+
+    GC::Ref<SVGElement> m_element;
+    DOM::QualifiedName m_reflected_attribute;
+    float m_initial_value;
+    SupportsSecondValue m_supports_second_value;
+    ValueRepresented m_value_represented;
+    AcceptsPercentage m_accepts_percentage;
+};
+
+}

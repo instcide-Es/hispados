@@ -1,0 +1,189 @@
+test("basic with statement functionality", () => {
+    var object = { foo: 5, bar: 6, baz: 7 };
+    var qux = 1;
+
+    var bar = 99;
+
+    with (object) {
+        expect(foo).toBe(5);
+        expect(bar).toBe(6);
+        expect(baz).toBe(7);
+        expect(qux).toBe(1);
+        expect(typeof quz).toBe("undefined");
+
+        bar = 2;
+    }
+
+    expect(object.bar).toBe(2);
+    expect(() => foo).toThrowWithMessage(ReferenceError, "'foo' is not defined");
+
+    expect(bar).toBe(99);
+});
+
+test("syntax error in strict mode", () => {
+    expect("'use strict'; with (foo) {}").not.toEval();
+});
+
+test("restores lexical environment even when exception is thrown", () => {
+    var object = {
+        foo: 1,
+        get bar() {
+            throw Error();
+        },
+    };
+
+    try {
+        with (object) {
+            expect(foo).toBe(1);
+            bar;
+        }
+        expect().fail();
+    } catch (e) {
+        expect(() => foo).toThrowWithMessage(ReferenceError, "'foo' is not defined");
+    }
+    expect(() => foo).toThrowWithMessage(ReferenceError, "'foo' is not defined");
+});
+
+test("with object changes can shadow an outer binding", () => {
+    let outer = "outer";
+    let object = {};
+    let seen = [];
+
+    with (object) {
+        for (let i = 0; i < 2; ++i) {
+            seen.push(outer);
+            object.outer = "object";
+        }
+    }
+
+    expect(seen).toEqual(["outer", "object"]);
+});
+
+test("assignment keeps the resolved with binding through RHS side effects", () => {
+    var outer = 0;
+    var object = { outer: 1 };
+
+    with (object) {
+        outer = (delete object.outer, 2);
+    }
+
+    expect(object.outer).toBe(2);
+    expect(outer).toBe(0);
+});
+
+test("var initializer keeps the resolved with binding through initializer side effects", () => {
+    var object = { test262id: 1 };
+
+    with (object) {
+        var test262id = delete object.test262id;
+    }
+
+    expect(object.test262id).toBe(true);
+    expect(test262id).toBeUndefined();
+});
+
+test("for-in var initializer keeps the resolved with binding through initializer side effects", () => {
+    const object = { forInId: 1 };
+
+    with (object) {
+        for (var forInId = (delete object.forInId) in {});
+    }
+
+    expect(object.forInId).toBe(true);
+    expect(forInId).toBeUndefined();
+});
+
+test("var patterns resolve their names before getting their values", () => {
+    const object = { forOfId: 1 };
+    var forOfId = "var";
+
+    with (object) {
+        for (var { forOfId = (delete object.forOfId, 2) } of [{}]);
+    }
+
+    expect(object.forOfId).toBe(2);
+    expect(forOfId).toBe("var");
+
+    const other = { evalId: 1 };
+    var evalId = "var";
+
+    with (other) {
+        eval("var [evalId = (delete other.evalId, 2)] = [];");
+    }
+
+    expect(other.evalId).toBe(2);
+    expect(evalId).toBe("var");
+
+    const added = {};
+    var forOfAddedId = "var";
+
+    with (added) {
+        for (var { forOfAddedId = ((added.forOfAddedId = 1), 2) } of [{}]);
+    }
+
+    expect(added.forOfAddedId).toBe(1);
+    expect(forOfAddedId).toBe(2);
+
+    const addedByEval = {};
+    var evalAddedId = "var";
+
+    with (addedByEval) {
+        eval("var [evalAddedId = ((addedByEval.evalAddedId = 1), 2)] = [];");
+    }
+
+    expect(addedByEval.evalAddedId).toBe(1);
+    expect(evalAddedId).toBe(2);
+});
+
+test("var without an initializer does not resolve its name", () => {
+    const names = [];
+    const object = new Proxy(
+        {},
+        {
+            has(target, name) {
+                names.push(name);
+                return false;
+            },
+        }
+    );
+
+    with (object) {
+        var noInitializerId;
+        for (var noInitializerLoopId; false; );
+    }
+
+    expect(names).toEqual([]);
+});
+
+test("with statement updates empty abrupt completions to undefined", () => {
+    expect(eval("1; do { 2; with ({}) { 3; break; } 4; } while (false);")).toBe(3);
+    expect(eval("5; do { 6; with ({}) { break; } 7; } while (false);")).toBeUndefined();
+    expect(eval("8; do { 9; with ({}) { 10; continue; } 11; } while (false);")).toBe(10);
+    expect(eval("12; do { 13; with ({}) { continue; } 14; } while (false);")).toBeUndefined();
+});
+
+test("a call of a function named async gets the object of the with statement as this value", () => {
+    const object = {
+        async() {
+            return this === object;
+        },
+        other() {
+            return this === object;
+        },
+    };
+    with (object) {
+        const result = async();
+        expect(result).toBeTrue();
+        expect([async(), other(), async(...[]), async(1, 2)]).toEqual([true, true, true, true]);
+        expect((() => async())()).toBeTrue();
+        expect(eval("async()")).toBeTrue();
+    }
+
+    function async() {
+        "use strict";
+        return this;
+    }
+    expect(async()).toBeUndefined();
+    const arrow = async () => 1;
+    expect(arrow()).toBeInstanceOf(Promise);
+});

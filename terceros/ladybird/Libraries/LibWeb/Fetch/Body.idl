@@ -1,0 +1,12 @@
+// https://fetch.spec.whatwg.org/#body
+interface mixin Body {
+    readonly attribute ReadableStream? body;
+    readonly attribute boolean bodyUsed;
+    [CreatesPromise, NeedsCallerRealm, NewObject] Promise<ArrayBuffer> arrayBuffer();
+    [CreatesPromise, NeedsCallerRealm, NewObject] Promise<Blob> blob();
+    [CreatesPromise, NeedsCallerRealm, NewObject] Promise<Uint8Array> bytes();
+    [CreatesPromise, NeedsCallerRealm, NewObject] Promise<FormData> formData();
+    [CreatesPromise, NeedsCallerRealm, NewObject] Promise<any> json();
+    [CreatesPromise, NeedsCallerRealm, NewObject] Promise<USVString> text();
+    [NewObject] ReadableStream textStream();
+};

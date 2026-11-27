@@ -1,0 +1,329 @@
+/*
+ * Copyright (c) 2026, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/AnyOf.h>
+#include <AK/Assertions.h>
+#include <AK/FFIHelpers.h>
+#include <LibGC/Heap.h>
+#include <LibHTTP/Cache/Utilities.h>
+#include <LibJS/Runtime/Realm.h>
+#include <LibWeb/CSS/Parser/Parser.h>
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/Fetch/Fetching/Fetching.h>
+#include <LibWeb/Fetch/Infrastructure/FetchAlgorithms.h>
+#include <LibWeb/Fetch/Infrastructure/FetchController.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/Bodies.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/Requests.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/ResponseView.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/Responses.h>
+#include <LibWeb/HTML/CORSSettingAttribute.h>
+#include <LibWeb/HTML/Parser/HTMLParser.h>
+#include <LibWeb/HTML/Parser/RustUtf16View.h>
+#include <LibWeb/HTML/Parser/SpeculativeHTMLParser.h>
+#include <LibWeb/HTML/PotentialCORSRequest.h>
+#include <LibWeb/HTML/PreloadEntry.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HTML/Scripting/Fetching.h>
+#include <LibWeb/HTMLTokenizerRustFFI.h>
+#include <LibWebCommon/Fetch/Infrastructure/HTTP/Statuses.h>
+#include <LibWebCommon/ReferrerPolicy/ReferrerPolicy.h>
+
+namespace Web::HTML {
+
+GC_DEFINE_ALLOCATOR(SpeculativeHTMLParser);
+
+GC::Ref<SpeculativeHTMLParser> SpeculativeHTMLParser::create(GC::Ref<DOM::Document> document, ParserScriptingMode scripting_mode)
+{
+    return document->relevant_settings_object().realm().create<SpeculativeHTMLParser>(document, scripting_mode);
+}
+
+SpeculativeHTMLParser::SpeculativeHTMLParser(GC::Ref<DOM::Document> document, ParserScriptingMode scripting_mode)
+    : m_document(document)
+    , m_scanner(rust_html_preload_scanner_create(scripting_mode != ParserScriptingMode::Disabled))
+{
+}
+
+void SpeculativeHTMLParser::finalize()
+{
+    Base::finalize();
+    rust_html_preload_scanner_destroy(m_scanner);
+    m_scanner = nullptr;
+}
+
+void SpeculativeHTMLParser::visit_edges(JS::Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_document);
+}
+
+void SpeculativeHTMLParser::stop()
+{
+    // https://html.spec.whatwg.org/multipage/parsing.html#stop-the-speculative-html-parser
+    // 3. Throw away any pending content in speculativeParser's input stream, and discard any future content
+    //    that would have been added to it.
+    m_stopped = true;
+}
+
+void SpeculativeHTMLParser::take_unscanned_input(RustFfiTokenizerHandle* tokenizer, URL::URL const& base_url)
+{
+    m_stopped = false;
+
+    // NB: A scan resolves URLs against the document's base URL as it was when the scan started, so once that has
+    //     changed, the scan starts over.
+    auto start_over = base_url != m_document_base_url;
+    m_document_base_url = base_url;
+
+    // NB: A scan that starts over leaves behind any base element the last one found ahead of the parser.
+    if (!rust_html_preload_scanner_append_parser_input(m_scanner, tokenizer, start_over))
+        m_base_url = base_url;
+}
+
+void SpeculativeHTMLParser::run()
+{
+    if (m_stopped)
+        return;
+
+    auto scanner_callback = [](void* context, RustFfiPreloadScannerEntry const* entry) -> bool {
+        auto& parser = *static_cast<SpeculativeHTMLParser*>(context);
+        if (parser.m_stopped || entry == nullptr)
+            return false;
+
+        parser.process_preload_scanner_entry(*entry);
+        return !parser.m_stopped;
+    };
+
+    rust_html_preload_scanner_scan(m_scanner, this, scanner_callback);
+}
+
+namespace {
+
+Optional<Fetch::Infrastructure::Request::Destination> destination_from_preload_scanner(RustFfiPreloadScannerDestination destination)
+{
+    switch (destination) {
+    case RustFfiPreloadScannerDestination::None:
+        return {};
+    case RustFfiPreloadScannerDestination::Font:
+        return Fetch::Infrastructure::Request::Destination::Font;
+    case RustFfiPreloadScannerDestination::Image:
+        return Fetch::Infrastructure::Request::Destination::Image;
+    case RustFfiPreloadScannerDestination::Script:
+        return Fetch::Infrastructure::Request::Destination::Script;
+    case RustFfiPreloadScannerDestination::Style:
+        return Fetch::Infrastructure::Request::Destination::Style;
+    case RustFfiPreloadScannerDestination::Track:
+        return Fetch::Infrastructure::Request::Destination::Track;
+    case RustFfiPreloadScannerDestination::AudioWorklet:
+        return Fetch::Infrastructure::Request::Destination::AudioWorklet;
+    case RustFfiPreloadScannerDestination::JSON:
+        return Fetch::Infrastructure::Request::Destination::JSON;
+    case RustFfiPreloadScannerDestination::PaintWorklet:
+        return Fetch::Infrastructure::Request::Destination::PaintWorklet;
+    case RustFfiPreloadScannerDestination::ServiceWorker:
+        return Fetch::Infrastructure::Request::Destination::ServiceWorker;
+    case RustFfiPreloadScannerDestination::SharedWorker:
+        return Fetch::Infrastructure::Request::Destination::SharedWorker;
+    case RustFfiPreloadScannerDestination::Worker:
+        return Fetch::Infrastructure::Request::Destination::Worker;
+    case RustFfiPreloadScannerDestination::Text:
+        return Fetch::Infrastructure::Request::Destination::Text;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+CORSSettingAttribute cors_setting_from_preload_scanner(RustFfiPreloadScannerCorsSetting cors_setting)
+{
+    switch (cors_setting) {
+    case RustFfiPreloadScannerCorsSetting::NoCors:
+        return CORSSettingAttribute::NoCORS;
+    case RustFfiPreloadScannerCorsSetting::Anonymous:
+        return CORSSettingAttribute::Anonymous;
+    case RustFfiPreloadScannerCorsSetting::UseCredentials:
+        return CORSSettingAttribute::UseCredentials;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+void issue_speculative_fetch(JS::Realm& realm, DOM::Document& document, URL::URL url, Optional<Fetch::Infrastructure::Request::Destination> destination, CORSSettingAttribute cors_setting)
+{
+    auto request = create_potential_CORS_request(url, destination, cors_setting);
+    request->set_client(document.relevant_settings_object().address());
+
+    // AD-HOC: The spec expects caching rules, which are not yet fully specified, to stop the normal parser from fetching
+    //         the same resource again. A response the HTTP cache can't store would be fetched twice, so once the
+    //         speculative fetch succeeds, offer its response to the normal parser's fetch the way a preload is, through
+    //         the document's map of preloaded resources. That fetch still runs main fetch's checks before using it.
+    Fetch::Infrastructure::FetchAlgorithms::Input fetch_algorithms_input { Fetch::Engine::BodyIntent::ConsumeForCallback };
+    fetch_algorithms_input.process_response_consume_body = GC::create_function(GC::Heap::the(), GC::captures(GC::Ref { document }, GC::Weak { document.active_parser() }, request), [](GC::Ref<DOM::Document>& document, GC::Weak<HTMLParser>& parser, NonnullRefPtr<Fetch::Infrastructure::Request>& request, GC::Ref<Fetch::Infrastructure::ResponseView> response_view, Fetch::Infrastructure::FetchAlgorithms::BodyBytes body_bytes) {
+        auto response = response_view->record();
+        auto* byte_sequence = body_bytes.get_pointer<Core::ImmutableBytes>();
+        if (response->is_network_error() || !byte_sequence)
+            return;
+
+        // NB: Only the parser that fetched it may still use the response.
+        if (!parser || document->active_parser() != parser.ptr())
+            return;
+
+        auto key = create_a_preload_key(*request);
+        if (document->map_of_preloaded_resources().contains(key))
+            return;
+
+        // NB: The server may have changed a failed or no-store response since, so fetch it again.
+        auto internal_response = response->unsafe_response();
+        if (!Fetch::Infrastructure::is_ok_status(internal_response->status()))
+            return;
+        if (auto cache_control = internal_response->header_list()->get("Cache-Control"sv); cache_control.has_value() && HTTP::contains_cache_control_directive(*cache_control, "no-store"sv))
+            return;
+
+        // NB: The preload key doesn't hold the request headers a response varies on, and the normal parser's request
+        //     may send others (e.g. a script may have set a cookie since). Accept-Encoding doesn't change in between.
+        auto vary_field_names = HTTP::vary_field_names(*internal_response->header_list());
+        if (!vary_field_names.has_value() || any_of(*vary_field_names, [](auto const& name) { return name != "accept-encoding"sv; }))
+            return;
+
+        // NB: Keep the filtered response, which main fetch uses as is. Unfiltered, it would be treated as same-origin.
+        auto preloaded_response = response->clone();
+        preloaded_response->unsafe_response()->set_body(Fetch::Infrastructure::ResponseBody::from_bytes(*byte_sequence));
+
+        auto entry = PreloadEntry::create();
+        entry->response = move(preloaded_response);
+        entry->is_speculative = true;
+        document->map_of_preloaded_resources().set(key, entry);
+    });
+
+    // The fetch stays alive via ResourceLoader's GC::Root callbacks for the duration of the
+    // network request, so we don't need to retain the FetchController.
+    (void)Fetch::Fetching::fetch(realm, request, Fetch::Infrastructure::FetchAlgorithms::create(move(fetch_algorithms_input)));
+}
+
+Utf16String utf16_string_from_preload_scanner(RustFfiHtmlUtf16View view)
+{
+    return Utf16String::from_utf16(utf16_view_from_ffi(view));
+}
+
+bool media_attribute_matches_environment(DOM::Document const& document, RustFfiPreloadScannerEntry const& entry)
+{
+    auto media = utf16_string_from_preload_scanner(entry.media);
+    return CSS::RustMediaList::parse(media).evaluate(document);
+}
+
+// Speculatively fetches url the way "fetch a single module script" would for a module script element or a modulepreload
+// link (a CORS-mode request carrying the script fetch options the element's attributes give) — so, the response is the
+// one the real fetch later finds in the HTTP cache. A potential-CORS request won't work here; a module script is always
+// fetched in CORS mode, and a server that only sends Access-Control-Allow-Origin in reply to an Origin header answers
+// a no-cors request without it. So the real fetch, served that response from the cache, fails its CORS check.
+// https://html.spec.whatwg.org/multipage/webappapis.html#fetch-a-single-module-script
+void issue_speculative_module_fetch(DOM::Document& document, URL::URL const& url, RustFfiPreloadScannerEntry const& entry, Fetch::Infrastructure::Request::Destination destination, Fetch::Infrastructure::Request::ParserMetadata parser_metadata)
+{
+    auto& settings_object = document.relevant_settings_object();
+    auto integrity_metadata = entry.integrity_present
+        ? utf16_string_from_preload_scanner(entry.integrity)
+        : resolve_a_module_integrity_metadata(url, settings_object);
+    ScriptFetchOptions options {
+        .cryptographic_nonce = utf16_string_from_preload_scanner(entry.nonce),
+        .integrity_metadata = move(integrity_metadata),
+        .parser_metadata = parser_metadata,
+        .credentials_mode = cors_settings_attribute_credentials_mode(cors_setting_from_preload_scanner(entry.cors_setting)),
+        .referrer_policy = ReferrerPolicy::from_string(utf16_string_from_preload_scanner(entry.referrer_policy)).value_or(ReferrerPolicy::ReferrerPolicy::EmptyString),
+        .fetch_priority = Fetch::Infrastructure::request_priority_from_string(utf16_string_from_preload_scanner(entry.fetch_priority)).value_or(Fetch::Infrastructure::Request::Priority::Auto),
+    };
+
+    // NB: A speculative fetch must not populate the module map. A CSP meta element can appear between the parser's
+    //     current position and this link, and the real modulepreload fetch must apply that policy before it can reuse
+    //     the response. This request may warm the HTTP cache, while the real link remains authoritative.
+    auto request = Fetch::Infrastructure::Request::create();
+    request->set_url(url);
+    request->set_mode(Fetch::Infrastructure::Request::Mode::CORS);
+    request->set_referrer(Fetch::Infrastructure::Request::Referrer::Client);
+    request->set_client(settings_object.address());
+    request->set_destination(destination);
+    if (first_is_one_of(destination,
+            Fetch::Infrastructure::Request::Destination::Worker,
+            Fetch::Infrastructure::Request::Destination::SharedWorker,
+            Fetch::Infrastructure::Request::Destination::ServiceWorker))
+        request->set_mode(Fetch::Infrastructure::Request::Mode::SameOrigin);
+    // NB: The request has no initiator type: only the fetch that uses the response reports its timing.
+    set_up_module_script_request(request, options);
+
+    Fetch::Infrastructure::FetchAlgorithms::Input fetch_algorithms_input { Fetch::Engine::BodyIntent::DrainAndDiscard };
+    auto algorithms = Fetch::Infrastructure::FetchAlgorithms::create(move(fetch_algorithms_input));
+    (void)Fetch::Fetching::fetch(settings_object.realm(), request, algorithms);
+}
+
+// https://html.spec.whatwg.org/multipage/links.html#link-type-modulepreload
+void issue_speculative_modulepreload_fetch(DOM::Document& document, URL::URL const& url, RustFfiPreloadScannerEntry const& entry)
+{
+    auto destination = destination_from_preload_scanner(entry.destination);
+    VERIFY(destination.has_value());
+
+    // The link's script fetch options have parser metadata "not-parser-inserted".
+    issue_speculative_module_fetch(document, url, entry, *destination, Fetch::Infrastructure::Request::ParserMetadata::NotParserInserted);
+}
+
+// https://html.spec.whatwg.org/multipage/scripting.html#prepare-the-script-element
+// A module script element's src is fetched as an external module script graph, whose root request "fetch a single
+// module script" builds with destination "script" — and with parser metadata "parser-inserted", since the parser
+// inserts the element the speculative parser found.
+void issue_speculative_module_script_fetch(DOM::Document& document, URL::URL const& url, RustFfiPreloadScannerEntry const& entry)
+{
+    issue_speculative_module_fetch(document, url, entry, Fetch::Infrastructure::Request::Destination::Script, Fetch::Infrastructure::Request::ParserMetadata::ParserInserted);
+}
+
+}
+
+void SpeculativeHTMLParser::process_preload_scanner_entry(RustFfiPreloadScannerEntry const& entry)
+{
+    auto url_view = utf16_view_from_ffi(entry.url);
+    if (url_view.is_empty())
+        return;
+
+    // https://html.spec.whatwg.org/multipage/parsing.html#speculative-fetch
+    switch (entry.action) {
+    case RustFfiPreloadScannerAction::Base:
+        // 1. If the speculative HTML parser encounters one of the following elements, then act as if that
+        //    element is processed for the purpose of its effect on subsequent speculative fetches.
+        //    - A base element.
+        if (auto parsed = m_document->encoding_parse_url(Utf16String::from_utf16(url_view)); parsed.has_value())
+            m_base_url = parsed.release_value();
+        return;
+
+    case RustFfiPreloadScannerAction::Fetch:
+    case RustFfiPreloadScannerAction::ModuleScript:
+        break;
+    case RustFfiPreloadScannerAction::ModulePreload:
+        if (!media_attribute_matches_environment(*m_document, entry))
+            return;
+        break;
+    }
+
+    // FIXME: A meta element whose http-equiv attribute is in the Content security policy state.
+    // FIXME: A meta element whose name attribute is referrer.
+    // FIXME: A meta element whose name attribute is viewport.
+
+    // 2. Let url be the URL that element would fetch if it was processed normally. If there is no such
+    //    URL or if it is the empty string, then do nothing.
+    // We resolve URLs against the speculative parser's tracked base_url (which may have been updated
+    // by an earlier speculative <base href>); this is why we use complete_url here rather than
+    // document.encoding_parse_url, which would resolve against the document's base instead.
+    auto url = m_base_url.complete_url(url_view.to_utf8_but_should_be_ported_to_utf16());
+    if (!url.has_value())
+        return;
+
+    // 3. Otherwise, if url is already in the list of speculative fetch URLs, then do nothing.
+    if (m_document->has_speculative_fetch_url(*url))
+        return;
+
+    // 4. Otherwise, fetch url as if the element was processed normally, and add url to the list of
+    //    speculative fetch URLs.
+    m_document->add_speculative_fetch_url(*url);
+    if (entry.action == RustFfiPreloadScannerAction::ModulePreload)
+        issue_speculative_modulepreload_fetch(*m_document, *url, entry);
+    else if (entry.action == RustFfiPreloadScannerAction::ModuleScript)
+        issue_speculative_module_script_fetch(*m_document, *url, entry);
+    else
+        issue_speculative_fetch(m_document->relevant_settings_object().realm(), *m_document, *url, destination_from_preload_scanner(entry.destination), cors_setting_from_preload_scanner(entry.cors_setting));
+}
+
+}

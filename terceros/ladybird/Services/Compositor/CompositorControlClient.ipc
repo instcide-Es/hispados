@@ -1,0 +1,7 @@
+#include <LibGfx/GpuDeviceIdentity.h>
+
+endpoint CompositorControlClient
+{
+    // Sent once at startup: the GPU that decoders must output to for their frames to be shown without a copy.
+    gpu_device_identity_reported(Optional<Gfx::GpuDeviceIdentity> identity) =|
+}

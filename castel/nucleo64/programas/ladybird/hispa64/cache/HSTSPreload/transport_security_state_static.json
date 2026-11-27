@@ -1,0 +1,9 @@
+// Hispa-64, etapa 10 g (docs/64/HISPA-64.md, sección 24): la lista de HSTS
+// precargada de Chromium que pide LibHTTP, sin descargas al compilar: con un nombre que no existe (el generador no
+// sabe hacerla vacía).
+// Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+{
+  "entries": [
+    { "name": "hstspreload.invalid", "mode": "force-https", "include_subdomains": true }
+  ]
+}

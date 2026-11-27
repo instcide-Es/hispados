@@ -1,0 +1,145 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+//! Retained AK::Utf16FlyString types shared by generated FFI headers.
+//!
+//! Both the style-value and computed-values cbindgen invocations parse this
+//! module so the same struct layout is emitted into each header's namespace,
+//! the same arrangement `display.rs` uses for `FfiDisplay`.
+
+use crate::css::style_value::retained_list;
+/// A retained `AK::Utf16FlyString` with the same one-word representation.
+#[repr(C)]
+pub struct RetainedUtf16FlyString {
+    raw: usize,
+}
+
+const _: () = assert!(size_of::<RetainedUtf16FlyString>() == size_of::<usize>());
+const _: () = assert!(align_of::<RetainedUtf16FlyString>() == align_of::<usize>());
+
+impl RetainedUtf16FlyString {
+    pub(crate) fn from_utf16(units: &[u16]) -> Self {
+        let string = ak::Utf16FlyString::from_utf16(units);
+        unsafe { Self::from_leaked_raw(string.into_raw()) }
+    }
+
+    /// The raw one-word representation; fly strings are interned, so equal raw
+    /// values mean equal strings.
+    pub(crate) fn raw(&self) -> usize {
+        self.raw
+    }
+
+    pub(crate) fn raw_word(&self) -> &usize {
+        &self.raw
+    }
+
+    /// The code units the string holds, borrowed where it stores them as UTF-16.
+    pub(crate) fn to_utf16(&self) -> std::borrow::Cow<'_, [u16]> {
+        if self.raw == 0 {
+            return std::borrow::Cow::Borrowed(&[]);
+        }
+        // SAFETY: Every non-zero value owns one reference to a valid fly string.
+        match unsafe { ak::utf16_string_units(&self.raw) } {
+            ak::Utf16StringUnits::Ascii(units) | ak::Utf16StringUnits::Latin1(units) => {
+                units.iter().map(|&unit| u16::from(unit)).collect()
+            }
+            ak::Utf16StringUnits::Utf16(units) => std::borrow::Cow::Borrowed(units),
+        }
+    }
+
+    /// The no-string sentinel; holds no reference. No real fly string uses the
+    /// zero raw representation.
+    pub(crate) fn none() -> Self {
+        Self { raw: 0 }
+    }
+
+    /// Assumes ownership of one leaked reference to the underlying string data.
+    pub(crate) unsafe fn from_leaked_raw(raw: usize) -> Self {
+        if raw == 0 {
+            return Self::none();
+        }
+        Self { raw }
+    }
+
+    /// Retains a borrowed raw fly-string reference.
+    ///
+    /// # Safety
+    /// `raw` must be zero or a live AK::Utf16FlyString raw representation.
+    pub(crate) unsafe fn from_borrowed_raw(raw: usize) -> Self {
+        if raw != 0 {
+            unsafe { ak::reference_utf16_string(raw) };
+        }
+        unsafe { Self::from_leaked_raw(raw) }
+    }
+}
+
+impl Clone for RetainedUtf16FlyString {
+    fn clone(&self) -> Self {
+        if self.raw == 0 {
+            return Self::none();
+        }
+        // SAFETY: Every non-zero value owns one reference to a valid fly string.
+        unsafe { ak::reference_utf16_string(self.raw) };
+        Self { raw: self.raw }
+    }
+}
+
+impl Drop for RetainedUtf16FlyString {
+    fn drop(&mut self) {
+        if self.raw == 0 {
+            return;
+        }
+        // SAFETY: Every non-zero value owns one reference to a valid fly string.
+        unsafe { ak::release_utf16_string_with(self.raw, crate::css::ffi_stats::release_utf16_fly_string) };
+    }
+}
+
+impl PartialEq for RetainedUtf16FlyString {
+    fn eq(&self, other: &Self) -> bool {
+        self.raw == other.raw
+    }
+}
+
+impl Eq for RetainedUtf16FlyString {}
+
+impl<'a> From<&'a RetainedUtf16FlyString> for crate::css::css_tokenizer::TokenizerInput<'a> {
+    fn from(string: &'a RetainedUtf16FlyString) -> Self {
+        match unsafe { ak::utf16_string_units(string.raw_word()) } {
+            ak::Utf16StringUnits::Ascii(bytes) | ak::Utf16StringUnits::Latin1(bytes) => Self::Latin1(bytes),
+            ak::Utf16StringUnits::Utf16(units) => Self::Utf16(units),
+        }
+    }
+}
+
+impl std::fmt::Debug for RetainedUtf16FlyString {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_tuple("RetainedUtf16FlyString")
+            .field(&self.raw)
+            .finish()
+    }
+}
+
+/// A Rust-owned array of retained AK::Utf16FlyString values.
+#[repr(C)]
+pub struct RetainedUtf16FlyStringList {
+    pointer: *mut RetainedUtf16FlyString,
+    length: usize,
+}
+
+impl RetainedUtf16FlyStringList {
+    /// The list viewed as raw fly-string words; fly strings are interned, so
+    /// equal raws mean equal strings.
+    pub(crate) fn raws(&self) -> &[usize] {
+        if self.pointer.is_null() {
+            return &[];
+        }
+        // SAFETY: `RetainedUtf16FlyString` is represented by its single raw word.
+        unsafe { ak::slice_from_raw_parts(self.pointer.cast::<usize>(), self.length) }
+    }
+}
+
+retained_list!(RetainedUtf16FlyStringList, RetainedUtf16FlyString);

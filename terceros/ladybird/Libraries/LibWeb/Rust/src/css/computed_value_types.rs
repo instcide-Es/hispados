@@ -1,0 +1,1282 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+/// The computed forms accepted by width and height sizing properties.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ComputedSizeKind {
+    Auto,
+    Calculated,
+    Length,
+    Percentage,
+    MinContent,
+    MaxContent,
+    FitContent,
+    Stretch,
+    None,
+}
+
+/// A computed sizing value. Scalar and calculated values retain their
+/// immutable Rust style-value identity. Fit-content retains only its
+/// argument, and keyword-only forms leave the handle empty.
+#[repr(C)]
+#[derive(Debug)]
+pub struct ComputedStyleValueHandle {
+    pub pointer: *const std::ffi::c_void,
+}
+
+// SAFETY: A non-null handle owns an Arc reference to immutable style value data and only exposes
+// shared access to it, as `RetainedStyleValueData` does.
+unsafe impl Send for ComputedStyleValueHandle where crate::css::style_value::StyleValueData: Send + Sync {}
+unsafe impl Sync for ComputedStyleValueHandle where crate::css::style_value::StyleValueData: Send + Sync {}
+
+#[repr(C)]
+#[derive(Debug)]
+pub struct ComputedSize {
+    pub kind: ComputedSizeKind,
+    /// The plain length or percentage `value` holds, kept inline so that reading it needs no dereference: the form of
+    /// `inline_value`, one of the forms `InlineLengthPercentage` decodes.
+    pub inline_form: u8,
+    pub inline_value: u32,
+    pub value: ComputedStyleValueHandle,
+}
+
+/// Layout of the six computed sizing properties.
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct SizingValues {
+    pub width: ComputedSize,
+    pub min_width: ComputedSize,
+    pub max_width: ComputedSize,
+    pub height: ComputedSize,
+    pub min_height: ComputedSize,
+    pub max_height: ComputedSize,
+}
+
+/// A computed flex-basis value. Content uses the flag; every other form
+/// uses the same computed-size representation as width and height.
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct ComputedFlexBasis {
+    pub is_content: bool,
+    pub size: ComputedSize,
+}
+
+/// A computed row-gap or column-gap value. Normal uses the flag; every
+/// other form retains its immutable length-percentage identity.
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct ComputedGap {
+    pub is_normal: bool,
+    pub value: ComputedStyleValueHandle,
+}
+
+/// Layout of the computed flexbox and box-alignment properties.
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct AlignmentValues {
+    pub webkit_box_orient: u8,
+    pub webkit_box_align: u8,
+    pub webkit_box_pack: u8,
+    pub flex_direction: u8,
+    pub flex_wrap: u8,
+    pub flex_basis: ComputedFlexBasis,
+    pub flex_grow: f64,
+    pub flex_shrink: f64,
+    pub webkit_box_flex: f64,
+    pub order: i32,
+    pub webkit_box_ordinal_group: i32,
+    pub align_content: u8,
+    pub align_items: u8,
+    pub align_self: u8,
+    pub align_items_is_last_baseline: bool,
+    pub align_self_is_last_baseline: bool,
+    pub align_content_is_last_baseline: bool,
+    pub justify_content: u8,
+    pub justify_items: u8,
+    pub justify_self: u8,
+    /// The explicit overflow alignment: one of the OVERFLOW_ALIGNMENT_* values.
+    pub align_items_overflow: u8,
+    pub justify_items_overflow: u8,
+    pub align_self_overflow: u8,
+    pub justify_self_overflow: u8,
+    pub align_content_overflow: u8,
+    pub justify_content_overflow: u8,
+    pub column_gap: ComputedGap,
+    pub row_gap: ComputedGap,
+}
+
+/// No explicit overflow alignment.
+pub const OVERFLOW_ALIGNMENT_DEFAULT: u8 = 0;
+/// The 'safe' overflow alignment.
+pub const OVERFLOW_ALIGNMENT_SAFE: u8 = 1;
+/// The 'unsafe' overflow alignment.
+pub const OVERFLOW_ALIGNMENT_UNSAFE: u8 = 2;
+
+/// A computed length-percentage-or-auto value.
+#[repr(C)]
+pub struct ComputedLengthPercentageOrAuto {
+    pub is_auto: bool,
+    /// The plain length or percentage `value` holds, as in [`ComputedSize`].
+    pub inline_form: u8,
+    pub inline_value: u32,
+    pub value: ComputedStyleValueHandle,
+}
+
+/// Four physical computed length-percentage-or-auto sides.
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct ComputedLengthBox {
+    pub top: ComputedLengthPercentageOrAuto,
+    pub right: ComputedLengthPercentageOrAuto,
+    pub bottom: ComputedLengthPercentageOrAuto,
+    pub left: ComputedLengthPercentageOrAuto,
+}
+
+/// Layout of the computed inset, margin, and padding properties, plus the
+/// computed position-anchor value the anchor lookup beside the anchor insets
+/// consults; an empty handle means position-anchor has no name. Each bare
+/// anchor() inset also carries the calculated wrapper the layout pass
+/// resolves, built with the payload so inset reads borrow it directly.
+#[repr(C)]
+pub struct SurroundValues {
+    pub inset: ComputedLengthBox,
+    pub top_anchor_inset: ComputedStyleValueHandle,
+    pub right_anchor_inset: ComputedStyleValueHandle,
+    pub bottom_anchor_inset: ComputedStyleValueHandle,
+    pub left_anchor_inset: ComputedStyleValueHandle,
+    pub top_anchor_inset_wrapper: ComputedStyleValueHandle,
+    pub right_anchor_inset_wrapper: ComputedStyleValueHandle,
+    pub bottom_anchor_inset_wrapper: ComputedStyleValueHandle,
+    pub left_anchor_inset_wrapper: ComputedStyleValueHandle,
+    pub position_anchor: ComputedStyleValueHandle,
+    pub margin: ComputedLengthBox,
+    pub padding: ComputedLengthBox,
+}
+
+/// A computed vertical-align value: an alignment keyword or a retained
+/// length-percentage offset.
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct ComputedVerticalAlign {
+    pub is_keyword: bool,
+    pub keyword: u8,
+    pub value: ComputedStyleValueHandle,
+}
+
+/// The computed aspect-ratio value, carrying both the used form and the
+/// as-computed form the serialization path reports. Absent ratios keep both
+/// components at zero so payload equality stays field-wise.
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq)]
+pub struct ComputedAspectRatio {
+    pub use_natural_aspect_ratio_if_available: bool,
+    pub has_preferred_ratio: bool,
+    pub preferred_ratio_numerator: f64,
+    pub preferred_ratio_denominator: f64,
+    pub computed_use_natural_aspect_ratio_if_available: bool,
+    pub has_computed_ratio: bool,
+    pub computed_ratio_numerator: f64,
+    pub computed_ratio_denominator: f64,
+}
+
+/// A computed contain-intrinsic-width or contain-intrinsic-height: auto? [ none | <length [0,∞]> ]. A false has_length
+/// means none.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ComputedContainIntrinsicSize {
+    pub has_auto: bool,
+    pub has_length: bool,
+    pub length_px: f64,
+}
+
+impl ComputedContainIntrinsicSize {
+    pub fn none() -> Self {
+        Self {
+            has_auto: false,
+            has_length: false,
+            length_px: 0.0,
+        }
+    }
+}
+
+/// Layout of the computed box-level properties.
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct BoxValues {
+    pub display: crate::css::display::FfiDisplay,
+    pub display_before_box_type_transformation: crate::css::display::FfiDisplay,
+    pub field_sizing: u8,
+    pub baseline_source: u8,
+    pub resize: u8,
+    pub text_overflow: u8,
+    pub grid_auto_flow_row: bool,
+    pub grid_auto_flow_dense: bool,
+    pub column_width: ComputedSize,
+    pub column_count_has_value: bool,
+    pub column_count: i32,
+    pub continue_: u8,
+    pub max_lines: i32,
+    pub has_z_index: bool,
+    pub z_index: i32,
+    pub vertical_align: ComputedVerticalAlign,
+    pub aspect_ratio: ComputedAspectRatio,
+    pub contain_intrinsic_width: ComputedContainIntrinsicSize,
+    pub contain_intrinsic_height: ComputedContainIntrinsicSize,
+    pub size_containment: bool,
+    pub inline_size_containment: bool,
+    pub layout_containment: bool,
+    pub style_containment: bool,
+    pub paint_containment: bool,
+    pub is_size_container: bool,
+    pub is_inline_size_container: bool,
+    pub is_scroll_state_container: bool,
+    pub container_name: crate::css::retained_fly_string::RetainedUtf16FlyStringList,
+}
+
+/// The first group index of the rare group set a style shares; the inherited set's groups come
+/// before it, from index zero.
+pub const STYLE_GROUP_RARE_SET_START: usize = 5;
+/// The first group index of the visual group set a style shares.
+pub const STYLE_GROUP_VISUAL_SET_START: usize = 13;
+/// The first group index of the groups a style keeps in its root, which run to the last group.
+pub const STYLE_GROUP_ROOT_START: usize = 19;
+
+/// The inherited longhands of few keywords a style holds as bits beside its inherited groups, in
+/// place of a field of a group: each the code of its keyword in the CSS enum of the property, at
+/// the field's shift.
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct InheritedBits(pub u32);
+
+pub const INHERITED_BITS_WRITING_MODE_SHIFT: u32 = 0;
+pub const INHERITED_BITS_WRITING_MODE_WIDTH: u32 = 3;
+pub const INHERITED_BITS_DIRECTION_SHIFT: u32 = 3;
+pub const INHERITED_BITS_DIRECTION_WIDTH: u32 = 1;
+pub const INHERITED_BITS_VISIBILITY_SHIFT: u32 = 4;
+pub const INHERITED_BITS_VISIBILITY_WIDTH: u32 = 2;
+pub const INHERITED_BITS_TEXT_ORIENTATION_SHIFT: u32 = 6;
+pub const INHERITED_BITS_TEXT_ORIENTATION_WIDTH: u32 = 2;
+pub const INHERITED_BITS_POINTER_EVENTS_SHIFT: u32 = 8;
+pub const INHERITED_BITS_POINTER_EVENTS_WIDTH: u32 = 4;
+pub const INHERITED_BITS_LIST_STYLE_POSITION_SHIFT: u32 = 12;
+pub const INHERITED_BITS_LIST_STYLE_POSITION_WIDTH: u32 = 1;
+pub const INHERITED_BITS_BORDER_COLLAPSE_SHIFT: u32 = 13;
+pub const INHERITED_BITS_BORDER_COLLAPSE_WIDTH: u32 = 1;
+pub const INHERITED_BITS_CAPTION_SIDE_SHIFT: u32 = 14;
+pub const INHERITED_BITS_CAPTION_SIDE_WIDTH: u32 = 1;
+pub const INHERITED_BITS_EMPTY_CELLS_SHIFT: u32 = 15;
+pub const INHERITED_BITS_EMPTY_CELLS_WIDTH: u32 = 1;
+pub const INHERITED_BITS_TEXT_ALIGN_SHIFT: u32 = 16;
+pub const INHERITED_BITS_TEXT_ALIGN_WIDTH: u32 = 4;
+pub const INHERITED_BITS_WHITE_SPACE_COLLAPSE_SHIFT: u32 = 20;
+pub const INHERITED_BITS_WHITE_SPACE_COLLAPSE_WIDTH: u32 = 3;
+pub const INHERITED_BITS_TEXT_WRAP_MODE_SHIFT: u32 = 23;
+pub const INHERITED_BITS_TEXT_WRAP_MODE_WIDTH: u32 = 1;
+pub const INHERITED_BITS_WORD_BREAK_SHIFT: u32 = 24;
+pub const INHERITED_BITS_WORD_BREAK_WIDTH: u32 = 2;
+pub const INHERITED_BITS_TEXT_ALIGN_LAST_SHIFT: u32 = 26;
+pub const INHERITED_BITS_TEXT_ALIGN_LAST_WIDTH: u32 = 3;
+pub const INHERITED_BITS_HYPHENS_SHIFT: u32 = 29;
+pub const INHERITED_BITS_HYPHENS_WIDTH: u32 = 2;
+
+/// The keywords of few values of properties that do not inherit a style holds as bits in its
+/// root beside its own groups, in place of fields of its box group: each the code of its keyword
+/// in the CSS enum of the property, at the field's shift.
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct ResetBits(pub u32);
+
+pub const RESET_BITS_POSITION_SHIFT: u32 = 0;
+pub const RESET_BITS_POSITION_WIDTH: u32 = 3;
+pub const RESET_BITS_FLOAT_SHIFT: u32 = 3;
+pub const RESET_BITS_FLOAT_WIDTH: u32 = 3;
+pub const RESET_BITS_CLEAR_SHIFT: u32 = 6;
+pub const RESET_BITS_CLEAR_WIDTH: u32 = 3;
+pub const RESET_BITS_OVERFLOW_X_SHIFT: u32 = 9;
+pub const RESET_BITS_OVERFLOW_X_WIDTH: u32 = 3;
+pub const RESET_BITS_OVERFLOW_Y_SHIFT: u32 = 12;
+pub const RESET_BITS_OVERFLOW_Y_WIDTH: u32 = 3;
+pub const RESET_BITS_BOX_SIZING_SHIFT: u32 = 15;
+pub const RESET_BITS_BOX_SIZING_WIDTH: u32 = 1;
+pub const RESET_BITS_UNICODE_BIDI_SHIFT: u32 = 16;
+pub const RESET_BITS_UNICODE_BIDI_WIDTH: u32 = 3;
+pub const RESET_BITS_TABLE_LAYOUT_SHIFT: u32 = 19;
+pub const RESET_BITS_TABLE_LAYOUT_WIDTH: u32 = 1;
+
+/// What a style's inherited set holds beside its groups for its readers to read directly: the
+/// inherited longhands held as bits, and the effective zoom.
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct InheritedSetValues {
+    pub bits: InheritedBits,
+    /// https://drafts.csswg.org/css-viewport/#effective-zoom
+    /// The bits of the effective zoom, as an `f32`.
+    pub effective_zoom_bits: u32,
+}
+
+/// What a style holds as bits beside its groups: the inherited bits and zoom beside its inherited
+/// set's groups, and the reset bits in its root.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct StyleBits {
+    pub inherited: InheritedSetValues,
+    pub reset: ResetBits,
+}
+
+/// A computed color as a group holds it: a color, or `currentcolor`, which its reader resolves
+/// against the element's color, so that the group does not depend on the element's color.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(C)]
+pub struct StyleColor {
+    /// The color, in the C++ Color::value() bit layout; unused for `currentcolor`.
+    pub rgba: u32,
+    pub is_current_color: bool,
+}
+
+const _: () = assert!(size_of::<StyleColor>() == 8);
+
+impl StyleColor {
+    pub const CURRENT_COLOR: Self = Self {
+        rgba: 0,
+        is_current_color: true,
+    };
+
+    pub const fn rgba(rgba: u32) -> Self {
+        Self {
+            rgba,
+            is_current_color: false,
+        }
+    }
+
+    /// The color, with `currentcolor` resolved to `current_color`.
+    #[inline]
+    pub const fn resolve(self, current_color: u32) -> u32 {
+        if self.is_current_color {
+            current_color
+        } else {
+            self.rgba
+        }
+    }
+}
+
+/// One computed border side, mirroring the C++ BorderData member layout:
+/// color, line style, used width. Layout reads the line style and width
+/// everywhere, and table border conflict resolution also reads the color.
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct ComputedBorderSide {
+    pub color: StyleColor,
+    pub line_style: u8,
+    pub width: crate::css::css_pixels::CssPixels,
+}
+
+/// The layout-facing prefix of the Rust-owned border style group. Its four
+/// side facts lead the group in this order, pinned by static asserts beside
+/// the C++ compatibility view.
+#[repr(C)]
+pub struct BorderLayoutFacts {
+    pub border_left: ComputedBorderSide,
+    pub border_top: ComputedBorderSide,
+    pub border_right: ComputedBorderSide,
+    pub border_bottom: ComputedBorderSide,
+}
+
+/// The border computed values. C++ materializes radii and border-image views
+/// from the canonical handles only when consumers request them.
+#[repr(C)]
+pub struct BorderValues {
+    pub border_left: ComputedBorderSide,
+    pub border_top: ComputedBorderSide,
+    pub border_right: ComputedBorderSide,
+    pub border_bottom: ComputedBorderSide,
+    pub border_left_color_style_value: ComputedStyleValueHandle,
+    pub border_top_color_style_value: ComputedStyleValueHandle,
+    pub border_right_color_style_value: ComputedStyleValueHandle,
+    pub border_bottom_color_style_value: ComputedStyleValueHandle,
+    pub border_left_computed_width: crate::css::css_pixels::CssPixels,
+    pub border_top_computed_width: crate::css::css_pixels::CssPixels,
+    pub border_right_computed_width: crate::css::css_pixels::CssPixels,
+    pub border_bottom_computed_width: crate::css::css_pixels::CssPixels,
+    pub border_bottom_left_radius: ComputedStyleValueHandle,
+    pub border_bottom_right_radius: ComputedStyleValueHandle,
+    pub border_top_left_radius: ComputedStyleValueHandle,
+    pub border_top_right_radius: ComputedStyleValueHandle,
+    pub has_noninitial_border_radii: bool,
+    pub corner_bottom_left_shape: f64,
+    pub corner_bottom_right_shape: f64,
+    pub corner_top_left_shape: f64,
+    pub corner_top_right_shape: f64,
+    pub border_image_source: ComputedStyleValueHandle,
+    pub border_shape: ComputedStyleValueHandle,
+    pub border_image_slice: ComputedStyleValueHandle,
+    pub border_image_width: ComputedStyleValueHandle,
+    pub border_image_outset: ComputedStyleValueHandle,
+    pub border_image_repeat: ComputedStyleValueHandle,
+}
+
+/// Canonical generated-content and counter values. C++ materializes its
+/// presentation structures only when a consumer requests them.
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct ContentValues {
+    pub content: ComputedStyleValueHandle,
+    pub counter_increment: ComputedStyleValueHandle,
+    pub counter_reset: ComputedStyleValueHandle,
+    pub counter_set: ComputedStyleValueHandle,
+}
+
+/// Canonical inherited list and table values. Counter-style and image presentation objects are
+/// resolved lazily by consumers with their current style scope. The table enum fields follow the
+/// opaque-byte convention; the border spacings are raw CSSPixels fixed-point values.
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct InheritedListTableValues {
+    pub list_style_type: ComputedStyleValueHandle,
+    pub list_style_image: ComputedStyleValueHandle,
+    pub quotes: ComputedStyleValueHandle,
+    pub border_spacing_horizontal: i32,
+    pub border_spacing_vertical: i32,
+}
+
+/// One physical overflow-clip-margin side.
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct ComputedOverflowClipMarginSide {
+    pub has_visual_box: bool,
+    pub visual_box: u8,
+    pub offset: crate::css::css_pixels::CssPixels,
+}
+
+/// Four physical overflow-clip-margin sides.
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct ComputedOverflowClipMargin {
+    pub left: ComputedOverflowClipMarginSide,
+    pub top: ComputedOverflowClipMarginSide,
+    pub right: ComputedOverflowClipMarginSide,
+    pub bottom: ComputedOverflowClipMarginSide,
+}
+
+/// Property IDs to treat as included in will-change due to animations.
+#[repr(C)]
+pub struct RetainedWillChangePropertyList {
+    pub pointer: *mut u16,
+    pub length: usize,
+}
+
+/// The bits of [`MiscLayoutValues::user_agent_margin_sides`], one per physical side.
+pub mod user_agent_margin_side {
+    pub const TOP: u8 = 1 << 0;
+    pub const RIGHT: u8 = 1 << 1;
+    pub const BOTTOM: u8 = 1 << 2;
+    pub const LEFT: u8 = 1 << 3;
+}
+
+/// The non-inherited values of how a box lays out and outlines that no more specific group holds:
+/// appearance, fragmentation breaks, columns, object fitting, outlines, overflow clip margins and
+/// float shapes.
+#[repr(C)]
+pub struct MiscLayoutValues {
+    pub outline_offset_style_value: ComputedStyleValueHandle,
+    pub overflow_clip_margin: ComputedOverflowClipMargin,
+    pub column_span: u8,
+    pub break_before: u8,
+    pub break_after: u8,
+    pub break_inside: u8,
+    pub column_rule_style: u8,
+    pub box_decoration_break: u8,
+    pub column_fill: u8,
+    pub appearance: u8,
+    pub computed_appearance: u8,
+    /// https://drafts.csswg.org/css-ui/#appearance-disabling-properties
+    pub native_appearance_disabled: bool,
+    /// The physical sides whose margins the user agent's style sheet sets, as [`user_agent_margin_side`] bits.
+    /// Only a quirks-mode document records them, for its margin collapsing quirks.
+    pub user_agent_margin_sides: u8,
+    pub outline_style: u8,
+    pub object_fit: u8,
+    pub column_height: ComputedSize,
+    pub outline_color: StyleColor,
+    pub outline_width: crate::css::css_pixels::CssPixels,
+    pub column_rule_color: StyleColor,
+    pub column_rule_width: crate::css::css_pixels::CssPixels,
+    pub outline_offset: crate::css::css_pixels::CssPixels,
+    pub object_position_x: ComputedStyleValueHandle,
+    pub object_position_y: ComputedStyleValueHandle,
+    pub shape_image_threshold: f64,
+    pub shape_margin: ComputedStyleValueHandle,
+    pub shape_outside: ComputedStyleValueHandle,
+    pub content_visibility: u8,
+}
+
+/// The non-inherited values of how a box scrolls and responds to the user that no more specific
+/// group holds: scrolling, scroll snapping, scrollbars, overscroll, user selection, view
+/// transitions and will-change.
+#[repr(C)]
+pub struct MiscInteractionValues {
+    pub scroll_margin: ComputedLengthBox,
+    pub scroll_padding: ComputedLengthBox,
+    pub view_transition_name: ComputedStyleValueHandle,
+    pub will_change: ComputedStyleValueHandle,
+    pub implicit_will_change: RetainedWillChangePropertyList,
+    pub user_select: u8,
+    pub scroll_behavior: u8,
+    pub scroll_snap_align_block: u8,
+    pub scroll_snap_align_inline: u8,
+    pub scroll_snap_stop: u8,
+    pub scroll_snap_axis: u8,
+    pub scroll_snap_strictness: u8,
+    pub scrollbar_gutter: u8,
+    pub scrollbar_width: u8,
+    pub overscroll_behavior_x: u8,
+    pub overscroll_behavior_y: u8,
+}
+
+/// A computed text-indent value, mirroring the C++ TextIndentData layout:
+/// a retained length-percentage plus the each-line and hanging flags.
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct ComputedTextIndent {
+    pub length_percentage: ComputedStyleValueHandle,
+    pub each_line: bool,
+    pub hanging: bool,
+}
+
+/// The layout-facing prefix of the C++-owned inherited-text style group,
+/// pinned by static asserts beside the C++ group definition. The computed
+/// tab-size is stored as an explicit length-or-number triple because the
+/// C++ Variant it replaced has no FFI-stable layout.
+#[repr(C)]
+pub struct InheritedTextLayoutFacts {
+    pub text_justify: u8,
+    pub line_break: u8,
+    pub tab_size_is_number: bool,
+    pub letter_spacing: crate::css::css_pixels::CssPixels,
+    pub word_spacing: crate::css::css_pixels::CssPixels,
+    pub tab_size_length: crate::css::css_pixels::CssPixels,
+    pub tab_size_number: f64,
+    pub text_indent: ComputedTextIndent,
+}
+
+/// A computed text-underline-position pair.
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct ComputedTextUnderlinePosition {
+    pub horizontal: u8,
+    pub vertical: u8,
+}
+
+/// A computed text-underline-offset and the pixel value used by layout.
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct ComputedTextUnderlineOffset {
+    pub used_value: crate::css::css_pixels::CssPixels,
+    pub is_auto: bool,
+    pub value: ComputedStyleValueHandle,
+}
+
+/// Layout of the inherited text computed values.
+#[repr(C)]
+pub struct InheritedTextValues {
+    pub text_justify: u8,
+    pub line_break: u8,
+    pub tab_size_is_number: bool,
+    pub text_security: u8,
+    pub letter_spacing: crate::css::css_pixels::CssPixels,
+    pub word_spacing: crate::css::css_pixels::CssPixels,
+    pub tab_size_length: crate::css::css_pixels::CssPixels,
+    pub tab_size_number: f64,
+    pub text_indent: ComputedTextIndent,
+    pub color: u32,
+    pub color_style_value: ComputedStyleValueHandle,
+    pub webkit_text_fill_color: u32,
+    pub webkit_text_fill_color_is_current_color: bool,
+    pub webkit_text_stroke_color: StyleColor,
+    pub webkit_text_stroke_width: f64,
+    pub font_smoothing: u8,
+    pub text_shadow: RetainedComputedShadowList,
+    pub text_transform: u8,
+    pub text_wrap_style: u8,
+    pub text_decoration_skip_ink: u8,
+    pub text_underline_position: ComputedTextUnderlinePosition,
+    pub text_underline_offset: ComputedTextUnderlineOffset,
+    pub overflow_wrap: u8,
+    pub block_ellipsis: ComputedStyleValueHandle,
+    pub word_spacing_style_value: ComputedStyleValueHandle,
+    pub letter_spacing_style_value: ComputedStyleValueHandle,
+    pub orphans: u64,
+    pub widows: u64,
+}
+
+/// The animation and transition computed values. Each handle retains the
+/// canonical Rust longhand value; typed C++ views decode coordinated list
+/// items only when a consumer asks for them.
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct AnimationValues {
+    pub animation_name: ComputedStyleValueHandle,
+    pub animation_composition: ComputedStyleValueHandle,
+    pub animation_delay: ComputedStyleValueHandle,
+    pub animation_direction: ComputedStyleValueHandle,
+    pub animation_duration: ComputedStyleValueHandle,
+    pub animation_fill_mode: ComputedStyleValueHandle,
+    pub animation_iteration_count: ComputedStyleValueHandle,
+    pub animation_play_state: ComputedStyleValueHandle,
+    pub animation_range_start: ComputedStyleValueHandle,
+    pub animation_range_end: ComputedStyleValueHandle,
+    pub animation_timeline: ComputedStyleValueHandle,
+    pub animation_timing_function: ComputedStyleValueHandle,
+    pub scroll_timeline_name: ComputedStyleValueHandle,
+    pub scroll_timeline_axis: ComputedStyleValueHandle,
+    pub timeline_scope: ComputedStyleValueHandle,
+    pub view_timeline_name: ComputedStyleValueHandle,
+    pub view_timeline_axis: ComputedStyleValueHandle,
+    pub view_timeline_inset: ComputedStyleValueHandle,
+    pub transition_property: ComputedStyleValueHandle,
+    pub transition_duration: ComputedStyleValueHandle,
+    pub transition_timing_function: ComputedStyleValueHandle,
+    pub transition_delay: ComputedStyleValueHandle,
+    pub transition_behavior: ComputedStyleValueHandle,
+    pub transition_delay_and_duration_are_single_zero: bool,
+}
+
+/// The mask computed values. Each handle retains a canonical Rust longhand;
+/// typed C++ views coordinate repeatable lists only when consumed.
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct MaskValues {
+    pub mask_image: ComputedStyleValueHandle,
+    pub mask_type: ComputedStyleValueHandle,
+    pub clip_path: ComputedStyleValueHandle,
+    pub mask_mode: ComputedStyleValueHandle,
+    pub mask_repeat: ComputedStyleValueHandle,
+    pub mask_position: ComputedStyleValueHandle,
+    pub mask_clip: ComputedStyleValueHandle,
+    pub mask_origin: ComputedStyleValueHandle,
+    pub mask_size: ComputedStyleValueHandle,
+    pub mask_composite: ComputedStyleValueHandle,
+    pub mask_border_source: ComputedStyleValueHandle,
+    pub mask_border_slice: ComputedStyleValueHandle,
+    pub mask_border_width: ComputedStyleValueHandle,
+    pub mask_border_outset: ComputedStyleValueHandle,
+    pub mask_border_repeat: ComputedStyleValueHandle,
+    pub mask_border_mode: ComputedStyleValueHandle,
+}
+
+/// The background computed values. Rust keeps every canonical longhand while
+/// C++ coordinates the repeatable lists only when painting consumes them.
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct BackgroundValues {
+    pub background_color: StyleColor,
+    pub background_color_style_value: ComputedStyleValueHandle,
+    pub background_color_clip: u8,
+    pub background_image: ComputedStyleValueHandle,
+    pub background_attachment: ComputedStyleValueHandle,
+    pub background_blend_mode: ComputedStyleValueHandle,
+    pub background_clip: ComputedStyleValueHandle,
+    pub background_origin: ComputedStyleValueHandle,
+    pub background_position_x: ComputedStyleValueHandle,
+    pub background_position_y: ComputedStyleValueHandle,
+    pub background_repeat: ComputedStyleValueHandle,
+    pub background_size: ComputedStyleValueHandle,
+}
+
+/// Canonical inherited font values and their derived platform font facts.
+#[repr(C)]
+pub struct FontValues {
+    pub font_size: crate::css::css_pixels::CssPixels,
+    /// The used line height as the style was computed, which a `normal` one of a cascade the font
+    /// computer published moves past once a load fills one of its faces in: read
+    /// [`FontValues::line_height_used`].
+    pub resolved_line_height_used: crate::css::css_pixels::CssPixels,
+    pub font_variant_emoji: u8,
+    /// The first available font and its metrics as the cascade was resolved, which a cascade the
+    /// font computer published moves past once a load fills one of its faces in: read
+    /// [`FontValues::first_available_font_metrics`] and [`FontValues::first_available_font`].
+    pub resolved_font_ascent: f32,
+    pub resolved_font_descent: f32,
+    pub resolved_font_x_height: f32,
+    pub resolved_font_cap_height: f32,
+    pub resolved_font_zero_advance: f32,
+    pub resolved_first_available_font: *const std::ffi::c_void,
+    pub font_cascade_list: libgfx_rust::font::FontCascadeListHandle,
+    /// The same cascade, frozen at publication: what the render pipeline reads. The live
+    /// list beside it is the document's, and only the document thread may look a code point
+    /// up in it.
+    pub frozen_font_list: libgfx_rust::font::FrozenFontListRef,
+    pub font_weight: f64,
+    pub font_width: f64,
+    pub math_shift: u8,
+    pub math_style: u8,
+    pub math_depth: i32,
+    pub font_family: ComputedStyleValueHandle,
+    pub font_style: ComputedStyleValueHandle,
+    pub font_optical_sizing: ComputedStyleValueHandle,
+    pub font_synthesis_weight: ComputedStyleValueHandle,
+    pub font_synthesis_style: ComputedStyleValueHandle,
+    pub font_feature_settings: ComputedStyleValueHandle,
+    pub font_kerning: ComputedStyleValueHandle,
+    pub font_language_override: ComputedStyleValueHandle,
+    pub font_variant_alternates: ComputedStyleValueHandle,
+    pub font_variant_caps: ComputedStyleValueHandle,
+    pub font_variant_east_asian: ComputedStyleValueHandle,
+    pub font_variant_ligatures: ComputedStyleValueHandle,
+    pub font_variant_numeric: ComputedStyleValueHandle,
+    pub font_variant_position: ComputedStyleValueHandle,
+    pub font_variation_settings: ComputedStyleValueHandle,
+    pub text_rendering: ComputedStyleValueHandle,
+    pub line_height: ComputedStyleValueHandle,
+    pub math_shift_value: ComputedStyleValueHandle,
+    pub math_style_value: ComputedStyleValueHandle,
+    pub math_depth_value: ComputedStyleValueHandle,
+    pub font_size_value: ComputedStyleValueHandle,
+}
+
+/// The metrics of a style's first available font that lengths and line layout read.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FirstAvailableFontMetrics {
+    pub ascent: f32,
+    pub descent: f32,
+    pub x_height: f32,
+    pub cap_height: f32,
+    pub zero_advance: f32,
+}
+
+impl FontValues {
+    /// The computed font size, which `font_size` holds rounded to the nearest pixel fraction, as
+    /// the lengths relative to it read it: An em or rem length scales the size unrounded.
+    pub fn font_size_for_lengths(&self) -> f64 {
+        match self.font_size_value.style_value() {
+            Some(crate::css::style_value::StyleValueData::Length { value, unit })
+                if *unit == crate::css::style_compute::px_length_unit() =>
+            {
+                *value
+            }
+            _ => self.font_size.to_double(),
+        }
+    }
+
+    /// https://drafts.csswg.org/css-fonts/#first-available-font
+    /// The frozen cascade answers where the font computer published one: a load filling one of its
+    /// faces in moves the answer without a new style. A cascade nobody published (a unit test's)
+    /// answers what it was resolved with.
+    pub fn first_available_font(&self) -> Option<&libgfx_rust::font::FontHandle> {
+        Some(self.frozen_font_list.list()?.first_available_font())
+    }
+
+    /// https://drafts.csswg.org/css-inline-3/#line-height-property
+    /// The used line height. A `normal` one is decided by the metrics of the first available font,
+    /// read through the frozen cascade, so a load filling one of its faces in moves it without a
+    /// new style.
+    pub fn line_height_used(&self) -> crate::css::css_pixels::CssPixels {
+        let is_normal = matches!(
+            self.line_height.style_value(),
+            Some(crate::css::style_value::StyleValueData::Keyword { keyword })
+                if *keyword == crate::css::style_compute::keyword::NORMAL
+        );
+        if is_normal && let Some(font) = self.first_available_font() {
+            let facts = font.facts();
+            return crate::css::css_pixels::CssPixels::from_integer(
+                i64::from(facts.ascent.round_ties_even() as i32)
+                    + i64::from(facts.descent.round_ties_even() as i32)
+                    + i64::from(facts.line_gap.round_ties_even() as i32),
+            );
+        }
+        self.resolved_line_height_used
+    }
+
+    /// The metrics of [`FontValues::first_available_font`].
+    pub fn first_available_font_metrics(&self) -> FirstAvailableFontMetrics {
+        match self.first_available_font() {
+            Some(font) => {
+                let facts = font.facts();
+                FirstAvailableFontMetrics {
+                    ascent: facts.ascent,
+                    descent: facts.descent,
+                    x_height: facts.x_height,
+                    cap_height: facts.cap_height,
+                    zero_advance: facts.zero_advance,
+                }
+            }
+            None => FirstAvailableFontMetrics {
+                ascent: self.resolved_font_ascent,
+                descent: self.resolved_font_descent,
+                x_height: self.resolved_font_x_height,
+                cap_height: self.resolved_font_cap_height,
+                zero_advance: self.resolved_font_zero_advance,
+            },
+        }
+    }
+}
+
+pub const GRID_NO_INDEX: u32 = u32::MAX;
+
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct ComputedGridTrackBreadth {
+    pub is_flex: bool,
+    pub flex_factor: f64,
+    pub size: ComputedSize,
+}
+
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct ComputedGridTrackEntry {
+    pub kind: u8,
+    pub next_sibling: u32,
+    pub name_index_start: usize,
+    pub name_index_count: usize,
+    pub size: ComputedGridTrackBreadth,
+    pub min_size: ComputedGridTrackBreadth,
+    pub max_size: ComputedGridTrackBreadth,
+    pub repeat_type: u8,
+    pub repeat_count: usize,
+    pub repeat_list: ComputedGridTrackList,
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ComputedGridTrackEntryKind {
+    LineNames,
+    TrackSize,
+    MinMax,
+    Repeat,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ComputedGridTrackList {
+    pub is_subgrid: bool,
+    pub preserves_line_name_sets: bool,
+    pub first_entry: u32,
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ComputedGridPlacementKind {
+    Auto,
+    Line,
+    Span,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ComputedGridPlacement {
+    pub kind: u8,
+    pub has_line_number: bool,
+    pub line_number: i32,
+    pub has_name: bool,
+    pub name_index: u32,
+    pub implicit_start_name_index: u32,
+    pub implicit_end_name_index: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ComputedGridArea {
+    pub name_index: u32,
+    pub implicit_start_name_index: u32,
+    pub implicit_end_name_index: u32,
+    pub row_start: usize,
+    pub row_end: usize,
+    pub column_start: usize,
+    pub column_end: usize,
+}
+
+#[repr(C)]
+pub struct RetainedGridTrackEntryList {
+    pub pointer: *mut ComputedGridTrackEntry,
+    pub length: usize,
+}
+
+#[repr(C)]
+pub struct RetainedGridNameIndexList {
+    pub pointer: *mut u32,
+    pub length: usize,
+}
+
+#[repr(C)]
+pub struct RetainedGridAreaList {
+    pub pointer: *mut ComputedGridArea,
+    pub length: usize,
+}
+
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct GridValues {
+    pub names: crate::css::retained_fly_string::RetainedUtf16FlyStringList,
+    pub name_indices: RetainedGridNameIndexList,
+    pub entries: RetainedGridTrackEntryList,
+    pub areas: RetainedGridAreaList,
+    pub template_columns: ComputedGridTrackList,
+    pub template_rows: ComputedGridTrackList,
+    pub auto_columns: ComputedGridTrackList,
+    pub auto_rows: ComputedGridTrackList,
+    pub column_start: ComputedGridPlacement,
+    pub column_end: ComputedGridPlacement,
+    pub row_start: ComputedGridPlacement,
+    pub row_end: ComputedGridPlacement,
+    pub grid_template_columns_style_value: ComputedStyleValueHandle,
+    pub grid_template_rows_style_value: ComputedStyleValueHandle,
+    pub grid_auto_columns_style_value: ComputedStyleValueHandle,
+    pub grid_auto_rows_style_value: ComputedStyleValueHandle,
+    pub grid_template_areas_style_value: ComputedStyleValueHandle,
+    pub grid_column_start_style_value: ComputedStyleValueHandle,
+    pub grid_column_end_style_value: ComputedStyleValueHandle,
+    pub grid_row_start_style_value: ComputedStyleValueHandle,
+    pub grid_row_end_style_value: ComputedStyleValueHandle,
+    pub fit_tolerance_style_value: ComputedStyleValueHandle,
+}
+
+/// Layout of the non-inherited SVG geometry and painting properties.
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct SVGResetValues {
+    pub cx: ComputedStyleValueHandle,
+    pub cy: ComputedStyleValueHandle,
+    pub d: ComputedStyleValueHandle,
+    pub r: ComputedStyleValueHandle,
+    pub rx: ComputedLengthPercentageOrAuto,
+    pub ry: ComputedLengthPercentageOrAuto,
+    pub x: ComputedStyleValueHandle,
+    pub y: ComputedStyleValueHandle,
+    pub stop_color: StyleColor,
+    pub stop_opacity: f32,
+    pub flood_color: StyleColor,
+    pub flood_opacity: f32,
+    pub vector_effect: u8,
+    /// Whether alignment-baseline names a baseline metric, rather than being 'baseline'.
+    pub has_alignment_baseline: bool,
+    pub alignment_baseline: u8,
+}
+
+/// A Rust-owned list of computed TextDecorationLine enum codes.
+#[repr(C)]
+pub struct RetainedTextDecorationLineList {
+    pub pointer: *mut u8,
+    pub length: usize,
+}
+
+/// Layout of the computed text-decoration and white-space-trim values.
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct TextResetValues {
+    pub text_decoration_lines: RetainedTextDecorationLineList,
+    /// 0 = auto, 1 = from-font, 2 = length-percentage.
+    pub text_decoration_thickness_kind: u8,
+    pub text_decoration_thickness: ComputedStyleValueHandle,
+    pub text_decoration_style: u8,
+    pub text_decoration_color: StyleColor,
+    pub white_space_trim_discard_before: bool,
+    pub white_space_trim_discard_after: bool,
+    pub white_space_trim_discard_inner: bool,
+}
+
+/// One transform function lowered for paint. Percentage-bearing translate
+/// axes retain their computed values; every other transform stores a matrix.
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct ComputedResolvedTransform {
+    pub is_translate: bool,
+    pub matrix: [f32; 16],
+    pub x_px: f32,
+    pub y_px: f32,
+    pub z_px: f32,
+    pub x_percentage: ComputedStyleValueHandle,
+    pub y_percentage: ComputedStyleValueHandle,
+}
+
+/// A Rust-owned array of paint-ready transforms.
+#[repr(C)]
+pub struct RetainedComputedResolvedTransformList {
+    pub pointer: *mut ComputedResolvedTransform,
+    pub length: usize,
+}
+
+/// Layout of the computed transform properties.
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct TransformValues {
+    pub transformations: ComputedStyleValueHandle,
+    pub resolved_transforms: RetainedComputedResolvedTransformList,
+    pub transform_box: u8,
+    pub transform_origin_x: ComputedStyleValueHandle,
+    pub transform_origin_y: ComputedStyleValueHandle,
+    pub transform_origin_z: ComputedStyleValueHandle,
+    pub transform_style: u8,
+    pub backface_visibility: u8,
+    pub rotate: ComputedStyleValueHandle,
+    pub translate: ComputedStyleValueHandle,
+    pub scale: ComputedStyleValueHandle,
+    pub has_perspective: bool,
+    pub perspective_px: i32,
+    pub perspective_origin_x: ComputedStyleValueHandle,
+    pub perspective_origin_y: ComputedStyleValueHandle,
+    /// Whether offset-path is not none, which is all elements without an offset path pay for.
+    pub has_offset_path: bool,
+    pub offset_path: ComputedStyleValueHandle,
+    pub offset_distance: ComputedStyleValueHandle,
+    pub offset_position: ComputedStyleValueHandle,
+    pub offset_anchor: ComputedStyleValueHandle,
+    pub offset_rotate: ComputedStyleValueHandle,
+}
+
+/// One paint-ready CSS filter operation.
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct ComputedFilterOperation {
+    pub kind: u8,
+    pub color_operation: u8,
+    pub amount: f32,
+    pub shadow_offset_x: i32,
+    pub shadow_offset_y: i32,
+    pub shadow_radius: i32,
+    pub shadow_color: u32,
+    pub url_value: ComputedStyleValueHandle,
+}
+
+#[repr(C)]
+pub struct RetainedComputedFilterOperationList {
+    pub pointer: *mut ComputedFilterOperation,
+    pub length: usize,
+}
+
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct ComputedFilter {
+    pub filter_list: ComputedStyleValueHandle,
+    pub operations: RetainedComputedFilterOperationList,
+}
+
+/// Layout-compatible with CSS::ShadowData.
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq)]
+pub struct ComputedShadow {
+    pub offset_x: i32,
+    pub offset_y: i32,
+    pub blur_radius: i32,
+    pub spread_distance: i32,
+    pub color: StyleColor,
+    pub color_syntax: u8,
+    pub placement: u32,
+}
+
+impl ComputedShadow {
+    pub fn is_inner(&self) -> bool {
+        self.placement == 1
+    }
+}
+
+#[repr(C)]
+pub struct RetainedComputedShadowList {
+    pub pointer: *mut ComputedShadow,
+    pub length: usize,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq)]
+pub struct ComputedClipEdge {
+    pub is_auto: bool,
+    pub value: f64,
+    pub unit: u8,
+}
+
+/// Layout of the computed effects properties.
+#[repr(C)]
+pub struct EffectsValues {
+    pub opacity: f32,
+    pub filter: ComputedFilter,
+    pub backdrop_filter: ComputedFilter,
+    pub mix_blend_mode: u8,
+    pub isolation: u8,
+    pub box_shadows: RetainedComputedShadowList,
+    pub clip_is_rect: bool,
+    pub clip_edges: [ComputedClipEdge; 4],
+    /// Canonical longhands retained so payload equality implies computed-value
+    /// equality even when distinct syntax lowers to the same used facts.
+    pub opacity_style_value: ComputedStyleValueHandle,
+    pub filter_style_value: ComputedStyleValueHandle,
+    pub backdrop_filter_style_value: ComputedStyleValueHandle,
+    pub mix_blend_mode_style_value: ComputedStyleValueHandle,
+    pub isolation_style_value: ComputedStyleValueHandle,
+    pub box_shadow_style_value: ComputedStyleValueHandle,
+    pub clip_style_value: ComputedStyleValueHandle,
+}
+
+#[repr(C)]
+pub struct RetainedPositionAreaList {
+    pub pointer: *mut u8,
+    pub length: usize,
+}
+
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct ComputedPositionTryFallback {
+    pub name: crate::css::retained_fly_string::RetainedUtf16FlyString,
+    pub tactics: [u8; 5],
+    pub tactic_count: usize,
+    pub has_position_area: bool,
+    pub position_area: RetainedPositionAreaList,
+}
+
+#[repr(C)]
+pub struct RetainedPositionTryFallbackList {
+    pub pointer: *mut ComputedPositionTryFallback,
+    pub length: usize,
+}
+
+/// Layout of the computed anchor-positioning properties.
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct AnchorValues {
+    pub anchor_names: crate::css::retained_fly_string::RetainedUtf16FlyStringList,
+    pub anchor_scope_all: bool,
+    pub anchor_scope_names: crate::css::retained_fly_string::RetainedUtf16FlyStringList,
+    pub position_anchor_type: u8,
+    pub position_anchor_name: crate::css::retained_fly_string::RetainedUtf16FlyString,
+    pub position_area: RetainedPositionAreaList,
+    pub position_try_fallbacks: RetainedPositionTryFallbackList,
+    pub has_position_try_order: bool,
+    pub position_try_order: u8,
+    pub position_visibility_always: bool,
+    pub position_visibility_anchors_valid: bool,
+    pub position_visibility_anchors_visible: bool,
+    pub position_visibility_no_overflow: bool,
+}
+
+/// A computed caret-color or accent-color, keeping the computed auto
+/// distinction beside the used color: `currentcolor` for an auto caret-color,
+/// the system accent color for an auto accent-color.
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct ComputedColorOrAuto {
+    pub is_auto: bool,
+    pub color: StyleColor,
+}
+
+/// One cursor list item: either a retained cursor() value or a predefined
+/// cursor enum code.
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct ComputedCursor {
+    pub is_cursor_value: bool,
+    pub cursor: ComputedStyleValueHandle,
+    pub predefined: u8,
+}
+
+#[repr(C)]
+pub struct RetainedComputedCursorList {
+    pub pointer: *mut ComputedCursor,
+    pub length: usize,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct ComputedScrollbarColor {
+    pub thumb_color: u32,
+    pub track_color: u32,
+    pub is_auto: bool,
+}
+
+/// Layout of the inherited UI computed values.
+#[repr(C)]
+pub struct InheritedUIValues {
+    pub caret_color: ComputedColorOrAuto,
+    pub accent_color: ComputedColorOrAuto,
+    pub cursor: RetainedComputedCursorList,
+    pub forced_color_adjust: u8,
+    pub interpolate_size: u8,
+    pub scrollbar_color: ComputedScrollbarColor,
+    pub color_scheme: u8,
+    pub color_schemes: crate::css::retained_fly_string::RetainedUtf16FlyStringList,
+    pub color_scheme_only: bool,
+    pub image_rendering: u8,
+}
+
+pub const SVG_PAINT_NONE: u8 = 0;
+pub const SVG_PAINT_COLOR: u8 = 1;
+pub const SVG_PAINT_URL: u8 = 2;
+
+/// One computed SVG paint. A color paint uses `color`; a URL paint retains
+/// the URL style value and may also carry a fallback color.
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct ComputedSvgPaint {
+    /// One of `SVG_PAINT_NONE`, `SVG_PAINT_COLOR`, `SVG_PAINT_URL`.
+    pub kind: u8,
+    pub url: ComputedStyleValueHandle,
+    pub has_color: bool,
+    pub color: StyleColor,
+}
+
+/// One computed stroke-dasharray item: either a plain SVG number or a
+/// retained length-percentage value.
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct ComputedSvgDash {
+    pub is_number: bool,
+    pub number: f64,
+    pub value: ComputedStyleValueHandle,
+}
+
+#[repr(C)]
+pub struct RetainedComputedSvgDashList {
+    pub pointer: *mut ComputedSvgDash,
+    pub length: usize,
+}
+
+/// Layout of the inherited SVG computed values.
+#[repr(C)]
+#[derive(Clone, PartialEq)]
+pub struct InheritedSVGValues {
+    pub fill: ComputedSvgPaint,
+    pub stroke: ComputedSvgPaint,
+    pub fill_rule: u8,
+    pub clip_rule: u8,
+    pub fill_opacity: f32,
+    pub stroke_opacity: f32,
+    pub stroke_linecap: u8,
+    pub stroke_linejoin: u8,
+    pub stroke_dasharray: RetainedComputedSvgDashList,
+    pub stroke_dashoffset: ComputedStyleValueHandle,
+    pub stroke_miterlimit: f64,
+    pub stroke_width: ComputedStyleValueHandle,
+    pub color_interpolation: u8,
+    pub color_interpolation_filters: u8,
+    pub paint_order: [u8; 3],
+    pub paint_order_serialization_length: u8,
+    pub paint_order_is_normal: bool,
+    pub text_anchor: u8,
+    pub has_dominant_baseline: bool,
+    pub dominant_baseline: u8,
+    pub shape_rendering: u8,
+}
+
+// Registered indices of the style groups the computed-values view reads,
+// pinned to the C++ StyleGroupIndex enum by static_asserts in
+// LayoutRustBridge.cpp.
+pub const STYLE_GROUP_INDEX_INHERITED_LIST_TABLE: usize = 0;
+pub const STYLE_GROUP_INDEX_INHERITED_UI: usize = 1;
+pub const STYLE_GROUP_INDEX_INHERITED_SVG: usize = 2;
+pub const STYLE_GROUP_INDEX_INHERITED_TEXT: usize = 3;
+pub const STYLE_GROUP_INDEX_FONT: usize = 4;
+pub const STYLE_GROUP_INDEX_SVG_RESET: usize = 6;
+pub const STYLE_GROUP_INDEX_GRID: usize = 7;
+pub const STYLE_GROUP_INDEX_ANCHOR: usize = 8;
+pub const STYLE_GROUP_INDEX_CONTENT: usize = 9;
+pub const STYLE_GROUP_INDEX_ALIGNMENT: usize = 10;
+pub const STYLE_GROUP_INDEX_MISC_LAYOUT: usize = 11;
+pub const STYLE_GROUP_INDEX_MISC_INTERACTION: usize = 12;
+pub const STYLE_GROUP_INDEX_EFFECTS: usize = 13;
+pub const STYLE_GROUP_INDEX_MASK: usize = 14;
+pub const STYLE_GROUP_INDEX_TEXT_RESET: usize = 15;
+pub const STYLE_GROUP_INDEX_TRANSFORM: usize = 16;
+pub const STYLE_GROUP_INDEX_BACKGROUND: usize = 17;
+pub const STYLE_GROUP_INDEX_BORDER: usize = 18;
+pub const STYLE_GROUP_INDEX_SIZING: usize = 19;
+pub const STYLE_GROUP_INDEX_SURROUND: usize = 20;
+pub const STYLE_GROUP_INDEX_BOX: usize = 21;

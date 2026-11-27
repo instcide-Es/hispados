@@ -1,0 +1,34 @@
+/*
+ * Copyright (c) 2024-2025, Sam Atkins <sam@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/StringView.h>
+#include <AK/Utf16FlyString.h>
+#include <LibWeb/CSS/PropertyID.h>
+
+namespace Web::CSS {
+
+// https://drafts.css-houdini.org/css-typed-om-1/#custom-property-name-string
+// https://drafts.csswg.org/css-variables-2/#custom-property
+inline bool is_a_custom_property_name_string(Utf16View string)
+{
+    // A custom property is any property whose name starts with two dashes (U+002D HYPHEN-MINUS), like --foo.
+    // The <custom-property-name> production corresponds to this: it’s defined as any <dashed-ident> (a valid
+    // identifier that starts with two dashes), except -- itself, which is reserved for future use by CSS.
+    return string.length_in_code_units() > 2
+        && string.code_unit_at(0) == '-'
+        && string.code_unit_at(1) == '-';
+}
+
+// The same check, on UTF-8 text: A name longer than its two dashes in code units is longer in bytes too, and the other
+// way round.
+inline bool is_a_custom_property_name_string(StringView string)
+{
+    return string.length() > 2 && string[0] == '-' && string[1] == '-';
+}
+
+}

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<!-- Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+     Hispa-64, etapa 10 g (docs/64/HISPA-64.md, sección 24): la página de
+     prueba de MWEB (mweb.c): HTML, CSS y JavaScript que cambia la página
+     (lo que saca «--headless=text» depende de que corra). -->
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Hispa-64: prueba de Ladybird</title>
+<style>
+  body { font-family: sans-serif; margin: 2em; background: #fffbe6; }
+  h1 { color: #0050a0; }
+  .caja { border: 2px solid #c00; padding: 8px; width: 300px; }
+  ul li:nth-child(2) { font-weight: bold; }
+</style>
+</head>
+<body>
+<h1>Hola desde Hispa-64</h1>
+<p class="caja">Ladybird sin ventana, con LibWeb y LibJS.</p>
+<ul>
+  <li>uno</li>
+  <li>dos</li>
+  <li>tres</li>
+</ul>
+<p id="js">JavaScript no ha corrido.</p>
+<p id="cuenta"></p>
+<script>
+  document.getElementById("js").textContent = "JavaScript ha corrido: " + [1, 2, 3].map(x => x * x).join("+") + " = " + (1 + 4 + 9) + ".";
+  const f = new Intl.DateTimeFormat("es", { timeZone: "UTC", year: "numeric", month: "long", day: "numeric" });
+  document.getElementById("cuenta").textContent = "Fecha: " + f.format(new Date(Date.UTC(2026, 10, 27))) + "; ñandú en mayúsculas: " + "ñandú".toUpperCase() + ".";
+</script>
+</body>
+</html>

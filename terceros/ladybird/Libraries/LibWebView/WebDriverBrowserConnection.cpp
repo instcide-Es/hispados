@@ -1,0 +1,371 @@
+/*
+ * Copyright (c) 2026, Shannon Booth <shannon@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/JsonObject.h>
+#include <LibCore/EventLoop.h>
+#include <LibWebView/Application.h>
+#include <LibWebView/PermissionManager.h>
+#include <LibWebView/ViewImplementation.h>
+#include <LibWebView/WebDriverBrowserConnection.h>
+#if defined(AK_OS_MACOS)
+#    include <LibIPC/TransportBootstrapMach.h>
+#else
+#    include <LibCore/Socket.h>
+#endif
+
+namespace WebView {
+
+ErrorOr<NonnullRefPtr<WebDriverBrowserConnection>> WebDriverBrowserConnection::connect(ByteString const& webdriver_endpoint)
+{
+#if defined(AK_OS_MACOS)
+    auto transport_ports = TRY(IPC::bootstrap_transport_from_mach_server(webdriver_endpoint));
+    auto transport = TRY(IPC::Transport::create(move(transport_ports.receive_right), move(transport_ports.send_right)));
+#else
+    auto socket = TRY(Core::LocalSocket::connect(webdriver_endpoint));
+    auto transport = TRY(IPC::Transport::from_socket(move(socket)));
+#endif
+    return adopt_nonnull_ref_or_enomem(new (nothrow) WebDriverBrowserConnection(move(transport)));
+}
+
+WebDriverBrowserConnection::WebDriverBrowserConnection(NonnullOwnPtr<IPC::Transport> transport)
+    : IPC::ConnectionToServer<WebDriverBrowserClientEndpoint, WebDriverBrowserServerEndpoint>(*this, move(transport))
+    , m_webdriver_bidi(make<WebDriverBiDi>(*this))
+{
+}
+
+void WebDriverBrowserConnection::die()
+{
+    Application::the().webdriver_browser_connection_died({});
+}
+
+void WebDriverBrowserConnection::close_session()
+{
+    Core::EventLoop::current().quit(0);
+}
+
+// 10.1 Navigate To, https://w3c.github.io/webdriver/#navigate-to
+void WebDriverBrowserConnection::navigate_to(u64 command_id, String window_handle, URL::URL url)
+{
+    // 1. If the current top-level browsing context is no longer open, return error with error code no such window.
+    auto view = ViewImplementation::find_view_by_handle(window_handle);
+    if (!view.has_value()) {
+        async_command_complete(command_id, Web::WebDriver::Error::from_code(Web::WebDriver::ErrorCode::NoSuchWindow, "Window not found"sv));
+        return;
+    }
+
+    // 4. Handle any user prompts and return its value if it is an error.
+    auto strong_this = NonnullRefPtr { *this };
+    view->run_webdriver_user_prompt_handling([strong_this, command_id, view_id = view->view_id(), url = move(url)](Web::WebDriver::Response response) {
+        if (response.is_error()) {
+            strong_this->async_command_complete(command_id, move(response));
+            return;
+        }
+
+        auto view = ViewImplementation::find_view_by_id(view_id);
+        if (!view.has_value()) {
+            strong_this->async_command_complete(command_id, Web::WebDriver::Error::from_code(Web::WebDriver::ErrorCode::NoSuchWindow, "Window not found"sv));
+            return;
+        }
+
+        // 5. Let current URL be the current top-level browsing context’s active document’s URL.
+        // NB: The URL replica is ordered after every navigation report WebContent sent before it
+        //     answered the user prompt job, so it reflects the document state this command observed.
+        auto const& current_url = view->url();
+
+        // FIXME: 6. If current URL and url do not have the same absolute URL:
+        // FIXME:     a. If timer has not been started, start a timer. If this algorithm has not completed before timer reaches the session’s session page load timeout in milliseconds, return an error with error code timeout.
+
+        // 7. Navigate the current top-level browsing context to url.
+        // NB: "Navigate to a javascript: URL" can evaluate without producing a new Document,
+        //     in which case "we will not perform a navigation".
+        // https://html.spec.whatwg.org/multipage/browsing-the-web.html#navigate-to-a-javascript:-url
+        auto is_same_document_fragment_navigation = url.fragment().has_value()
+            && url.equals(current_url, URL::ExcludeFragment::Yes);
+        if (url.scheme() != "javascript"sv && !is_same_document_fragment_navigation)
+            view->did_start_webdriver_navigation();
+        view->load_for_webdriver_navigation(url);
+
+        // FIXME: 10. If the current top-level browsing context contains a refresh state pragma directive of time 1 second or less, wait until the refresh timeout has elapsed, a new navigate has begun, and return to the first step of this algorithm.
+
+        // 11. Return success with data null.
+        strong_this->async_command_complete(command_id, JsonValue {});
+    });
+}
+
+// 10.5 Refresh, https://w3c.github.io/webdriver/#dfn-refresh
+void WebDriverBrowserConnection::refresh(u64 command_id, String window_handle)
+{
+    // 1. If the current top-level browsing context is no longer open, return error with error code no such window.
+    auto view = ViewImplementation::find_view_by_handle(window_handle);
+    if (!view.has_value()) {
+        async_command_complete(command_id, Web::WebDriver::Error::from_code(Web::WebDriver::ErrorCode::NoSuchWindow, "Window not found"sv));
+        return;
+    }
+
+    // 2. Handle any user prompts and return its value if it is an error.
+    auto strong_this = NonnullRefPtr { *this };
+    view->run_webdriver_user_prompt_handling([strong_this, command_id, view_id = view->view_id()](Web::WebDriver::Response response) {
+        if (response.is_error()) {
+            strong_this->async_command_complete(command_id, move(response));
+            return;
+        }
+
+        auto view = ViewImplementation::find_view_by_id(view_id);
+        if (!view.has_value()) {
+            strong_this->async_command_complete(command_id, Web::WebDriver::Error::from_code(Web::WebDriver::ErrorCode::NoSuchWindow, "Window not found"sv));
+            return;
+        }
+
+        // 3. Initiate an overridden reload of the current top-level browsing context’s active document.
+        view->did_start_webdriver_navigation();
+        view->reload();
+
+        // FIXME: 4. If url is special except for file:
+        // FIXME:     1. Try to wait for navigation to complete.
+        // FIXME:     2. Try to run the post-navigation checks.
+
+        // 6. Return success with data null.
+        strong_this->async_command_complete(command_id, JsonValue {});
+    });
+}
+
+void WebDriverBrowserConnection::wait_for_navigation_completion(u64 command_id, String window_handle, Optional<u64> page_load_timeout)
+{
+    auto view = ViewImplementation::find_view_by_handle(window_handle);
+    if (!view.has_value()) {
+        async_command_complete(command_id, Web::WebDriver::Error::from_code(Web::WebDriver::ErrorCode::NoSuchWindow, "Window not found"sv));
+        return;
+    }
+
+    auto strong_this = NonnullRefPtr { *this };
+    view->wait_for_webdriver_navigation_completion(page_load_timeout, [strong_this, command_id](Web::WebDriver::Response response) {
+        strong_this->async_command_complete(command_id, move(response));
+    });
+}
+
+void WebDriverBrowserConnection::load_url(u64 command_id, String window_handle, URL::URL url)
+{
+    auto view = ViewImplementation::find_view_by_handle(window_handle);
+    if (!view.has_value()) {
+        async_command_complete(command_id, Web::WebDriver::Error::from_code(Web::WebDriver::ErrorCode::NoSuchWindow, "Window not found"sv));
+        return;
+    }
+
+    auto strong_this = NonnullRefPtr { *this };
+    Core::deferred_invoke([strong_this, command_id, view_id = view->view_id(), url = move(url)]() {
+        auto view = ViewImplementation::find_view_by_id(view_id);
+        if (!view.has_value()) {
+            strong_this->async_command_complete(command_id, Web::WebDriver::Error::from_code(Web::WebDriver::ErrorCode::NoSuchWindow, "Window not found"sv));
+            return;
+        }
+
+        // The wait is armed only as the load starts: The current document can finish loading before then, and its
+        // completion would end a wait that was armed for the load.
+        view->did_start_webdriver_navigation();
+        view->load_from_browser_ui(url);
+        strong_this->async_command_complete(command_id, JsonValue {});
+    });
+}
+
+void WebDriverBrowserConnection::run_content_command(u64 command_id, String window_handle, Web::WebDriver::SessionBrowsingContext browsing_context, String name, JsonValue payload, Vector<String> arguments)
+{
+    auto view = ViewImplementation::find_view_by_handle(window_handle);
+    if (!view.has_value()) {
+        async_command_complete(command_id, Web::WebDriver::Error::from_code(Web::WebDriver::ErrorCode::NoSuchWindow, "Window not found"sv));
+        return;
+    }
+
+    view->run_webdriver_content_command(command_id, browsing_context, name, move(payload), move(arguments));
+}
+
+// 11.3 Switch to Window, https://w3c.github.io/webdriver/#dfn-switch-to-window
+void WebDriverBrowserConnection::switch_to_window(u64 command_id, String window_handle)
+{
+    // 4. If handle is equal to the associated window handle for some top-level browsing context, let context be the that
+    //    browsing context, and set the current top-level browsing context with session and context.
+    //    Otherwise, return error with error code no such window.
+    auto view = ViewImplementation::find_view_by_handle(window_handle);
+    if (!view.has_value()) {
+        async_command_complete(command_id, Web::WebDriver::Error::from_code(Web::WebDriver::ErrorCode::NoSuchWindow, "Window not found"sv));
+        return;
+    }
+    view->set_webdriver_current_browsing_context_to_top_level();
+
+    // 5. Update any implementation-specific state that would result from the user selecting the current
+    //    browsing context for interaction, without altering OS-level focus.
+    if (view->on_activate_tab)
+        view->on_activate_tab();
+
+    async_command_complete(command_id, JsonValue {});
+}
+
+void WebDriverBrowserConnection::switch_to_parent_frame(u64 command_id, String window_handle)
+{
+    auto view = ViewImplementation::find_view_by_handle(window_handle);
+    if (!view.has_value()) {
+        async_command_complete(command_id, Web::WebDriver::Error::from_code(Web::WebDriver::ErrorCode::NoSuchWindow, "Window not found"sv));
+        return;
+    }
+
+    view->switch_webdriver_to_parent_frame([strong_this = NonnullRefPtr { *this }, command_id](Web::WebDriver::Response response) {
+        strong_this->async_command_complete(command_id, move(response));
+    });
+}
+
+void WebDriverBrowserConnection::set_current_browsing_context_to_top_level(u64 command_id, String window_handle)
+{
+    auto view = ViewImplementation::find_view_by_handle(window_handle);
+    if (!view.has_value()) {
+        async_command_complete(command_id, Web::WebDriver::Error::from_code(Web::WebDriver::ErrorCode::NoSuchWindow, "Window not found"sv));
+        return;
+    }
+
+    view->set_webdriver_current_browsing_context_to_top_level();
+    async_command_complete(command_id, JsonValue {});
+}
+
+void WebDriverBrowserConnection::set_user_prompt_handler(Web::WebDriver::UserPromptHandler user_prompt_handler)
+{
+    Application::the().update_webdriver_session_config({}, [user_prompt_handler = move(user_prompt_handler)](auto& config) {
+        config.user_prompt_handler = user_prompt_handler;
+    });
+}
+
+void WebDriverBrowserConnection::set_page_load_strategy(Web::WebDriver::PageLoadStrategy page_load_strategy)
+{
+    Application::the().update_webdriver_session_config({}, [page_load_strategy](auto& config) {
+        config.page_load_strategy = page_load_strategy;
+    });
+}
+
+void WebDriverBrowserConnection::set_strict_file_interactability(bool strict_file_interactability)
+{
+    Application::the().update_webdriver_session_config({}, [strict_file_interactability](auto& config) {
+        config.strict_file_interactability = strict_file_interactability;
+    });
+}
+
+void WebDriverBrowserConnection::set_timeouts_configuration(JsonValue timeouts)
+{
+    Application::the().update_webdriver_session_config({}, [timeouts = move(timeouts)](auto& config) {
+        config.timeouts = timeouts;
+    });
+}
+
+// 10.3 Back, https://w3c.github.io/webdriver/#dfn-back
+// 10.4 Forward, https://w3c.github.io/webdriver/#dfn-forward
+void WebDriverBrowserConnection::traverse_history(u64 command_id, String window_handle, i32 delta, bool handle_user_prompts)
+{
+    // 1. If session's current top-level browsing context is no longer open, return error with error code no such window.
+    auto view = ViewImplementation::find_view_by_handle(window_handle);
+    if (!view.has_value()) {
+        async_command_complete(command_id, Web::WebDriver::Error::from_code(Web::WebDriver::ErrorCode::NoSuchWindow, "Window not found"sv));
+        return;
+    }
+
+    auto strong_this = NonnullRefPtr { *this };
+    auto run_traversal = [strong_this, command_id, view_id = view->view_id(), delta]() {
+        // Defer the traversal, so its cancelation checks can safely call back into the WebContent
+        // process whose message dispatch we may currently be inside.
+        Core::deferred_invoke([strong_this, command_id, view_id, delta]() {
+            auto view = ViewImplementation::find_view_by_id(view_id);
+            if (!view.has_value()) {
+                strong_this->async_command_complete(command_id, Web::WebDriver::Error::from_code(Web::WebDriver::ErrorCode::NoSuchWindow, "Window not found"sv));
+                return;
+            }
+
+            view->traverse_the_history_by_delta(delta, CheckForCancelation::Yes, [strong_this, command_id]() {
+                strong_this->async_command_complete(command_id, JsonValue {});
+            });
+        });
+    };
+
+    if (!handle_user_prompts) {
+        run_traversal();
+        return;
+    }
+
+    // 2. Try to handle any user prompts with session.
+    view->run_webdriver_user_prompt_handling([strong_this, command_id, run_traversal = move(run_traversal)](Web::WebDriver::Response response) mutable {
+        if (response.is_error()) {
+            strong_this->async_command_complete(command_id, move(response));
+            return;
+        }
+
+        run_traversal();
+    });
+}
+
+void WebDriverBrowserConnection::get_session_history(u64 command_id, String window_handle)
+{
+    auto view = ViewImplementation::find_view_by_handle(window_handle);
+    if (!view.has_value()) {
+        async_command_complete(command_id, Web::WebDriver::Error::from_code(Web::WebDriver::ErrorCode::NoSuchWindow, "Window not found"sv));
+        return;
+    }
+
+    JsonObject result;
+    result.set("ui"sv, view->webdriver_session_history());
+    async_command_complete(command_id, JsonValue { move(result) });
+}
+
+// https://w3c.github.io/permissions/#webdriver-command-set-permission
+void WebDriverBrowserConnection::set_permission(u64 command_id, String window_handle, JsonValue parameters)
+{
+    auto invalid_argument = [&](StringView message) {
+        async_command_complete(command_id, Web::WebDriver::Error::from_code(Web::WebDriver::ErrorCode::InvalidArgument, message));
+    };
+
+    auto view = ViewImplementation::find_view_by_handle(window_handle);
+    if (!view.has_value()) {
+        async_command_complete(command_id, Web::WebDriver::Error::from_code(Web::WebDriver::ErrorCode::NoSuchWindow, "Window not found"sv));
+        return;
+    }
+
+    if (!parameters.is_object())
+        return invalid_argument("Parameters must be an object"sv);
+    auto descriptor = parameters.as_object().get_object("descriptor"sv);
+    if (!descriptor.has_value())
+        return invalid_argument("The descriptor must be an object"sv);
+    auto name = descriptor->get_string("name"sv).map([](auto const& string) { return Web::Permissions::permission_name_from_string(string); });
+    if (!name.has_value() || !name->has_value())
+        return invalid_argument("The permission name is not supported"sv);
+
+    Optional<PermissionDecision> decision;
+    auto state = parameters.as_object().get_string("state"sv);
+    if (state == "granted"sv)
+        decision = PermissionDecision::Allow;
+    else if (state == "denied"sv)
+        decision = PermissionDecision::Block;
+    else if (state != "prompt"sv)
+        return invalid_argument("The state must be granted, denied, or prompt"sv);
+
+    // NB: A permission is kept for the top-level document's origin, whichever frame the session is in.
+    view->set_site_permission(view->permission_origin(), **name, decision);
+    async_command_complete(command_id, JsonValue {});
+}
+
+void WebDriverBrowserConnection::bidi_command(u64 command_id, String method, JsonValue params)
+{
+    m_webdriver_bidi->run_command(command_id, method, move(params));
+}
+
+void WebDriverBrowserConnection::bidi_get_top_level_traversables(u64 command_id, Vector<String> navigable_ids)
+{
+    m_webdriver_bidi->get_top_level_traversables(command_id, navigable_ids);
+}
+
+void WebDriverBrowserConnection::bidi_run_subscribe_steps(u64 command_id, String event_name, Vector<String> top_level_traversable_ids)
+{
+    m_webdriver_bidi->run_subscribe_steps(command_id, event_name, top_level_traversable_ids);
+}
+
+void WebDriverBrowserConnection::set_bidi_enabled_events(Vector<String> event_names, HashMap<String, Optional<Vector<String>>> event_contexts)
+{
+    m_webdriver_bidi->set_enabled_events(event_names, move(event_contexts));
+}
+
+}

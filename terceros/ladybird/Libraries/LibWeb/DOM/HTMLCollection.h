@@ -1,0 +1,116 @@
+/*
+ * Copyright (c) 2021-2022, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2023, Luke Wilde <lukew@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <LibGC/Function.h>
+#include <LibGC/Ptr.h>
+#include <LibGC/RootVector.h>
+#include <LibGC/Weak.h>
+#include <LibGC/WeakContainer.h>
+#include <LibGC/WeakVector.h>
+#include <LibWeb/Bindings/Wrappable.h>
+#include <LibWeb/DOM/HTMLCollectionCacheRegistration.h>
+#include <LibWeb/Forward.h>
+
+namespace Web::Internals {
+
+class Internals;
+
+}
+
+namespace Web::DOM {
+
+// NOTE: HTMLCollection is in the DOM namespace because it's part of the DOM specification.
+
+// This class implements a live, filtered view of a DOM subtree.
+// When constructing an HTMLCollection, you provide a root node + a filter.
+// The filter is a simple Function object that answers the question
+// "is this Element part of the collection?"
+
+class HTMLCollection
+    : public Bindings::GCAllocatedWrappable
+    , public GC::WeakContainer
+    , public HTMLCollectionCacheRegistration {
+    WEB_WRAPPABLE(HTMLCollection, Bindings::GCAllocatedWrappable);
+    GC_DECLARE_ALLOCATOR(HTMLCollection);
+
+public:
+    enum class Scope {
+        Children,
+        Descendants,
+    };
+
+    enum class Kind {
+        Generic,
+        FormControls,
+        SelectedOptions,
+    };
+
+    using AttributeInvalidationType = HTMLCollectionCacheRegistration::AttributeInvalidationType;
+    using AttributeInvalidationTypes = HTMLCollectionCacheRegistration::AttributeInvalidationTypes;
+
+    using Filter = GC::Ref<GC::Function<bool(Element const&)>>;
+    using Sort = GC::Ptr<GC::Function<bool(Element const&, Element const&)>>;
+
+    [[nodiscard]] static GC::Ref<HTMLCollection> create(ParentNode& root, Scope, Filter, AttributeInvalidationType, Sort = nullptr, Kind = Kind::Generic);
+
+    virtual ~HTMLCollection() override;
+
+    size_t length() const;
+    Element* item(size_t index) const;
+    Element* named_item(Utf16View key) const;
+
+    GC::RootVector<GC::Ref<Element>> collect_matching_elements() const;
+
+    virtual Vector<Utf16FlyString> supported_property_names() const override;
+    virtual bool is_supported_property_name(Utf16FlyString const&) const override;
+
+protected:
+    HTMLCollection(ParentNode& root, Scope, Filter, AttributeInvalidationType, Sort = nullptr, Kind = Kind::Generic);
+
+    GC::Ref<ParentNode> root() { return *m_root; }
+    GC::Ref<ParentNode const> root() const { return *m_root; }
+    bool element_matches_filter(Element const& element) const { return (*m_filter)(element); }
+
+    virtual void collect_elements_into(GC::RootVector<GC::Ref<Element>>&) const;
+
+    virtual void visit_edges(GC::Cell::Visitor&) override;
+
+private:
+    virtual void finalize() override;
+    virtual void remove_dead_cells(Badge<GC::Heap>) override;
+    virtual GC::Cell const& owner_cell(Badge<GC::Heap>) const override;
+
+    void update_cache_if_needed() const;
+    void update_name_to_element_mappings_if_needed() const;
+    u64 invalidation_version(Document const&) const;
+    void invalidate_cache() const;
+    void invalidate_name_to_element_mappings() const;
+    void invalidate_cache_for_tree_mutation(Node const& mutation_parent) const;
+    void invalidate_cache_for_attribute_change(Element const&, AttributeInvalidationTypes) const;
+
+    friend class Node;
+    friend class Web::Internals::Internals;
+
+    bool cache_is_valid() const;
+
+    mutable GC::Weak<Document const> m_cached_document;
+    mutable u64 m_cached_invalidation_version { 0 };
+    mutable GC::WeakVector<Element> m_cached_elements;
+    mutable OwnPtr<OrderedHashMap<Utf16FlyString, GC::Weak<Element>>> m_cached_name_to_element_mappings;
+
+    GC::Ref<ParentNode> m_root;
+    Filter m_filter;
+    Sort m_sort;
+
+    Scope m_scope { Scope::Descendants };
+    Kind m_kind { Kind::Generic };
+    AttributeInvalidationType m_attribute_invalidation_type { AttributeInvalidationType::None };
+};
+
+}

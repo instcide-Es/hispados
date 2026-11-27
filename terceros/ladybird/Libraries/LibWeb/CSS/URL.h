@@ -1,0 +1,81 @@
+/*
+ * Copyright (c) 2025, Sam Atkins <sam@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/FlyString.h>
+#include <AK/String.h>
+#include <AK/Utf16FlyString.h>
+#include <AK/Utf16View.h>
+#include <AK/Vector.h>
+#include <LibGC/Ptr.h>
+#include <LibWeb/Export.h>
+#include <LibWeb/Forward.h>
+
+namespace Web::CSS {
+
+// https://drafts.csswg.org/css-values-5/#request-url-modifiers
+class RequestURLModifier {
+public:
+    enum class Type : u8 {
+        CrossOrigin,
+        Integrity,
+        ReferrerPolicy,
+    };
+
+    static RequestURLModifier create_cross_origin(CrossOriginModifierValue);
+    static RequestURLModifier create_integrity(Utf16FlyString);
+    static RequestURLModifier create_referrer_policy(ReferrerPolicyModifierValue);
+
+    ~RequestURLModifier() = default;
+    void modify_request(NonnullRefPtr<Fetch::Infrastructure::Request>) const;
+    Type type() const { return m_type; }
+    using Value = Variant<CrossOriginModifierValue, ReferrerPolicyModifierValue, Utf16FlyString>;
+    Value const& value() const { return m_value; }
+    String to_string() const;
+    Utf16String to_utf16_string() const;
+
+private:
+    RequestURLModifier(Type, Value);
+
+    Type m_type;
+    Value m_value;
+};
+
+// https://drafts.csswg.org/css-values-4/#urls
+class WEB_API URL {
+public:
+    enum class Type : u8 {
+        Url,
+        Src,
+    };
+
+    URL(String url, Type = Type::Url, Vector<RequestURLModifier> = {});
+    URL(Utf16String url, Type = Type::Url, Vector<RequestURLModifier> = {});
+    URL(Utf16View url, Type = Type::Url, Vector<RequestURLModifier> = {});
+
+    Utf16String const& url() const { return m_url; }
+    Type type() const { return m_type; }
+    Vector<RequestURLModifier> const& request_url_modifiers() const { return m_request_url_modifiers; }
+
+    String to_string() const;
+    Utf16String to_utf16_string() const;
+
+private:
+    Type m_type;
+    Utf16String m_url;
+    Vector<RequestURLModifier> m_request_url_modifiers;
+};
+
+}
+
+template<>
+struct AK::Formatter<Web::CSS::URL> : AK::Formatter<StringView> {
+    ErrorOr<void> format(FormatBuilder& builder, Web::CSS::URL const& value)
+    {
+        return Formatter<StringView>::format(builder, value.to_string());
+    }
+};

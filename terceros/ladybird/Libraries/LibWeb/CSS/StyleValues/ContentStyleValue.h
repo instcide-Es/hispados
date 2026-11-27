@@ -1,0 +1,41 @@
+/*
+ * Copyright (c) 2018-2020, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2021, Tobias Christiansen <tobyase@serenityos.org>
+ * Copyright (c) 2021-2023, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2022-2023, MacDue <macdue@dueutil.tech>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <LibWeb/CSS/StyleValues/StyleValue.h>
+
+namespace Web::CSS {
+
+class ContentStyleValue final : public StyleValueWithDefaultOperators<ContentStyleValue> {
+public:
+    virtual ~ContentStyleValue() override = default;
+
+    StyleValueList const& content() const { return m_content; }
+    StyleValueList const* alt_text() const { return m_alt_text.ptr(); }
+
+    void set_style_sheet(StyleSheetState*);
+
+private:
+    friend class StyleValue;
+
+    explicit ContentStyleValue(StyleValueFFI::StyleValueData const* data)
+        : StyleValueWithDefaultOperators(Type::Content, data)
+        , m_content(StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(static_cast<StyleValueFFI::StyleValueData const*>(data->content._0->content.pointer)))->as_value_list())
+    {
+        auto const* alt_text_data = static_cast<StyleValueFFI::StyleValueData const*>(data->content._0->alt_text.pointer);
+        if (alt_text_data)
+            m_alt_text = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(alt_text_data))->as_value_list();
+    }
+
+    ValueComparingNonnullRefPtr<StyleValueList const> m_content;
+    ValueComparingRefPtr<StyleValueList const> m_alt_text;
+};
+
+}

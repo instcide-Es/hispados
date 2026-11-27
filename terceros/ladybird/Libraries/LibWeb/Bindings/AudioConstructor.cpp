@@ -1,0 +1,55 @@
+/*
+ * Copyright (c) 2022, Luke Wilde <lukew@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibWeb/Bindings/AudioConstructor.h>
+#include <LibWeb/Bindings/HTMLAudioElement.h>
+#include <LibWeb/Bindings/Intrinsics.h>
+#include <LibWeb/Bindings/WrapperWorld.h>
+#include <LibWeb/DOM/ElementFactory.h>
+#include <LibWeb/HTML/HTMLAudioElement.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HTML/Window.h>
+#include <LibWeb/Namespace.h>
+#include <LibWeb/WebIDL/ExceptionOrUtils.h>
+
+namespace Web::Bindings {
+
+// https://html.spec.whatwg.org/multipage/media.html#dom-audio
+// https://webidl.spec.whatwg.org/#legacy-factory-functions
+JS::ThrowCompletionOr<GC::Ref<JS::Object>> AudioConstructor::construct(JS::HostFunction& constructor, JS::FunctionObject& new_target)
+{
+    auto& vm = constructor.vm();
+    auto& realm = *constructor.realm();
+
+    // 1. Let document be the current global object's associated Document.
+    auto& window = HTML::current_window();
+    auto& document = window.associated_document();
+
+    // 2. Let audio be the result of creating an element given document, "audio", and the HTML namespace.
+    auto audio = TRY(WebIDL::throw_dom_exception_if_needed(vm, realm, [&]() { return DOM::create_element(document, HTML::TagNames::audio, Namespace::HTML); }));
+    auto& audio_element = as<HTML::HTMLAudioElement>(*audio);
+    auto wrapped_audio = Bindings::wrap(host_defined_wrapper_world(realm), realm, GC::Ref { audio_element });
+
+    // https://webidl.spec.whatwg.org/#internally-create-a-new-object-implementing-the-interface
+    TRY(set_prototype_from_new_target<HTMLAudioElementPrototype>(vm, new_target, "HTMLAudioElement"_utf16_fly_string, *wrapped_audio));
+
+    // 3. Set an attribute value for audio using "preload" and "auto".
+    audio->set_attribute_value(HTML::AttributeNames::preload, "auto"_utf16);
+
+    auto src_value = vm.argument(0);
+
+    // 4. If src is given, then set an attribute value for audio using "src" and src.
+    //    (This will cause the user agent to invoke the object's resource selection algorithm before returning.)
+    if (!src_value.is_undefined()) {
+        auto src = TRY(src_value.to_utf16_string(vm));
+        audio->set_attribute_value(HTML::AttributeNames::src, move(src));
+    }
+
+    // 5. Return audio.
+    return GC::Ref<JS::Object> { *wrapped_audio };
+}
+
+}

@@ -1,0 +1,6 @@
+// https://drafts.csswg.org/cssom/#csspagerule
+[Exposed=Window, ImplementedIn=Rust]
+interface CSSPageRule : CSSGroupingRule {
+    attribute CSSOMString selectorText;
+    [SameObject, PutForwards=cssText] readonly attribute CSSPageDescriptors style;
+};

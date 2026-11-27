@@ -1,0 +1,349 @@
+/*
+ * Copyright (c) 2020, the SerenityOS developers.
+ * Copyright (c) 2024, Jamie Mansfield <jmansfield@cadixdev.org>
+ * Copyright (c) 2025, Tim Ledbetter <tim.ledbetter@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibGC/Heap.h>
+#include <LibURL/Parser.h>
+#include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOM/Event.h>
+#include <LibWeb/Fetch/Fetching/Fetching.h>
+#include <LibWeb/Fetch/Infrastructure/FetchAlgorithms.h>
+#include <LibWeb/Fetch/Infrastructure/FetchController.h>
+#include <LibWeb/Fetch/Infrastructure/HTTP/ResponseView.h>
+#include <LibWeb/HTML/HTMLMediaElement.h>
+#include <LibWeb/HTML/HTMLTrackElement.h>
+#include <LibWeb/HTML/PotentialCORSRequest.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HTML/TextTrack.h>
+#include <LibWeb/HTML/TextTrackList.h>
+#include <LibWeb/HTML/TextTrackObserver.h>
+#include <LibWeb/HTML/TrackEvent.h>
+#include <LibWeb/HighResolutionTime/TimeOrigin.h>
+#include <LibWeb/Platform/EventLoopPlugin.h>
+#include <LibWeb/WebVTT/Parser.h>
+#include <LibWeb/WebVTT/VTTCue.h>
+#include <LibWebCommon/Fetch/Infrastructure/HTTP/Statuses.h>
+
+namespace Web::HTML {
+
+GC_DEFINE_ALLOCATOR(HTMLTrackElement);
+
+HTMLTrackElement::HTMLTrackElement(DOM::Document& document, DOM::QualifiedName qualified_name)
+    : HTMLElement(document, move(qualified_name))
+{
+}
+
+HTMLTrackElement::~HTMLTrackElement() = default;
+
+void HTMLTrackElement::initialize_element()
+{
+    m_track = TextTrack::create();
+    m_track->set_track_element(this);
+    m_track_observer = TextTrackObserver::create(*m_track);
+}
+
+void HTMLTrackElement::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_track);
+    visitor.visit(m_track_observer);
+    visitor.visit(m_fetch_algorithms);
+    visitor.visit(m_fetch_controller);
+}
+
+void HTMLTrackElement::attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_)
+{
+    Base::attribute_changed(name, old_value, value, namespace_);
+    auto value_or_empty = value.has_value() ? value->utf16_view() : u""sv;
+
+    // https://html.spec.whatwg.org/multipage/media.html#sourcing-out-of-band-text-tracks
+    // As the kind, label, and srclang attributes are set, changed, or removed, the text track must update accordingly, as per the definitions above.
+    if (name.equals_ignoring_ascii_case(HTML::AttributeNames::kind)) {
+        m_track->set_kind(text_track_kind_from_string(MUST(value_or_empty.to_utf8())));
+    } else if (name.equals_ignoring_ascii_case(HTML::AttributeNames::label)) {
+        m_track->set_label(value_or_empty);
+    } else if (name.equals_ignoring_ascii_case(HTML::AttributeNames::srclang)) {
+        m_track->set_language(value_or_empty);
+    } else if (name.equals_ignoring_ascii_case(HTML::AttributeNames::src)) {
+        // https://html.spec.whatwg.org/multipage/media.html#sourcing-out-of-band-text-tracks:attr-track-src
+        // Whenever a track element has its src attribute set, changed, or removed, the user agent must immediately empty the element's text track's text track list of cues.
+        // (This also causes the algorithm above to stop adding cues from the resource being obtained using the previously given URL, if any.)
+        m_track->empty_text_track_list_of_cues();
+        ++m_src_generation;
+
+        if (!value.has_value())
+            return;
+
+        // https://html.spec.whatwg.org/multipage/media.html#attr-track-src
+        // When the element's src attribute is set, run these steps:
+        // 1. Let trackURL be failure.
+        Optional<Utf16String> track_url;
+
+        // 2. Let value be the element's src attribute value.
+        // 3. If value is not the empty string, then set trackURL to the result of encoding-parsing-and-serializing a URL given value, relative to the element's node document.
+        if (!value_or_empty.is_empty())
+            track_url = document().encoding_parse_and_serialize_url(value_or_empty);
+
+        // 4. Set the element's track URL to trackURL if it is not failure; otherwise to the empty string.
+        set_track_url(track_url.has_value() ? track_url->utf16_view() : u""sv);
+    }
+    // https://html.spec.whatwg.org/multipage/media.html#dom-texttrack-id
+    // For tracks that correspond to track elements, the track's identifier is the value of the element's id attribute, if any.
+    if (name.equals_ignoring_ascii_case(HTML::AttributeNames::id)) {
+        m_track->set_id(value_or_empty);
+    }
+}
+
+void HTMLTrackElement::inserted()
+{
+    HTMLElement::inserted();
+
+    if (auto* media_element = as_if<HTMLMediaElement>(parent()); media_element && !media_element->text_tracks()->contains(*m_track))
+        parent_changed(nullptr);
+
+    // AD-HOC: This is a hack to allow tracks to start loading, without needing to implement the entire
+    //         "honor user preferences for automatic text track selection" AO detailed here:
+    //         https://html.spec.whatwg.org/multipage/media.html#honor-user-preferences-for-automatic-text-track-selection
+    m_track->set_mode(TextTrackMode::Hidden);
+
+    start_the_track_processing_model();
+}
+
+void HTMLTrackElement::removed_from(IsSubtreeRoot is_subtree_root, Node* old_ancestor, Node& old_root)
+{
+    Base::removed_from(is_subtree_root, old_ancestor, old_root);
+
+    if (is_subtree_root == IsSubtreeRoot::Yes)
+        parent_changed(old_ancestor);
+}
+
+void HTMLTrackElement::moved_from(IsSubtreeRoot is_subtree_root, GC::Ptr<Node> old_ancestor)
+{
+    Base::moved_from(is_subtree_root, old_ancestor);
+
+    if (is_subtree_root == IsSubtreeRoot::Yes)
+        parent_changed(old_ancestor);
+}
+
+// https://html.spec.whatwg.org/multipage/media.html#sourcing-out-of-band-text-tracks
+void HTMLTrackElement::parent_changed(GC::Ptr<Node> old_parent)
+{
+    // When a track element's parent element changes and the old parent was a media element, then the user agent must
+    // remove the track element's corresponding text track from the media element's list of text tracks, and then queue
+    // a media element task given the media element to fire an event named removetrack at the media element's
+    // textTracks attribute's TextTrackList object, using TrackEvent, with the track attribute initialized to the text
+    // track.
+    if (auto* media_element = as_if<HTMLMediaElement>(old_parent.ptr())) {
+        media_element->text_tracks()->remove_track(*m_track);
+        m_track->set_media_element(nullptr);
+        m_track->unset_active_flag_of_cues();
+        media_element->text_track_cue_or_text_track_removed();
+        media_element->queue_a_media_element_task(GC::create_function(GC::Heap::the(), GC::captures(GC::Ref { *m_track }), [](auto& track, HTMLMediaElement& media_element) {
+            media_element.text_tracks()->dispatch_event(create_track_event(HTML::relevant_realm(media_element), HTML::EventNames::removetrack, track));
+        }));
+    }
+
+    // When a track element's parent element changes and the new parent is a media element, then the user agent must
+    // add the track element's corresponding text track to the media element's list of text tracks, and then queue a
+    // media element task given the media element to fire an event named addtrack at the media element's textTracks
+    // attribute's TextTrackList object, using TrackEvent, with the track attribute initialized to the text track.
+    if (auto* media_element = as_if<HTMLMediaElement>(parent())) {
+        media_element->text_tracks()->add_track(*m_track);
+        m_track->set_media_element(media_element);
+        media_element->add_newly_introduced_cues(m_track->text_track_list_of_cues());
+        media_element->queue_a_media_element_task(GC::create_function(GC::Heap::the(), GC::captures(GC::Ref { *m_track }), [](auto& track, HTMLMediaElement& media_element) {
+            media_element.text_tracks()->dispatch_event(create_track_event(HTML::relevant_realm(media_element), HTML::EventNames::addtrack, track));
+        }));
+    }
+}
+
+// https://html.spec.whatwg.org/multipage/media.html#dom-track-readystate
+WebIDL::UnsignedShort HTMLTrackElement::ready_state()
+{
+    // The readyState attribute must return the numeric value corresponding to the text track readiness state of the track element's text track, as defined by the following list:
+    switch (m_track->readiness_state()) {
+    case TextTrack::ReadinessState::NotLoaded:
+        // NONE (numeric value 0)
+        //    The text track not loaded state.
+        return 0;
+    case TextTrack::ReadinessState::Loading:
+        // LOADING (numeric value 1)
+        //    The text track loading state.
+        return 1;
+    case TextTrack::ReadinessState::Loaded:
+        // LOADED (numeric value 2)
+        //    The text track loaded state.
+        return 2;
+    case TextTrack::ReadinessState::FailedToLoad:
+        // ERROR (numeric value 3)
+        //    The text track failed to load state.
+        return 3;
+    }
+
+    VERIFY_NOT_REACHED();
+}
+
+void HTMLTrackElement::set_track_url(Utf16View track_url)
+{
+    if (m_track_url == track_url)
+        return;
+
+    m_track_url = Utf16String::from_utf16(track_url);
+
+    auto track_is_hidden_or_showing = first_is_one_of(m_track->mode(), TextTrackMode::Hidden, TextTrackMode::Showing);
+
+    // https://html.spec.whatwg.org/multipage/media.html#start-the-track-processing-model
+    if (m_loading && m_fetch_controller && track_is_hidden_or_showing) {
+        m_loading = false;
+        m_fetch_controller->abort(HTML::relevant_realm(*this), {});
+    }
+
+    // https://html.spec.whatwg.org/multipage/media.html#start-the-track-processing-model
+    if (m_awaiting_track_url_change && track_is_hidden_or_showing) {
+        m_awaiting_track_url_change = false;
+
+        // 13. Jump to the step labeled top.
+        start_the_track_processing_model_parallel_steps();
+    }
+}
+
+// https://html.spec.whatwg.org/multipage/media.html#start-the-track-processing-model
+void HTMLTrackElement::start_the_track_processing_model()
+{
+    // 1. If another occurrence of this algorithm is already running for this text track and its track element, return,
+    //    letting that other algorithm take care of this element.
+    if (m_loading)
+        return;
+
+    // 2. If the text track's text track mode is not set to one of hidden or showing, then return.
+    if (!first_is_one_of(m_track->mode(), TextTrackMode::Hidden, TextTrackMode::Showing))
+        return;
+
+    // 3. If the text track's track element does not have a media element as a parent, return.
+    if (!is<HTMLMediaElement>(parent_element().ptr()))
+        return;
+
+    m_loading = true;
+
+    // 4. Run the remainder of these steps in parallel, allowing whatever caused these steps to run to continue.
+    Platform::EventLoopPlugin::the().deferred_invoke(GC::create_function(GC::Heap::the(), GC::captures(*this), [](auto& self) {
+        self.start_the_track_processing_model_parallel_steps();
+    }));
+}
+
+void HTMLTrackElement::start_the_track_processing_model_parallel_steps()
+{
+    auto& realm = HTML::relevant_realm(*this);
+
+    // 5. Top: Await a stable state. The synchronous section consists of the following steps.
+
+    // 6. ⌛ Set the text track readiness state to loading.
+    m_track->set_readiness_state(TextTrack::ReadinessState::Loading);
+
+    // 7. ⌛ Let URL be the track URL of the track element.
+    auto url = track_url();
+
+    // 8. ⌛ If the track element's parent is a media element, then let corsAttributeState be the state of the
+    //    parent media element's crossorigin content attribute. Otherwise, let corsAttributeState be No CORS.
+    auto cors_attribute_state = CORSSettingAttribute::NoCORS;
+    if (is<HTMLMediaElement>(parent())) {
+        cors_attribute_state = as<HTMLMediaElement>(parent())->crossorigin();
+    }
+
+    // 9. End the synchronous section, continuing the remaining steps in parallel.
+
+    // 10. If URL is not the empty string, then:
+    if (!url.is_empty()) {
+        // 1. Let request be the result of creating a potential-CORS request given URL, "track", and corsAttributeState,
+        // and with the same-origin fallback flag set.
+        auto parsed_url = URL::Parser::basic_parse(url.utf16_view());
+        VERIFY(parsed_url.has_value());
+        auto request = create_potential_CORS_request(parsed_url.release_value(), Fetch::Infrastructure::Request::Destination::Track, cors_attribute_state, SameOriginFallbackFlag::Yes);
+
+        // 2. Set request's client to the track element's node document's relevant settings object.
+        request->set_client(document().relevant_settings_object().address());
+
+        // 3. Set request's initiator type to "track".
+        request->set_initiator_type(Fetch::Infrastructure::Request::InitiatorType::Track);
+
+        Fetch::Infrastructure::FetchAlgorithms::Input fetch_algorithms_input { Fetch::Engine::BodyIntent::ConsumeForCallback };
+        fetch_algorithms_input.process_response_consume_body = GC::create_function(GC::Heap::the(), GC::captures(*this, m_src_generation), [](auto& self, auto& src_generation, GC::Ref<Fetch::Infrastructure::ResponseView> response, Fetch::Infrastructure::FetchAlgorithms::BodyBytes body_bytes) {
+            self.m_loading = false;
+
+            // If fetching fails for any reason (network error, the server returns an error code, CORS fails, etc.),
+            // or if URL is the empty string, then queue an element task on the DOM manipulation task source given the media element
+            // to first change the text track readiness state to failed to load and then fire an event named error at the track element.
+            if (!response->url().has_value() || body_bytes.template has<Empty>() || body_bytes.template has<Fetch::Infrastructure::FetchAlgorithms::ConsumeBodyFailureTag>() || !Fetch::Infrastructure::is_ok_status(response->status()) || response->is_network_error()) {
+                self.track_failed_to_load();
+                return;
+            }
+
+            // If fetching does not fail, but the type of the resource is not a supported text track format, or the file was not successfully processed
+            // (e.g., the format in question is an XML format and the file contained a well-formedness error that XML requires be detected and reported to the application),
+            // then the task that is queued on the networking task source in which the aforementioned problem is found must change the text track readiness state to failed to
+            // load and fire an event named error at the track element.
+            // FIXME: Support text track formats other than WebVTT, and parse the file incrementally as it is received.
+            auto cues = WebVTT::parse_webvtt_file(body_bytes.template get<Core::ImmutableBytes>().bytes());
+            if (!cues.has_value()) {
+                self.track_failed_to_load();
+                return;
+            }
+
+            // If fetching does not fail, and the file was successfully processed, then the final task that is queued by the networking task source,
+            // after it has finished parsing the data, must change the text track readiness state to loaded, and fire an event named load at the track element.
+            self.queue_an_element_task(Task::Source::Networking, GC::create_function(GC::Heap::the(), GC::captures(self, cues.release_value(), src_generation), [](auto& self, auto& cues, auto& src_generation) {
+                if (src_generation == self.m_src_generation) {
+                    for (auto const& parsed_cue : cues) {
+                        auto cue = WebVTT::VTTCue::create(parsed_cue.start_time, parsed_cue.end_time, parsed_cue.text);
+                        cue->set_id(parsed_cue.identifier);
+                        self.m_track->add_cue(cue);
+                    }
+                }
+
+                self.m_track->set_readiness_state(TextTrack::ReadinessState::Loaded);
+                self.dispatch_event(DOM::Event::create(HTML::EventNames::load,
+                    HighResolutionTime::current_high_resolution_time(HTML::relevant_global_object(self))));
+            }));
+        });
+
+        // 4. Fetch request.
+        m_fetch_algorithms = Fetch::Infrastructure::FetchAlgorithms::create(move(fetch_algorithms_input));
+        m_fetch_controller = Fetch::Fetching::fetch(realm, request, *m_fetch_algorithms);
+    } else {
+        track_failed_to_load();
+        return;
+    }
+
+    // 11. Wait until the text track readiness state is no longer set to loading.
+    if (m_track->readiness_state() == TextTrack::ReadinessState::Loading) {
+        m_track_observer->set_track_readiness_observer(GC::create_function(GC::Heap::the(), GC::captures(*this), [](auto& self, TextTrack::ReadinessState) {
+            if (self.m_track->readiness_state() != TextTrack::ReadinessState::Loading)
+                self.track_became_ready();
+        }));
+    } else {
+        track_became_ready();
+    }
+}
+
+void HTMLTrackElement::track_became_ready()
+{
+    m_track_observer->set_track_readiness_observer({});
+
+    // 12. Wait until the track URL is no longer equal to URL, at the same time as the text track mode is set to hidden or showing.
+    m_awaiting_track_url_change = true;
+}
+
+void HTMLTrackElement::track_failed_to_load()
+{
+    queue_an_element_task(Task::Source::DOMManipulation, GC::create_function(GC::Heap::the(), GC::captures(*this), [](auto& self) {
+        self.m_track->set_readiness_state(TextTrack::ReadinessState::FailedToLoad);
+        self.dispatch_event(DOM::Event::create(HTML::EventNames::error,
+            HighResolutionTime::current_high_resolution_time(HTML::relevant_global_object(self))));
+    }));
+}
+
+}

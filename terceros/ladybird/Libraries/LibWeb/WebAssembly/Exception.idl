@@ -1,0 +1,13 @@
+// https://webassembly.github.io/spec/js-api/#dictdef-exceptionoptions
+dictionary ExceptionOptions {
+    boolean traceStack = false;
+};
+
+// https://webassembly.github.io/spec/js-api/#exception
+[LegacyNamespace=WebAssembly, Exposed=*, ImplementedIn=Rust]
+interface Exception {
+    constructor(Tag exceptionTag, sequence<any> payload, optional ExceptionOptions options = {});
+    any getArg(Tag exceptionTag, [EnforceRange] unsigned long index);
+    boolean is(Tag exceptionTag);
+    readonly attribute (DOMString or undefined) stack;
+};

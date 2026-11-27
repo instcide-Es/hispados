@@ -1,0 +1,12 @@
+dictionary CookieChangeEventInit : EventInit {
+    CookieList changed;
+    CookieList deleted;
+};
+
+// https://cookiestore.spec.whatwg.org/#cookiechangeevent
+[Exposed=Window, SecureContext, ImplementedIn=Rust]
+interface CookieChangeEvent : Event {
+    constructor(DOMString type, optional CookieChangeEventInit eventInitDict = {});
+    [SameObject, CachedAccessor] readonly attribute FrozenArray<CookieListItem> changed;
+    [SameObject, CachedAccessor] readonly attribute FrozenArray<CookieListItem> deleted;
+};

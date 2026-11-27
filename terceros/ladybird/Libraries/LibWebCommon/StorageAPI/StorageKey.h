@@ -1,0 +1,70 @@
+/*
+ * Copyright (c) 2024, Andrew Kaster <andrew@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Optional.h>
+#include <AK/String.h>
+#include <AK/Traits.h>
+#include <LibGC/Forward.h>
+#include <LibIPC/Forward.h>
+#include <LibURL/Origin.h>
+#include <LibWebCommon/Export.h>
+
+namespace Web::StorageAPI {
+
+// https://storage.spec.whatwg.org/#storage-keys
+struct StorageKey {
+
+    // A storage key is a tuple consisting of an origin (an origin). [HTML]
+    // NOTE: This is expected to change; see Client-Side Storage Partitioning https://privacycg.github.io/storage-partitioning/.
+    URL::Origin origin;
+
+    String to_string() const
+    {
+        return origin.serialize();
+    }
+
+    friend bool operator==(StorageKey const& a, StorageKey const& b)
+    {
+        // To determine whether a storage key A equals storage key B, run these steps:
+        // 1. If A’s origin is not same origin with B’s origin, then return false.
+        // 2. Return true.
+        return a.origin.is_same_origin(b.origin);
+    }
+};
+
+WEBCOMMON_API StorageKey obtain_a_storage_key_for_non_storage_purposes(URL::Origin const&);
+
+// Steps 2 to 4 of "obtain a storage key", for a caller that has the environment's origin in hand. Every process
+// that names a bottle goes through this, so they all name it the same way.
+WEBCOMMON_API Optional<StorageKey> obtain_a_storage_key(URL::Origin const&);
+
+}
+
+namespace AK {
+
+template<>
+struct Traits<Web::StorageAPI::StorageKey> : public DefaultTraits<Web::StorageAPI::StorageKey> {
+    static unsigned hash(Web::StorageAPI::StorageKey const& key)
+    {
+        return Traits<URL::Origin>::hash(key.origin);
+    }
+};
+
+}
+
+namespace IPC {
+
+template<>
+WEBCOMMON_API ErrorOr<void> encode(Encoder&, Web::StorageAPI::StorageKey const&);
+
+template<>
+WEBCOMMON_API ErrorOr<Web::StorageAPI::StorageKey> decode(Decoder&);
+
+}
+
+GC_UNTRACED_CAPTURE(Web::StorageAPI::StorageKey);

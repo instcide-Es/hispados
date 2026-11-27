@@ -1,0 +1,5 @@
+// https://drafts.csswg.org/filter-effects-1/#InterfaceSVGFEMergeNodeElement
+[Exposed=Window]
+interface SVGFEMergeNodeElement : SVGElement {
+    readonly attribute SVGAnimatedString in1;
+};

@@ -1,0 +1,180 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+//! # LibJS
+//!
+//! LibJS's frontend and runtime. The frontend parses JavaScript into a syntax tree and compiles it to bytecode, which the
+//! runtime runs in the Flap-generated interpreter, on cells allocated from LibGC.
+//!
+//! ## Architecture
+//!
+//! ```text
+//! Source code (Latin-1 or UTF-16)
+//!     │
+//!     ▼
+//! ┌─────────────────────────────────────────────────────┐
+//! │  Parser (parser/)                                   │
+//! │  Lexes and parses into flat columns, analyzes       │
+//! │  scopes, and resolves identifiers                   │
+//! └──────────────────────┬──────────────────────────────┘
+//!                        │ syntax tree (ast.rs)
+//!                        ▼
+//! ┌─────────────────────────────────────────────────────┐
+//! │  Codegen (bytecode/codegen/)                        │
+//! │  Sweeps the rows of the tree, emits bytecode        │
+//! └──────────────────────┬──────────────────────────────┘
+//!                        │ assembled bytecode
+//!                        ▼
+//! ┌─────────────────────────────────────────────────────┐
+//! │  Runtime (host.rs)                                  │
+//! │  Creates an executable from the compiled program    │
+//! └─────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Module overview
+//!
+//! - `compile.rs` — Parse and compile pipeline shared by every runtime
+//! - `host.rs` — Functions every embedding runtime provides to the frontend
+//! - `token.rs` — Token types
+//! - `tokenize.rs` — Tokens of a source without parsing it, for syntax highlighting
+//! - `lexer.rs` — Tokenizer: UTF-16 input → Token stream, for tokenize.rs
+//! - `parser/` — Parse jobs and what is kept of them; the parser, the columns of its syntax tree, scope analysis and
+//!   identifier resolution are the `libjs_parser` crate (Libraries/LibJS/Parser/Rust)
+//! - `ast.rs` — The syntax tree and the typed views that everything after the parser reads it through
+//! - `bytecode/` — Bytecode generator, instruction types, and dumper
+//! - `breakpoint_positions.rs` — Where in a source a debugger can stop
+//! - `interpreter/`, `runtime/`, `gc/`, `layout/`, `embedding/` — The runtime and its embedding ABI
+
+#[cfg(feature = "allocator")]
+extern crate ladybird_allocator;
+
+#[path = "../../../RustDemangle.rs"]
+mod rust_demangle;
+
+#[path = "../../../RustPanic.rs"]
+mod rust_panic;
+
+/// Compile-time conversion of an ASCII string literal to `&'static [u16]`.
+///
+/// Produces a static `[u16; N]` array, so comparisons like
+/// `value == utf16!("eval")` involve zero heap allocation.
+///
+/// # Panics (at compile time)
+/// Panics if the string contains non-ASCII characters. All JS keywords
+/// and identifiers we compare against are pure ASCII.
+macro_rules! utf16 {
+    ($s:literal) => {{
+        const VALUE: &[u16; $s.len()] = &{
+            let bytes = $s.as_bytes();
+            let mut arr = [0u16; $s.len()];
+            let mut i = 0;
+            while i < bytes.len() {
+                assert!(bytes[i] < 128, "utf16! only supports ASCII literals");
+                arr[i] = bytes[i] as u16;
+                i += 1;
+            }
+            arr
+        };
+        VALUE.as_slice()
+    }};
+}
+
+#[cfg(not(test))]
+pub mod api;
+pub mod ast;
+pub mod ast_dump;
+#[cfg(not(test))]
+pub mod breakpoint;
+pub mod breakpoint_positions;
+pub mod build_configuration;
+pub mod bytecode;
+pub mod compile;
+#[cfg(not(test))]
+pub mod console;
+#[cfg(not(test))]
+pub mod console_log_level;
+#[cfg(not(test))]
+pub mod contrib;
+#[cfg(not(test))]
+pub mod debugger;
+#[cfg(not(test))]
+pub mod embedding;
+pub mod fast_hash;
+#[cfg(not(test))]
+pub mod frontend_host;
+#[cfg(any(not(test), target_os = "linux"))]
+#[cfg(not(test))]
+pub mod gc;
+#[cfg(not(test))]
+pub mod hash_table;
+pub mod host;
+#[cfg(not(test))]
+pub mod interpreter;
+#[cfg(all(not(test), feature = "jit"))]
+pub mod jit;
+#[cfg(all(feature = "jit", windows, not(target_arch = "x86_64")))]
+compile_error!("the JIT supports Windows on x86-64 only: build without the jit feature (ENABLE_JS_JIT=OFF)");
+// NB: Without the JIT, the runtime sees the same interface to it, with nothing behind it.
+#[cfg(all(not(test), not(feature = "jit")))]
+#[path = "jit/disabled.rs"]
+pub mod jit;
+// NB: The thread pool of the compiles and the options of the JIT use nothing of the runtime, so they are part of a
+//     test build, which `jit` is not.
+#[cfg(feature = "jit")]
+pub mod jit_compile_pool;
+#[cfg(feature = "jit")]
+pub mod jit_options;
+#[cfg(not(test))]
+pub mod layout;
+#[cfg(not(test))]
+pub mod layout_forward;
+// NB: The tests build the layout module with the build script's stand-ins for the rest of the crate.
+#[cfg(test)]
+#[allow(dead_code)]
+mod layout;
+#[cfg(test)]
+#[path = "../generate/layout_forward.rs"]
+mod layout_forward;
+pub mod lexer;
+#[cfg(not(test))]
+pub mod lexical_path;
+pub mod parser;
+pub mod parser_error;
+#[cfg(not(test))]
+pub mod random;
+#[cfg(not(test))]
+pub mod runtime;
+#[cfg(not(test))]
+pub mod script;
+#[cfg(not(test))]
+pub mod simdjson;
+pub mod slice_block;
+#[cfg(not(test))]
+pub mod source_code;
+#[cfg(not(test))]
+pub mod source_range;
+pub mod source_text;
+#[cfg(not(test))]
+pub mod standard_output;
+pub mod terminal;
+pub mod token;
+pub mod tokenize;
+#[cfg(not(test))]
+pub mod unicode;
+pub mod utf16;
+#[cfg(not(test))]
+pub mod utilities;
+mod work_zone;
+
+#[cfg(test)]
+mod test_host;
+
+pub(crate) use libjs_parser::u32_from_usize;
+
+#[cfg(not(test))]
+mod layout_static_assertions {
+    include!(concat!(env!("OUT_DIR"), "/layout_static_assertions.rs"));
+}

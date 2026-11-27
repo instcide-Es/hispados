@@ -1,0 +1,48 @@
+/*
+ * Copyright (c) 2022, Sam Atkins <atkinssj@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <LibWeb/SVG/SVGGeometryElement.h>
+#include <LibWeb/SVG/SVGPointList.h>
+
+namespace Web::SVG {
+
+class SVGPolylineElement final
+    : public SVGGeometryElement
+    , public SVGAnimatedPoints {
+    WEB_WRAPPABLE(SVGPolylineElement, SVGGeometryElement);
+    GC_DECLARE_ALLOCATOR(SVGPolylineElement);
+
+public:
+    virtual ~SVGPolylineElement() override = default;
+
+    virtual void attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_) override;
+
+    // The parsed `points` list, as the element publishes it to layout.
+    ReadonlySpan<Gfx::FloatPoint> points() const { return m_points; }
+
+private:
+    virtual bool is_svg_polyline_element() const final { return true; }
+
+    SVGPolylineElement(DOM::Document&, DOM::QualifiedName);
+
+    virtual void visit_edges(Cell::Visitor&) override;
+
+    // ^SVGAnimatedPoints
+    virtual SVGElement& svg_animated_points_element() override { return *this; }
+
+    Vector<Gfx::FloatPoint> m_points;
+};
+
+}
+
+namespace Web::DOM {
+
+template<>
+inline bool Node::fast_is<SVG::SVGPolylineElement>() const { return is_svg_polyline_element(); }
+
+}

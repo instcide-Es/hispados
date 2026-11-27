@@ -1,0 +1,126 @@
+/*
+ * Copyright (c) 2018-2022, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Noncopyable.h>
+#include <LibJS/Heap/Cell.h>
+#include <LibURL/Origin.h>
+#include <LibWeb/Bindings/WrapperWorld.h>
+#include <LibWeb/Export.h>
+#include <LibWeb/HTML/NavigableContainer.h>
+#include <LibWeb/HTML/SessionHistoryEntry.h>
+#include <LibWeb/HTML/TokenizedFeatures.h>
+#include <LibWebCommon/HTML/BrowsingContext.h>
+#include <LibWebCommon/HTML/CrossProcessId.h>
+#include <LibWebCommon/HTML/SandboxingFlagSet.h>
+
+namespace Web::HTML {
+
+class WEB_API BrowsingContext final : public JS::Cell {
+    GC_CELL(BrowsingContext, JS::Cell);
+    GC_DECLARE_ALLOCATOR(BrowsingContext);
+
+public:
+    struct BrowsingContextAndDocument {
+        GC::Ref<BrowsingContext> browsing_context;
+        GC::Ref<DOM::Document> document;
+    };
+
+    static BrowsingContextAndDocument create_a_new_browsing_context_and_document(GC::Ref<Page> page, GC::Ptr<DOM::Document> creator, GC::Ptr<DOM::Element> embedder, GC::Ptr<WindowProxy> existing_window_proxy = {}, Optional<URL::Origin> determined_origin = {}, Optional<CrossProcessId> document_id = {});
+    static BrowsingContextAndDocument create_a_new_auxiliary_browsing_context_and_document(GC::Ref<Page> page, GC::Ref<HTML::BrowsingContext> opener, Optional<CrossProcessId> document_id);
+
+    virtual ~BrowsingContext() override;
+
+    bool is_ancestor_of(BrowsingContext const&) const;
+
+    bool is_top_level() const;
+    bool is_auxiliary() const { return m_is_auxiliary; }
+
+    DOM::Document const* active_document() const;
+    DOM::Document* active_document();
+    void set_active_document(GC::Ptr<DOM::Document>);
+
+    HTML::WindowProxy* window_proxy();
+    HTML::WindowProxy const* window_proxy() const;
+    HTML::WindowProxy* window_proxy_for(Bindings::WrapperWorld&, JS::Realm&);
+    void set_active_window(GC::Ref<HTML::Window>);
+
+    void set_window_proxy(GC::Ptr<WindowProxy>);
+
+    HTML::Window* active_window();
+    HTML::Window const* active_window() const;
+
+    Page& page() { return m_page; }
+    Page const& page() const { return m_page; }
+
+    GC::Ptr<BrowsingContext> top_level_browsing_context() const;
+
+    Optional<u64> browsing_context_group_id() const { return m_browsing_context_group_id; }
+    void set_browsing_context_group_id(Optional<u64> id) { m_browsing_context_group_id = id; }
+
+    // https://html.spec.whatwg.org/multipage/browsers.html#one-permitted-sandboxed-navigator
+    GC::Ptr<BrowsingContext const> the_one_permitted_sandboxed_navigator() const { return m_the_one_permitted_sandboxed_navigator; }
+    void set_the_one_permitted_sandboxed_navigator(BrowsingContext const* browsing_context) { m_the_one_permitted_sandboxed_navigator = browsing_context; }
+    Optional<CrossProcessId> one_permitted_sandboxed_navigator_navigable_id() const;
+    GC::Ptr<Navigable> one_permitted_sandboxed_navigator_navigable() const;
+
+    bool has_navigable_been_destroyed() const;
+
+    GC::Ptr<WindowProxy> opener_browsing_context_window_proxy() const;
+    Optional<CrossProcessId> opener_navigable_id() const;
+    GC::Ptr<Navigable> opener_navigable() const;
+    void set_opener_browsing_context(GC::Ptr<BrowsingContext>);
+    void set_opener_browsing_context(Navigable&);
+    void set_is_auxiliary(bool is_auxiliary) { m_is_auxiliary = is_auxiliary; }
+
+    void set_is_popup(TokenizedFeature::Popup is_popup) { m_is_popup = is_popup; }
+    [[nodiscard]] TokenizedFeature::Popup is_popup() const { return m_is_popup; }
+
+    SandboxingFlagSet popup_sandboxing_flag_set() const { return m_popup_sandboxing_flag_set; }
+    void set_popup_sandboxing_flag_set(SandboxingFlagSet value) { m_popup_sandboxing_flag_set = value; }
+
+private:
+    explicit BrowsingContext(GC::Ref<Page>);
+
+    virtual void visit_edges(Cell::Visitor&) override;
+
+    GC::Ref<Page> m_page;
+
+    // https://html.spec.whatwg.org/multipage/document-sequences.html#browsing-context
+    GC::Ptr<WindowProxy> m_window_proxy;
+    // Non-main WindowProxy identity is weakly cached per WrapperWorld. A live
+    // world realm roots its global-this WindowProxy; otherwise the proxy may be
+    // collected and rematerialized because it carries no observable state.
+    Bindings::WrapperWorldWeakValueCacheMap<Bindings::WrapperWorld, WindowProxy> m_window_proxies;
+
+    // https://html.spec.whatwg.org/multipage/browsers.html#active-document
+    GC::Ptr<DOM::Document> m_active_document;
+
+    // https://html.spec.whatwg.org/multipage/browsers.html#opener-browsing-context
+    // NB: Held as its WindowProxy, which also stands for a browsing context another process holds.
+    GC::Ptr<WindowProxy> m_opener_browsing_context_window_proxy;
+
+    // https://html.spec.whatwg.org/multipage/browsers.html#one-permitted-sandboxed-navigator
+    GC::Ptr<BrowsingContext const> m_the_one_permitted_sandboxed_navigator;
+
+    // https://html.spec.whatwg.org/multipage/browsers.html#is-popup
+    TokenizedFeature::Popup m_is_popup { TokenizedFeature::Popup::No };
+
+    // https://html.spec.whatwg.org/multipage/browsers.html#popup-sandboxing-flag-set
+    SandboxingFlagSet m_popup_sandboxing_flag_set {};
+
+    // https://html.spec.whatwg.org/multipage/document-sequences.html#is-auxiliary
+    bool m_is_auxiliary { false };
+
+    // https://html.spec.whatwg.org/multipage/browsers.html#tlbc-group
+    Optional<u64> m_browsing_context_group_id;
+};
+
+SandboxingFlagSet determine_the_creation_sandboxing_flags(BrowsingContext const&, GC::Ptr<DOM::Element> embedder);
+SandboxingFlagSet determine_the_creation_sandboxing_flags(BrowsingContext const&, Navigable const&);
+
+}

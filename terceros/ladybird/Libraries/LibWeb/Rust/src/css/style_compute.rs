@@ -1,0 +1,8181 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+//! The Rust style computation core.
+//!
+//! This module is growing into StyleComputer's cascade and compute logic. The
+//! first piece is length absolutization: resolving font-relative, viewport-
+//! relative and absolute lengths to pixels during style computation, exactly
+//! as the C++ implementation does (the resolved value is the unrounded double;
+//! CSSPixels fixed-point rounding happens later at the consumers).
+//!
+//! Element-bound inputs, such as container sizes and tree positions, are
+//! snapshotted by C++ before entering the Rust computation drive.
+
+use crate::css::computed_values::GroupValuesWriter;
+use crate::css::css_string::CssString;
+use crate::css::ffi_support::OwnedBox;
+use crate::css::style_value::{
+    CalculatedPayload, ColorSchemePayload, ContentPayload, CounterPayload, CounterStylePayload, FunctionPayload,
+    ImagePayload, OpenTypeTaggedPayload, RandomValueSharingPayload, ShorthandPayload, UrlPayload,
+};
+use crate::css::style_value_arc::StyleValueArc;
+use ak::math;
+use smallvec::SmallVec;
+use std::ffi::c_void;
+use std::sync::OnceLock;
+
+use crate::css::animated_overlay::{AnimatedOverlay, overlay_wins};
+use crate::css::cascaded_properties::{CascadeOrigin, CascadedPropertyStore};
+use crate::css::computed_longhand_table::{
+    HIGHLIGHT_COLOR_IS_CURRENT_COLOR, HIGHLIGHT_COLORS_AUTHORED, LonghandTableFlags,
+};
+use crate::css::css_pixels::{CssPixelRect, CssPixels};
+use crate::css::display::FfiDisplay;
+use crate::css::property_metadata::longhands_for_shorthand;
+use crate::css::property_metadata::property_id;
+use crate::css::property_metadata::property_is_inherited;
+use crate::css::property_metadata::property_is_shorthand;
+use crate::css::retained_fly_string::RetainedUtf16FlyString;
+use crate::css::style_value::{RetainedStyleValueData, RetainedStyleValueDataList, StyleValueData};
+
+pub use crate::css::css_enums::*;
+
+include!(concat!(env!("OUT_DIR"), "/length_units_generated.rs"));
+
+/// The font metrics needed for font-relative length resolution, as unrounded
+/// CSS pixel values.
+#[repr(C)]
+#[derive(Clone, Copy, Default, PartialEq)]
+pub struct FfiFontMetrics {
+    pub font_size: f64,
+    pub x_height: f64,
+    pub cap_height: f64,
+    pub zero_advance: f64,
+    pub line_height: f64,
+}
+
+/// Mirror of the length resolution parts of Length::ResolutionContext.
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq)]
+pub struct FfiLengthResolutionContext {
+    pub viewport_width: f64,
+    pub viewport_height: f64,
+    pub font_metrics: FfiFontMetrics,
+    pub root_font_metrics: FfiFontMetrics,
+    pub font_metrics_depend_on_viewport_metrics: bool,
+    pub root_font_metrics_depend_on_viewport_metrics: bool,
+    pub has_container_width_basis: bool,
+    pub has_container_height_basis: bool,
+    pub container_width_basis: f64,
+    pub container_height_basis: f64,
+    pub container_width_basis_depends_on_viewport_metrics: bool,
+    pub container_height_basis_depends_on_viewport_metrics: bool,
+    pub subject_inline_axis_is_horizontal: bool,
+    /// Optional flag owned by Length::ResolutionContext, set to true whenever a
+    /// resolution here consumed viewport metrics. Callers that report the
+    /// dependency through their return value may leave this null.
+    pub resolved_viewport_relative_length: *mut bool,
+    /// https://drafts.csswg.org/css-viewport/#effective-zoom
+    /// The effective zoom that absolute and viewport-relative lengths are multiplied by. The font metrics are those
+    /// of fonts the effective zoom already applies to.
+    pub zoom: f64,
+}
+
+/// A context with no viewport, font metrics or container basis, which tracks no viewport dependency.
+impl Default for FfiLengthResolutionContext {
+    fn default() -> Self {
+        Self {
+            viewport_width: 0.0,
+            viewport_height: 0.0,
+            font_metrics: FfiFontMetrics::default(),
+            root_font_metrics: FfiFontMetrics::default(),
+            font_metrics_depend_on_viewport_metrics: false,
+            root_font_metrics_depend_on_viewport_metrics: false,
+            has_container_width_basis: false,
+            has_container_height_basis: false,
+            container_width_basis: 0.0,
+            container_height_basis: 0.0,
+            container_width_basis_depends_on_viewport_metrics: false,
+            container_height_basis_depends_on_viewport_metrics: false,
+            subject_inline_axis_is_horizontal: false,
+            resolved_viewport_relative_length: std::ptr::null_mut(),
+            zoom: 1.0,
+        }
+    }
+}
+
+/// Records a viewport metric dependency on the context's tracking flag, if one is set.
+fn record_viewport_relative_length_resolution(context: &FfiLengthResolutionContext) {
+    if context.resolved_viewport_relative_length.is_null() {
+        return;
+    }
+    // SAFETY: The flag belongs to a Length::ResolutionContext that outlives this call.
+    unsafe { *context.resolved_viewport_relative_length = true };
+}
+
+/// Result of absolutizing a length.
+#[repr(C)]
+pub struct FfiAbsolutizedLength {
+    /// False when the unit cannot be handled with the supplied context; the
+    /// caller must fall back to the C++ resolution.
+    pub handled: bool,
+    /// False when the length was already absolute pixels and is unchanged.
+    pub changed: bool,
+    /// True when resolving consumed viewport metrics, either directly or
+    /// through font metrics that depend on them.
+    pub resolved_viewport_relative_length: bool,
+    pub px: f64,
+}
+
+#[derive(Clone, Copy)]
+enum LengthUnitKind {
+    Px,
+    Absolute { px_per_unit: f64 },
+    FontRelative { metric: FontMetricSelector, root: bool },
+    ViewportRelative { axis: ViewportAxis },
+    ContainerRelative { axis: ContainerAxis },
+}
+
+#[derive(Clone, Copy)]
+enum FontMetricSelector {
+    FontSize,
+    XHeight,
+    CapHeight,
+    ZeroAdvance,
+    LineHeight,
+}
+
+#[derive(Clone, Copy)]
+enum ViewportAxis {
+    Width,
+    Height,
+    Inline,
+    Block,
+    Min,
+    Max,
+}
+
+#[derive(Clone, Copy)]
+enum ContainerAxis {
+    Width,
+    Height,
+    Inline,
+    Block,
+    Min,
+    Max,
+}
+
+pub(crate) fn px_length_unit() -> u8 {
+    static PX: OnceLock<u8> = OnceLock::new();
+    *PX.get_or_init(|| LENGTH_UNIT_NAMES.iter().position(|&name| name == "px").unwrap() as u8)
+}
+
+pub(crate) fn none_keyword() -> u16 {
+    keyword::NONE
+}
+
+pub(crate) fn current_color_keyword() -> u16 {
+    keyword::CURRENTCOLOR
+}
+
+pub(crate) fn absolute_length_to_px(value: f64, unit: u8) -> Option<f64> {
+    match length_unit_kinds().get(unit as usize)? {
+        LengthUnitKind::Px => Some(value),
+        LengthUnitKind::Absolute { px_per_unit } => Some(value * px_per_unit),
+        _ => None,
+    }
+}
+
+fn length_unit_kinds() -> &'static [LengthUnitKind] {
+    static KINDS: OnceLock<Vec<LengthUnitKind>> = OnceLock::new();
+    KINDS.get_or_init(|| {
+        LENGTH_UNIT_NAMES
+            .iter()
+            .zip(LENGTH_UNIT_CANONICAL_PX_RATIOS)
+            .map(|(&name, ratio)| match name {
+                "px" => LengthUnitKind::Px,
+                // NB: ic and ric use the font size until the CJK water ideograph
+                //     advance is available, matching the C++ FIXME.
+                "em" | "ic" => LengthUnitKind::FontRelative {
+                    metric: FontMetricSelector::FontSize,
+                    root: false,
+                },
+                "rem" | "ric" => LengthUnitKind::FontRelative {
+                    metric: FontMetricSelector::FontSize,
+                    root: true,
+                },
+                "ex" => LengthUnitKind::FontRelative {
+                    metric: FontMetricSelector::XHeight,
+                    root: false,
+                },
+                "rex" => LengthUnitKind::FontRelative {
+                    metric: FontMetricSelector::XHeight,
+                    root: true,
+                },
+                "cap" => LengthUnitKind::FontRelative {
+                    metric: FontMetricSelector::CapHeight,
+                    root: false,
+                },
+                "rcap" => LengthUnitKind::FontRelative {
+                    metric: FontMetricSelector::CapHeight,
+                    root: true,
+                },
+                "ch" => LengthUnitKind::FontRelative {
+                    metric: FontMetricSelector::ZeroAdvance,
+                    root: false,
+                },
+                "rch" => LengthUnitKind::FontRelative {
+                    metric: FontMetricSelector::ZeroAdvance,
+                    root: true,
+                },
+                "lh" => LengthUnitKind::FontRelative {
+                    metric: FontMetricSelector::LineHeight,
+                    root: false,
+                },
+                "rlh" => LengthUnitKind::FontRelative {
+                    metric: FontMetricSelector::LineHeight,
+                    root: true,
+                },
+                "vw" | "svw" | "lvw" | "dvw" => LengthUnitKind::ViewportRelative {
+                    axis: ViewportAxis::Width,
+                },
+                "vh" | "svh" | "lvh" | "dvh" => LengthUnitKind::ViewportRelative {
+                    axis: ViewportAxis::Height,
+                },
+                // https://drafts.csswg.org/css-values-4/#vi
+                // Equal to 1% of the size of the large viewport size, small viewport size, large viewport size, and
+                // dynamic viewport size (respectively) in the box’s inline axis.
+                "vi" | "svi" | "lvi" | "dvi" => LengthUnitKind::ViewportRelative {
+                    axis: ViewportAxis::Inline,
+                },
+                "vb" | "svb" | "lvb" | "dvb" => LengthUnitKind::ViewportRelative {
+                    axis: ViewportAxis::Block,
+                },
+                "vmin" | "svmin" | "lvmin" | "dvmin" => LengthUnitKind::ViewportRelative {
+                    axis: ViewportAxis::Min,
+                },
+                "vmax" | "svmax" | "lvmax" | "dvmax" => LengthUnitKind::ViewportRelative {
+                    axis: ViewportAxis::Max,
+                },
+                "cqw" => LengthUnitKind::ContainerRelative {
+                    axis: ContainerAxis::Width,
+                },
+                "cqh" => LengthUnitKind::ContainerRelative {
+                    axis: ContainerAxis::Height,
+                },
+                "cqi" => LengthUnitKind::ContainerRelative {
+                    axis: ContainerAxis::Inline,
+                },
+                "cqb" => LengthUnitKind::ContainerRelative {
+                    axis: ContainerAxis::Block,
+                },
+                "cqmin" => LengthUnitKind::ContainerRelative {
+                    axis: ContainerAxis::Min,
+                },
+                "cqmax" => LengthUnitKind::ContainerRelative {
+                    axis: ContainerAxis::Max,
+                },
+                _ if ratio.is_finite() => LengthUnitKind::Absolute { px_per_unit: ratio },
+                _ => unreachable!("unknown length unit without an absolute conversion ratio"),
+            })
+            .collect()
+    })
+}
+
+/// Whether a length unit is font-relative or container-relative, the two
+/// relativities that make a length depend on more than global information.
+pub(crate) fn length_unit_is_font_or_container_relative(unit: u8) -> bool {
+    matches!(
+        length_unit_kinds().get(unit as usize),
+        Some(LengthUnitKind::FontRelative { .. } | LengthUnitKind::ContainerRelative { .. })
+    )
+}
+
+pub(crate) fn length_unit_is_container_relative(unit: u8) -> bool {
+    matches!(
+        length_unit_kinds().get(unit as usize),
+        Some(LengthUnitKind::ContainerRelative { .. })
+    )
+}
+
+fn select_font_metric(metrics: &FfiFontMetrics, metric: FontMetricSelector) -> f64 {
+    match metric {
+        FontMetricSelector::FontSize => metrics.font_size,
+        FontMetricSelector::XHeight => metrics.x_height,
+        FontMetricSelector::CapHeight => metrics.cap_height,
+        FontMetricSelector::ZeroAdvance => metrics.zero_advance,
+        FontMetricSelector::LineHeight => metrics.line_height,
+    }
+}
+
+/// Crate-visible length absolutization for the calc evaluation, which needs
+/// the unrounded pixel result.
+pub(crate) fn absolutize_length_for_calc(
+    value: f64,
+    unit: usize,
+    context: &FfiLengthResolutionContext,
+) -> FfiAbsolutizedLength {
+    absolutize_length(value, unit, context)
+}
+
+pub(crate) fn absolutize_length(value: f64, unit: usize, context: &FfiLengthResolutionContext) -> FfiAbsolutizedLength {
+    let kinds = length_unit_kinds();
+    let unhandled = FfiAbsolutizedLength {
+        handled: false,
+        changed: false,
+        resolved_viewport_relative_length: false,
+        px: 0.0,
+    };
+    let Some(kind) = kinds.get(unit) else {
+        return unhandled;
+    };
+    // https://drafts.csswg.org/css-viewport/#zoom-property
+    // To apply zoom, the used value of a CSS property is pre-multiplied (before any other steps in the used value
+    // stage) by the used value of zoom for the element.
+    // INTEROP: Lengths are zoomed as they compute instead, as other browsers do. Font-relative lengths resolve against
+    //          font metrics that are zoomed already.
+    let zoom = context.zoom;
+    match *kind {
+        LengthUnitKind::Px if zoom == 1.0 => FfiAbsolutizedLength {
+            handled: true,
+            changed: false,
+            resolved_viewport_relative_length: false,
+            px: value,
+        },
+        LengthUnitKind::Px => FfiAbsolutizedLength {
+            handled: true,
+            changed: true,
+            resolved_viewport_relative_length: false,
+            px: value * zoom,
+        },
+        LengthUnitKind::Absolute { px_per_unit } => FfiAbsolutizedLength {
+            handled: true,
+            changed: true,
+            resolved_viewport_relative_length: false,
+            px: px_per_unit * value * zoom,
+        },
+        LengthUnitKind::FontRelative { metric, root } => {
+            let metrics = if root {
+                &context.root_font_metrics
+            } else {
+                &context.font_metrics
+            };
+            let depends_on_viewport = if root {
+                context.root_font_metrics_depend_on_viewport_metrics
+            } else {
+                context.font_metrics_depend_on_viewport_metrics
+            };
+            if depends_on_viewport {
+                record_viewport_relative_length_resolution(context);
+            }
+            FfiAbsolutizedLength {
+                handled: true,
+                changed: true,
+                resolved_viewport_relative_length: depends_on_viewport,
+                px: value * select_font_metric(metrics, metric),
+            }
+        }
+        LengthUnitKind::ViewportRelative { axis } => {
+            record_viewport_relative_length_resolution(context);
+            let basis = match axis {
+                ViewportAxis::Width => context.viewport_width,
+                ViewportAxis::Height => context.viewport_height,
+                ViewportAxis::Inline => {
+                    if context.subject_inline_axis_is_horizontal {
+                        context.viewport_width
+                    } else {
+                        context.viewport_height
+                    }
+                }
+                ViewportAxis::Block => {
+                    if context.subject_inline_axis_is_horizontal {
+                        context.viewport_height
+                    } else {
+                        context.viewport_width
+                    }
+                }
+                ViewportAxis::Min => context.viewport_width.min(context.viewport_height),
+                ViewportAxis::Max => context.viewport_width.max(context.viewport_height),
+            };
+            FfiAbsolutizedLength {
+                handled: true,
+                changed: true,
+                resolved_viewport_relative_length: true,
+                px: basis * value / 100.0 * zoom,
+            }
+        }
+        LengthUnitKind::ContainerRelative { axis } => {
+            let physical_axis_basis = |width: bool| {
+                if width {
+                    context.has_container_width_basis.then_some((
+                        context.container_width_basis,
+                        context.container_width_basis_depends_on_viewport_metrics,
+                    ))
+                } else {
+                    context.has_container_height_basis.then_some((
+                        context.container_height_basis,
+                        context.container_height_basis_depends_on_viewport_metrics,
+                    ))
+                }
+            };
+            let inline_is_width = context.subject_inline_axis_is_horizontal;
+            let basis = match axis {
+                ContainerAxis::Width => physical_axis_basis(true),
+                ContainerAxis::Height => physical_axis_basis(false),
+                ContainerAxis::Inline => physical_axis_basis(inline_is_width),
+                ContainerAxis::Block => physical_axis_basis(!inline_is_width),
+                ContainerAxis::Min | ContainerAxis::Max => {
+                    match (physical_axis_basis(true), physical_axis_basis(false)) {
+                        (Some((width, width_depends_on_viewport)), Some((height, height_depends_on_viewport))) => {
+                            Some((
+                                if matches!(axis, ContainerAxis::Min) {
+                                    width.min(height)
+                                } else {
+                                    width.max(height)
+                                },
+                                width_depends_on_viewport || height_depends_on_viewport,
+                            ))
+                        }
+                        _ => None,
+                    }
+                }
+            };
+            let Some((basis, depends_on_viewport)) = basis else {
+                return unhandled;
+            };
+            if depends_on_viewport {
+                record_viewport_relative_length_resolution(context);
+            }
+            FfiAbsolutizedLength {
+                handled: true,
+                changed: true,
+                resolved_viewport_relative_length: depends_on_viewport,
+                px: basis * value / 100.0,
+            }
+        }
+    }
+}
+
+/// Absolutizes a length during style computation.
+///
+/// # Safety
+/// `context.resolved_viewport_relative_length` must be null or point to a live flag, which the
+/// absolutization may set.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_absolutize_length(
+    value: f64,
+    unit: u8,
+    context: &FfiLengthResolutionContext,
+) -> FfiAbsolutizedLength {
+    absolutize_length(value, unit as usize, context)
+}
+
+/// Result of computing a property that resolves to a number.
+#[repr(C)]
+pub struct FfiComputedNumber {
+    /// False when the value needs C++ handling (calc).
+    pub handled: bool,
+    /// True when the absolutized value is already the computed value.
+    pub unchanged: bool,
+    pub value: f64,
+}
+
+impl From<Option<ComputedNumber>> for FfiComputedNumber {
+    fn from(computed: Option<ComputedNumber>) -> Self {
+        let (handled, unchanged, value) = match computed {
+            Some(ComputedNumber::Unchanged) => (true, true, 0.0),
+            Some(ComputedNumber::Computed(value)) => (true, false, value),
+            None => (false, false, 0.0),
+        };
+        Self {
+            handled,
+            unchanged,
+            value,
+        }
+    }
+}
+
+/// What computing a property that resolves to a number came to.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ComputedNumber {
+    /// The absolutized value is already the computed value.
+    Unchanged,
+    Computed(f64),
+}
+
+/// What computing line-height came to: a resolved calc may produce either a pixel length or a
+/// unitless number multiplier.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ComputedLineHeight {
+    /// The absolutized value is already the computed value.
+    Unchanged,
+    Px(f64),
+    Number(f64),
+}
+
+// https://drafts.csswg.org/css-fonts-4/#font-weight-prop
+// a number, see below
+fn compute_font_weight(value: &StyleValueData, inherited_font_weight: f64) -> Option<ComputedNumber> {
+    let computed = |value| Some(ComputedNumber::Computed(value));
+    match value {
+        // <number [1,1000]>
+        StyleValueData::Number { .. } => Some(ComputedNumber::Unchanged),
+        StyleValueData::Keyword { keyword } => match *keyword {
+            // normal
+            // Same as 400.
+            keyword::NORMAL => computed(400.0),
+            // bold
+            // Same as 700.
+            keyword::BOLD => computed(700.0),
+            // Specified values of bolder and lighter indicate weights relative to the weight of the
+            // parent element. The computed weight is calculated based on the inherited font-weight
+            // value using the chart below.
+            //
+            // Inherited value (w)  bolder     lighter
+            // w < 100              400        No change
+            // 100 <= w < 350       400        100
+            // 350 <= w < 550       700        100
+            // 550 <= w < 750       900        400
+            // 750 <= w < 900       900        700
+            // 900 <= w             No change  700
+            //
+            // bolder
+            // Specifies a bolder weight than the inherited value. See 2.2.1 Relative Weights.
+            keyword::BOLDER => {
+                if inherited_font_weight < 350.0 {
+                    computed(400.0)
+                } else if inherited_font_weight < 550.0 {
+                    computed(700.0)
+                } else if inherited_font_weight < 900.0 {
+                    computed(900.0)
+                } else {
+                    computed(inherited_font_weight)
+                }
+            }
+            // lighter
+            // Specifies a lighter weight than the inherited value. See 2.2.1 Relative Weights.
+            keyword::LIGHTER => {
+                if inherited_font_weight < 100.0 {
+                    computed(inherited_font_weight)
+                } else if inherited_font_weight < 550.0 {
+                    computed(100.0)
+                } else if inherited_font_weight < 750.0 {
+                    computed(400.0)
+                } else {
+                    computed(700.0)
+                }
+            }
+            _ => None,
+        },
+        // Calc values resolve in the calc core with no external context; anything the
+        // core cannot resolve is left to the caller.
+        StyleValueData::Calculated { .. } => {
+            crate::css::calc::resolve_calculated_number_without_context(value).map(ComputedNumber::Computed)
+        }
+        _ => None,
+    }
+}
+
+// https://drafts.csswg.org/css-fonts-4/#font-width-prop
+// a percentage, see below
+fn compute_font_width(value: &StyleValueData) -> Option<ComputedNumber> {
+    let computed = |value| Some(ComputedNumber::Computed(value));
+    match value {
+        // <percentage [0,inf]>
+        StyleValueData::Percentage { .. } => Some(ComputedNumber::Unchanged),
+        StyleValueData::Keyword { keyword } => match *keyword {
+            // ultra-condensed 50%
+            keyword::ULTRA_CONDENSED => computed(50.0),
+            // extra-condensed 62.5%
+            keyword::EXTRA_CONDENSED => computed(62.5),
+            // condensed 75%
+            keyword::CONDENSED => computed(75.0),
+            // semi-condensed 87.5%
+            keyword::SEMI_CONDENSED => computed(87.5),
+            // normal 100%
+            keyword::NORMAL => computed(100.0),
+            // semi-expanded 112.5%
+            keyword::SEMI_EXPANDED => computed(112.5),
+            // expanded 125%
+            keyword::EXPANDED => computed(125.0),
+            // extra-expanded 150%
+            keyword::EXTRA_EXPANDED => computed(150.0),
+            // ultra-expanded 200%
+            keyword::ULTRA_EXPANDED => computed(200.0),
+            _ => None,
+        },
+        // Calc percentages resolve in the calc core with no external context; anything
+        // the core cannot resolve is left to the caller.
+        StyleValueData::Calculated { .. } => {
+            crate::css::calc::resolve_calculated_percentage_without_context(value).map(ComputedNumber::Computed)
+        }
+        _ => None,
+    }
+}
+
+/// Computes the font-width property from its absolutized value.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_compute_font_width(absolutized_value: &StyleValueData) -> FfiComputedNumber {
+    compute_font_width(absolutized_value).into()
+}
+
+/// The font size the `<absolute-size>` `keyword` maps to for a default font size of
+/// `default_font_size_raw`, both in raw CSS pixels. Any other keyword maps to the default size.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_absolute_size_font_mapping(keyword: u16, default_font_size_raw: i32) -> i32 {
+    absolute_size_font_mapping(keyword, CssPixels::from_raw(default_font_size_raw))
+        .map_or(default_font_size_raw, |size| size.raw_value())
+}
+
+/// https://drafts.csswg.org/css-fonts-4/#absolute-size-mapping
+/// An <absolute-size> keyword refers to an entry in a table of font sizes computed and kept by
+/// the user agent. See 2.5.1 Absolute Size Keyword Mapping Table.
+fn absolute_size_font_mapping(keyword: u16, default_font_size: CssPixels) -> Option<CssPixels> {
+    let entry = |numerator: i64, denominator: i64| {
+        Some(
+            (default_font_size * CssPixels::from_integer(numerator))
+                .div_as_fraction(CssPixels::from_integer(denominator)),
+        )
+    };
+    // INTEROP: Other browsers share this keyword table for integral default sizes from 9px through 16px, so we use
+    //          it instead of the ratios from the spec's guideline table.
+    let column = match keyword {
+        keyword::XX_SMALL => 0,
+        keyword::X_SMALL => 1,
+        keyword::SMALL => 2,
+        keyword::MEDIUM => 3,
+        keyword::LARGE => 4,
+        keyword::X_LARGE => 5,
+        keyword::XX_LARGE => 6,
+        keyword::XXX_LARGE => 7,
+        _ => return None,
+    };
+    const FONT_SIZE_TABLE: [[i64; 8]; 8] = [
+        [9, 9, 9, 9, 11, 14, 18, 27],
+        [9, 9, 9, 10, 12, 15, 20, 30],
+        [9, 9, 10, 11, 13, 17, 22, 33],
+        [9, 9, 10, 12, 14, 18, 24, 36],
+        [9, 10, 12, 13, 16, 20, 26, 39],
+        [9, 10, 12, 14, 17, 21, 28, 42],
+        [9, 10, 13, 15, 18, 23, 30, 45],
+        [9, 10, 13, 16, 18, 24, 32, 48],
+    ];
+    let default_size = default_font_size.to_int();
+    if (9..=16).contains(&default_size) && default_font_size == CssPixels::from_integer(i64::from(default_size)) {
+        return Some(CssPixels::from_integer(
+            FONT_SIZE_TABLE[(default_size - 9) as usize][column],
+        ));
+    }
+    match keyword {
+        keyword::XX_SMALL => entry(3, 5),
+        keyword::X_SMALL => entry(3, 4),
+        keyword::SMALL => entry(8, 9),
+        keyword::MEDIUM => Some(default_font_size),
+        keyword::LARGE => entry(6, 5),
+        keyword::X_LARGE => entry(3, 2),
+        keyword::XX_LARGE => Some(default_font_size * CssPixels::from_integer(2)),
+        keyword::XXX_LARGE => Some(default_font_size * CssPixels::from_integer(3)),
+        _ => None,
+    }
+}
+
+/// A <relative-size> keyword is interpreted relative to the computed font-size of the parent
+/// element. User agents may use a simple ratio, which should be around 1.2-1.5.
+/// A font size computed from another, in the single precision a computed font size is kept in, so
+/// that a percentage of a size like 13.333333px comes out whole: 300% of it is 40px.
+pub(crate) fn single_precision_font_size(px: f64) -> f64 {
+    f64::from(px as f32)
+}
+
+/// The factor a relative-size keyword scales the inherited font size by.
+fn relative_size_font_ratio(keyword: u16) -> Option<f64> {
+    match keyword {
+        keyword::SMALLER => Some(5.0 / 6.0),
+        keyword::LARGER => Some(6.0 / 5.0),
+        _ => None,
+    }
+}
+
+// https://drafts.csswg.org/css-fonts/#font-size-prop
+// an absolute length
+//
+// The absolute-size keywords map through CSSPixels fixed-point arithmetic. A size relative to the
+// inherited one scales it unrounded, as the computed value holds it.
+fn compute_font_size(
+    value: &StyleValueData,
+    computed_math_depth: i32,
+    inherited_font_size: f64,
+    inherited_math_depth: i32,
+    default_font_size: CssPixels,
+    default_font_size_scale: f64,
+) -> Option<ComputedNumber> {
+    let computed = |px: f64| Some(ComputedNumber::Computed(single_precision_font_size(px)));
+    match value {
+        // <length-percentage [0,inf]>
+        // A length value specifies an absolute font size (independent of the user agent's font
+        // table). Negative lengths are invalid.
+        StyleValueData::Length { .. } => Some(ComputedNumber::Unchanged),
+        // A percentage value specifies an absolute font size relative to the parent element's
+        // computed font-size. Negative percentages are invalid.
+        StyleValueData::Percentage { value } => computed(inherited_font_size * (value / 100.0)),
+        StyleValueData::Keyword { keyword } => {
+            if let Some(px) = absolute_size_font_mapping(*keyword, default_font_size) {
+                return computed(px.to_double() * default_font_size_scale);
+            }
+            if let Some(ratio) = relative_size_font_ratio(*keyword) {
+                return computed(inherited_font_size * ratio);
+            }
+            match *keyword {
+                // math
+                // Special mathematical scaling rules must be applied when determining the computed
+                // value of the font-size property.
+                keyword::MATH => {
+                    // https://w3c.github.io/mathml-core/#the-math-script-level-property
+                    // If the specified value font-size is math then the computed value of font-size is
+                    // obtained by multiplying the inherited value of font-size by a nonzero scale
+                    // factor calculated by the following procedure:
+                    // 1. Let A be the inherited math-depth value, B the computed math-depth value,
+                    //    C be 0.71 and S be 1.0
+                    let mut a = inherited_math_depth;
+                    let mut b = computed_math_depth;
+                    let size_ratio = 0.71f64;
+                    let mut scale = 1.0f64;
+                    let math_scaling_factor = if a == b {
+                        // 2. If A = B then return S.
+                        scale
+                    } else {
+                        // If B < A, swap A and B and set InvertScaleFactor to true.
+                        // Otherwise B > A and set InvertScaleFactor to false.
+                        let invert_scale_factor = if b < a {
+                            std::mem::swap(&mut a, &mut b);
+                            true
+                        } else {
+                            false
+                        };
+                        // 3. Let E be B - A > 0.
+                        let e = f64::from(b) - f64::from(a);
+                        // FIXME: 4. If the inherited first available font has an OpenType MATH table:
+                        //    - If A <= 0 and B >= 2 then multiply S by scriptScriptPercentScaleDown
+                        //      and decrement E by 2.
+                        //    - Otherwise if A = 1 then multiply S by scriptScriptPercentScaleDown /
+                        //      scriptPercentScaleDown and decrement E by 1.
+                        //    - Otherwise if B = 1 then multiply S by scriptPercentScaleDown and
+                        //      decrement E by 1.
+                        // 5. Multiply S by C^E.
+                        scale *= math::pow(size_ratio, e);
+                        // 6. Return S if InvertScaleFactor is false and 1/S otherwise.
+                        if !invert_scale_factor { scale } else { 1.0 / scale }
+                    };
+                    computed(inherited_font_size * math_scaling_factor)
+                }
+                _ => None,
+            }
+        }
+        // Calc lengths and percentages resolve in the calc core against the inherited
+        // font size; anything the core cannot resolve is left to the caller.
+        StyleValueData::Calculated { .. } => {
+            crate::css::calc::resolve_calculated_length_without_context(value, inherited_font_size)
+                .map(|px| ComputedNumber::Computed(single_precision_font_size(px)))
+        }
+        _ => None,
+    }
+}
+
+/// Computes the font-size property from its absolutized value. The font size
+/// inputs are raw CSSPixels values.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_compute_font_size(
+    absolutized_value: &StyleValueData,
+    computed_math_depth: i32,
+    inherited_font_size_raw: i32,
+    inherited_math_depth: i32,
+    default_font_size_raw: i32,
+) -> FfiComputedNumber {
+    compute_font_size(
+        absolutized_value,
+        computed_math_depth,
+        CssPixels::from_raw(inherited_font_size_raw).to_double(),
+        inherited_math_depth,
+        CssPixels::from_raw(default_font_size_raw),
+        1.0,
+    )
+    .into()
+}
+
+/// Why a monospace font-size recascade batch stopped.
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum FontSizeRecascadeStatus {
+    Complete,
+    /// The caller must provide the font and DOM-dependent resolution context
+    /// for `next_index`, then resume there.
+    NeedsLengthResolution,
+    /// Rust could not resolve the length at `next_index` with the supplied
+    /// context, so the caller must resolve it and resume at the next value.
+    NeedsCppLengthResolution,
+}
+
+pub struct FontSizeRecascadeBatch {
+    pub status: FontSizeRecascadeStatus,
+    pub next_index: usize,
+    /// The font size reached so far, in pixels, unrounded.
+    pub current_size: f64,
+    pub depends_on_viewport_metrics: bool,
+}
+
+/// The document's side of the lengths a monospace font-size recascade resolves on its own. Each
+/// caller passes the inputs it computes with: C++ its own root metrics and viewport, which move
+/// when it recomputes the root, and the style engine the inputs it prepared for the batch.
+#[derive(Clone, Copy)]
+pub struct FontSizeRecascadeDocumentInputs {
+    pub root_font_size: f64,
+    pub root_effective_zoom: f64,
+    pub root_font_metrics_depend_on_viewport_metrics: bool,
+    pub viewport_width: f64,
+    pub viewport_height: f64,
+}
+
+impl FontSizeRecascadeDocumentInputs {
+    pub(crate) fn from_document(inputs: &crate::css::style::bridge::FfiDocumentStyleComputationInputs) -> Self {
+        Self {
+            root_font_size: inputs.root_font_size,
+            root_effective_zoom: inputs.root_effective_zoom,
+            root_font_metrics_depend_on_viewport_metrics: inputs.root_font_metrics_depend_on_viewport_metrics,
+            viewport_width: inputs.viewport_width,
+            viewport_height: inputs.viewport_height,
+        }
+    }
+}
+
+/// Drives the time-traveling font-size inheritance applied when the cascade
+/// ends up with `font-family: monospace` through as many ancestors as Rust can
+/// resolve without another DOM-dependent length context. Absolute, `em`, `rem`
+/// and viewport-relative lengths resolve from the size reached so far and the
+/// document's inputs.
+///
+/// A `length_resolution_context` applies only to the value at
+/// `start_index`.
+/// Building it involves font work, so the caller does so lazily after a batch
+/// reports `NeedsLengthResolution` and resumes at the reported index.
+///
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn recascade_font_size_batch<'a>(
+    value_count: usize,
+    mut value_at: impl FnMut(usize) -> Option<&'a StyleValueData>,
+    effective_zoom_at: impl Fn(usize) -> f64,
+    applies_zoom_at: impl Fn(usize) -> bool,
+    start_index: usize,
+    current_size: f64,
+    current_depends_on_viewport_metrics: bool,
+    default_size_raw: i32,
+    document_inputs: FontSizeRecascadeDocumentInputs,
+    supplied_length_resolution_context: Option<&FfiLengthResolutionContext>,
+) -> FontSizeRecascadeBatch {
+    assert!(start_index <= value_count);
+    let mut current_size = current_size;
+    let mut depends_on_viewport_metrics = current_depends_on_viewport_metrics;
+    let default_size = CssPixels::from_raw(default_size_raw);
+    let root_zoom = if document_inputs.root_effective_zoom > 0.0 {
+        document_inputs.root_effective_zoom
+    } else {
+        1.0
+    };
+    let stopped = |status, next_index, current_size: f64, depends_on_viewport_metrics| FontSizeRecascadeBatch {
+        status,
+        next_index,
+        current_size: single_precision_font_size(current_size),
+        depends_on_viewport_metrics,
+    };
+
+    for index in start_index..value_count {
+        // NB: Each ancestor's size is computed in single precision, as the cascade computes it.
+        current_size = single_precision_font_size(current_size);
+        // NB: Keep the size before this ancestor for a batch that must retry this index with font metrics.
+        let inherited_size = current_size;
+        let zoom = effective_zoom_at(index);
+        let parent_zoom = index.checked_sub(1).map_or(1.0, &effective_zoom_at);
+        let applies_zoom = applies_zoom_at(index);
+        let own_zoom = if applies_zoom { zoom / parent_zoom } else { 1.0 };
+        let length_zoom = if applies_zoom { zoom } else { 1.0 };
+        let root_metric_zoom = if applies_zoom { zoom / root_zoom } else { 1.0 };
+        current_size *= own_zoom;
+        let zoomed_default_size = default_size.to_double() * length_zoom;
+        let Some(value) = value_at(index) else {
+            continue;
+        };
+        match value {
+            StyleValueData::Keyword { keyword } => {
+                if *keyword == keyword::INITIAL {
+                    current_size = zoomed_default_size;
+                    depends_on_viewport_metrics = false;
+                    continue;
+                }
+                // NB: font-size is an inherited property, so unset inherits it.
+                if *keyword == keyword::INHERIT || *keyword == keyword::UNSET {
+                    continue;
+                }
+                if let Some(px) = absolute_size_font_mapping(*keyword, default_size) {
+                    current_size = px.to_double() * length_zoom;
+                    depends_on_viewport_metrics = false;
+                    continue;
+                }
+                if let Some(ratio) = relative_size_font_ratio(*keyword) {
+                    current_size *= ratio;
+                    continue;
+                }
+                // FIXME: Resolve `font-size: math`
+                if *keyword == keyword::MATH {
+                    continue;
+                }
+            }
+            StyleValueData::Percentage { value } => {
+                current_size *= value / 100.0;
+                continue;
+            }
+            StyleValueData::Length { value, unit } => {
+                let directly_resolved = match length_unit_kinds().get(*unit as usize) {
+                    Some(LengthUnitKind::Px) => Some((*value * length_zoom, false)),
+                    Some(LengthUnitKind::Absolute { px_per_unit }) => Some((*value * px_per_unit * length_zoom, false)),
+                    Some(LengthUnitKind::FontRelative {
+                        metric: FontMetricSelector::FontSize,
+                        root: true,
+                    }) => Some((
+                        *value * document_inputs.root_font_size * root_metric_zoom,
+                        document_inputs.root_font_metrics_depend_on_viewport_metrics,
+                    )),
+                    Some(LengthUnitKind::FontRelative {
+                        metric: FontMetricSelector::FontSize,
+                        root: false,
+                    }) => Some((*value * current_size, depends_on_viewport_metrics)),
+                    // NB: Logical viewport units need the ancestor's writing mode from its resolution context.
+                    Some(LengthUnitKind::ViewportRelative {
+                        axis: ViewportAxis::Inline | ViewportAxis::Block,
+                    }) => None,
+                    Some(LengthUnitKind::ViewportRelative { axis }) => {
+                        let basis = match axis {
+                            ViewportAxis::Inline | ViewportAxis::Block => unreachable!(),
+                            ViewportAxis::Width => document_inputs.viewport_width,
+                            ViewportAxis::Height => document_inputs.viewport_height,
+                            ViewportAxis::Min => document_inputs.viewport_width.min(document_inputs.viewport_height),
+                            ViewportAxis::Max => document_inputs.viewport_width.max(document_inputs.viewport_height),
+                        };
+                        Some((basis * *value / 100.0 * length_zoom, true))
+                    }
+                    _ => None,
+                };
+                if let Some((px, resolved_viewport_relative_length)) = directly_resolved {
+                    current_size = px;
+                    depends_on_viewport_metrics = resolved_viewport_relative_length;
+                    continue;
+                }
+                let Some(length_resolution_context) = (index == start_index)
+                    .then_some(supplied_length_resolution_context)
+                    .flatten()
+                else {
+                    return stopped(
+                        FontSizeRecascadeStatus::NeedsLengthResolution,
+                        index,
+                        inherited_size,
+                        depends_on_viewport_metrics,
+                    );
+                };
+                let result = absolutize_length(*value, *unit as usize, length_resolution_context);
+                if !result.handled {
+                    return stopped(
+                        FontSizeRecascadeStatus::NeedsCppLengthResolution,
+                        index,
+                        inherited_size,
+                        depends_on_viewport_metrics,
+                    );
+                }
+                current_size = result.px;
+                depends_on_viewport_metrics = result.resolved_viewport_relative_length;
+                continue;
+            }
+            calculated @ StyleValueData::Calculated { .. } if calculated_font_size_is_percentage(calculated) => {
+                if let Some(px) = crate::css::calc::resolve_calculated_length_without_context(calculated, current_size)
+                {
+                    current_size = px;
+                }
+                continue;
+            }
+            StyleValueData::Calculated { .. } => {
+                continue;
+            }
+            _ => {}
+        }
+        let status = if index == start_index && supplied_length_resolution_context.is_some() {
+            FontSizeRecascadeStatus::NeedsCppLengthResolution
+        } else {
+            FontSizeRecascadeStatus::NeedsLengthResolution
+        };
+        return stopped(status, index, inherited_size, depends_on_viewport_metrics);
+    }
+    stopped(
+        FontSizeRecascadeStatus::Complete,
+        value_count,
+        current_size,
+        depends_on_viewport_metrics,
+    )
+}
+
+/// Whether a computed `content` value reads its tree scope's counter-style registry: whether it
+/// holds a counter in a named counter style, a predefined one included. A record holding one names
+/// the registry it was computed against, whichever side computed it.
+pub(crate) fn content_reads_counter_style_environment(value: &StyleValueData) -> bool {
+    match value {
+        StyleValueData::Counter(counter_payload) => {
+            let CounterPayload { counter_style, .. } = &**counter_payload;
+            matches!(
+                counter_style.optional_data().and_then(StyleValueData::as_counter_style),
+                Some(CounterStylePayload { is_symbols: false, .. })
+            )
+        }
+        StyleValueData::Content(content_payload) => {
+            let ContentPayload { content, alt_text } = &**content_payload;
+            [content, alt_text].into_iter().any(|part| {
+                part.optional_data()
+                    .is_some_and(content_reads_counter_style_environment)
+            })
+        }
+        StyleValueData::ValueList { values, .. } => values.as_slice().iter().any(|item| {
+            item.optional_data()
+                .is_some_and(content_reads_counter_style_environment)
+        }),
+        _ => false,
+    }
+}
+
+/// The counter-style names no @counter-style rule overrides: decimal, disc, square, circle,
+/// disclosure-open and disclosure-closed.
+fn counter_style_name_is_non_overridable(name: &[u16]) -> bool {
+    [
+        "decimal",
+        "disc",
+        "square",
+        "circle",
+        "disclosure-open",
+        "disclosure-closed",
+    ]
+    .iter()
+    .any(|candidate| {
+        candidate.len() == name.len()
+            && candidate
+                .bytes()
+                .zip(name)
+                .all(|(expected, &unit)| unit < 128 && (unit as u8).eq_ignore_ascii_case(&expected))
+    })
+}
+
+/// Whether a style with this `content` and `list-style-type` reads its tree scope's counter-style
+/// registry: its content holds a counter in a named counter style, or its `list-style-type` names a
+/// counter style that registry may define, which for a pseudo-element is any named one.
+pub(crate) fn style_reads_counter_style_environment(
+    content: Option<&StyleValueData>,
+    list_style_type: Option<&StyleValueData>,
+    is_pseudo: bool,
+) -> bool {
+    content.is_some_and(content_reads_counter_style_environment)
+        || match list_style_type {
+            Some(StyleValueData::CounterStyle(counter_style)) if !counter_style.is_symbols => {
+                is_pseudo || !counter_style_name_is_non_overridable(counter_style.name.units())
+            }
+            _ => false,
+        }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_style_reads_counter_style_environment(
+    content: Option<&StyleValueData>,
+    list_style_type: Option<&StyleValueData>,
+    is_pseudo: bool,
+) -> bool {
+    style_reads_counter_style_environment(content, list_style_type, is_pseudo)
+}
+
+/// https://drafts.css-houdini.org/css-properties-values-api/#computationally-independent
+/// A property value is computationally independent if it can be converted into a computed value
+/// using only the value of the property on the element, and "global" information that cannot be
+/// changed by CSS.
+///
+/// Returns None for value types that must not reach computational-independence checks. A
+/// container is likewise undecided when a nested value is unsupported, unless another nested value
+/// already makes it dependent.
+pub(crate) fn value_is_computationally_independent(value: &StyleValueData) -> Option<bool> {
+    match value {
+        StyleValueData::Keyword { .. } => {
+            if value_is_css_wide_keyword(value) {
+                return Some(false);
+            }
+            // NB: System colors are computationally independent, although the color scheme decides what they compute
+            //     to, and so is light-dark():
+            //     https://github.com/w3c/csswg-drafts/issues/12735
+            // FIXME: Are there any other keywords which aren't computationally independent?
+            Some(true)
+        }
+        StyleValueData::Length { unit, .. } => Some(!length_unit_is_font_or_container_relative(*unit)),
+        // NB: anchor() and anchor-size() count as independent even though they carry a fallback value.
+        StyleValueData::Anchor { .. } | StyleValueData::AnchorSize { .. } => Some(true),
+        StyleValueData::TreeCountingFunction { .. } => Some(false),
+        // The calculation tree decides natively; its style value leaves resolve through the
+        // same decision, falling back for the types the core cannot decide.
+        StyleValueData::Calculated(calculated_payload) => {
+            let CalculatedPayload { rust_calculation, .. } = &**calculated_payload;
+            Some(rust_calculation.node().is_computationally_independent(
+                &|unit| !length_unit_is_font_or_container_relative(unit),
+                &|retained| value_is_computationally_independent(retained.data()).unwrap_or_default(),
+            ))
+        }
+        // FIXME: Consider sub-values once we support <custom-color-space> values
+        StyleValueData::ColorInterpolationMethod { .. } => Some(true),
+        StyleValueData::UnicodeRange { .. }
+        | StyleValueData::GuaranteedInvalid
+        | StyleValueData::PendingSubstitution { .. }
+        | StyleValueData::CounterStyleSystem { .. }
+        | StyleValueData::Unresolved { .. } => None,
+        // Any other value is independent when all the values it holds are. A dependent child
+        // decides the answer wherever it is, so the order of the children does not matter.
+        _ => {
+            let mut independent = Some(true);
+            value.for_each_child(&mut |child| {
+                if independent != Some(false) {
+                    let answer = value_is_computationally_independent(child);
+                    if answer != Some(true) {
+                        independent = answer;
+                    }
+                }
+            });
+            independent
+        }
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+pub(crate) struct ExternalValueDependencies {
+    pub uses_tree_counting_function: bool,
+    pub container_relative_length_unit_mask: u8,
+    pub has_unfixed_random_sharing: bool,
+    /// The value draws a `random()` result, which the document's random base values decide.
+    pub uses_random_function: bool,
+    pub needs_document_base_url: bool,
+    pub may_need_style_sheet_resource_context: bool,
+    pub inheritance_dependent: bool,
+    /// How much of the root element's font the value's root-relative lengths (`rem`, `rex`,
+    /// `rcap`, `rch`, `ric` or `rlh`) resolve against, which the document element's font decides.
+    pub root_font_reads: RootFontReads,
+    /// The value holds a length relative to a metric of the first available font of the element
+    /// or its parent (`ex`, `cap`, `ch` or `lh`), which a load of one of its faces moves.
+    pub font_metric_relative_length: bool,
+    /// The value resolves against the used color scheme: it holds `light-dark()` or a system color.
+    pub color_scheme_dependent: bool,
+    /// The value resolves against the device pixel ratio: it holds an `image-set()`, whose option
+    /// is chosen for the ratio.
+    pub device_pixel_ratio_dependent: bool,
+    /// The axes of the viewport the value's viewport-relative lengths resolve against, as
+    /// `VIEWPORT_WIDTH_AXIS` and `VIEWPORT_HEIGHT_AXIS` bits.
+    pub viewport_axes: u8,
+}
+
+/// The `viewport_axes` bit of a length relative to the viewport's width.
+pub(crate) const VIEWPORT_WIDTH_AXIS: u8 = 1 << 0;
+/// The `viewport_axes` bit of a length relative to the viewport's height.
+pub(crate) const VIEWPORT_HEIGHT_AXIS: u8 = 1 << 1;
+
+/// The axes of the viewport `unit` resolves against, as `viewport_axes` bits: an inline or block
+/// size, which the writing mode maps to an axis, and the smaller or larger size read either.
+/// https://drafts.csswg.org/css-values-4/#viewport-relative-lengths
+// NB: The small, large and dynamic viewports are the same size here, so their units read the same
+//     axes.
+pub(crate) fn viewport_length_unit_axes(unit: u8) -> u8 {
+    let Some(name) = LENGTH_UNIT_NAMES.get(usize::from(unit)) else {
+        return 0;
+    };
+    match *name {
+        "vw" | "svw" | "lvw" | "dvw" => VIEWPORT_WIDTH_AXIS,
+        "vh" | "svh" | "lvh" | "dvh" => VIEWPORT_HEIGHT_AXIS,
+        "vi" | "svi" | "lvi" | "dvi" | "vb" | "svb" | "lvb" | "dvb" | "vmin" | "svmin" | "lvmin" | "dvmin" | "vmax"
+        | "svmax" | "lvmax" | "dvmax" => VIEWPORT_WIDTH_AXIS | VIEWPORT_HEIGHT_AXIS,
+        _ => 0,
+    }
+}
+
+/// Which metrics of a first available font the lengths in `value` read: whether one is an `lh`,
+/// relative to a line height, and whether one is an `ex`, `cap` or `ch`, relative to a glyph metric.
+pub(crate) fn font_metric_length_reads(value: &StyleValueData) -> (bool, bool) {
+    fn read_unit(unit: u8, reads: &mut (bool, bool)) {
+        if let Some(LengthUnitKind::FontRelative { metric, root: false }) = length_unit_kinds().get(usize::from(unit)) {
+            match metric {
+                FontMetricSelector::LineHeight => reads.0 = true,
+                FontMetricSelector::FontSize => {}
+                _ => reads.1 = true,
+            }
+        }
+    }
+    fn read_calculation(node: &crate::css::calc::CalcNode, reads: &mut (bool, bool)) {
+        if let crate::css::calc::CalcNode::Numeric(crate::css::calc::CalcNumericValue::Length { unit, .. }) = node {
+            read_unit(*unit, reads);
+        }
+        node.for_each_child(&mut |child| read_calculation(child, reads));
+    }
+    fn read(value: &StyleValueData, reads: &mut (bool, bool)) {
+        match value {
+            StyleValueData::Length { unit, .. } => read_unit(*unit, reads),
+            StyleValueData::Calculated(payload) => read_calculation(payload.rust_calculation.node(), reads),
+            _ => {}
+        }
+        value.for_each_child(&mut |child| read(child, reads));
+    }
+    let mut reads = (false, false);
+    read(value, &mut reads);
+    reads
+}
+
+/// Whether `unit` is relative to a metric of the element's or its parent's first available font,
+/// rather than to its font size alone.
+pub(crate) fn is_font_metric_relative_length_unit(unit: u8) -> bool {
+    matches!(
+        length_unit_kinds().get(usize::from(unit)),
+        Some(LengthUnitKind::FontRelative { root: false, metric }) if !matches!(metric, FontMetricSelector::FontSize)
+    )
+}
+
+/// How much of the root element's font a style resolves lengths against, ordered by what moves of
+/// that font it resolves them again for. As the move of a root element's font, the least a style
+/// must read of it to resolve its lengths again.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u8)]
+pub(crate) enum RootFontReads {
+    #[default]
+    None,
+    /// Its font size, as zoomed, through `rem` or `ric`. As a move, the size moved, and with it
+    /// what every root-relative length resolves against.
+    FontSize,
+    /// A metric of its first available font, through `rex`, `rcap`, `rch` or `rlh`, which a load
+    /// of one of its faces moves without its size. As a move, only those metrics moved.
+    Metrics,
+}
+
+impl RootFontReads {
+    /// Whether a style reading this much of the root element's font resolves its lengths again
+    /// when the font makes the move `moved`.
+    pub(crate) fn reads_move(self, moved: RootFontReads) -> bool {
+        self != RootFontReads::None && moved != RootFontReads::None && self >= moved
+    }
+}
+
+/// How much of the root element's font `unit` is relative to.
+pub(crate) fn root_font_reads_of_length_unit(unit: u8) -> RootFontReads {
+    match length_unit_kinds().get(usize::from(unit)) {
+        Some(LengthUnitKind::FontRelative {
+            root: true,
+            metric: FontMetricSelector::FontSize,
+        }) => RootFontReads::FontSize,
+        Some(LengthUnitKind::FontRelative { root: true, .. }) => RootFontReads::Metrics,
+        _ => RootFontReads::None,
+    }
+}
+
+pub(crate) fn container_relative_length_unit_bit(unit: u8) -> u8 {
+    match LENGTH_UNIT_NAMES[unit as usize] {
+        "cqw" => 1 << 0,
+        "cqh" => 1 << 1,
+        "cqi" => 1 << 2,
+        "cqb" => 1 << 3,
+        "cqmin" => 1 << 4,
+        "cqmax" => 1 << 5,
+        _ => 0,
+    }
+}
+
+/// Which physical axes, width and height, the units of a `container_relative_length_unit_mask`
+/// read the bases of, for a subject whose inline axis is or is not the horizontal one.
+pub(crate) fn container_relative_axes_read(unit_mask: u8, subject_inline_axis_is_horizontal: bool) -> (bool, bool) {
+    const CQW: u8 = 1 << 0;
+    const CQH: u8 = 1 << 1;
+    const CQI: u8 = 1 << 2;
+    const CQB: u8 = 1 << 3;
+    const CQMIN_OR_CQMAX: u8 = (1 << 4) | (1 << 5);
+    let (width_axis, height_axis) = if subject_inline_axis_is_horizontal {
+        (CQW | CQI, CQH | CQB)
+    } else {
+        (CQW | CQB, CQH | CQI)
+    };
+    (
+        unit_mask & (width_axis | CQMIN_OR_CQMAX) != 0,
+        unit_mask & (height_axis | CQMIN_OR_CQMAX) != 0,
+    )
+}
+
+pub(crate) fn collect_external_value_dependencies(value: &StyleValueData) -> ExternalValueDependencies {
+    fn collect_calculation(node: &crate::css::calc::CalcNode, dependencies: &mut ExternalValueDependencies) {
+        match node {
+            crate::css::calc::CalcNode::Numeric(crate::css::calc::CalcNumericValue::Length { unit, .. }) => {
+                dependencies.container_relative_length_unit_mask |= container_relative_length_unit_bit(*unit);
+                dependencies.root_font_reads = dependencies.root_font_reads.max(root_font_reads_of_length_unit(*unit));
+                dependencies.font_metric_relative_length |= is_font_metric_relative_length_unit(*unit);
+                dependencies.viewport_axes |= viewport_length_unit_axes(*unit);
+            }
+            crate::css::calc::CalcNode::Random { sharing, .. } => {
+                dependencies.uses_random_function = true;
+                collect(sharing.data(), dependencies);
+            }
+            crate::css::calc::CalcNode::NonMathFunction { value: sharing, .. } => {
+                collect(sharing.data(), dependencies);
+            }
+            _ => {}
+        }
+        node.for_each_child(&mut |child| collect_calculation(child, dependencies));
+    }
+
+    fn collect(value: &StyleValueData, dependencies: &mut ExternalValueDependencies) {
+        match value {
+            StyleValueData::TreeCountingFunction { .. } => dependencies.uses_tree_counting_function = true,
+            // https://drafts.csswg.org/css-color-4/#css-system-colors
+            StyleValueData::Keyword { keyword } => {
+                dependencies.color_scheme_dependent |=
+                    crate::css::color_resolution::system_color_for_keyword(*keyword, false).is_some();
+            }
+            StyleValueData::Length { unit, .. } => {
+                dependencies.container_relative_length_unit_mask |= container_relative_length_unit_bit(*unit);
+                dependencies.root_font_reads = dependencies.root_font_reads.max(root_font_reads_of_length_unit(*unit));
+                dependencies.font_metric_relative_length |= is_font_metric_relative_length_unit(*unit);
+                dependencies.viewport_axes |= viewport_length_unit_axes(*unit);
+            }
+            StyleValueData::Image(image_payload) => {
+                let ImagePayload {
+                    url, resource_context, ..
+                } = &**image_payload;
+                dependencies.needs_document_base_url |= !url.is_empty() && !resource_context.has_base_url;
+                dependencies.may_need_style_sheet_resource_context |= !url.is_empty();
+            }
+            StyleValueData::Url(url_payload) => {
+                let UrlPayload { url, .. } = &**url_payload;
+                if !url.is_empty() && !url.is_fragment() {
+                    let needs_base_url =
+                        liburl_rust::basic_parse(url.url_input(), liburl_rust::BasicParseOptions::new()).is_none();
+                    dependencies.needs_document_base_url |= needs_base_url;
+                    dependencies.may_need_style_sheet_resource_context |= needs_base_url;
+                }
+            }
+            StyleValueData::Calculated(calculated_payload) => {
+                let CalculatedPayload { rust_calculation, .. } = &**calculated_payload;
+                collect_calculation(rust_calculation.node(), dependencies);
+            }
+            StyleValueData::RandomValueSharing(random_value_sharing_payload) => {
+                dependencies.uses_random_function = true;
+                dependencies.has_unfixed_random_sharing |=
+                    random_value_sharing_payload.fixed_value.optional_data().is_none();
+            }
+            StyleValueData::ImageSet(_) => dependencies.device_pixel_ratio_dependent = true,
+            StyleValueData::LightDark(_) => dependencies.color_scheme_dependent = true,
+            _ => {}
+        }
+        value.for_each_child(&mut |child| collect(child, dependencies));
+    }
+
+    let mut dependencies = ExternalValueDependencies::default();
+    collect(value, &mut dependencies);
+    dependencies
+}
+
+/// The external dependencies of a value, or `None` for one whose computational independence is
+/// not known, which only a value that never reaches computation has.
+pub(crate) fn try_external_value_dependencies(value: &StyleValueData) -> Option<ExternalValueDependencies> {
+    let mut dependencies = collect_external_value_dependencies(value);
+    dependencies.inheritance_dependent =
+        crate::css::style_value::value_depends_on_current_color(value) || !value_is_computationally_independent(value)?;
+    Some(dependencies)
+}
+
+pub(crate) fn external_value_dependencies(value: &StyleValueData) -> ExternalValueDependencies {
+    let mut dependencies = collect_external_value_dependencies(value);
+    dependencies.inheritance_dependent = crate::css::style_value::value_depends_on_current_color(value)
+        || !value_is_computationally_independent(value)
+            .expect("computational independence requested for an unsupported value");
+    dependencies
+}
+
+/// The random caching key a random function's `<random-value-sharing>` gives it, as its name and
+/// whether its element is null: a sharing that names a `<dashed-ident>` is shared by every element,
+/// as an `element-shared` one is.
+/// https://drafts.csswg.org/css-values-5/#random-caching
+pub(crate) fn random_caching_key(sharing: &StyleValueData) -> (&[u16], bool) {
+    let StyleValueData::RandomValueSharing(random_value_sharing_payload) = sharing else {
+        unreachable!("a random caching key is a random sharing's");
+    };
+    let RandomValueSharingPayload {
+        has_name,
+        name,
+        element_shared,
+        is_auto,
+        ..
+    } = &**random_value_sharing_payload;
+    (if *has_name { name.units() } else { &[] }, *element_shared || !*is_auto)
+}
+
+/// Collects the element- or document-cached random sharing nodes reachable through the
+/// recursively absolutized style-value graph.
+pub(crate) fn collect_unfixed_random_sharings_in_value(
+    value: &StyleValueData,
+    sharings: &mut Vec<*const StyleValueData>,
+) {
+    match value {
+        StyleValueData::Calculated(calculated_payload) => {
+            let CalculatedPayload { rust_calculation, .. } = &**calculated_payload;
+            crate::css::calc::collect_unfixed_random_sharings(rust_calculation.node(), sharings);
+        }
+        StyleValueData::RandomValueSharing(random_value_sharing_payload)
+            if random_value_sharing_payload.fixed_value.optional_data().is_none() =>
+        {
+            if !sharings.contains(&std::ptr::from_ref(value)) {
+                sharings.push(value);
+            }
+        }
+        _ => value.for_each_child(&mut |child| collect_unfixed_random_sharings_in_value(child, sharings)),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_style_value_is_computationally_independent(data: &StyleValueData) -> bool {
+    value_is_computationally_independent(data).expect("computational independence requested for an unsupported value")
+}
+
+// The computed value of the math-depth value is determined as follows:
+fn compute_math_depth(value: &StyleValueData, inherited_math_depth: i32, inherited_math_style_is_compact: bool) -> i32 {
+    match value {
+        // - If the specified value of math-depth is auto-add and the inherited value of math-style
+        //   is compact then the computed value of math-depth of the element is its inherited value
+        //   plus one.
+        StyleValueData::Keyword { keyword } if *keyword == keyword::AUTO_ADD && inherited_math_style_is_compact => {
+            inherited_math_depth.saturating_add(1)
+        }
+        // - If the specified value of math-depth is of the form <integer> then the computed value
+        //   of math-depth of the element is the specified integer.
+        StyleValueData::Integer { value } => *value,
+        // Calc values resolve to an integer in the calc core with no external context.
+        StyleValueData::Calculated { .. } => crate::css::calc::resolve_calculated_integer_without_context(value)
+            .expect("a calculated math-depth resolves to an integer"),
+        // - If the specified value of math-depth is of the form add(<integer>) then the computed
+        //   value of math-depth of the element is its inherited value plus the specified integer.
+        StyleValueData::Function(function_payload) => {
+            let FunctionPayload { value, .. } = &**function_payload;
+            let added = match value.optional_data().expect("add() holds a value") {
+                StyleValueData::Integer { value } => *value,
+                value @ StyleValueData::Calculated { .. } => {
+                    crate::css::calc::resolve_calculated_integer_without_context(value)
+                        .expect("a calculated add() resolves to an integer")
+                }
+                _ => unreachable!("add() holds an integer"),
+            };
+            inherited_math_depth.saturating_add(added)
+        }
+        // - Otherwise, the computed value of math-depth of the element is the inherited one.
+        _ => inherited_math_depth,
+    }
+}
+
+// https://drafts.csswg.org/css-inline-3/#line-height-property
+fn compute_line_height(value: &StyleValueData, computed_font_size: f64) -> ComputedLineHeight {
+    match value {
+        // normal
+        // <length [0,inf]>
+        // <number [0,inf]>
+        StyleValueData::Keyword {
+            keyword: keyword::NORMAL,
+        }
+        | StyleValueData::Length { .. }
+        | StyleValueData::Number { .. } => ComputedLineHeight::Unchanged,
+        // <percentage [0,inf]>
+        StyleValueData::Percentage { value } => ComputedLineHeight::Px(computed_font_size * (value / 100.0)),
+        // Calc lengths, percentages, and numbers resolve in the calc core against the
+        // computed font size.
+        StyleValueData::Calculated { .. } => {
+            match crate::css::calc::resolve_calculated_line_height_without_context(value, computed_font_size)
+                .expect("a calculated line-height resolves to a length or a number")
+            {
+                crate::css::calc::ResolvedLineHeightCalc::Px(px) => ComputedLineHeight::Px(px),
+                crate::css::calc::ResolvedLineHeightCalc::Number(number) => ComputedLineHeight::Number(number),
+            }
+        }
+        _ => unreachable!("line-height is normal, a length, a number, a percentage or a calculation"),
+    }
+}
+
+// https://drafts.csswg.org/css-backgrounds/#border-width
+// absolute length, snapped as a border width
+fn compute_border_or_outline_width(
+    value: &StyleValueData,
+    device_pixels_per_css_pixel: f64,
+    zoom: f64,
+    length_resolution_context: Option<&FfiLengthResolutionContext>,
+) -> f64 {
+    let absolute_length = match value {
+        // The thin, medium, and thick keywords are equivalent to 1px, 3px, and 5px, respectively.
+        // https://drafts.csswg.org/css-backgrounds/#typedef-line-width
+        // NB: As a length is, the keyword is zoomed by the effective zoom.
+        StyleValueData::Keyword { keyword } => match *keyword {
+            keyword::THIN => CssPixels::from_integer(1).scaled(zoom),
+            keyword::MEDIUM => CssPixels::from_integer(3).scaled(zoom),
+            keyword::THICK => CssPixels::from_integer(5).scaled(zoom),
+            _ => unreachable!("a line width keyword is thin, medium or thick"),
+        },
+        StyleValueData::Length { value, unit } => {
+            let kinds = length_unit_kinds();
+            match kinds.get(*unit as usize) {
+                Some(LengthUnitKind::Px) => CssPixels::nearest_value_for(*value),
+                Some(LengthUnitKind::Absolute { px_per_unit }) => CssPixels::nearest_value_for(px_per_unit * value),
+                _ => unreachable!("a line width length is absolute by now"),
+            }
+        }
+        StyleValueData::Calculated { .. } => {
+            let length_resolution_context =
+                length_resolution_context.expect("a calculated line width requires a resolution context");
+            CssPixels::nearest_value_for(
+                crate::css::calc::resolve_calculated_length_with_context(value, length_resolution_context)
+                    .expect("a calculated line width resolves to a length"),
+            )
+        }
+        _ => unreachable!("a line width is a keyword, a length or a calculation"),
+    };
+    snap_a_length_as_a_border_width(device_pixels_per_css_pixel, absolute_length).to_double()
+}
+
+// https://drafts.csswg.org/css-gaps-1/#propdef-column-rule-width
+// Computed value: list of absolute lengths, snapped as a border width
+fn compute_line_width_list(
+    value: &StyleValueData,
+    device_pixels_per_css_pixel: f64,
+    length_resolution_context: &FfiLengthResolutionContext,
+) -> StyleValueData {
+    let compute_width = |width: &StyleValueData| StyleValueData::Length {
+        value: compute_border_or_outline_width(
+            width,
+            device_pixels_per_css_pixel,
+            length_resolution_context.zoom,
+            Some(length_resolution_context),
+        ),
+        unit: px_length_unit(),
+    };
+    let map_list = |values: &RetainedStyleValueDataList, map: &dyn Fn(usize, &StyleValueData) -> StyleValueData| {
+        RetainedStyleValueDataList::from_retained_values(
+            values
+                .as_slice()
+                .iter()
+                .enumerate()
+                .map(|(index, value)| RetainedStyleValueData::from_owned(map(index, value.data())))
+                .collect(),
+        )
+    };
+    let StyleValueData::ValueList {
+        values,
+        separator,
+        collapsible,
+    } = value
+    else {
+        return compute_width(value);
+    };
+    StyleValueData::ValueList {
+        values: map_list(values, &|_, item| {
+            let StyleValueData::Function(function_payload) = item else {
+                return compute_width(item);
+            };
+            let FunctionPayload { name, value } = &**function_payload;
+            let StyleValueData::ValueList {
+                values,
+                separator,
+                collapsible,
+            } = value.data()
+            else {
+                unreachable!("a repeat() of line widths holds a list");
+            };
+            let arguments = map_list(values, &|index, argument| match (index, argument) {
+                (0, StyleValueData::Calculated { .. }) => StyleValueData::Integer {
+                    value: crate::css::calc::resolve_calculated_integer_without_context(argument)
+                        .expect("a repeat count resolves to an integer"),
+                },
+                (0, count) => count.clone(),
+                (_, width) => compute_width(width),
+            });
+            StyleValueData::Function(crate::css::style_value::StyleValueBox::new(FunctionPayload {
+                name: name.clone(),
+                value: RetainedStyleValueData::from_owned(StyleValueData::ValueList {
+                    values: arguments,
+                    separator: *separator,
+                    collapsible: *collapsible,
+                }),
+            }))
+        }),
+        separator: *separator,
+        collapsible: *collapsible,
+    }
+}
+
+// https://drafts.csswg.org/css-backgrounds/#compute-a-border-width
+pub(crate) fn snap_a_length_as_a_border_width(device_pixels_per_css_pixel: f64, length: CssPixels) -> CssPixels {
+    // 1. Assert: len is non-negative.
+    // NB: The caller guarantees this; negative widths are invalid at parse time.
+
+    // 2. If len is an integer number of device pixels, do nothing.
+    let device_pixels = length.to_double() * device_pixels_per_css_pixel;
+    if device_pixels == device_pixels.trunc() {
+        return length;
+    }
+
+    // 3. If len is greater than zero, but less than 1 device pixel, round len up to 1 device pixel.
+    if device_pixels > 0.0 && device_pixels < 1.0 {
+        return CssPixels::nearest_value_for(1.0 / device_pixels_per_css_pixel);
+    }
+
+    // 4. If len is greater than 1 device pixel, round it down to the nearest integer number of
+    //    device pixels.
+    if device_pixels > 1.0 {
+        return CssPixels::nearest_value_for(device_pixels.floor() / device_pixels_per_css_pixel);
+    }
+
+    length
+}
+
+// https://drafts.csswg.org/css-borders-4/#propdef-corner-top-left-shape
+// the corresponding superellipse() value
+fn compute_corner_shape_parameter(value: &StyleValueData) -> Option<f64> {
+    match value {
+        StyleValueData::Keyword { keyword } => match *keyword {
+            // The corner shape is a quarter of a convex ellipse. Equivalent to superellipse(1).
+            keyword::ROUND => Some(1.0),
+            // The corner shape is a quarter of a "squircle", a convex curve between round and
+            // square. Equivalent to superellipse(2).
+            keyword::SQUIRCLE => Some(2.0),
+            // The corner shape is a convex 90deg angle. Equivalent to superellipse(infinity).
+            keyword::SQUARE => Some(f64::INFINITY),
+            // The corner shape is a straight diagonal line, neither convex nor concave.
+            // Equivalent to superellipse(0).
+            keyword::BEVEL => Some(0.0),
+            // The corner shape is a concave quarter-ellipse. Equivalent to superellipse(-1).
+            keyword::SCOOP => Some(-1.0),
+            // The corner shape is a concave 90deg angle. Equivalent to superellipse(-infinity).
+            keyword::NOTCH => Some(f64::NEG_INFINITY),
+            _ => unreachable!("not a corner shape keyword"),
+        },
+        // Superellipse values are already computed.
+        StyleValueData::Superellipse { .. } => None,
+        _ => unreachable!("a corner shape is a keyword or a superellipse"),
+    }
+}
+
+/// Whether a calc() font size is a percentage alone, which scales the inherited size as a percentage
+/// does, and so carries a keyword size through to the element.
+pub(crate) fn calculated_font_size_is_percentage(value: &StyleValueData) -> bool {
+    use crate::css::calc::{BASE_TYPE_PERCENT, CalcNumericType};
+    let StyleValueData::Calculated(payload) = value else {
+        return false;
+    };
+    // NB: The type the calculation has with its percentages kept as percentages, rather than as the lengths they
+    //     resolve to.
+    let mut percentage = CalcNumericType::default();
+    percentage.exponents[BASE_TYPE_PERCENT] = Some(1);
+    payload
+        .rust_calculation
+        .node()
+        .numeric_type(&percentage)
+        .is_some_and(|numeric_type| {
+            numeric_type.percent_hint.is_none()
+                && numeric_type
+                    .exponents
+                    .iter()
+                    .enumerate()
+                    .all(|(base, exponent)| match base {
+                        BASE_TYPE_PERCENT => *exponent == Some(1),
+                        _ => matches!(exponent, None | Some(0)),
+                    })
+        })
+}
+
+/// The font size a cascaded font-size computes to from `inherited_font_size`, where it's relative
+/// to it: a percentage, alone or in a calc(), an `em` length, `larger` or `smaller`, or the size
+/// itself through `inherit` or `unset`.
+pub(crate) fn font_size_relative_to_inherited_size(value: &StyleValueData, inherited_font_size: f64) -> Option<f64> {
+    let size = match value {
+        StyleValueData::Percentage { value } => Some(inherited_font_size * (value / 100.0)),
+        calculated @ StyleValueData::Calculated { .. } if calculated_font_size_is_percentage(calculated) => {
+            crate::css::calc::resolve_calculated_length_without_context(calculated, inherited_font_size)
+        }
+        StyleValueData::Keyword { keyword } if matches!(*keyword, keyword::INHERIT | keyword::UNSET) => {
+            Some(inherited_font_size)
+        }
+        StyleValueData::Keyword { keyword } => {
+            relative_size_font_ratio(*keyword).map(|ratio| inherited_font_size * ratio)
+        }
+        StyleValueData::Length { value, unit } => matches!(
+            length_unit_kinds().get(usize::from(*unit)),
+            Some(LengthUnitKind::FontRelative {
+                metric: FontMetricSelector::FontSize,
+                root: false,
+            })
+        )
+        .then(|| value * inherited_font_size),
+        _ => None,
+    };
+    size.map(single_precision_font_size)
+}
+
+/// Whether a font-family value is a single monospace keyword, which triggers
+/// the monospace font-size recascade. The list entry's keyword is read through
+/// the nested value's shared Rust data handle.
+pub(crate) fn font_family_is_monospace(value: &StyleValueData) -> bool {
+    let StyleValueData::ValueList { values, .. } = value else {
+        return false;
+    };
+    let values = values.as_slice();
+    values.len() == 1
+        && matches!(
+            values[0].data(),
+            StyleValueData::Keyword { keyword } if *keyword == keyword::MONOSPACE
+        )
+}
+
+/// Computes a font-feature-settings or font-variation-settings value list:
+/// deduplicate by tag with the later occurrence taking precedence, then sort
+/// the survivors ascending by tag.
+/// https://drafts.csswg.org/css-fonts/#font-feature-settings-prop
+#[allow(clippy::arc_with_non_send_sync)]
+fn compute_font_feature_tag_value_list(value: &StyleValueData) -> StyleValueArc {
+    let StyleValueData::ValueList {
+        values,
+        separator,
+        collapsible,
+    } = value
+    else {
+        unreachable!("font feature settings must be a value list")
+    };
+    let values = values.as_slice();
+    let packed_tag = |index: usize| match values[index].data() {
+        StyleValueData::OpenTypeTagged(open_type_tagged_payload) => {
+            let OpenTypeTaggedPayload { packed_tag, .. } = &**open_type_tagged_payload;
+            *packed_tag
+        }
+        _ => unreachable!("font feature settings must contain OpenType tagged values"),
+    };
+
+    // Keep the last occurrence of each tag; later declarations take precedence.
+    let mut survivors: Vec<usize> = (0..values.len())
+        .filter(|&i| !((i + 1)..values.len()).any(|j| packed_tag(i) == packed_tag(j)))
+        .collect();
+    survivors.sort_unstable_by_key(|&index| packed_tag(index));
+    let values = survivors
+        .into_iter()
+        .map(|index| values[index].clone_retained())
+        .collect();
+    StyleValueArc::new(StyleValueData::ValueList {
+        values: RetainedStyleValueDataList::from_retained_values(values),
+        separator: *separator,
+        collapsible: *collapsible,
+    })
+}
+
+/// Whether a value contains a percentage, either directly or inside a
+/// calculation tree; the shared core of the two font predicates below.
+fn value_contains_percentage(value: &StyleValueData) -> bool {
+    match value {
+        StyleValueData::Percentage { .. } => true,
+        StyleValueData::Calculated(calculated_payload) => {
+            let CalculatedPayload { rust_calculation, .. } = &**calculated_payload;
+            rust_calculation.node().contains_percentage()
+        }
+        _ => false,
+    }
+}
+
+/// Whether a value's computed value depends on inherited information because
+/// of the property it belongs to: a font-weight of bolder or lighter (relative
+/// to the inherited weight), a font-size that is a percentage, a percentage-
+/// bearing calc(), or one of larger/smaller/math (relative to the inherited
+/// size), a line-height that is a percentage or percentage-bearing calc()
+/// (relative to the computed font size), or a text-align of match-parent or
+/// -libweb-inherit-or-center (relative to the parent's text-align and
+/// direction). This is the property-specific part of the flow's
+/// inheritance-dependency decision; the property-agnostic parts
+/// (depends-on-current-color and computational independence) stay with the
+/// value's own operations.
+pub(crate) fn value_depends_on_inherited_info_for_property(value: &StyleValueData, property_id: u16) -> bool {
+    use crate::css::property_metadata::property_id as prop;
+    match property_id {
+        prop::FONT_WEIGHT => {
+            matches!(value, StyleValueData::Keyword { keyword } if matches!(*keyword, keyword::BOLDER | keyword::LIGHTER))
+        }
+        prop::FONT_SIZE => {
+            value_contains_percentage(value)
+                || matches!(value, StyleValueData::Keyword { keyword }
+                    if matches!(*keyword, keyword::LARGER | keyword::SMALLER | keyword::MATH))
+        }
+        prop::_WEBKIT_TEXT_STROKE_WIDTH => matches!(value, StyleValueData::Keyword { keyword }
+            if matches!(*keyword, keyword::THIN | keyword::MEDIUM | keyword::THICK)),
+        prop::LINE_HEIGHT => value_contains_percentage(value),
+        prop::TEXT_ALIGN => matches!(value, StyleValueData::Keyword { keyword }
+            if matches!(*keyword, keyword::MATCH_PARENT | keyword::_LIBWEB_INHERIT_OR_CENTER)),
+        _ => false,
+    }
+}
+
+/// The outcome of the font-style computation: whether a keyword was mapped to
+/// a font-style keyword the caller should construct, and that keyword's code.
+#[repr(C)]
+pub struct FfiFontStyleComputation {
+    pub is_keyword: bool,
+    pub font_style_keyword: u8,
+}
+
+/// Computes font-style: a bare keyword maps to a font-style keyword (the caller
+/// constructs the FontStyleStyleValue from it); any other value is already the
+/// computed value. Font-style normally parses straight to a FontStyleStyleValue;
+/// this keyword arm is reached when StylePropertyMap sets a keyword directly.
+/// https://drafts.csswg.org/css-fonts-4/#font-style-prop
+///
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_compute_font_style(absolutized_value: &StyleValueData) -> FfiFontStyleComputation {
+    if let StyleValueData::Keyword { keyword } = absolutized_value
+        && let Some(font_style_keyword) = keyword_to_font_style_keyword(*keyword)
+    {
+        return FfiFontStyleComputation {
+            is_keyword: true,
+            font_style_keyword,
+        };
+    }
+    FfiFontStyleComputation {
+        is_keyword: false,
+        font_style_keyword: 0,
+    }
+}
+
+fn position_area_short_keyword(keyword: u16) -> u16 {
+    match keyword {
+        keyword::BLOCK_START | keyword::INLINE_START => keyword::START,
+        keyword::BLOCK_END | keyword::INLINE_END => keyword::END,
+        keyword::SELF_BLOCK_START | keyword::SELF_INLINE_START => keyword::SELF_START,
+        keyword::SELF_BLOCK_END | keyword::SELF_INLINE_END => keyword::SELF_END,
+        keyword::SPAN_BLOCK_START | keyword::SPAN_INLINE_START => keyword::SPAN_START,
+        keyword::SPAN_BLOCK_END | keyword::SPAN_INLINE_END => keyword::SPAN_END,
+        keyword::SPAN_SELF_BLOCK_START | keyword::SPAN_SELF_INLINE_START => keyword::SPAN_SELF_START,
+        keyword::SPAN_SELF_BLOCK_END | keyword::SPAN_SELF_INLINE_END => keyword::SPAN_SELF_END,
+        _ => keyword,
+    }
+}
+
+fn position_area_span_all_remap(block_keyword: u16, inline_keyword: u16) -> Option<u16> {
+    if block_keyword == keyword::SPAN_ALL {
+        return match inline_keyword {
+            keyword::START => Some(keyword::INLINE_START),
+            keyword::END => Some(keyword::INLINE_END),
+            keyword::SELF_START => Some(keyword::SELF_INLINE_START),
+            keyword::SELF_END => Some(keyword::SELF_INLINE_END),
+            keyword::SPAN_START => Some(keyword::SPAN_INLINE_START),
+            keyword::SPAN_END => Some(keyword::SPAN_INLINE_END),
+            keyword::SPAN_SELF_START => Some(keyword::SPAN_SELF_INLINE_START),
+            keyword::SPAN_SELF_END => Some(keyword::SPAN_SELF_INLINE_END),
+            _ => None,
+        };
+    }
+    if inline_keyword == keyword::SPAN_ALL {
+        return match block_keyword {
+            keyword::START => Some(keyword::BLOCK_START),
+            keyword::END => Some(keyword::BLOCK_END),
+            keyword::SELF_START => Some(keyword::SELF_BLOCK_START),
+            keyword::SELF_END => Some(keyword::SELF_BLOCK_END),
+            keyword::SPAN_START => Some(keyword::SPAN_BLOCK_START),
+            keyword::SPAN_END => Some(keyword::SPAN_BLOCK_END),
+            keyword::SPAN_SELF_START => Some(keyword::SPAN_SELF_BLOCK_START),
+            keyword::SPAN_SELF_END => Some(keyword::SPAN_SELF_BLOCK_END),
+            _ => None,
+        };
+    }
+    None
+}
+
+// https://drafts.csswg.org/css-anchor-position/#position-area-computed
+#[allow(clippy::arc_with_non_send_sync)]
+fn compute_position_area(value: &StyleValueData) -> Option<StyleValueArc> {
+    // The computed value of a <position-area> value is the two keywords indicating the selected tracks in each axis,
+    // with the long (block-start) and short (start) logical keywords treated as equivalent. It serializes in the order
+    // given in the grammar (above), with the logical keywords serialized in their short forms (e.g. start start
+    // instead of block-start inline-start).
+    let StyleValueData::ValueList {
+        values,
+        separator,
+        collapsible,
+    } = value
+    else {
+        return None;
+    };
+    let [block_value, inline_value] = values.as_slice() else {
+        unreachable!("position-area must contain two keywords")
+    };
+    let StyleValueData::Keyword { keyword: block_keyword } = block_value.data() else {
+        unreachable!("position-area must contain keywords")
+    };
+    let StyleValueData::Keyword {
+        keyword: inline_keyword,
+    } = inline_value.data()
+    else {
+        unreachable!("position-area must contain keywords")
+    };
+
+    if let Some(keyword) = position_area_span_all_remap(*block_keyword, *inline_keyword) {
+        return Some(StyleValueArc::new(StyleValueData::Keyword { keyword }));
+    }
+    let short_block_keyword = position_area_short_keyword(*block_keyword);
+    let short_inline_keyword = position_area_short_keyword(*inline_keyword);
+    if short_block_keyword == *block_keyword && short_inline_keyword == *inline_keyword {
+        return None;
+    }
+
+    let retained_keyword =
+        |keyword| RetainedStyleValueData::from_arc(StyleValueArc::new(StyleValueData::Keyword { keyword }));
+    Some(StyleValueArc::new(StyleValueData::ValueList {
+        values: RetainedStyleValueDataList::from_retained_values(vec![
+            retained_keyword(short_block_keyword),
+            retained_keyword(short_inline_keyword),
+        ]),
+        separator: *separator,
+        collapsible: *collapsible,
+    }))
+}
+
+/// The computed dash list, with each number converted to the length it measures in user units.
+/// None when the list holds no numbers, so an unchanged list keeps its identity.
+#[allow(clippy::arc_with_non_send_sync)]
+fn stroke_dasharray_numbers_as_lengths(value: &StyleValueData) -> Option<StyleValueArc> {
+    let StyleValueData::ValueList {
+        values,
+        separator,
+        collapsible,
+    } = value
+    else {
+        return None;
+    };
+    let dashes = values.as_slice();
+    if !dashes
+        .iter()
+        .any(|dash| matches!(dash.data(), StyleValueData::Number { .. }))
+    {
+        return None;
+    }
+    let computed_dashes = dashes
+        .iter()
+        .map(|dash| match dash.data() {
+            StyleValueData::Number { value } => {
+                RetainedStyleValueData::from_arc(StyleValueArc::new(StyleValueData::Length {
+                    value: *value,
+                    unit: px_length_unit(),
+                }))
+            }
+            _ => dash.clone_retained(),
+        })
+        .collect();
+    Some(StyleValueArc::new(StyleValueData::ValueList {
+        values: RetainedStyleValueDataList::from_retained_values(computed_dashes),
+        separator: *separator,
+        collapsible: *collapsible,
+    }))
+}
+
+/// The computed two-value list for a `border-spacing` member used for both axes.
+#[allow(clippy::arc_with_non_send_sync)]
+fn border_spacing_pair(single: StyleValueData) -> StyleValueArc {
+    let single = RetainedStyleValueData::from_arc(StyleValueArc::new(single));
+    StyleValueArc::new(StyleValueData::ValueList {
+        values: RetainedStyleValueDataList::from_retained_values(vec![single.clone_retained(), single]),
+        separator: 0,
+        collapsible: true,
+    })
+}
+
+/// https://drafts.csswg.org/css-borders-4/#border-shape-geometry-box
+/// The computed value of a border-shape leaves out the reference boxes that are the defaults, and keeps one of two
+/// shapes that are the same against the same box. Returns `None` when the value is already canonical.
+#[allow(clippy::arc_with_non_send_sync)]
+fn canonicalize_border_shape(value: &StyleValueData) -> Option<StyleValueArc> {
+    let StyleValueData::ValueList { values, .. } = value else {
+        return None;
+    };
+    let mut entries: Vec<(&RetainedStyleValueData, Option<u16>)> = Vec::new();
+    for item in values.as_slice() {
+        match item.data() {
+            StyleValueData::Keyword { keyword } => entries.last_mut()?.1 = Some(*keyword),
+            _ => entries.push((item, None)),
+        }
+    }
+    // A single shape defaults to the half-border-box. Of two, the outer one defaults to the border box, and the inner
+    // one to the padding box.
+    let default_box = |count: usize, index: usize| match (count, index) {
+        (1, _) => keyword::HALF_BORDER_BOX,
+        (_, 0) => keyword::BORDER_BOX,
+        _ => keyword::PADDING_BOX,
+    };
+    if let [(outer, outer_box), (inner, inner_box)] = entries[..]
+        && outer.data() == inner.data()
+        && outer_box.unwrap_or(default_box(2, 0)) == inner_box.unwrap_or(default_box(2, 1))
+    {
+        // NB: An omitted box means something else for a single shape, so this keeps the box the outer shape used.
+        entries = vec![(outer, Some(outer_box.unwrap_or(default_box(2, 0))))];
+    }
+    let count = entries.len();
+    let mut canonical = Vec::with_capacity(count * 2);
+    for (index, (shape, geometry_box)) in entries.into_iter().enumerate() {
+        canonical.push(shape.clone_retained());
+        if let Some(geometry_box) = geometry_box.filter(|&geometry_box| geometry_box != default_box(count, index)) {
+            canonical.push(retained_new(StyleValueData::Keyword { keyword: geometry_box }));
+        }
+    }
+    if canonical.len() == values.as_slice().len() {
+        return None;
+    }
+    if let [only] = &canonical[..] {
+        return Some(StyleValueArc::new(only.data().clone()));
+    }
+    Some(StyleValueArc::new(StyleValueData::ValueList {
+        values: RetainedStyleValueDataList::from_retained_values(canonical),
+        separator: 0,
+        collapsible: false,
+    }))
+}
+
+/// https://drafts.csswg.org/scroll-animations-1/#animation-range-start
+/// A computed range edge leaves out the progress after a range name when it is the default for the edge: 0% for a
+/// start, 100% for an end. Returns `None` when the value is already canonical.
+#[allow(clippy::arc_with_non_send_sync)]
+fn canonicalize_animation_range(value: &StyleValueData, default_offset: f64) -> Option<StyleValueArc> {
+    // A calculation that resolves to the default percentage, with no length part, is left out too.
+    let is_percentage_of = |offset: &StyleValueData, percentage: f64| match offset {
+        StyleValueData::Percentage { value } => *value == percentage,
+        StyleValueData::Calculated { .. } => {
+            let offset = crate::css::computed_value_views::LengthPercentageRef::over(offset);
+            offset.to_px(CssPixels::default()) == CssPixels::default()
+                && offset.to_px(CssPixels::from_integer(100)).to_double() == percentage
+        }
+        _ => false,
+    };
+    let canonical_edge = |edge: &StyleValueData| match edge {
+        StyleValueData::ValueList { values, .. } => match values.as_slice() {
+            [name, offset] if is_percentage_of(offset.data(), default_offset) => Some(name.clone_retained()),
+            _ => None,
+        },
+        _ => None,
+    };
+    let StyleValueData::ValueList {
+        values,
+        separator,
+        collapsible,
+    } = value
+    else {
+        return None;
+    };
+    // A list of edges is comma separated; a lone edge with a range name and an offset is a space separated pair.
+    if *separator == 0 {
+        return canonical_edge(value).map(|edge| StyleValueArc::new(edge.data().clone()));
+    }
+    let mut changed = false;
+    let edges = values
+        .as_slice()
+        .iter()
+        .map(|edge| match canonical_edge(edge.data()) {
+            Some(canonical) => {
+                changed = true;
+                canonical
+            }
+            None => edge.clone_retained(),
+        })
+        .collect();
+    changed.then(|| {
+        StyleValueArc::new(StyleValueData::ValueList {
+            values: RetainedStyleValueDataList::from_retained_values(edges),
+            separator: *separator,
+            collapsible: *collapsible,
+        })
+    })
+}
+
+/// https://drafts.csswg.org/motion-1/#offset-rotate-property
+/// Computed value: computed <angle> value, optionally preceded by auto
+/// Returns `None` when the value is already canonical.
+#[allow(clippy::arc_with_non_send_sync)]
+fn canonicalize_offset_rotate(value: &StyleValueData) -> Option<StyleValueArc> {
+    // NB: The C++ AngleUnit for degrees.
+    const DEGREES: u8 = 0;
+    let degrees = match value {
+        StyleValueData::Keyword {
+            keyword: keyword::REVERSE,
+        } => 0.0,
+        StyleValueData::ValueList { values, .. } => match values.as_slice() {
+            [first, angle]
+                if matches!(
+                    first.data(),
+                    StyleValueData::Keyword {
+                        keyword: keyword::REVERSE
+                    }
+                ) =>
+            {
+                let StyleValueData::Angle { value, unit: DEGREES } = angle.data() else {
+                    return None;
+                };
+                *value
+            }
+            _ => return None,
+        },
+        _ => return None,
+    };
+    // reverse <angle>?: Identical to auto, but adds an additional 180deg to the rotation.
+    Some(StyleValueArc::new(StyleValueData::ValueList {
+        values: RetainedStyleValueDataList::from_retained_values(vec![
+            retained_new(StyleValueData::Keyword { keyword: keyword::AUTO }),
+            retained_new(StyleValueData::Angle {
+                value: degrees + 180.0,
+                unit: DEGREES,
+            }),
+        ]),
+        separator: 0,
+        collapsible: false,
+    }))
+}
+
+// https://drafts.csswg.org/css-contain-2/#contain-property
+#[allow(clippy::arc_with_non_send_sync)]
+fn collapse_containment_list(value: &StyleValueData) -> Option<StyleValueArc> {
+    let StyleValueData::ValueList { values, .. } = value else {
+        return None;
+    };
+
+    let mut contains_size = false;
+    let mut contains_layout = false;
+    let mut contains_style = false;
+    let mut contains_paint = false;
+
+    for containment in values.as_slice() {
+        match containment.data() {
+            StyleValueData::Keyword { keyword } if *keyword == keyword::SIZE => contains_size = true,
+            StyleValueData::Keyword { keyword } if *keyword == keyword::LAYOUT => contains_layout = true,
+            StyleValueData::Keyword { keyword } if *keyword == keyword::STYLE => contains_style = true,
+            StyleValueData::Keyword { keyword } if *keyword == keyword::PAINT => contains_paint = true,
+            _ => return None,
+        }
+    }
+
+    if !contains_layout || !contains_style || !contains_paint {
+        return None;
+    }
+
+    let collapsed_keyword = if contains_size {
+        keyword::STRICT
+    } else {
+        keyword::CONTENT
+    };
+    Some(StyleValueArc::new(StyleValueData::Keyword {
+        keyword: collapsed_keyword,
+    }))
+}
+
+/// The per-longhand initial values as shared Rust value identities, parsed from Properties.json on
+/// first use.
+struct InitialValueTable {
+    values: Box<[crate::css::style_value::RetainedStyleValueData]>,
+    dependencies: Box<[ExternalValueDependencies]>,
+}
+
+// SAFETY: The entries reference immortal, immutable style values.
+unsafe impl Send for InitialValueTable {}
+unsafe impl Sync for InitialValueTable {}
+
+fn initial_value_table() -> &'static InitialValueTable {
+    use crate::css::property_metadata::{FIRST_LONGHAND_PROPERTY_ID, LAST_LONGHAND_PROPERTY_ID};
+    use crate::css::style_value::RetainedStyleValueData;
+
+    static TABLE: std::sync::OnceLock<InitialValueTable> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        let values: Box<[_]> = (FIRST_LONGHAND_PROPERTY_ID..=LAST_LONGHAND_PROPERTY_ID)
+            .map(|property| {
+                crate::css::parser::value_parser::parse_initial_value(property).map_or_else(
+                    RetainedStyleValueData::none,
+                    |value| match crate::css::style_value_arc::StyleValueArc::is_unique(&value) {
+                        // NB: The table holds the value for the rest of the process.
+                        true => RetainedStyleValueData::from_arc(
+                            crate::css::style_value_arc::StyleValueArc::into_immortal(value),
+                        ),
+                        false => RetainedStyleValueData::from_arc(value),
+                    },
+                )
+            })
+            .collect();
+        let dependencies = values
+            .iter()
+            .map(|value| {
+                value
+                    .optional_data()
+                    .map_or_else(Default::default, external_value_dependencies)
+            })
+            .collect();
+        InitialValueTable { values, dependencies }
+    })
+}
+
+/// Returns the initial value data of a longhand property.
+pub(crate) fn initial_value(property_id: u16) -> Option<&'static crate::css::style_value::StyleValueData> {
+    initial_value_table().values[longhand_index(property_id)].optional_data()
+}
+
+pub(crate) fn initial_value_data(property_id: u16) -> *const crate::css::style_value::StyleValueData {
+    initial_value_handle(property_id).pointer()
+}
+
+pub(crate) fn initial_value_handle(property_id: u16) -> &'static crate::css::style_value::RetainedStyleValueData {
+    &initial_value_table().values[longhand_index(property_id)]
+}
+
+pub(crate) fn initial_value_dependencies(property_id: u16) -> ExternalValueDependencies {
+    initial_value_table().dependencies[longhand_index(property_id)]
+}
+
+fn longhand_index(property_id: u16) -> usize {
+    usize::from(property_id - crate::css::property_metadata::FIRST_LONGHAND_PROPERTY_ID)
+}
+
+/// A longhand's initial value, which C++ property_initial_value() shares.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_style_metadata_initial_value(property_id: u16) -> *const c_void {
+    initial_value_data(property_id).cast()
+}
+
+/// Whether a keyword resolves as a color during computed-value processing.
+pub(crate) fn keyword_is_color(keyword: u16) -> bool {
+    keyword == keyword::CURRENTCOLOR || crate::css::color_resolution::system_color_for_keyword(keyword, false).is_some()
+}
+
+/// The inherit-or-initial decision for one longhand in the property
+/// computation loop.
+pub struct LonghandDecision {
+    pub should_inherit: bool,
+    /// True when, absent a successful inheritance fetch, the value falls back
+    /// to the property's initial value.
+    pub use_initial_without_inherit: bool,
+}
+
+fn longhand_decision(value: Option<&StyleValueData>, property_id: u16) -> LonghandDecision {
+    let keyword = match value {
+        Some(StyleValueData::Keyword { keyword }) => Some(*keyword),
+        _ => None,
+    };
+    let is_inherit = keyword == Some(keyword::INHERIT);
+    let is_unset = keyword == Some(keyword::UNSET);
+    let is_initial = keyword == Some(keyword::INITIAL);
+    let inherited_property = property_is_inherited(property_id);
+
+    let mut should_inherit = value.is_none() && inherited_property;
+
+    // https://www.w3.org/TR/css-cascade-4/#inherit
+    // If the cascaded value of a property is the inherit keyword, the property's specified and
+    // computed values are the inherited value.
+    should_inherit |= is_inherit;
+
+    // https://www.w3.org/TR/css-cascade-4/#inherit-initial
+    // If the cascaded value of a property is the unset keyword, then if it is an inherited
+    // property, this is treated as inherit, and if it is not, this is treated as initial.
+    should_inherit |= is_unset && inherited_property;
+
+    // https://www.w3.org/TR/css-color-4/#resolving-other-colors
+    // In the color property, the used value of currentcolor is the resolved inherited value.
+    should_inherit |=
+        property_id == crate::css::property_metadata::property_id::COLOR && keyword == Some(keyword::CURRENTCOLOR);
+
+    LonghandDecision {
+        should_inherit,
+        use_initial_without_inherit: value.is_none() || is_initial || is_unset || should_inherit,
+    }
+}
+
+// https://drafts.csswg.org/css-pseudo-4/#highlight-cascade
+// When any supported property is not given a value by the cascade, or given a value of inherit or
+// unset, its specified value is determined by inheritance from the corresponding highlight
+// pseudo-element of its originating element's parent element. This occurs regardless of whether
+// that property is an inherited property.
+fn highlight_longhand_inherits(value: Option<&StyleValueData>, pseudo_kind: u8, property_id: u16) -> bool {
+    crate::css::property_metadata::pseudo_element_whitelist_names_property(pseudo_kind, property_id)
+        && match value {
+            None => true,
+            Some(StyleValueData::Keyword { keyword }) => *keyword == keyword::INHERIT || *keyword == keyword::UNSET,
+            Some(_) => false,
+        }
+}
+
+/// The number of writing-mode and direction values represented in the
+/// generated logical-property mapping tables.
+pub const WRITING_MODE_COUNT: usize = 5;
+pub const DIRECTION_COUNT: usize = 2;
+
+/// Maps a logical alias longhand to its physical property for the given
+/// writing mode and direction, or returns the property itself when it is not
+/// a logical alias.
+pub fn map_logical_alias_to_physical(property_id: u16, writing_mode: u8, direction: u8) -> u16 {
+    use crate::css::property_metadata::{
+        FIRST_LONGHAND_PROPERTY_ID, LAST_LONGHAND_PROPERTY_ID, LOGICAL_ALIAS_TO_PHYSICAL,
+    };
+    if !(FIRST_LONGHAND_PROPERTY_ID..=LAST_LONGHAND_PROPERTY_ID).contains(&property_id) {
+        return property_id;
+    }
+    let longhand_index = (property_id - FIRST_LONGHAND_PROPERTY_ID) as usize;
+    let index = (longhand_index * WRITING_MODE_COUNT + writing_mode as usize) * DIRECTION_COUNT + direction as usize;
+    match LOGICAL_ALIAS_TO_PHYSICAL.get(index) {
+        Some(&physical) if physical != 0 => physical,
+        _ => property_id,
+    }
+}
+
+/// FFI accessor for the parity test on the C++ side.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_map_logical_alias_to_physical(property_id: u16, writing_mode: u8, direction: u8) -> u16 {
+    map_logical_alias_to_physical(property_id, writing_mode, direction)
+}
+
+/// Maps a physical longhand to its logical alias for the given writing mode
+/// and direction, or returns the property itself when it has no logical alias.
+pub fn map_physical_to_logical_alias(property_id: u16, writing_mode: u8, direction: u8) -> u16 {
+    use crate::css::property_metadata::{
+        FIRST_LONGHAND_PROPERTY_ID, LAST_LONGHAND_PROPERTY_ID, PHYSICAL_TO_LOGICAL_ALIAS,
+    };
+    if !(FIRST_LONGHAND_PROPERTY_ID..=LAST_LONGHAND_PROPERTY_ID).contains(&property_id) {
+        return property_id;
+    }
+    let longhand_index = (property_id - FIRST_LONGHAND_PROPERTY_ID) as usize;
+    let index = (longhand_index * WRITING_MODE_COUNT + writing_mode as usize) * DIRECTION_COUNT + direction as usize;
+    match PHYSICAL_TO_LOGICAL_ALIAS.get(index) {
+        Some(&logical) if logical != 0 => logical,
+        _ => property_id,
+    }
+}
+
+/// A longhand's computed value, as the drive found it.
+enum NativeValue {
+    /// The specified value is the computed value.
+    Unchanged,
+    Px(f64),
+    Integer(i32),
+    Superellipse(f64),
+    Number(f64),
+    Percentage(f64),
+    /// A font-style value of a font-style keyword code.
+    FontStyle(u8),
+    Keyword(u16),
+    StyleValue(StyleValueArc),
+}
+
+struct ComputedStoreEntry<'a> {
+    property_id: u16,
+    /// The selected specified value; also the stored value when `computed` is `NativeValue::Unchanged`, and
+    /// otherwise what the inheritance-dependence bookkeeping reads.
+    data: &'a RetainedStyleValueData,
+    inheritance_dependent: bool,
+    computed: NativeValue,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum FfiAnimationTimelineKind {
+    Document,
+    None,
+    Scroll,
+    View,
+    Named,
+}
+
+/// The insets of a view progress timeline's visibility range, as the host takes them: each side either auto, which
+/// takes the scroll container's scroll padding, or a length plus a percentage of the scrollport.
+/// https://drafts.csswg.org/scroll-animations-1/#view-timeline-inset
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FfiViewTimelineInset {
+    pub start_is_auto: bool,
+    pub start_px: f64,
+    pub start_percentage: f64,
+    /// A calculation the start inset resolves against the scrollport size, or null. See `calculated_offset`.
+    pub start_calculated: *const c_void,
+    pub end_is_auto: bool,
+    pub end_px: f64,
+    pub end_percentage: f64,
+    pub end_calculated: *const c_void,
+}
+
+#[repr(C)]
+pub struct FfiComputedAnimation {
+    pub duration_is_auto: bool,
+    pub duration: f64,
+    pub timing_function: *const c_void,
+    pub iteration_count: f64,
+    pub direction: u8,
+    pub play_state: u8,
+    pub delay: f64,
+    pub fill_mode: u8,
+    pub composition: u8,
+    pub name: *const CssString,
+    pub timeline_kind: FfiAnimationTimelineKind,
+    pub scroll_scroller: u8,
+    pub scroll_axis: u8,
+    /// The insets of a view() timeline.
+    pub view_inset: FfiViewTimelineInset,
+    /// The name of a named timeline, as a CSS string, or null.
+    pub timeline_name: *const CssString,
+    /// The edges of the animation attachment range, each a `TimelineRangeName` in the host's numbering and an offset
+    /// from the start of that range: a length plus a percentage of the range.
+    pub range_start_name: u8,
+    pub range_start_px: f64,
+    pub range_start_percentage: f64,
+    /// A calculation the start offset resolves against the size of its range, or null. See `calculated_offset`.
+    pub range_start_calculated: *const c_void,
+    pub range_end_name: u8,
+    pub range_end_px: f64,
+    pub range_end_percentage: f64,
+    pub range_end_calculated: *const c_void,
+    /// The index, in the list of CSS animations the host already holds for this element or
+    /// pseudo-element, of the animation this definition claims, or -1 where it asks for a new one.
+    pub matched_existing_index: i32,
+    /// The `KeyframeSet` for this definition's name, from the `@keyframes` the scopes in the name's
+    /// chain published, which the plan holds, or null where none of them defines it.
+    pub keyframe_set: *const c_void,
+}
+
+/// Document-level inputs to used color-scheme resolution. Scheme values use
+/// the C++ PreferredColorScheme discriminants: auto, dark, and light.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FfiEffectiveColorSchemeInput {
+    pub preferred_color_scheme: u8,
+    pub has_document_supported_schemes: bool,
+    pub document_supported_scheme_codes: *const u8,
+    pub document_supported_scheme_count: usize,
+}
+
+#[repr(C)]
+pub struct FfiDocumentLonghandInput {
+    pub color_scheme_input: FfiEffectiveColorSchemeInput,
+    pub length_resolution_context: FfiLengthResolutionContext,
+    pub device_pixels_per_css_pixel: f64,
+    pub initial_font_size_raw: i32,
+    pub default_font_size_raw: i32,
+    pub viewport_width: f64,
+    pub viewport_height: f64,
+}
+
+impl FfiEffectiveColorSchemeInput {
+    /// # Safety
+    /// The document-supported scheme storage must be valid for the returned
+    /// slice's lifetime.
+    unsafe fn document_supported_schemes(&self) -> Option<&[u8]> {
+        self.has_document_supported_schemes.then(|| {
+            if self.document_supported_scheme_count == 0 {
+                &[][..]
+            } else {
+                unsafe {
+                    ak::slice_from_raw_parts(
+                        self.document_supported_scheme_codes,
+                        self.document_supported_scheme_count,
+                    )
+                }
+            }
+        })
+    }
+}
+
+/// Stable element and document facts supplied once for a longhand drive.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FfiStyleComputationEnvironment {
+    pub box_type_input: FfiBoxTypeTransformationInput,
+    pub color_scheme_input: FfiEffectiveColorSchemeInput,
+    pub is_th_element: bool,
+    pub has_new_font_size: bool,
+    /// Whether the new font size already accounts for the element's own cascaded `font-size`, which
+    /// the drive then leaves alone.
+    pub new_font_size_includes_cascaded_value: bool,
+    pub has_tree_counting_context: bool,
+    pub sibling_count: u64,
+    pub sibling_index: u64,
+    pub random_base_values: *const FfiRandomBaseValue,
+    pub random_base_value_count: usize,
+    pub document_base_url: *const u8,
+    pub document_base_url_length: usize,
+    pub style_sheet_resource_contexts: *const FfiStyleSheetResourceContext,
+    pub style_sheet_resource_context_count: usize,
+    pub device_pixels_per_css_pixel: f64,
+    pub initial_font_size_raw: i32,
+    pub default_font_size_raw: i32,
+    /// The effective zoom of the document element, whose font metrics `rem` and `rlh` lengths resolve against.
+    pub root_effective_zoom: f64,
+}
+
+#[repr(C)]
+pub struct FfiRandomBaseValue {
+    pub source: *const c_void,
+    pub value: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FfiStyleSheetResourceContext {
+    pub base_url: *const u8,
+    pub base_url_length: usize,
+    pub has_value: bool,
+    pub origin_clean: bool,
+}
+
+impl FfiStyleSheetResourceContext {
+    pub(crate) const fn empty() -> Self {
+        Self {
+            base_url: std::ptr::null(),
+            base_url_length: 0,
+            has_value: false,
+            origin_clean: false,
+        }
+    }
+}
+
+/// Whether a value's absolutization is the identity, so the specified value
+/// is already the computed value. Mirrors the value types that fall through
+/// to the default arm of StyleValue::absolutized, plus keywords that resolve
+/// to themselves: the currentcolor keyword computes to itself, and only
+/// color keywords resolve to something else at computed-value time.
+pub(crate) fn value_absolutization_is_identity(value: &StyleValueData) -> bool {
+    match value {
+        StyleValueData::Keyword { keyword } => *keyword == keyword::CURRENTCOLOR || !keyword_is_color(*keyword),
+        StyleValueData::Number { .. }
+        | StyleValueData::Integer { .. }
+        | StyleValueData::String { .. }
+        | StyleValueData::CustomIdent { .. }
+        | StyleValueData::Percentage { .. }
+        | StyleValueData::Flex { .. }
+        | StyleValueData::UnicodeRange { .. } => true,
+        StyleValueData::Url(url_payload) => {
+            let UrlPayload { url, .. } = &**url_payload;
+            url.is_empty() || url.is_fragment()
+        }
+        _ => false,
+    }
+}
+
+/// Whether `value` is a scalar that reads nothing of any context and computes to itself where nothing
+/// zooms it: a length in pixels, a percentage, a number, an opaque legacy color, or a keyword that is
+/// no color and no CSS-wide keyword.
+pub(crate) fn value_is_a_plain_scalar(value: &StyleValueData) -> bool {
+    match value {
+        StyleValueData::Length { unit, .. } => *unit == px_length_unit(),
+        StyleValueData::Percentage { .. } | StyleValueData::Number { .. } | StyleValueData::Integer { .. } => true,
+        StyleValueData::Keyword { keyword } => {
+            *keyword != keyword::CURRENTCOLOR && !keyword_is_color(*keyword) && !value_is_css_wide_keyword(value)
+        }
+        _ => crate::css::absolutize::color_function_is_canonical_legacy_rgb(value),
+    }
+}
+
+/// What is known of how a declared value computes from how it was written, for the winners it is
+/// known of.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct KnownComputation {
+    /// The value computes to itself where nothing zooms it.
+    pub(crate) to_itself: bool,
+    /// The value is the initial value of a longhand that does not inherit, and depends on nothing.
+    pub(crate) is_initial: bool,
+}
+
+/// Whether `value` computes to itself against the length context `length`, without looking any
+/// further into it.
+fn value_computes_to_itself(value: &StyleValueData, length: &FfiLengthResolutionContext) -> bool {
+    length.zoom == 1.0 && value_absolutization_is_identity_where_nothing_zooms(value)
+}
+
+/// Whether `value` computes to itself where nothing zooms it: a length in pixels, or a value whose
+/// absolutization is the identity.
+pub(crate) fn value_absolutization_is_identity_where_nothing_zooms(value: &StyleValueData) -> bool {
+    match value {
+        StyleValueData::Length { unit, .. } => *unit == px_length_unit(),
+        _ => {
+            value_absolutization_is_identity(value)
+                || crate::css::absolutize::color_function_is_canonical_legacy_rgb(value)
+        }
+    }
+}
+
+/// Properties with a dedicated computed-value rule in the native driver;
+/// everything else computes as plain absolutization.
+fn property_has_dedicated_compute_rule(property_id: u16) -> bool {
+    use crate::css::property_metadata::property_id as prop;
+    matches!(
+        property_id,
+        prop::_WEBKIT_TEXT_STROKE_WIDTH
+            | prop::ANIMATION_NAME
+            | prop::BACKGROUND_ATTACHMENT
+            | prop::BACKGROUND_CLIP
+            | prop::BACKGROUND_ORIGIN
+            | prop::BACKGROUND_POSITION_X
+            | prop::BACKGROUND_POSITION_Y
+            | prop::BACKGROUND_REPEAT
+            | prop::BACKGROUND_SIZE
+            | prop::BORDER_BOTTOM_WIDTH
+            | prop::BORDER_LEFT_WIDTH
+            | prop::BORDER_RIGHT_WIDTH
+            | prop::BORDER_TOP_WIDTH
+            | prop::CONTAIN
+            | prop::OUTLINE_WIDTH
+            | prop::COLUMN_RULE_WIDTH
+            | prop::ROW_RULE_WIDTH
+            | prop::CORNER_BOTTOM_LEFT_SHAPE
+            | prop::CORNER_BOTTOM_RIGHT_SHAPE
+            | prop::CORNER_TOP_LEFT_SHAPE
+            | prop::CORNER_TOP_RIGHT_SHAPE
+            | prop::FONT_SIZE
+            | prop::FONT_STYLE
+            | prop::FONT_WEIGHT
+            | prop::FONT_WIDTH
+            | prop::FONT_FEATURE_SETTINGS
+            | prop::FONT_VARIATION_SETTINGS
+            | prop::LETTER_SPACING
+            | prop::WORD_SPACING
+            | prop::LINE_HEIGHT
+            | prop::MATH_DEPTH
+            | prop::POSITION_AREA
+            | prop::TRANSFORM_ORIGIN
+            | prop::ZOOM
+    )
+}
+
+/// Repeats a coordinated list to the background layer count. The outer option
+/// rejects non-list or empty values, while the inner option preserves the
+/// original allocation when its length already matches.
+#[allow(clippy::arc_with_non_send_sync)]
+fn repeat_style_value_list_to_n_elements(value: &StyleValueData, count: usize) -> Option<Option<StyleValueArc>> {
+    let StyleValueData::ValueList { values, separator, .. } = value else {
+        return None;
+    };
+    let values = values.as_slice();
+    if values.len() == count {
+        return Some(None);
+    }
+    if values.is_empty() {
+        return None;
+    }
+    let repeated_values = (0..count)
+        .map(|index| values[index % values.len()].clone_retained())
+        .collect();
+    Some(Some(StyleValueArc::new(StyleValueData::ValueList {
+        values: RetainedStyleValueDataList::from_retained_values(repeated_values),
+        separator: *separator,
+        collapsible: true,
+    })))
+}
+
+/// https://drafts.csswg.org/css-animations-1/#animation-name
+/// list, each item either a case-sensitive css identifier or the keyword none
+#[allow(clippy::arc_with_non_send_sync)]
+fn compute_animation_name(value: &StyleValueData) -> Option<StyleValueArc> {
+    let StyleValueData::ValueList { values, .. } = value else {
+        return None;
+    };
+    let computed_entries = values
+        .as_slice()
+        .iter()
+        .map(|entry| match entry.data() {
+            // none | <custom-ident>
+            StyleValueData::Keyword { keyword } if *keyword == keyword::NONE => Some(entry.clone_retained()),
+            StyleValueData::CustomIdent { .. } => Some(entry.clone_retained()),
+            // <string>
+            StyleValueData::String {
+                string,
+                is_valid_animation_name_custom_ident,
+                ..
+            } => Some(if *is_valid_animation_name_custom_ident {
+                RetainedStyleValueData::from_arc(StyleValueArc::new(StyleValueData::CustomIdent {
+                    custom_ident: string.clone(),
+                }))
+            } else {
+                entry.clone_retained()
+            }),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(StyleValueArc::new(StyleValueData::ValueList {
+        values: RetainedStyleValueDataList::from_retained_values(computed_entries),
+        separator: 1,
+        collapsible: true,
+    }))
+}
+
+/// https://drafts.csswg.org/css-transforms/#transform-origin-property
+/// top and left compute to 0%, center computes to 50%, and bottom and right
+/// compute to 100%. A None return means the value is already computed.
+#[allow(clippy::arc_with_non_send_sync)]
+fn compute_transform_origin(value: &StyleValueData) -> Option<StyleValueArc> {
+    let StyleValueData::ValueList {
+        values,
+        separator,
+        collapsible,
+    } = value
+    else {
+        return None;
+    };
+    let offset_percentage = |offset: &RetainedStyleValueData| match offset.data() {
+        StyleValueData::Keyword { keyword: code } => match *code {
+            keyword::LEFT | keyword::TOP => Some(0.0),
+            keyword::CENTER => Some(50.0),
+            keyword::RIGHT | keyword::BOTTOM => Some(100.0),
+            _ => None,
+        },
+        _ => None,
+    };
+    let offsets = values.as_slice();
+    if !offsets.iter().any(|offset| offset_percentage(offset).is_some()) {
+        return None;
+    }
+    let computed_offsets = offsets
+        .iter()
+        .map(|offset| match offset_percentage(offset) {
+            Some(percentage) => {
+                RetainedStyleValueData::from_arc(StyleValueArc::new(StyleValueData::Percentage { value: percentage }))
+            }
+            None => offset.clone_retained(),
+        })
+        .collect();
+    Some(StyleValueArc::new(StyleValueData::ValueList {
+        values: RetainedStyleValueDataList::from_retained_values(computed_offsets),
+        separator: *separator,
+        collapsible: *collapsible,
+    }))
+}
+
+pub(crate) struct ParentSnapshot<'a> {
+    longhands: crate::css::style::ViewLonghands<'a>,
+    inherited_value_overlay: Option<&'a AnimatedOverlay>,
+    stored_animated_overlay: Option<&'a AnimatedOverlay>,
+    font_metrics_depend_on_viewport_metrics: bool,
+    highlight_colors_authored: bool,
+    highlight_color_is_current_color: bool,
+}
+
+impl<'a> ParentSnapshot<'a> {
+    /// A snapshot over a record view's longhands, for a caller holding the record view itself.
+    /// What the record's animations sampled is what a child inherits.
+    pub(crate) fn from_view(
+        longhands: crate::css::style::ViewLonghands<'a>,
+        stored_animated_overlay: Option<&'a AnimatedOverlay>,
+        font_metrics_depend_on_viewport_metrics: bool,
+    ) -> Self {
+        Self {
+            longhands,
+            inherited_value_overlay: stored_animated_overlay,
+            stored_animated_overlay,
+            font_metrics_depend_on_viewport_metrics,
+            highlight_colors_authored: longhands.dependency_flags() & HIGHLIGHT_COLORS_AUTHORED != 0,
+            highlight_color_is_current_color: longhands.dependency_flags() & HIGHLIGHT_COLOR_IS_CURRENT_COLOR != 0,
+        }
+    }
+    fn is_important(&self, property_id: u16) -> bool {
+        self.longhands.is_important(property_id)
+    }
+
+    fn value(&self, property_id: u16) -> Option<&StyleValueData> {
+        self.value_handle(property_id).map(RetainedStyleValueData::data)
+    }
+
+    /// The handle that owns what [`Self::value`] answers.
+    fn value_handle(&self, property_id: u16) -> Option<&RetainedStyleValueData> {
+        if let Some(entry) = self
+            .inherited_value_overlay
+            .and_then(|overlay| overlay.get(property_id))
+            && overlay_wins(entry, self.is_important(property_id))
+        {
+            return Some(entry.value_handle());
+        }
+        // NB: A value reading currentcolor is inherited as specified, to resolve against the inheriting element's own
+        //     color, except in the color property, whose currentcolor is the inherited value and so resolved where
+        //     it computes.
+        if property_id != crate::css::property_metadata::property_id::COLOR {
+            for (property, value) in self.longhands.inheritance_dependent_values() {
+                if property == property_id
+                    && crate::css::style_value::style_value_dependency_flags(value.data()) & 1 != 0
+                {
+                    return Some(value);
+                }
+            }
+        }
+        self.longhands.handle(property_id)
+    }
+}
+
+/// What an element inheriting from the record `view` views reads of it, with `animated_overlay`
+/// the values it inherits beyond the record's.
+pub(crate) fn parent_snapshot_of_view<'a>(
+    view: crate::css::style::StyleRecordView<'a>,
+    animated_overlay: Option<&'a AnimatedOverlay>,
+) -> ParentSnapshot<'a> {
+    let longhands = view.longhands();
+    ParentSnapshot {
+        longhands,
+        inherited_value_overlay: animated_overlay,
+        stored_animated_overlay: view.animated_overlay,
+        font_metrics_depend_on_viewport_metrics: view.dependency_flags & (1 << 1) != 0,
+        highlight_colors_authored: view.dependency_flags & HIGHLIGHT_COLORS_AUTHORED != 0,
+        highlight_color_is_current_color: view.dependency_flags & HIGHLIGHT_COLOR_IS_CURRENT_COLOR != 0,
+    }
+}
+
+/// https://drafts.csswg.org/css-pseudo-4/#highlight-cascade
+/// What a highlight pseudo-element's applicable properties inherit from: the record of the
+/// corresponding highlight pseudo-element of the originating element's parent, when it has one.
+pub(crate) struct HighlightInheritance<'a> {
+    pub(crate) pseudo_kind: u8,
+    pub(crate) snapshot: Option<ParentSnapshot<'a>>,
+}
+
+fn keyframe_parent_snapshot_of_record(
+    record: &std::sync::Arc<crate::css::style::pipeline::Record>,
+) -> ParentSnapshot<'_> {
+    let mut snapshot = parent_snapshot_of_view(crate::css::style::StyleRecordView::of_host_record(record), None);
+    snapshot.inherited_value_overlay = snapshot.stored_animated_overlay;
+    snapshot
+}
+
+/// Results of one longhand drive that remain outside the Rust longhand table.
+pub struct LonghandDriverResults {
+    /// Longhands whose specified-to-computed evaluation ran in this drive.
+    pub longhand_evaluations: u32,
+    pub depends_on_viewport_metrics: bool,
+    pub font_metrics_depend_on_viewport_metrics: bool,
+    pub uses_tree_counting_function: bool,
+    /// https://drafts.csswg.org/css-pseudo-4/#paired-defaults
+    pub highlight_colors_authored: bool,
+    /// https://drafts.csswg.org/css-pseudo-4/#highlight-text
+    pub highlight_color_is_current_color: bool,
+}
+
+#[derive(Clone, Copy)]
+struct PostComputeAdjustment {
+    display_before: FfiDisplay,
+    box_type_transformation: FfiBoxTypeTransformation,
+    element_style_adjustment: ElementStyleAdjustment,
+}
+
+pub(crate) fn empty_longhand_driver_results() -> LonghandDriverResults {
+    LonghandDriverResults {
+        longhand_evaluations: 0,
+        depends_on_viewport_metrics: false,
+        font_metrics_depend_on_viewport_metrics: false,
+        uses_tree_counting_function: false,
+        highlight_colors_authored: false,
+        highlight_color_is_current_color: false,
+    }
+}
+
+pub const LONGHAND_DRIVE_PHASE_FONT: u8 = 0;
+pub const LONGHAND_DRIVE_PHASE_LINE_HEIGHT: u8 = 1;
+pub const LONGHAND_DRIVE_PHASE_COLOR_SCHEME: u8 = 2;
+pub const LONGHAND_DRIVE_PHASE_REMAINING: u8 = 3;
+
+/// The positions of line-height and color-scheme in the property computation order, which split it
+/// into the font, line-height, color-scheme and remaining phases.
+fn property_computation_phase_boundaries() -> (usize, usize) {
+    use crate::css::property_metadata::{property_computation_order, property_id as prop};
+
+    static PHASE_BOUNDARIES: OnceLock<(usize, usize)> = OnceLock::new();
+    let order = property_computation_order();
+    *PHASE_BOUNDARIES.get_or_init(|| {
+        let line_height = order
+            .iter()
+            .position(|&property_id| property_id == prop::LINE_HEIGHT)
+            .expect("line-height must be in the property computation order");
+        let color_scheme = order
+            .iter()
+            .position(|&property_id| property_id == prop::COLOR_SCHEME)
+            .expect("color-scheme must be in the property computation order");
+        assert_eq!(color_scheme, line_height + 1);
+        (line_height, color_scheme)
+    })
+}
+
+pub(crate) fn property_computation_order_for_phase(phase: u8) -> &'static [u16] {
+    use crate::css::property_metadata::{property_computation_order, property_id as prop};
+
+    let order = property_computation_order();
+    let (line_height, color_scheme) = property_computation_phase_boundaries();
+    match phase {
+        LONGHAND_DRIVE_PHASE_FONT => {
+            // NB: Font sizes can use logical viewport units, so their subject's writing mode must be computed first.
+            static FONT_ORDER: OnceLock<Vec<u16>> = OnceLock::new();
+            FONT_ORDER.get_or_init(|| {
+                std::iter::once(prop::WRITING_MODE)
+                    .chain(order[..line_height].iter().copied())
+                    .collect()
+            })
+        }
+        LONGHAND_DRIVE_PHASE_LINE_HEIGHT => &order[line_height..color_scheme],
+        LONGHAND_DRIVE_PHASE_COLOR_SCHEME => &order[color_scheme..color_scheme + 1],
+        LONGHAND_DRIVE_PHASE_REMAINING => {
+            // NB: A partial remaining-phase drive must resolve the current axis before any length, including images.
+            static REMAINING_ORDER: OnceLock<Vec<u16>> = OnceLock::new();
+            REMAINING_ORDER.get_or_init(|| {
+                std::iter::once(prop::WRITING_MODE)
+                    .chain(
+                        order[color_scheme + 1..]
+                            .iter()
+                            .copied()
+                            .filter(|&property| property != prop::WRITING_MODE),
+                    )
+                    .collect()
+            })
+        }
+        _ => unreachable!("unknown longhand drive phase"),
+    }
+}
+
+/// The longhands a partial drive evaluates in one phase: the selected ones, the inputs every drive
+/// evaluates, and the background layer longhands when background-image is selected, in computation
+/// order. A partial drive selects few longhands, so this is much shorter than the phase's order.
+fn partial_drive_phase_order(phase: u8, words: &[u64], background_image_is_selected: bool) -> SmallVec<[u16; 48]> {
+    use crate::css::property_metadata::{
+        FIRST_LONGHAND_PROPERTY_ID, NUMBER_OF_LONGHAND_PROPERTIES, property_id as prop,
+    };
+
+    static RANKS: OnceLock<Box<[u16]>> = OnceLock::new();
+    let ranks = RANKS.get_or_init(|| {
+        let mut ranks = vec![u16::MAX; NUMBER_OF_LONGHAND_PROPERTIES].into_boxed_slice();
+        for (rank, &property_id) in crate::css::property_metadata::property_computation_order()
+            .iter()
+            .enumerate()
+        {
+            ranks[usize::from(property_id - FIRST_LONGHAND_PROPERTY_ID)] = u16::try_from(rank).unwrap();
+        }
+        ranks
+    });
+    let rank_of = |property_id: u16| ranks[usize::from(property_id - FIRST_LONGHAND_PROPERTY_ID)];
+    // NB: The font and remaining phases compute writing-mode first (see
+    //     property_computation_order_for_phase()), so it belongs to them in addition to its own rank.
+    let (line_height, color_scheme) = property_computation_phase_boundaries();
+    let (line_height, color_scheme) = (line_height as u16, color_scheme as u16);
+    let (phase_ranks, phase_computes_writing_mode_first) = match phase {
+        LONGHAND_DRIVE_PHASE_FONT => (0..line_height, true),
+        LONGHAND_DRIVE_PHASE_LINE_HEIGHT => (line_height..color_scheme, false),
+        LONGHAND_DRIVE_PHASE_COLOR_SCHEME => (color_scheme..color_scheme + 1, false),
+        LONGHAND_DRIVE_PHASE_REMAINING => (color_scheme + 1..u16::MAX, true),
+        _ => unreachable!("unknown longhand drive phase"),
+    };
+    let belongs_first = |property_id: u16| phase_computes_writing_mode_first && property_id == prop::WRITING_MODE;
+
+    let mut order: SmallVec<[u16; 48]> = SmallVec::new();
+    let mut offer = |property_id: u16| {
+        if belongs_first(property_id) || phase_ranks.contains(&rank_of(property_id)) {
+            order.push(property_id);
+        }
+    };
+    for (word_index, &word) in words.iter().enumerate() {
+        let mut bits = word;
+        while bits != 0 {
+            let bit = bits.trailing_zeros() as usize;
+            bits &= bits - 1;
+            offer(FIRST_LONGHAND_PROPERTY_ID + (word_index * 64 + bit) as u16);
+        }
+    }
+    for property_id in REQUIRED_DRIVER_INPUTS {
+        offer(property_id);
+    }
+    if background_image_is_selected {
+        for property_id in BACKGROUND_LAYER_LONGHANDS {
+            offer(property_id);
+        }
+    }
+    order.sort_unstable_by_key(|&property_id| (!belongs_first(property_id), rank_of(property_id)));
+    order.dedup();
+    order
+}
+
+pub(crate) const LOGICAL_ALIAS_BIT: u8 = 1;
+pub(crate) const PHYSICAL_TO_LOGICAL_BIT: u8 = 2;
+
+pub(crate) fn table_row_bits(property_id: u16) -> u8 {
+    use crate::css::property_metadata::{
+        FIRST_LONGHAND_PROPERTY_ID, LAST_LONGHAND_PROPERTY_ID, longhand_is_logical_alias, property_is_in_logical_group,
+    };
+    if !(FIRST_LONGHAND_PROPERTY_ID..=LAST_LONGHAND_PROPERTY_ID).contains(&property_id) {
+        return 0;
+    }
+    if longhand_is_logical_alias(property_id) {
+        LOGICAL_ALIAS_BIT
+    } else if property_is_in_logical_group(property_id) {
+        PHYSICAL_TO_LOGICAL_BIT
+    } else {
+        0
+    }
+}
+
+fn value_is_initial_or_unset(value: &StyleValueData) -> bool {
+    match value {
+        StyleValueData::Keyword { keyword } => *keyword == keyword::INITIAL || *keyword == keyword::UNSET,
+        _ => false,
+    }
+}
+
+fn set_longhand_bit(words: &mut [u64], property_id: u16) {
+    use crate::css::property_metadata::FIRST_LONGHAND_PROPERTY_ID;
+    let index = (property_id - FIRST_LONGHAND_PROPERTY_ID) as usize;
+    words[index / 64] |= 1 << (index % 64);
+}
+
+fn clear_longhand_bit(words: &mut [u64], property_id: u16) {
+    use crate::css::property_metadata::FIRST_LONGHAND_PROPERTY_ID;
+    let index = (property_id - FIRST_LONGHAND_PROPERTY_ID) as usize;
+    words[index / 64] &= !(1 << (index % 64));
+}
+
+#[allow(clippy::arc_with_non_send_sync)]
+fn retained_new(value: StyleValueData) -> RetainedStyleValueData {
+    RetainedStyleValueData::from_arc(StyleValueArc::new(value))
+}
+
+/// Store what a drive found for one longhand: its computed value, and the value its inheritance depends on, if it
+/// does. That's the specified value, except for a value that reads currentcolor: An inheriting element takes its
+/// computed value, which keeps currentcolor to resolve against that element's own color, and whose lengths are
+/// absolute (resolved against this element's font, as inheritance requires).
+fn store_driven_value(writer: &mut GroupValuesWriter<'_>, entry: ComputedStoreEntry) {
+    use crate::css::property_metadata::property_id as prop;
+    let inheritance_dependent_value = entry.inheritance_dependent.then(|| match &entry.computed {
+        NativeValue::StyleValue(computed)
+            if entry.property_id != prop::COLOR
+                && crate::css::style_value::retained_value_depends_on_current_color(entry.data)
+                && !value_depends_on_inherited_info_for_property(entry.data.data(), entry.property_id) =>
+        {
+            RetainedStyleValueData::from_arc(computed.clone())
+        }
+        _ => entry.data.clone(),
+    });
+    writer.set_inheritance_dependent_value(entry.property_id, inheritance_dependent_value);
+    store_computed_value(writer, entry);
+}
+
+fn store_computed_value(writer: &mut GroupValuesWriter<'_>, entry: ComputedStoreEntry) {
+    let computed = match entry.computed {
+        NativeValue::Unchanged => {
+            writer.set_or_keep_equal(entry.property_id, entry.data);
+            return;
+        }
+        NativeValue::StyleValue(computed) => {
+            writer.set_or_keep_equal(entry.property_id, &RetainedStyleValueData::from_arc(computed));
+            return;
+        }
+        NativeValue::Px(value) => StyleValueData::Length {
+            value,
+            unit: px_length_unit(),
+        },
+        NativeValue::Integer(value) => StyleValueData::Integer { value },
+        NativeValue::Superellipse(value) => StyleValueData::Superellipse {
+            parameter: retained_new(StyleValueData::Number { value }),
+        },
+        NativeValue::Number(value) => StyleValueData::Number { value },
+        NativeValue::Percentage(value) => StyleValueData::Percentage { value },
+        NativeValue::FontStyle(font_style) => StyleValueData::FontStyle {
+            font_style,
+            angle_value: RetainedStyleValueData::none(),
+        },
+        NativeValue::Keyword(keyword) => StyleValueData::Keyword { keyword },
+    };
+    writer.set_computed(entry.property_id, computed);
+}
+
+/// The background longhands whose lists are coordinated with the number of background-image layers when they compute.
+pub(crate) const BACKGROUND_LAYER_LONGHANDS: [u16; 7] = {
+    use crate::css::property_metadata::property_id as prop;
+    [
+        prop::BACKGROUND_ATTACHMENT,
+        prop::BACKGROUND_CLIP,
+        prop::BACKGROUND_ORIGIN,
+        prop::BACKGROUND_POSITION_X,
+        prop::BACKGROUND_POSITION_Y,
+        prop::BACKGROUND_REPEAT,
+        prop::BACKGROUND_SIZE,
+    ]
+};
+
+/// https://drafts.csswg.org/css-viewport/#zoom-property
+/// The used value of a computed zoom: a 0 value is treated as if it was 1.
+pub(crate) fn used_zoom(value: Option<&StyleValueData>) -> f64 {
+    match value {
+        Some(StyleValueData::Number { value }) if *value > 0.0 => *value,
+        _ => 1.0,
+    }
+}
+
+/// https://drafts.csswg.org/css-viewport/#effective-zoom
+/// The zoom a longhand drive applies to the lengths it computes.
+#[derive(Clone, Copy)]
+struct DriveZoom {
+    parent_effective_zoom: f64,
+    zoom: f64,
+    root_effective_zoom: f64,
+    /// FIXME: Zoom SVG content as a whole, instead of leaving the lengths of SVG elements unzoomed.
+    applies_to_lengths: bool,
+}
+
+/// AD-HOC: The effective zoom is kept within a range where the lengths it multiplies, and the unscaled values that
+///         divide by it, stay finite.
+const EFFECTIVE_ZOOM_RANGE: std::ops::RangeInclusive<f64> = 1.0e-6..=1.0e6;
+
+impl DriveZoom {
+    fn effective_zoom(self) -> f64 {
+        (self.parent_effective_zoom * self.zoom).clamp(*EFFECTIVE_ZOOM_RANGE.start(), *EFFECTIVE_ZOOM_RANGE.end())
+    }
+
+    /// The factor the element's own zoom multiplies the effective zoom of its parent by.
+    fn own_zoom(self) -> f64 {
+        if EFFECTIVE_ZOOM_RANGE.contains(&(self.parent_effective_zoom * self.zoom)) {
+            self.zoom
+        } else {
+            self.effective_zoom() / self.parent_effective_zoom
+        }
+    }
+
+    /// The zoom the lengths of a value inherited from the parent take.
+    fn length_zoom(self) -> f64 {
+        if self.applies_to_lengths { self.own_zoom() } else { 1.0 }
+    }
+
+    /// The zoom the lengths of a value that is not inherited take.
+    fn length_effective_zoom(self) -> f64 {
+        if self.applies_to_lengths {
+            self.effective_zoom()
+        } else {
+            1.0
+        }
+    }
+
+    fn is_identity(self) -> bool {
+        !self.applies_to_lengths
+            || (self.zoom == 1.0 && self.parent_effective_zoom == 1.0 && self.root_effective_zoom == 1.0)
+    }
+
+    /// The context the lengths of a value resolve against. The lengths of a value inherited from the parent are
+    /// zoomed by the parent's effective zoom already, so they only take the element's own zoom.
+    /// NB: The font metrics of the font phase are the parent's, which the element's own zoom applies to as well.
+    fn context(
+        self,
+        context: &FfiLengthResolutionContext,
+        inherited: bool,
+        font_metrics_are_parents: bool,
+    ) -> FfiLengthResolutionContext {
+        let scaled = |metrics: FfiFontMetrics, factor: f64| FfiFontMetrics {
+            font_size: metrics.font_size * factor,
+            x_height: metrics.x_height * factor,
+            cap_height: metrics.cap_height * factor,
+            zero_advance: metrics.zero_advance * factor,
+            line_height: metrics.line_height * factor,
+        };
+        let mut context = *context;
+        let own_zoom = self.own_zoom();
+        context.zoom = if inherited { own_zoom } else { self.effective_zoom() };
+        if font_metrics_are_parents && own_zoom != 1.0 {
+            context.font_metrics = scaled(context.font_metrics, own_zoom);
+        }
+        // NB: The root font metrics are those of the document element, zoomed by its effective zoom.
+        let root_zoom = self.effective_zoom() / self.root_effective_zoom;
+        if root_zoom != 1.0 {
+            context.root_font_metrics = scaled(context.root_font_metrics, root_zoom);
+        }
+        context
+    }
+}
+
+// https://drafts.csswg.org/css-ui/#appearance-disabling-properties
+pub(crate) const PROPERTIES_DISABLING_NATIVE_APPEARANCE: &[u16] = {
+    use crate::css::property_metadata::property_id as prop;
+    &[
+        prop::BACKGROUND_COLOR,
+        prop::BORDER_TOP_COLOR,
+        prop::BORDER_TOP_STYLE,
+        prop::BORDER_TOP_WIDTH,
+        prop::BORDER_RIGHT_COLOR,
+        prop::BORDER_RIGHT_STYLE,
+        prop::BORDER_RIGHT_WIDTH,
+        prop::BORDER_BOTTOM_COLOR,
+        prop::BORDER_BOTTOM_STYLE,
+        prop::BORDER_BOTTOM_WIDTH,
+        prop::BORDER_LEFT_COLOR,
+        prop::BORDER_LEFT_STYLE,
+        prop::BORDER_LEFT_WIDTH,
+        prop::BORDER_BLOCK_START_COLOR,
+        prop::BORDER_BLOCK_END_COLOR,
+        prop::BORDER_INLINE_START_COLOR,
+        prop::BORDER_INLINE_END_COLOR,
+        prop::BORDER_BLOCK_START_STYLE,
+        prop::BORDER_BLOCK_END_STYLE,
+        prop::BORDER_INLINE_START_STYLE,
+        prop::BORDER_INLINE_END_STYLE,
+        prop::BORDER_BLOCK_START_WIDTH,
+        prop::BORDER_BLOCK_END_WIDTH,
+        prop::BORDER_INLINE_START_WIDTH,
+        prop::BORDER_INLINE_END_WIDTH,
+        prop::BACKGROUND_IMAGE,
+        prop::BACKGROUND_ATTACHMENT,
+        // NB: The spec lists background-position, which is a shorthand for these two here.
+        prop::BACKGROUND_POSITION_X,
+        prop::BACKGROUND_POSITION_Y,
+        prop::BACKGROUND_CLIP,
+        prop::BACKGROUND_ORIGIN,
+        prop::BACKGROUND_SIZE,
+        prop::BORDER_IMAGE_SOURCE,
+        prop::BORDER_IMAGE_SLICE,
+        prop::BORDER_IMAGE_WIDTH,
+        prop::BORDER_IMAGE_OUTSET,
+        prop::BORDER_IMAGE_REPEAT,
+        prop::BORDER_TOP_LEFT_RADIUS,
+        prop::BORDER_TOP_RIGHT_RADIUS,
+        prop::BORDER_BOTTOM_RIGHT_RADIUS,
+        prop::BORDER_BOTTOM_LEFT_RADIUS,
+        prop::BORDER_START_START_RADIUS,
+        prop::BORDER_START_END_RADIUS,
+        prop::BORDER_END_START_RADIUS,
+        prop::BORDER_END_END_RADIUS,
+    ]
+};
+
+/// One bit per longhand: whether it is among [`PROPERTIES_DISABLING_NATIVE_APPEARANCE`].
+const LONGHANDS_DISABLING_NATIVE_APPEARANCE: [u64; crate::css::property_metadata::LONGHAND_WORD_COUNT] = {
+    let mut words = [0; crate::css::property_metadata::LONGHAND_WORD_COUNT];
+    let mut at = 0;
+    while at < PROPERTIES_DISABLING_NATIVE_APPEARANCE.len() {
+        let index = (PROPERTIES_DISABLING_NATIVE_APPEARANCE[at]
+            - crate::css::property_metadata::FIRST_LONGHAND_PROPERTY_ID) as usize;
+        words[index / 64] |= 1 << (index % 64);
+        at += 1;
+    }
+    words
+};
+
+/// Whether `property_id` is a longhand that, declared in the Author Origin, disables native appearance.
+pub(crate) fn property_disables_native_appearance(property_id: u16) -> bool {
+    let index = usize::from(property_id - crate::css::property_metadata::FIRST_LONGHAND_PROPERTY_ID);
+    LONGHANDS_DISABLING_NATIVE_APPEARANCE[index / 64] & (1 << (index % 64)) != 0
+}
+
+// https://drafts.csswg.org/css-ui/#appearance-disabling-properties
+// Certain properties, when declared in the Author Origin, will disable the native appearance of certain widgets.
+// Specifically, if all the declarations of the Author Origin pertaining to such a widget are cascaded and a cascaded
+// value exists--after having rolled back any number revert or revert-layer values--for any property that disables
+// native appearance for widgets, then that widget is rendered as a devolved widget.
+pub(crate) fn has_author_value_disabling_native_appearance(
+    store: &impl crate::css::cascaded_properties::CascadedValues,
+) -> bool {
+    PROPERTIES_DISABLING_NATIVE_APPEARANCE.iter().any(|&property_id| {
+        matches!(
+            store.winning_origin(property_id),
+            Some(CascadeOrigin::Author | CascadeOrigin::AuthorPresentationalHint)
+        )
+    })
+}
+
+/// Drives the property computation loop: iterates every longhand in
+/// computation order, resolves logical pairing, reads the winning cascaded
+/// declarations straight from the store, selects between the cascaded,
+/// inherited and initial values, decides inheritance dependence, and stores
+/// native results and their metadata directly in the computed longhand table.
+/// Other per-element side effects accumulate in `results` for bulk application
+/// after the loop.
+///
+/// `length_resolution_context` is the context for this stage, or none for the
+/// color-scheme stage. `input_line_height_metrics` are the metrics for the
+/// remaining stage, or none when post-compute adjustments are not wanted.
+///
+/// # Safety
+/// The slices `environment` points at must be live.
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn drive_property_computation(
+    writer: &mut GroupValuesWriter<'_>,
+    store: &impl crate::css::cascaded_properties::CascadedValues,
+    snapshot: Option<&ParentSnapshot<'_>>,
+    highlight: Option<&HighlightInheritance<'_>>,
+    environment: &FfiStyleComputationEnvironment,
+    computed_property_words: Option<&[u64]>,
+    phase: u8,
+    length_resolution_context: Option<&FfiLengthResolutionContext>,
+    input_line_height_metrics: Option<&FfiInputLineHeightMetrics>,
+    results: &mut LonghandDriverResults,
+    effective_color_scheme: &mut i16,
+    coordinate_overflow_keywords: bool,
+    preserve_background_lists: bool,
+) {
+    use crate::css::property_metadata::{
+        NUMBER_OF_LONGHAND_PROPERTIES, REQUIRES_COMPUTATION_ALWAYS, REQUIRES_COMPUTATION_CASCADED,
+        REQUIRES_COMPUTATION_NON_INHERITED, property_id as prop, property_requires_computation_level,
+    };
+
+    let has_inheritance_parent = snapshot.is_some();
+    let box_type_input = &environment.box_type_input;
+    let color_scheme_input = &environment.color_scheme_input;
+    let is_th_element = environment.is_th_element;
+    let has_new_font_size = environment.has_new_font_size;
+    let new_font_size_includes_cascaded_value = has_new_font_size && environment.new_font_size_includes_cascaded_value;
+    let device_pixels_per_css_pixel = environment.device_pixels_per_css_pixel;
+    let initial_font_size_raw = environment.initial_font_size_raw;
+    let default_font_size_raw = environment.default_font_size_raw;
+    let tree_counting_context = environment
+        .has_tree_counting_context
+        .then_some((environment.sibling_count, environment.sibling_index));
+    let random_base_values = if environment.random_base_value_count == 0 {
+        &[][..]
+    } else {
+        unsafe { ak::slice_from_raw_parts(environment.random_base_values, environment.random_base_value_count) }
+    };
+    let document_base_url = if environment.document_base_url_length == 0 {
+        &[][..]
+    } else {
+        unsafe { ak::slice_from_raw_parts(environment.document_base_url, environment.document_base_url_length) }
+    };
+    let style_sheet_resource_contexts = if environment.style_sheet_resource_context_count == 0 {
+        &[][..]
+    } else {
+        unsafe {
+            ak::slice_from_raw_parts(
+                environment.style_sheet_resource_contexts,
+                environment.style_sheet_resource_context_count,
+            )
+        }
+    };
+    const LONGHAND_WORD_COUNT: usize = NUMBER_OF_LONGHAND_PROPERTIES.div_ceil(64);
+    let mut important_words = [0; LONGHAND_WORD_COUNT];
+    let mut inherited_words = [0; LONGHAND_WORD_COUNT];
+    let mut evaluated_words = [0; LONGHAND_WORD_COUNT];
+    let mut cached_writing_mode_and_direction: Option<(u8, u8)> = None;
+
+    let computation_order = property_computation_order_for_phase(phase);
+    // https://drafts.csswg.org/css-viewport/#effective-zoom
+    // The effective zoom of an element is the product of its computed value of zoom and all flat tree ancestors'
+    // computed values of zoom.
+    // NB: A drive that does not compute zoom reads what an earlier phase computed.
+    let mut zoom = DriveZoom {
+        parent_effective_zoom: snapshot.map_or(1.0, |snapshot| f64::from(snapshot.longhands.effective_zoom())),
+        zoom: used_zoom(writer.get(prop::ZOOM).and_then(RetainedStyleValueData::optional_data)),
+        root_effective_zoom: if environment.root_effective_zoom > 0.0 {
+            environment.root_effective_zoom
+        } else {
+            1.0
+        },
+        applies_to_lengths: !environment.box_type_input.is_svg_element,
+    };
+    let mut pending_overflow_x_store: Option<ComputedStoreEntry> = None;
+    let mut pending_effective_color_scheme: i16 = -1;
+    // The element's used color scheme, produced by the preceding color-scheme
+    // stage for generic absolutizations.
+    let current_effective_color_scheme = u8::try_from(*effective_color_scheme).ok();
+    // The computed math-depth, remembered for the font-size rule. A partial font restyle
+    // may reuse the value already stored in the working table instead.
+    let mut computed_math_depth: Option<i32> = None;
+    // The background-image list length, for the coordinated background properties.
+    let mut background_image_list_length: Option<usize> = None;
+    // Logical properties use the computed writing mode and direction to find their physical counterparts.
+    let mut computed_writing_mode = writer.get(prop::WRITING_MODE).and_then(|value| match value.data() {
+        StyleValueData::Keyword { keyword } => keyword_to_writing_mode(*keyword),
+        _ => None,
+    });
+    let mut computed_direction: Option<u8> = None;
+    let mut computed_overflow_x: Option<u16> = None;
+    let mut computed_overflow_y: Option<u16> = None;
+    let mut computed_text_align: Option<u16> = None;
+    let mut computed_display: Option<FfiDisplay> = None;
+    let mut computed_float: Option<u16> = None;
+    let mut computed_position: Option<u16> = None;
+    debug_assert!(computed_property_words.is_none_or(|words| words.len() == LONGHAND_WORD_COUNT));
+    let is_selected = |property_id: u16| {
+        let property_index = usize::from(property_id - crate::css::property_metadata::FIRST_LONGHAND_PROPERTY_ID);
+        computed_property_words.is_some_and(|words| words[property_index / 64] & (1 << (property_index % 64)) != 0)
+    };
+    // NB: The background layer longhands are coordinated with the number of background-image layers as they compute,
+    //     so a drive that evaluates background-image again evaluates them again as well.
+    let background_image_is_selected = is_selected(prop::BACKGROUND_IMAGE);
+    let partial_order =
+        computed_property_words.map(|words| partial_drive_phase_order(phase, words, background_image_is_selected));
+    let computation_order = partial_order.as_deref().unwrap_or(computation_order);
+
+    for &property_id in computation_order {
+        let required_driver_input = is_required_driver_input(property_id);
+        let property_is_selected = is_selected(property_id)
+            || (background_image_is_selected && BACKGROUND_LAYER_LONGHANDS.contains(&property_id));
+        if !required_driver_input && !property_is_selected && computed_property_words.is_some() {
+            continue;
+        }
+        if BACKGROUND_LAYER_LONGHANDS.contains(&property_id) {
+            writer.set_uncoordinated_background_value(property_id, None);
+        }
+        set_longhand_bit(&mut evaluated_words, property_id);
+        results.longhand_evaluations = results
+            .longhand_evaluations
+            .checked_add(1)
+            .expect("longhand evaluation count overflow");
+        let mut cascaded_property_id = property_id;
+        let mut inherited_property_id = property_id;
+
+        // https://drafts.csswg.org/css-logical/#box
+        // Within each logical property group, corresponding flow-relative and physical
+        // properties are paired using the element's own computed writing mode; the computed
+        // value of both properties in the pair is derived from the specified value of the
+        // property declared with higher priority in the CSS cascade. A longhand is in a
+        // logical property group exactly when either mapping table maps it.
+        let table_bits = table_row_bits(property_id);
+        let is_logical_alias = table_bits & LOGICAL_ALIAS_BIT != 0;
+        if table_bits != 0 {
+            let (writing_mode, direction) = *cached_writing_mode_and_direction.get_or_insert_with(|| {
+                // Direction and writing-mode precede every logical property in the
+                // generated computation order and only accept keywords, so their
+                // selected values are their computed mapping inputs.
+                (
+                    computed_writing_mode.expect("writing-mode must precede logical properties"),
+                    computed_direction.expect("direction must precede logical properties"),
+                )
+            });
+            let counterpart_property_id = if is_logical_alias {
+                let physical = map_logical_alias_to_physical(property_id, writing_mode, direction);
+                // AD-HOC: While the spec says that inheritance of logical aliases should be
+                // direct, other browsers instead inherit from the physical counterpart - the
+                // CSSWG has resolved to update the spec to reflect this -
+                // see https://github.com/w3c/csswg-drafts/issues/3029
+                inherited_property_id = physical;
+                physical
+            } else {
+                map_physical_to_logical_alias(property_id, writing_mode, direction)
+            };
+            cascaded_property_id = store.property_with_higher_priority(property_id, counterpart_property_id);
+        }
+
+        let mut value: Option<&RetainedStyleValueData> = None;
+        let mut source_slot = -1;
+        let mut has_style_sheet_context = false;
+        let mut external_dependencies = None;
+        let winning_declaration = store.winning_declaration(cascaded_property_id);
+        let has_winning_declaration = winning_declaration.is_some();
+        if let Some((
+            value_data,
+            important,
+            cascaded_source_slot,
+            cascaded_has_style_sheet_context,
+            cascaded_external_dependencies,
+        )) = winning_declaration
+        {
+            // An empty winning value cascades nothing, as no declaration would.
+            value = Some(value_data).filter(|value| value.optional_data().is_some());
+            source_slot = i64::from(cascaded_source_slot);
+            has_style_sheet_context = cascaded_has_style_sheet_context;
+            external_dependencies = Some(cascaded_external_dependencies);
+            if important {
+                set_longhand_bit(&mut important_words, property_id);
+            }
+            if property_id == crate::css::property_metadata::property_id::FONT_SIZE {
+                writer.flags_mut().set_raw_cascaded_font_size(Some(value_data.clone()));
+            }
+        }
+        if property_id == crate::css::property_metadata::property_id::FONT_SIZE
+            && has_new_font_size
+            && (!has_winning_declaration || new_font_size_includes_cascaded_value)
+        {
+            // NB: The recascade walks the ancestors. The inherited result still takes this element's own zoom.
+            if zoom.length_zoom() != 1.0 {
+                let recascaded = writer.get(property_id).and_then(|value| {
+                    if let StyleValueData::Length { value, unit } = value.data() {
+                        Some((value * zoom.length_zoom(), *unit))
+                    } else {
+                        None
+                    }
+                });
+                if let Some((value, unit)) = recascaded {
+                    writer.set_computed(property_id, StyleValueData::Length { value, unit });
+                }
+            }
+            continue;
+        } else if property_id == crate::css::property_metadata::property_id::FONT_SIZE && !has_winning_declaration {
+            writer.flags_mut().set_raw_cascaded_font_size(None);
+        }
+
+        let cascaded_value = value.map(RetainedStyleValueData::data);
+        let decision = longhand_decision(cascaded_value, property_id);
+
+        // The computation-need level to compare against depends on which source wins;
+        // cascaded is the baseline and is overridden by the inherit and initial paths.
+        let mut required_level = REQUIRES_COMPUTATION_CASCADED;
+
+        let highlight_inherits = highlight
+            .is_some_and(|highlight| highlight_longhand_inherits(cascaded_value, highlight.pseudo_kind, property_id));
+        let highlight_parent_snapshot = if highlight_inherits {
+            highlight.and_then(|highlight| highlight.snapshot.as_ref())
+        } else {
+            None
+        };
+        // https://drafts.csswg.org/css-pseudo-4/#paired-defaults
+        // Paired default highlight colors must only be used when neither 'color' nor
+        // 'background-color' yield a cascaded value from the author origin (or inherit their
+        // value from the author origin).
+        if highlight.is_some() && (property_id == prop::COLOR || property_id == prop::BACKGROUND_COLOR) {
+            results.highlight_colors_authored |= store.winning_origin(property_id) == Some(CascadeOrigin::Author)
+                || highlight_parent_snapshot.is_some_and(|snapshot| snapshot.highlight_colors_authored);
+        }
+        // https://drafts.csswg.org/css-pseudo-4/#highlight-text
+        // currentColor on a highlight pseudo-element's 'color' property represents the color of
+        // the next active highlight pseudo-element layer below, falling back finally to the
+        // colors that would otherwise have been used.
+        // NB: The computed value is still the originating element's color; the flag tells the
+        //     painter to draw the layer below instead.
+        if highlight.is_some() && property_id == prop::COLOR {
+            results.highlight_color_is_current_color = if highlight_inherits {
+                highlight_parent_snapshot.is_none_or(|snapshot| snapshot.highlight_color_is_current_color)
+            } else {
+                matches!(cascaded_value, Some(StyleValueData::Keyword { keyword }) if *keyword == keyword::CURRENTCOLOR)
+            };
+        }
+        let inherit_fetch_attempted = if highlight_parent_snapshot.is_some() {
+            true
+        } else if highlight_inherits {
+            // Additionally, for highlight pseudo-elements originating from the root element the
+            // inherited value of 'color' is currentColor, not the initial value.
+            // NB: currentColor on a highlight pseudo-element is the color of the layer below,
+            //     which without another highlight is the originating element's own.
+            property_id == prop::COLOR && has_inheritance_parent
+        } else {
+            decision.should_inherit && has_inheritance_parent
+        };
+        if inherit_fetch_attempted {
+            source_slot = -1;
+            has_style_sheet_context = false;
+            external_dependencies = None;
+            let snapshot = highlight_parent_snapshot.or(snapshot).unwrap();
+            set_longhand_bit(&mut inherited_words, property_id);
+            // Both the inherited-by-default read and an explicit `inherit` of a
+            // non-inherited property take the parent's stored computed value for
+            // `inherited_property_id` straight from the snapshot's table span.
+            value = snapshot
+                .value_handle(inherited_property_id)
+                .filter(|value| value.optional_data().is_some());
+            if property_affects_font_metrics(inherited_property_id) && snapshot.font_metrics_depend_on_viewport_metrics
+            {
+                results.font_metrics_depend_on_viewport_metrics = true;
+            }
+            required_level = REQUIRES_COMPUTATION_ALWAYS;
+        }
+
+        let use_initial = if inherit_fetch_attempted {
+            value.is_none_or(|value| value_is_initial_or_unset(value.data()))
+        } else {
+            decision.use_initial_without_inherit
+        };
+        if use_initial {
+            source_slot = -1;
+            has_style_sheet_context = false;
+            external_dependencies = Some(initial_value_dependencies(property_id));
+            value = Some(initial_value_handle(property_id));
+            required_level = REQUIRES_COMPUTATION_NON_INHERITED;
+        }
+
+        // https://drafts.csswg.org/css-viewport/#zoom-property
+        // NB: The lengths an element inherits are zoomed by its parent's effective zoom, so an element with a zoom of
+        //     its own computes them again, zoomed by its own zoom. The lengths of an initial value are zoomed by the
+        //     element's effective zoom as they compute. A drive that resolves no lengths has nothing to zoom.
+        let zooms_value = length_resolution_context.is_some()
+            && if use_initial {
+                zoom.length_effective_zoom() != 1.0
+            } else {
+                zoom.length_zoom() != 1.0 && inherit_fetch_attempted
+            };
+        let requires_computation = property_requires_computation_level(property_id) >= required_level || zooms_value;
+
+        let mut zoomed_length_resolution_context;
+        let length_resolution_context = match length_resolution_context {
+            Some(context)
+                if !zoom.is_identity()
+                    || computed_writing_mode.is_some_and(|writing_mode| {
+                        context.subject_inline_axis_is_horizontal != (writing_mode == writing_mode::HORIZONTAL_TB)
+                    }) =>
+            {
+                zoomed_length_resolution_context = if zoom.is_identity() {
+                    *context
+                } else {
+                    zoom.context(
+                        context,
+                        inherit_fetch_attempted && !use_initial,
+                        phase == LONGHAND_DRIVE_PHASE_FONT,
+                    )
+                };
+                if let Some(writing_mode) = computed_writing_mode {
+                    zoomed_length_resolution_context.subject_inline_axis_is_horizontal =
+                        writing_mode == writing_mode::HORIZONTAL_TB;
+                }
+                Some(&zoomed_length_resolution_context)
+            }
+            context => context,
+        };
+
+        // Whether the computed value depends on inherited information, so the specified
+        // value must be kept for re-resolution when an ancestor changes.
+        let value = value.expect("a longhand has a cascaded, inherited or initial value");
+        let value = if property_id == prop::WRITING_MODE
+            && let StyleValueData::Keyword { keyword } = value.data()
+        {
+            RetainedStyleValueData::shared_keyword(computed_writing_mode_keyword(*keyword))
+        } else {
+            value
+        };
+        let value_data = value.data();
+        let external_dependencies = external_dependencies.unwrap_or_else(|| external_value_dependencies(value_data));
+
+        if tree_counting_context.is_some() && external_dependencies.uses_tree_counting_function {
+            results.uses_tree_counting_function = true;
+        }
+
+        if inherited_property_id == crate::css::property_metadata::property_id::MATH_DEPTH
+            && let StyleValueData::Integer { value } = value_data
+        {
+            // An inherited or initial math-depth is already computed and skips the
+            // cascaded-value computation rule, but font-size still consumes it.
+            computed_math_depth = Some(*value);
+        }
+        if inherited_property_id == crate::css::property_metadata::property_id::BACKGROUND_IMAGE
+            && let StyleValueData::ValueList { values, .. } = value_data
+        {
+            background_image_list_length = Some(values.as_slice().len());
+        }
+        if let StyleValueData::Keyword { keyword } = value_data {
+            if property_id == crate::css::property_metadata::property_id::WRITING_MODE {
+                computed_writing_mode = keyword_to_writing_mode(*keyword);
+            } else if property_id == crate::css::property_metadata::property_id::DIRECTION {
+                computed_direction = keyword_to_direction(*keyword);
+            }
+        }
+        let inheritance_dependent = external_dependencies.inheritance_dependent
+            || value_depends_on_inherited_info_for_property(value_data, property_id);
+
+        let style_sheet_resource_context = if has_style_sheet_context && source_slot >= 0 {
+            style_sheet_resource_contexts
+                .get(source_slot as usize)
+                .filter(|context| context.has_value)
+                .map(|context| {
+                    let base_url = if context.base_url_length == 0 {
+                        &[][..]
+                    } else {
+                        unsafe { ak::slice_from_raw_parts(context.base_url, context.base_url_length) }
+                    };
+                    crate::css::absolutize::StyleSheetResourceContext {
+                        base_url,
+                        origin_clean: context.origin_clean,
+                    }
+                })
+        } else {
+            None
+        };
+        // https://www.w3.org/TR/css-color-4/#resolving-other-colors
+        // In the color property, the used value of currentcolor is the resolved inherited value.
+        let current_color = (inherited_property_id == prop::COLOR).then(|| {
+            highlight_parent_snapshot
+                .or(snapshot)
+                .and_then(|snapshot| snapshot.value_handle(prop::COLOR))
+                .and_then(RetainedStyleValueData::optional_data)
+                .unwrap_or_else(|| initial_value_handle(prop::COLOR).data())
+        });
+        // Absolutizes a value against this element's facts, noting in `results` when it resolved a viewport-relative
+        // length.
+        let absolutize_value = |value: &StyleValueData,
+                                length: &FfiLengthResolutionContext,
+                                scheme: Option<u8>,
+                                results: &mut LonghandDriverResults| {
+            let context = crate::css::absolutize::AbsolutizationContext {
+                length,
+                scheme,
+                resolved_viewport_relative_length: std::cell::Cell::new(false),
+                tree_counting: tree_counting_context,
+                random_base_values,
+                document_base_url,
+                style_sheet_resource_context,
+                current_color,
+            };
+            let outcome = crate::css::absolutize::absolutize(value, &context);
+            if context.resolved_viewport_relative_length.get() {
+                results.depends_on_viewport_metrics = true;
+                if property_affects_font_metrics(inherited_property_id) {
+                    results.font_metrics_depend_on_viewport_metrics = true;
+                }
+            }
+            outcome
+        };
+
+        let mut entry = if requires_computation {
+            // First classify values handled by simple absolutization. Recursive and
+            // dedicated property rules below handle the remaining shapes.
+            // The specified value absolutized natively when the core can:
+            // Some(None) leaves the value unchanged, Some(Some(px)) resolves it to
+            // a pixel length, and None means no simple result is available.
+            let mut absolutized: Option<Option<f64>> = if value_absolutization_is_identity(value_data) {
+                Some(None)
+            } else if let StyleValueData::Length {
+                value: length_value,
+                unit,
+            } = value_data
+            {
+                let resolution_context =
+                    length_resolution_context.expect("a length-valued property must run with a resolution context");
+                let result = absolutize_length(*length_value, *unit as usize, resolution_context);
+                if result.handled {
+                    if result.resolved_viewport_relative_length {
+                        results.depends_on_viewport_metrics = true;
+                        if property_affects_font_metrics(inherited_property_id) {
+                            results.font_metrics_depend_on_viewport_metrics = true;
+                        }
+                    }
+                    Some(result.changed.then_some(result.px))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            // Resolve recursively absolutized inputs once against the immutable facts
+            // captured before entering the drive. Dedicated property rules then consume
+            // the resolved structure just like any other specified value.
+            let externally_absolutized = if external_dependencies.uses_tree_counting_function
+                || external_dependencies.container_relative_length_unit_mask != 0
+                || external_dependencies.has_unfixed_random_sharing
+                || matches!(value_data, StyleValueData::Calculated { .. })
+                || inherited_property_id == crate::css::property_metadata::property_id::MATH_DEPTH
+                    && matches!(
+                        value_data,
+                        StyleValueData::Calculated { .. } | StyleValueData::Function { .. }
+                    ) {
+                let resolution_context =
+                    length_resolution_context.expect("recursive inputs require a length resolution context");
+                let scheme = if phase == LONGHAND_DRIVE_PHASE_REMAINING {
+                    current_effective_color_scheme
+                } else {
+                    None
+                };
+                let outcome = absolutize_value(value_data, resolution_context, scheme, results);
+                match outcome {
+                    Some(crate::css::absolutize::Absolutized::Changed(value)) => Some(value.into_arc()),
+                    Some(crate::css::absolutize::Absolutized::Unchanged) | None => None,
+                }
+            } else {
+                None
+            };
+            let value_data = externally_absolutized.as_deref().unwrap_or(value_data);
+            if absolutized.is_none()
+                && externally_absolutized.is_some()
+                && let StyleValueData::Length {
+                    value: length_value,
+                    unit,
+                } = value_data
+            {
+                // NB: Recursive simplification already applied zoom to these length leaves.
+                let mut resolution_context =
+                    *length_resolution_context.expect("a length-valued property must run with a resolution context");
+                resolution_context.zoom = 1.0;
+                let result = absolutize_length(*length_value, *unit as usize, &resolution_context);
+                if result.handled {
+                    absolutized = Some(result.changed.then_some(result.px));
+                }
+            }
+
+            // The computed value: for properties without a dedicated rule the
+            // absolutized value is the computed value; the dedicated rules that
+            // have moved into the core run over the absolutized value here.
+            use crate::css::absolutize::Absolutized;
+            use crate::css::property_metadata::property_id as prop;
+            let unsupported = || -> ! {
+                unreachable!("unsupported native computation for longhand property {inherited_property_id}")
+            };
+            // Absolutizes a value only a dedicated rule below reads, which has to have an absolutized form.
+            let absolutize_for_rule = |value: &StyleValueData,
+                                       length: &FfiLengthResolutionContext,
+                                       scheme: Option<u8>,
+                                       results: &mut LonghandDriverResults| {
+                absolutize_value(value, length, scheme, results).unwrap_or_else(|| unsupported())
+            };
+            let synthesized_px_length = |absolutized: Option<f64>| {
+                absolutized.map(|px| StyleValueData::Length {
+                    value: px,
+                    unit: px_length_unit(),
+                })
+            };
+            let native = match (absolutized, inherited_property_id) {
+                (_, prop::_WEBKIT_TEXT_STROKE_WIDTH) if matches!(value_data, StyleValueData::Keyword { .. }) => {
+                    let StyleValueData::Keyword { keyword } = value_data else {
+                        unreachable!()
+                    };
+                    let multiplier = match *keyword {
+                        keyword::THIN => 1.0,
+                        keyword::MEDIUM => 3.0,
+                        keyword::THICK => 5.0,
+                        _ => unreachable!("a text stroke width keyword is thin, medium or thick"),
+                    };
+                    let context = length_resolution_context.expect("text stroke widths require font metrics");
+                    results.depends_on_viewport_metrics |= context.font_metrics_depend_on_viewport_metrics;
+                    NativeValue::Px(context.font_metrics.font_size * context.zoom * multiplier / 48.0)
+                }
+                (Some(absolutized), prop::_WEBKIT_TEXT_STROKE_WIDTH) => {
+                    absolutized.map_or(NativeValue::Unchanged, NativeValue::Px)
+                }
+                (None, prop::_WEBKIT_TEXT_STROKE_WIDTH) => NativeValue::Px(
+                    crate::css::calc::resolve_calculated_length_without_context(value_data, 0.0)
+                        .expect("a calculated text stroke width resolves to a length"),
+                ),
+
+                (_, prop::COLUMN_RULE_WIDTH | prop::ROW_RULE_WIDTH)
+                    if matches!(value_data, StyleValueData::ValueList { .. }) =>
+                {
+                    let resolution_context =
+                        length_resolution_context.expect("line widths require a length resolution context");
+                    // NB: Recursive simplification already applied zoom to an externally absolutized list.
+                    let list = match externally_absolutized.is_some() {
+                        true => value_data.clone(),
+                        false => match absolutize_for_rule(
+                            value_data,
+                            resolution_context,
+                            current_effective_color_scheme,
+                            results,
+                        ) {
+                            Absolutized::Unchanged => value_data.clone(),
+                            Absolutized::Changed(value) => value.data().clone(),
+                        },
+                    };
+                    NativeValue::StyleValue(StyleValueArc::new(compute_line_width_list(
+                        &list,
+                        device_pixels_per_css_pixel,
+                        resolution_context,
+                    )))
+                }
+                (
+                    Some(absolutized),
+                    prop::BORDER_BOTTOM_WIDTH
+                    | prop::BORDER_LEFT_WIDTH
+                    | prop::BORDER_RIGHT_WIDTH
+                    | prop::BORDER_TOP_WIDTH
+                    | prop::OUTLINE_WIDTH
+                    | prop::COLUMN_RULE_WIDTH
+                    | prop::ROW_RULE_WIDTH,
+                ) => {
+                    let synthesized = synthesized_px_length(absolutized);
+                    NativeValue::Px(compute_border_or_outline_width(
+                        synthesized.as_ref().unwrap_or(value_data),
+                        device_pixels_per_css_pixel,
+                        length_resolution_context.map_or(1.0, |context| context.zoom),
+                        None,
+                    ))
+                }
+                (
+                    None,
+                    prop::BORDER_BOTTOM_WIDTH
+                    | prop::BORDER_LEFT_WIDTH
+                    | prop::BORDER_RIGHT_WIDTH
+                    | prop::BORDER_TOP_WIDTH
+                    | prop::OUTLINE_WIDTH
+                    | prop::COLUMN_RULE_WIDTH
+                    | prop::ROW_RULE_WIDTH,
+                ) if matches!(value_data, StyleValueData::Calculated { .. }) => {
+                    let resolution_context = length_resolution_context
+                        .expect("calculated border widths require a length resolution context");
+                    let mut resolved_viewport_relative_length = false;
+                    let mut calc_resolution_context = *resolution_context;
+                    calc_resolution_context.resolved_viewport_relative_length =
+                        &raw mut resolved_viewport_relative_length;
+                    let width = compute_border_or_outline_width(
+                        value_data,
+                        device_pixels_per_css_pixel,
+                        1.0,
+                        Some(&calc_resolution_context),
+                    );
+                    if resolved_viewport_relative_length {
+                        results.depends_on_viewport_metrics = true;
+                    }
+                    NativeValue::Px(width)
+                }
+                (
+                    Some(_),
+                    prop::CORNER_BOTTOM_LEFT_SHAPE
+                    | prop::CORNER_BOTTOM_RIGHT_SHAPE
+                    | prop::CORNER_TOP_LEFT_SHAPE
+                    | prop::CORNER_TOP_RIGHT_SHAPE,
+                ) => {
+                    // Corner shape keywords reach here because their absolutization is the identity.
+                    compute_corner_shape_parameter(value_data).map_or(NativeValue::Unchanged, NativeValue::Superellipse)
+                }
+                (
+                    None,
+                    prop::CORNER_BOTTOM_LEFT_SHAPE
+                    | prop::CORNER_BOTTOM_RIGHT_SHAPE
+                    | prop::CORNER_TOP_LEFT_SHAPE
+                    | prop::CORNER_TOP_RIGHT_SHAPE,
+                ) => {
+                    let resolution_context =
+                        length_resolution_context.expect("corner shapes require a length resolution context");
+                    match absolutize_for_rule(value_data, resolution_context, current_effective_color_scheme, results) {
+                        Absolutized::Unchanged => compute_corner_shape_parameter(value_data)
+                            .map_or(NativeValue::Unchanged, NativeValue::Superellipse),
+                        Absolutized::Changed(value) => match compute_corner_shape_parameter(value.data()) {
+                            Some(parameter) => NativeValue::Superellipse(parameter),
+                            None => NativeValue::StyleValue(value.into_arc()),
+                        },
+                    }
+                }
+                (native_absolutized, prop::MATH_DEPTH)
+                    if native_absolutized.is_some()
+                        || externally_absolutized.is_some()
+                        || matches!(
+                            value_data,
+                            StyleValueData::Calculated { .. } | StyleValueData::Function { .. }
+                        ) =>
+                {
+                    // The inherited math-depth and math-style come from the parent
+                    // snapshot; without an inheritance parent the initial values apply
+                    // (math-depth 0, math-style normal).
+                    let (inherited_math_depth, inherited_math_style_is_compact) = match snapshot {
+                        Some(snapshot) => {
+                            let math_depth = match snapshot.value(prop::MATH_DEPTH) {
+                                Some(StyleValueData::Integer { value }) => *value,
+                                _ => 0,
+                            };
+                            let compact = matches!(
+                                snapshot.value(prop::MATH_STYLE),
+                                Some(StyleValueData::Keyword { keyword }) if *keyword == keyword::COMPACT
+                            );
+                            (math_depth, compact)
+                        }
+                        None => (0, false),
+                    };
+                    let depth = compute_math_depth(value_data, inherited_math_depth, inherited_math_style_is_compact);
+                    computed_math_depth = Some(depth);
+                    NativeValue::Integer(depth)
+                }
+                (native_absolutized, prop::FONT_SIZE)
+                    if native_absolutized.is_some()
+                        || externally_absolutized.is_some()
+                        || matches!(value_data, StyleValueData::Calculated { .. }) =>
+                {
+                    let absolutized = native_absolutized.flatten();
+                    let computed_math_depth = computed_math_depth.or_else(|| {
+                        writer.get(prop::MATH_DEPTH).and_then(|value| match value.data() {
+                            StyleValueData::Integer { value } => Some(*value),
+                            _ => None,
+                        })
+                    });
+                    if let Some(computed_math_depth) = computed_math_depth {
+                        // A font-size relative to the inherited size also inherits the
+                        // parent's viewport dependence of its font metrics.
+                        if value_depends_on_inherited_info_for_property(value_data, prop::FONT_SIZE)
+                            && snapshot.is_some_and(|snapshot| snapshot.font_metrics_depend_on_viewport_metrics)
+                        {
+                            results.depends_on_viewport_metrics = true;
+                            results.font_metrics_depend_on_viewport_metrics = true;
+                        }
+                        let inherited = match snapshot {
+                            Some(snapshot) => match snapshot.value(prop::FONT_SIZE) {
+                                Some(StyleValueData::Length { value, unit }) if *unit == px_length_unit() => {
+                                    let math_depth = match snapshot.value(prop::MATH_DEPTH) {
+                                        Some(StyleValueData::Integer { value }) => *value,
+                                        _ => 0,
+                                    };
+                                    // https://drafts.csswg.org/css-viewport/#zoom-property
+                                    // NB: The parent's font-size is zoomed by its effective zoom already, so it takes
+                                    //     the element's own zoom alone.
+                                    Some((*value * zoom.length_zoom(), math_depth))
+                                }
+                                _ => None,
+                            },
+                            None => Some((
+                                CssPixels::from_raw(initial_font_size_raw).to_double() * zoom.length_effective_zoom(),
+                                0,
+                            )),
+                        };
+                        match inherited {
+                            Some((inherited_font_size, inherited_math_depth)) => {
+                                let synthesized = synthesized_px_length(absolutized);
+                                match compute_font_size(
+                                    synthesized.as_ref().unwrap_or(value_data),
+                                    computed_math_depth,
+                                    inherited_font_size,
+                                    inherited_math_depth,
+                                    CssPixels::from_raw(default_font_size_raw),
+                                    zoom.length_effective_zoom(),
+                                ) {
+                                    Some(ComputedNumber::Unchanged) => {
+                                        absolutized.map_or(NativeValue::Unchanged, NativeValue::Px)
+                                    }
+                                    Some(ComputedNumber::Computed(px)) => NativeValue::Px(px),
+                                    None => unsupported(),
+                                }
+                            }
+                            None => unsupported(),
+                        }
+                    } else {
+                        unsupported()
+                    }
+                }
+                (native_absolutized, prop::FONT_WEIGHT)
+                    if native_absolutized.is_some()
+                        || externally_absolutized.is_some()
+                        || matches!(value_data, StyleValueData::Calculated { .. }) =>
+                {
+                    let inherited_font_weight = match snapshot {
+                        Some(snapshot) => match snapshot.value(prop::FONT_WEIGHT) {
+                            Some(StyleValueData::Number { value }) => Some(*value),
+                            _ => None,
+                        },
+                        None => Some(400.0),
+                    };
+                    match inherited_font_weight {
+                        Some(inherited_font_weight) => match compute_font_weight(value_data, inherited_font_weight) {
+                            Some(ComputedNumber::Unchanged) => NativeValue::Unchanged,
+                            Some(ComputedNumber::Computed(weight)) => NativeValue::Number(weight),
+                            None => unsupported(),
+                        },
+                        None => unsupported(),
+                    }
+                }
+                (Some(_), prop::FONT_STYLE) => match value_data {
+                    StyleValueData::Keyword { keyword } => match keyword_to_font_style_keyword(*keyword) {
+                        Some(font_style_keyword) => NativeValue::FontStyle(font_style_keyword),
+                        None => NativeValue::Unchanged,
+                    },
+                    _ => NativeValue::Unchanged,
+                },
+                (None, prop::FONT_STYLE) if matches!(value_data, StyleValueData::FontStyle { .. }) => {
+                    let resolution_context =
+                        length_resolution_context.expect("font-style requires a length resolution context");
+                    match absolutize_for_rule(value_data, resolution_context, None, results) {
+                        Absolutized::Unchanged => NativeValue::Unchanged,
+                        Absolutized::Changed(value) => NativeValue::StyleValue(value.into_arc()),
+                    }
+                }
+                (native_absolutized, prop::FONT_WIDTH)
+                    if native_absolutized.is_some()
+                        || externally_absolutized.is_some()
+                        || matches!(value_data, StyleValueData::Calculated { .. }) =>
+                {
+                    match compute_font_width(value_data) {
+                        Some(ComputedNumber::Unchanged) => NativeValue::Unchanged,
+                        Some(ComputedNumber::Computed(percentage)) => NativeValue::Percentage(percentage),
+                        None => unsupported(),
+                    }
+                }
+                (Some(_), prop::FONT_FEATURE_SETTINGS | prop::FONT_VARIATION_SETTINGS)
+                    if matches!(value_data, StyleValueData::Keyword { .. }) =>
+                {
+                    NativeValue::Unchanged
+                }
+                (None, prop::FONT_FEATURE_SETTINGS | prop::FONT_VARIATION_SETTINGS) => {
+                    let resolution_context =
+                        length_resolution_context.expect("font feature settings require a length resolution context");
+                    match absolutize_for_rule(value_data, resolution_context, None, results) {
+                        Absolutized::Unchanged => {
+                            NativeValue::StyleValue(compute_font_feature_tag_value_list(value_data))
+                        }
+                        Absolutized::Changed(value) => {
+                            NativeValue::StyleValue(compute_font_feature_tag_value_list(value.data()))
+                        }
+                    }
+                }
+                (_, prop::LINE_HEIGHT) => {
+                    let absolutized = absolutized.flatten();
+                    let result = if matches!(
+                        value_data,
+                        StyleValueData::Percentage { .. } | StyleValueData::Calculated { .. }
+                    ) {
+                        let resolution_context =
+                            length_resolution_context.expect("line-height must run with a resolution context");
+                        compute_line_height(value_data, resolution_context.font_metrics.font_size)
+                    } else {
+                        let synthesized = synthesized_px_length(absolutized);
+                        compute_line_height(synthesized.as_ref().unwrap_or(value_data), 0.0)
+                    };
+                    match result {
+                        ComputedLineHeight::Unchanged => absolutized.map_or(NativeValue::Unchanged, NativeValue::Px),
+                        ComputedLineHeight::Px(px) => NativeValue::Px(px),
+                        ComputedLineHeight::Number(number) => NativeValue::Number(number),
+                    }
+                }
+                (None, prop::FONT_FAMILY) if matches!(value_data, StyleValueData::ValueList { .. }) => {
+                    // A font-family list only ever holds keywords, strings and custom
+                    // identifiers, whose absolutization is the identity.
+                    NativeValue::Unchanged
+                }
+                (
+                    None,
+                    prop::BACKGROUND_ATTACHMENT
+                    | prop::BACKGROUND_CLIP
+                    | prop::BACKGROUND_ORIGIN
+                    | prop::BACKGROUND_POSITION_X
+                    | prop::BACKGROUND_POSITION_Y
+                    | prop::BACKGROUND_REPEAT
+                    | prop::BACKGROUND_SIZE,
+                ) => {
+                    // NB: The background properties are coordinated at compute time rather
+                    //     than use time, unlike other coordinating list property groups.
+                    let declared_count = match value_data {
+                        StyleValueData::ValueList { values, .. } if preserve_background_lists => {
+                            Some(values.as_slice().len())
+                        }
+                        _ => None,
+                    };
+                    let layer_count = declared_count
+                        .or(background_image_list_length)
+                        .or_else(|| {
+                            writer.get(prop::BACKGROUND_IMAGE).and_then(|value| match value.data() {
+                                StyleValueData::ValueList { values, .. } => Some(values.as_slice().len()),
+                                _ => None,
+                            })
+                        })
+                        .expect("background-image must be a computed value list");
+                    let resolution_context =
+                        length_resolution_context.expect("background lists require a length resolution context");
+                    let full = match absolutize_for_rule(
+                        value_data,
+                        resolution_context,
+                        current_effective_color_scheme,
+                        results,
+                    ) {
+                        Absolutized::Unchanged => match &externally_absolutized {
+                            Some(value) => std::borrow::Cow::Owned(RetainedStyleValueData::from_arc(value.clone())),
+                            None => std::borrow::Cow::Borrowed(value),
+                        },
+                        Absolutized::Changed(value) => {
+                            std::borrow::Cow::Owned(RetainedStyleValueData::from_arc(value.into_arc()))
+                        }
+                    };
+                    let excess = matches!(full.data(), StyleValueData::ValueList { values, .. } if values.as_slice().len() > layer_count);
+                    writer.set_uncoordinated_background_value(property_id, excess.then(|| full.clone().into_owned()));
+                    match repeat_style_value_list_to_n_elements(full.data(), layer_count) {
+                        Some(None) => match full {
+                            std::borrow::Cow::Borrowed(_) => NativeValue::Unchanged,
+                            std::borrow::Cow::Owned(value) => NativeValue::StyleValue(value.into_arc()),
+                        },
+                        Some(Some(value)) => NativeValue::StyleValue(value),
+                        None => unsupported(),
+                    }
+                }
+                (Some(_), prop::ANIMATION_NAME)
+                    if matches!(
+                        value_data,
+                        StyleValueData::Keyword { .. } | StyleValueData::CustomIdent { .. }
+                    ) =>
+                {
+                    NativeValue::Unchanged
+                }
+                (None, prop::ANIMATION_NAME) => match compute_animation_name(value_data) {
+                    Some(value) => NativeValue::StyleValue(value),
+                    None => unsupported(),
+                },
+                (_, prop::LETTER_SPACING | prop::WORD_SPACING)
+                    if matches!(value_data, StyleValueData::Calculated { .. }) =>
+                {
+                    NativeValue::Unchanged
+                }
+                (_, prop::LETTER_SPACING | prop::WORD_SPACING) => match absolutized.flatten() {
+                    Some(px) => NativeValue::Px(px),
+                    None if matches!(
+                        value_data,
+                        StyleValueData::Keyword {
+                            keyword: keyword::NORMAL
+                        }
+                    ) =>
+                    {
+                        NativeValue::Px(0.0)
+                    }
+                    None => NativeValue::Unchanged,
+                },
+                // INTEROP: Preserve explicit right in declarations, but omit it from the computed value, as in
+                //          Chromium and WebKit.
+                (_, prop::TEXT_EMPHASIS_POSITION) => {
+                    if let StyleValueData::ValueList { values, .. } = value_data
+                        && let [horizontal, vertical] = values.as_slice()
+                        && matches!(vertical.data(), StyleValueData::Keyword { keyword: code } if *code == keyword::RIGHT)
+                    {
+                        NativeValue::StyleValue(StyleValueArc::new(horizontal.data().clone()))
+                    } else {
+                        NativeValue::Unchanged
+                    }
+                }
+                (_, prop::POSITION_AREA) => match compute_position_area(value_data) {
+                    Some(value) => NativeValue::StyleValue(value),
+                    None => NativeValue::Unchanged,
+                },
+                (_, prop::STROKE_DASHOFFSET | prop::STROKE_WIDTH)
+                    if matches!(value_data, StyleValueData::Number { .. }) =>
+                {
+                    let StyleValueData::Number { value } = value_data else {
+                        unreachable!("the guard accepted only numbers");
+                    };
+                    NativeValue::Px(*value)
+                }
+                (None, prop::STROKE_DASHARRAY) if matches!(value_data, StyleValueData::ValueList { .. }) => {
+                    let resolution_context =
+                        length_resolution_context.expect("a dash list must run with a resolution context");
+                    match absolutize_for_rule(value_data, resolution_context, current_effective_color_scheme, results) {
+                        Absolutized::Unchanged => match stroke_dasharray_numbers_as_lengths(value_data) {
+                            Some(value) => NativeValue::StyleValue(value),
+                            None => NativeValue::Unchanged,
+                        },
+                        Absolutized::Changed(value) => match stroke_dasharray_numbers_as_lengths(value.data()) {
+                            Some(computed) => NativeValue::StyleValue(computed),
+                            None => NativeValue::StyleValue(value.into_arc()),
+                        },
+                    }
+                }
+                (None, prop::TRANSFORM_ORIGIN) => {
+                    let resolution_context =
+                        length_resolution_context.expect("transform-origin requires a length resolution context");
+                    match absolutize_for_rule(value_data, resolution_context, current_effective_color_scheme, results) {
+                        Absolutized::Unchanged => match compute_transform_origin(value_data) {
+                            Some(value) => NativeValue::StyleValue(value),
+                            None => NativeValue::Unchanged,
+                        },
+                        Absolutized::Changed(value) => {
+                            let computed = compute_transform_origin(value.data());
+                            NativeValue::StyleValue(computed.unwrap_or_else(|| value.into_arc()))
+                        }
+                    }
+                }
+                // https://drafts.csswg.org/css-tables-3/#border-spacing-property
+                // two absolute lengths
+                // A single specified length computes to the pair with both members equal, so
+                // every computed border-spacing has the same two-value list shape; a specified
+                // pair takes the generic arms below.
+                (_, prop::BORDER_SPACING) if !matches!(value_data, StyleValueData::ValueList { .. }) => {
+                    let single = match absolutized {
+                        Some(Some(px)) => StyleValueData::Length {
+                            value: px,
+                            unit: px_length_unit(),
+                        },
+                        _ => value_data.clone(),
+                    };
+                    NativeValue::StyleValue(border_spacing_pair(single))
+                }
+                (None, prop::BORDER_SHAPE) => {
+                    let resolution_context =
+                        length_resolution_context.expect("border-shape must compute with a resolution context");
+                    match absolutize_for_rule(value_data, resolution_context, current_effective_color_scheme, results) {
+                        Absolutized::Unchanged => canonicalize_border_shape(value_data)
+                            .map_or(NativeValue::Unchanged, NativeValue::StyleValue),
+                        Absolutized::Changed(new_value) => match canonicalize_border_shape(new_value.data()) {
+                            Some(canonical) => NativeValue::StyleValue(canonical),
+                            None => NativeValue::StyleValue(new_value.into_arc()),
+                        },
+                    }
+                }
+                (_, prop::OFFSET_ROTATE) => {
+                    let resolution_context =
+                        length_resolution_context.expect("offset-rotate must compute with a resolution context");
+                    match absolutize_for_rule(value_data, resolution_context, current_effective_color_scheme, results) {
+                        Absolutized::Unchanged => canonicalize_offset_rotate(value_data)
+                            .map_or(NativeValue::Unchanged, NativeValue::StyleValue),
+                        Absolutized::Changed(new_value) => match canonicalize_offset_rotate(new_value.data()) {
+                            Some(canonical) => NativeValue::StyleValue(canonical),
+                            None => NativeValue::StyleValue(new_value.into_arc()),
+                        },
+                    }
+                }
+                (None, prop::ANIMATION_RANGE_START | prop::ANIMATION_RANGE_END) => {
+                    let resolution_context =
+                        length_resolution_context.expect("animation-range must compute with a resolution context");
+                    let default_offset = if inherited_property_id == prop::ANIMATION_RANGE_START {
+                        0.0
+                    } else {
+                        100.0
+                    };
+                    match absolutize_for_rule(value_data, resolution_context, current_effective_color_scheme, results) {
+                        Absolutized::Unchanged => canonicalize_animation_range(value_data, default_offset)
+                            .map_or(NativeValue::Unchanged, NativeValue::StyleValue),
+                        Absolutized::Changed(new_value) => {
+                            match canonicalize_animation_range(new_value.data(), default_offset) {
+                                Some(canonical) => NativeValue::StyleValue(canonical),
+                                None => NativeValue::StyleValue(new_value.into_arc()),
+                            }
+                        }
+                    }
+                }
+                // https://drafts.csswg.org/css-viewport/#zoom-property
+                // Computed value: as specified, but with <percentage> converted to the equivalent <number>
+                (_, prop::ZOOM) => {
+                    let number = match value_data {
+                        StyleValueData::Number { value } => Some(*value),
+                        StyleValueData::Percentage { value } => Some(value / 100.0),
+                        // INTEROP: Other browsers accept normal, as a zoom of 1.
+                        StyleValueData::Keyword {
+                            keyword: keyword::NORMAL,
+                        } => Some(1.0),
+                        StyleValueData::Calculated { .. } => {
+                            let resolution_context =
+                                length_resolution_context.expect("a calculated zoom requires a resolution context");
+                            crate::css::calc::resolve_calculated_number_with_context(value_data, resolution_context)
+                                .or_else(|| {
+                                    crate::css::calc::resolve_calculated_percentage_without_context(value_data)
+                                        .map(|percentage| percentage / 100.0)
+                                })
+                        }
+                        _ => None,
+                    };
+                    match number {
+                        // A 0 value is treated as if it was 1.
+                        // INTEROP: Other browsers compute it to 1.
+                        Some(0.0) => NativeValue::Number(1.0),
+                        Some(number) => NativeValue::Number(number),
+                        None => unsupported(),
+                    }
+                }
+                (_, prop::CONTAIN) => match collapse_containment_list(value_data) {
+                    Some(value) => NativeValue::StyleValue(value),
+                    None => NativeValue::Unchanged,
+                },
+                (Some(absolutized), _) if !property_has_dedicated_compute_rule(inherited_property_id) => {
+                    match absolutized {
+                        Some(px) => NativeValue::Px(px),
+                        None => NativeValue::Unchanged,
+                    }
+                }
+                (None, _)
+                    if externally_absolutized.is_some()
+                        && !property_has_dedicated_compute_rule(inherited_property_id) =>
+                {
+                    NativeValue::Unchanged
+                }
+                (None, _) if !property_has_dedicated_compute_rule(inherited_property_id) => {
+                    // The recursive native absolutization: structural values and their
+                    // length leaves resolve here.
+                    let resolution_context =
+                        length_resolution_context.expect("recursive absolutization must run with a resolution context");
+                    // Only the generic computation context carries a color scheme in C++;
+                    // the font and line-height contexts absolutize without one.
+                    let scheme = if phase == LONGHAND_DRIVE_PHASE_REMAINING {
+                        current_effective_color_scheme
+                    } else {
+                        None
+                    };
+                    match absolutize_for_rule(value_data, resolution_context, scheme, results) {
+                        Absolutized::Unchanged => NativeValue::Unchanged,
+                        Absolutized::Changed(new_value) => NativeValue::StyleValue(new_value.into_arc()),
+                    }
+                }
+                _ => unsupported(),
+            };
+
+            // An unchanged dedicated-rule result refers to the value presented to that
+            // rule. Preserve an externally resolved replacement instead of the original declaration.
+            let native = match (native, externally_absolutized) {
+                (NativeValue::Unchanged, Some(value)) => NativeValue::StyleValue(value),
+                (native, _) => native,
+            };
+            ComputedStoreEntry {
+                property_id,
+                data: value,
+                inheritance_dependent,
+                computed: native,
+            }
+        } else {
+            ComputedStoreEntry {
+                property_id,
+                data: value,
+                inheritance_dependent,
+                computed: NativeValue::Unchanged,
+            }
+        };
+
+        if property_id == prop::OVERFLOW_X {
+            if let StyleValueData::Keyword { keyword } = value_data {
+                computed_overflow_x = Some(*keyword);
+            }
+        } else if property_id == prop::OVERFLOW_Y
+            && let StyleValueData::Keyword { keyword: overflow_y } = value_data
+        {
+            computed_overflow_y = Some(*overflow_y);
+            if coordinate_overflow_keywords {
+                let overflow_x = computed_overflow_x.expect("overflow-x must precede overflow-y in computation order");
+                let effective_overflow = resolve_effective_overflow_keywords(overflow_x, *overflow_y);
+                let overflow_x_entry = pending_overflow_x_store
+                    .as_mut()
+                    .expect("overflow-x must precede overflow-y in computation order");
+                if effective_overflow.changed_x {
+                    debug_assert!(matches!(overflow_x_entry.computed, NativeValue::Unchanged));
+                    overflow_x_entry.computed = NativeValue::Keyword(effective_overflow.x_keyword);
+                    clear_longhand_bit(&mut important_words, prop::OVERFLOW_X);
+                    clear_longhand_bit(&mut inherited_words, prop::OVERFLOW_X);
+                }
+                if effective_overflow.changed_y {
+                    debug_assert!(matches!(entry.computed, NativeValue::Unchanged));
+                    entry.computed = NativeValue::Keyword(effective_overflow.y_keyword);
+                    clear_longhand_bit(&mut important_words, prop::OVERFLOW_Y);
+                    clear_longhand_bit(&mut inherited_words, prop::OVERFLOW_Y);
+                }
+            }
+        } else if matches!(property_id, prop::TEXT_ALIGN | prop::TEXT_ALIGN_LAST)
+            && let StyleValueData::Keyword { keyword: text_align } = value_data
+        {
+            let (has_parent_with_computed_values, parent_text_align, parent_direction_is_ltr) =
+                if let Some(snapshot) = snapshot {
+                    let parent_text_align = match snapshot.value(property_id) {
+                        Some(StyleValueData::Keyword { keyword }) => *keyword,
+                        _ => unreachable!("parent text-align and text-align-last must be keywords"),
+                    };
+                    let parent_direction_is_ltr = match snapshot.value(prop::DIRECTION) {
+                        Some(StyleValueData::Keyword {
+                            keyword: parent_direction,
+                        }) => *parent_direction == keyword::LTR,
+                        _ => unreachable!("parent direction must be a keyword"),
+                    };
+                    (true, parent_text_align, parent_direction_is_ltr)
+                } else {
+                    (false, 0, true)
+                };
+            // https://drafts.csswg.org/css-text-4/#propdef-text-align-last
+            // Computed value: keyword as specified, except for match-parent which computes as defined above
+            let adjustment = compute_text_align_adjustment(
+                *text_align,
+                is_th_element && property_id == prop::TEXT_ALIGN,
+                has_parent_with_computed_values,
+                parent_text_align,
+                parent_direction_is_ltr,
+            );
+            if adjustment.changed {
+                debug_assert!(matches!(entry.computed, NativeValue::Unchanged));
+                entry.computed = NativeValue::Keyword(adjustment.keyword);
+                clear_longhand_bit(&mut important_words, property_id);
+                clear_longhand_bit(&mut inherited_words, property_id);
+                if adjustment.inherited {
+                    set_longhand_bit(&mut inherited_words, property_id);
+                }
+            }
+            if property_id == prop::TEXT_ALIGN {
+                computed_text_align = Some(if adjustment.changed {
+                    adjustment.keyword
+                } else {
+                    *text_align
+                });
+            }
+        } else if property_id == prop::COLOR_SCHEME
+            && let StyleValueData::ColorScheme(color_scheme_payload) = value_data
+        {
+            let ColorSchemePayload { scheme_codes, .. } = &**color_scheme_payload;
+            let color_scheme = resolve_effective_color_scheme(
+                scheme_codes.as_slice(),
+                color_scheme_input.preferred_color_scheme,
+                unsafe { color_scheme_input.document_supported_schemes() },
+            );
+            pending_effective_color_scheme = i16::from(color_scheme);
+            *effective_color_scheme = i16::from(color_scheme);
+        }
+
+        match (property_id, value_data) {
+            (prop::DISPLAY, StyleValueData::Display { raw }) => {
+                computed_display = Some(FfiDisplay::from_raw(*raw));
+            }
+            (prop::FLOAT, StyleValueData::Keyword { keyword }) => {
+                computed_float = Some(*keyword);
+            }
+            (prop::POSITION, StyleValueData::Keyword { keyword }) => {
+                computed_position = Some(*keyword);
+            }
+            _ => {}
+        }
+
+        let mut store = |entry: ComputedStoreEntry| {
+            store_driven_value(writer, entry);
+        };
+        if property_id == prop::OVERFLOW_X {
+            pending_overflow_x_store = Some(entry);
+        } else {
+            if property_id == prop::OVERFLOW_Y {
+                store(
+                    pending_overflow_x_store
+                        .take()
+                        .expect("overflow-x must precede overflow-y in computation order"),
+                );
+            }
+            store(entry);
+        }
+        if property_id == prop::ZOOM {
+            zoom.zoom = used_zoom(writer.get(prop::ZOOM).and_then(RetainedStyleValueData::optional_data));
+        }
+    }
+
+    writer.set_effective_zoom(zoom.effective_zoom() as f32);
+    assert!(
+        pending_overflow_x_store.is_none(),
+        "overflow-y must follow overflow-x in computation order"
+    );
+    writer
+        .flags_mut()
+        .merge_driver_flags(&important_words, &inherited_words, &evaluated_words);
+    writer.merge_dependency_flags(
+        (u8::from(results.depends_on_viewport_metrics)
+            * crate::css::computed_longhand_table::DEPENDS_ON_VIEWPORT_METRICS)
+            | (u8::from(results.font_metrics_depend_on_viewport_metrics)
+                * crate::css::computed_longhand_table::FONT_METRICS_DEPEND_ON_VIEWPORT_METRICS)
+            | (u8::from(results.highlight_colors_authored)
+                * crate::css::computed_longhand_table::HIGHLIGHT_COLORS_AUTHORED)
+            | (u8::from(results.highlight_color_is_current_color)
+                * crate::css::computed_longhand_table::HIGHLIGHT_COLOR_IS_CURRENT_COLOR),
+    );
+    if pending_effective_color_scheme >= 0 {
+        writer.set_effective_color_scheme(pending_effective_color_scheme);
+    }
+    if phase != LONGHAND_DRIVE_PHASE_REMAINING {
+        return;
+    }
+    adjust_computed_box(
+        writer,
+        box_type_input,
+        ComputedBoxInputs {
+            display: computed_display.expect("display must be computed by the longhand driver"),
+            overflow: [
+                computed_overflow_x.expect("overflow-x must be computed by the longhand driver"),
+                computed_overflow_y.expect("overflow-y must be computed by the longhand driver"),
+            ],
+            float_value: computed_float.expect("float must be computed by the longhand driver"),
+            position: computed_position.expect("position must be computed by the longhand driver"),
+            text_align: computed_text_align.expect("text-align must be computed by the longhand driver"),
+        },
+        input_line_height_metrics,
+    );
+}
+
+/// The computed values the box-type transformation and the element style adjustments read.
+struct ComputedBoxInputs {
+    display: FfiDisplay,
+    overflow: [u16; 2],
+    float_value: u16,
+    position: u16,
+    text_align: u16,
+}
+
+/// Record the box inputs a computation settled in `writer`, and adjust its computed values as the
+/// box-type transformation and the element style adjustments require. The adjustments apply only
+/// where the caller passes the input line-height metrics, which only the last phase of a
+/// computation knows.
+fn adjust_computed_box(
+    writer: &mut GroupValuesWriter<'_>,
+    box_type_input: &FfiBoxTypeTransformationInput,
+    inputs: ComputedBoxInputs,
+    input_line_height_metrics: Option<&FfiInputLineHeightMetrics>,
+) {
+    use crate::css::property_metadata::property_id as prop;
+
+    let display_before = inputs.display;
+    writer.set_display_before_box_type_transformation(display_before.encoded());
+    writer.set_overflow_before_adjustment(inputs.overflow);
+    let keyword_of = |property_id: u16| keyword_from_style_value(writer.value(property_id).data());
+    let mut box_type_input = *box_type_input;
+    box_type_input.display = display_before;
+    box_type_input.float_value = inputs.float_value;
+    box_type_input.writing_mode = writing_mode_and_direction_of(
+        Some(writer.value(prop::WRITING_MODE)),
+        Some(writer.value(prop::DIRECTION)),
+    )
+    .0;
+    box_type_input.position = inputs.position;
+    box_type_input.force_line_height_normal &= keyword_of(prop::APPEARANCE) != keyword::NONE;
+    box_type_input.webkit_box_layout_transformation_applies =
+        keyword_of(prop::_WEBKIT_BOX_ORIENT) == keyword::VERTICAL && keyword_of(prop::CONTINUE) != keyword::AUTO;
+    let adjustments = compute_element_style_adjustments(&box_type_input, inputs.text_align);
+    let Some(input_line_height_metrics) = input_line_height_metrics else {
+        return;
+    };
+    let adjusted = post_compute_adjusted_values(
+        &PostComputeAdjustment {
+            display_before,
+            box_type_transformation: adjustments.box_type,
+            element_style_adjustment: adjustments.element_style,
+        },
+        input_line_height_metrics,
+    );
+    // An adjustment moves only a computed value. Whether the value depends on the parent stays
+    // what the drive recorded for the specified value, as for a match-parent text-align it adjusts.
+    for (property_id, value) in adjusted.values {
+        writer.set_computed(property_id, value);
+    }
+    for property_id in adjusted.cleared_flags {
+        writer.clear_flags(property_id);
+    }
+}
+
+/// Whether the engine computes a declared longhand's value directly: the longhand computes directly,
+/// and the value reads nothing beyond the element's own font and the document's metrics.
+pub(crate) fn value_computes_directly(
+    property_id: u16,
+    data: &StyleValueData,
+    prepared_dependencies: Option<ExternalValueDependencies>,
+) -> bool {
+    use crate::css::property_metadata::property_id as prop;
+    if !computes_directly(property_id) || computes_in_font_phases(property_id) {
+        return false;
+    }
+    // The background layer longhands coordinate with the number of background-image layers,
+    // which is the identity only where every one of them holds a single layer.
+    if matches!(data, StyleValueData::ValueList { values, .. } if values.as_slice().len() != 1)
+        && (property_id == prop::BACKGROUND_IMAGE || BACKGROUND_LAYER_LONGHANDS.contains(&property_id))
+    {
+        return false;
+    }
+    let Some(dependencies) = prepared_dependencies.or_else(|| try_external_value_dependencies(data)) else {
+        return false;
+    };
+    // A value that is not computationally independent, such as a font-relative length or one
+    // reading `currentcolor`, still computes directly: the context it absolutizes against is the
+    // element's own, with the font of its drive or, for an element declaring no font longhand, its
+    // parent's, and the table keeps its specified value for the groups as a drive's does.
+    // The color property's own `currentcolor` is the inherited color, which the drive resolves.
+    !((property_id == prop::COLOR && crate::css::style_value::value_depends_on_current_color(data))
+        || dependencies.uses_tree_counting_function
+        || dependencies.uses_random_function
+        || dependencies.needs_document_base_url
+        || dependencies.may_need_style_sheet_resource_context
+        || dependencies.container_relative_length_unit_mask != 0)
+}
+
+/// Whether a longhand computes in the font or line-height phase of a drive.
+pub(crate) fn computes_in_font_phases(property_id: u16) -> bool {
+    use crate::css::property_metadata::FIRST_LONGHAND_PROPERTY_ID;
+    static FONT_PHASES: OnceLock<Box<[bool]>> = OnceLock::new();
+    let font_phases = FONT_PHASES.get_or_init(|| {
+        let mut font_phases =
+            vec![false; crate::css::property_metadata::NUMBER_OF_LONGHAND_PROPERTIES].into_boxed_slice();
+        // NB: The font phase also computes writing-mode first, but writing-mode belongs to the remaining
+        //     phase, so this reads the unmodified computation order up to color-scheme.
+        let (_, color_scheme) = property_computation_phase_boundaries();
+        for &property in &crate::css::property_metadata::property_computation_order()[..color_scheme] {
+            font_phases[usize::from(property - FIRST_LONGHAND_PROPERTY_ID)] = true;
+        }
+        font_phases
+    });
+    font_phases[usize::from(property_id - FIRST_LONGHAND_PROPERTY_ID)]
+}
+
+/// Whether the engine computes a declared longhand directly: its computed value is its specified
+/// value absolutized against the element's context, with nothing the longhand drive special-cases.
+pub(crate) fn computes_directly(property_id: u16) -> bool {
+    use crate::css::property_metadata::FIRST_LONGHAND_PROPERTY_ID;
+    static DIRECT: OnceLock<Box<[bool]>> = OnceLock::new();
+    let direct = DIRECT.get_or_init(|| {
+        (0..crate::css::property_metadata::NUMBER_OF_LONGHAND_PROPERTIES)
+            .map(|index| longhand_computes_directly(FIRST_LONGHAND_PROPERTY_ID + index as u16))
+            .collect()
+    });
+    property_id
+        .checked_sub(FIRST_LONGHAND_PROPERTY_ID)
+        .and_then(|index| direct.get(usize::from(index)))
+        .copied()
+        .unwrap_or(false)
+}
+
+fn longhand_computes_directly(property_id: u16) -> bool {
+    use crate::css::property_metadata::property_id as prop;
+    // The background layer longhands coordinate with the number of background-image layers, which
+    // the direct computation checks for itself.
+    if property_id == prop::BACKGROUND_IMAGE || BACKGROUND_LAYER_LONGHANDS.contains(&property_id) {
+        return true;
+    }
+    // A line's width computes to its length snapped as a border width, which the direct
+    // computation does as the drive does; what its style makes of it is the groups' to say.
+    if is_line_width(property_id) {
+        return true;
+    }
+    if property_has_dedicated_compute_rule(property_id) || computes_in_font_phases(property_id) {
+        return false;
+    }
+    !matches!(
+        property_id,
+        // The drive computes these with rules of their own.
+        prop::TEXT_EMPHASIS_POSITION
+            | prop::STROKE_DASHOFFSET
+            | prop::STROKE_WIDTH
+            | prop::STROKE_DASHARRAY
+            | prop::BORDER_SPACING
+            | prop::BORDER_SHAPE
+            | prop::OFFSET_ROTATE
+            | prop::ANIMATION_RANGE_START
+            | prop::ANIMATION_RANGE_END
+            | prop::TEXT_ALIGN_LAST
+            | prop::COLOR_SCHEME
+            | prop::MATH_STYLE
+            // The logical mapping of the element's own declarations reads these.
+            | prop::DIRECTION
+            | prop::WRITING_MODE
+    )
+}
+
+/// Whether `property_id` computes as a width snapped as a border width, which the device pixel
+/// ratio decides: a border, outline or column rule width, or a logical alias of one.
+pub(crate) fn property_snaps_as_border_width(property_id: u16) -> bool {
+    is_line_width(property_id)
+        || (table_row_bits(property_id) & LOGICAL_ALIAS_BIT != 0
+            && is_line_width(map_logical_alias_to_physical(property_id, 0, 0)))
+}
+
+fn is_line_width(property_id: u16) -> bool {
+    use crate::css::property_metadata::property_id as prop;
+    matches!(
+        property_id,
+        prop::BORDER_TOP_WIDTH
+            | prop::BORDER_RIGHT_WIDTH
+            | prop::BORDER_BOTTOM_WIDTH
+            | prop::BORDER_LEFT_WIDTH
+            | prop::OUTLINE_WIDTH
+            | prop::COLUMN_RULE_WIDTH
+            | prop::ROW_RULE_WIDTH
+    )
+}
+
+/// The engine: what a thread absolutized each computationally independent value to, and whether that
+/// resolved a viewport-relative length, by the value's identity and the color scheme it absolutized
+/// under, or none for a value that is not independent. Elements declaring the same value then hold
+/// the same computed value.
+pub(crate) type AbsolutizedValues = crate::fast_hash::FastMap<
+    crate::css::style::pointer_key::PointerKey<RetainedStyleValueData, u8>,
+    Option<(RetainedStyleValueData, bool)>,
+>;
+
+/// The engine's direct computation of an element none of whose declarations needs anything the
+/// longhand drive special-cases: each winning value absolutizes against the element's context into
+/// `values`, which hold the element's inherited and initial values, and the box adjustments the
+/// drive ends its last phase with run over the result. The winners are ones classified as
+/// computing directly; answers false, leaving `values` to be discarded, where one does not
+/// absolutize.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn compute_declared_values<'a>(
+    values: &mut GroupValuesWriter<'_>,
+    winners: impl Iterator<
+        Item = (
+            u16,
+            &'a RetainedStyleValueData,
+            Option<ExternalValueDependencies>,
+            KnownComputation,
+        ),
+    >,
+    length: &FfiLengthResolutionContext,
+    scheme: Option<u8>,
+    box_type_input: &FfiBoxTypeTransformationInput,
+    is_th_element: bool,
+    adjust_box: bool,
+    driven: Option<&[u64]>,
+    absolutized: &mut AbsolutizedValues,
+    device_pixels_per_css_pixel: f64,
+) -> bool {
+    use crate::css::property_metadata::property_id as prop;
+
+    // The longhands held as bits, as the element holds them before its own declarations.
+    let seeded_bits = values.bits();
+    let inherited = |property_id: u16| {
+        seeded_bits.value(crate::css::computed_values::StyleBitField::of(property_id).expect("a longhand of the bits"))
+    };
+    // The longhands decided so far: a lower-priority member of a logical pair decides nothing the
+    // higher-priority member decided.
+    let mut decided = [0_u64; crate::css::property_metadata::LONGHAND_WORD_COUNT];
+    let longhand_bit = |property_id: u16| {
+        let index = usize::from(property_id - crate::css::property_metadata::FIRST_LONGHAND_PROPERTY_ID);
+        (index / 64, 1_u64 << (index % 64))
+    };
+    let is_decided = |decided: &[u64; crate::css::property_metadata::LONGHAND_WORD_COUNT], property_id: u16| {
+        let (word, bit) = longhand_bit(property_id);
+        decided[word] & bit != 0
+    };
+    // What a drive over the table computed is decided too.
+    let was_driven = |property_id: u16| {
+        let index = usize::from(property_id - crate::css::property_metadata::FIRST_LONGHAND_PROPERTY_ID);
+        driven.is_some_and(|words| words[index / 64] & (1 << (index % 64)) != 0)
+    };
+    let context = crate::css::absolutize::AbsolutizationContext {
+        length,
+        scheme,
+        resolved_viewport_relative_length: std::cell::Cell::new(false),
+        tree_counting: None,
+        random_base_values: &[],
+        document_base_url: &[],
+        style_sheet_resource_context: None,
+        current_color: None,
+    };
+    for (property_id, value, prepared_dependencies, known) in winners {
+        let Some(data) = value.optional_data() else {
+            return false;
+        };
+        // The caller passes only winners it classified as computing directly.
+        debug_assert!(value_computes_directly(property_id, data, prepared_dependencies));
+        // A longhand that does not inherit, declared with the very value its initial value is, holds
+        // what the element's seed does: its initial value computed. Nothing computes against it.
+        if known.is_initial && !is_decided(&decided, property_id) && !was_driven(property_id) {
+            let (word, bit) = longhand_bit(property_id);
+            decided[word] |= bit;
+            values.flags_mut().mark_evaluated(property_id);
+            continue;
+        }
+        // https://www.w3.org/TR/css-color-4/#resolving-other-colors
+        // In the color property, the used value of currentcolor is the resolved inherited value.
+        let inherited_color;
+        let color_context;
+        let context = if property_id == prop::COLOR {
+            inherited_color = values.get(prop::COLOR).cloned();
+            color_context = crate::css::absolutize::AbsolutizationContext {
+                current_color: inherited_color.as_ref().and_then(RetainedStyleValueData::optional_data),
+                resolved_viewport_relative_length: std::cell::Cell::new(false),
+                ..context
+            };
+            &color_context
+        } else {
+            &context
+        };
+        let mut computed = if (known.to_itself && length.zoom == 1.0) || value_computes_to_itself(data, length) {
+            std::borrow::Cow::Borrowed(value)
+        } else {
+            // The color property absolutizes against the inherited color, which no key holds.
+            let scheme = scheme.unwrap_or(u8::MAX);
+            let memoized = (property_id != prop::COLOR)
+                .then(|| absolutized.get(&crate::css::style::pointer_key::PointerLookup::new(value, scheme)))
+                .flatten();
+            match memoized {
+                Some(Some((computed, resolved_viewport_relative_length))) => {
+                    // NB: The element depends on the viewport as the one this was absolutized for did.
+                    if *resolved_viewport_relative_length {
+                        context.resolved_viewport_relative_length.set(true);
+                    }
+                    std::borrow::Cow::Owned(computed.clone())
+                }
+                _ => {
+                    // Whether this value alone resolves a viewport-relative length, for the memo.
+                    let resolved_before = context.resolved_viewport_relative_length.replace(false);
+                    let computed = match crate::css::absolutize::absolutize(data, context) {
+                        Some(crate::css::absolutize::Absolutized::Unchanged) => value.clone(),
+                        Some(crate::css::absolutize::Absolutized::Changed(computed)) => computed,
+                        None => return false,
+                    };
+                    let resolved_viewport_relative_length = context.resolved_viewport_relative_length.get();
+                    context
+                        .resolved_viewport_relative_length
+                        .set(resolved_before || resolved_viewport_relative_length);
+                    // NB: A value that absolutized to itself costs its walk again, which is less than
+                    //     a memo entry costs each value that never recurs.
+                    if property_id != prop::COLOR && memoized.is_none() && computed.pointer() != value.pointer() {
+                        let independent = value_is_computationally_independent(data) == Some(true);
+                        absolutized.insert(
+                            crate::css::style::pointer_key::PointerKey::new(value, scheme),
+                            independent.then(|| (computed.clone(), resolved_viewport_relative_length)),
+                        );
+                    }
+                    std::borrow::Cow::Owned(computed)
+                }
+            }
+        };
+        // The physical longhand a logical alias's value computes as.
+        let physical = match table_row_bits(property_id) & LOGICAL_ALIAS_BIT != 0 {
+            true => {
+                let (writing_mode, direction) = writing_mode_and_direction_of(
+                    Some(inherited(prop::WRITING_MODE)),
+                    Some(inherited(prop::DIRECTION)),
+                );
+                Some(map_logical_alias_to_physical(property_id, writing_mode, direction))
+            }
+            false => None,
+        };
+        // https://drafts.csswg.org/css-backgrounds/#border-width
+        // Computed value: absolute length, snapped as a border width
+        if is_line_width(physical.unwrap_or(property_id)) {
+            let Some(data) = computed.optional_data() else {
+                return false;
+            };
+            computed = std::borrow::Cow::Owned(retained_new(match data {
+                StyleValueData::ValueList { .. } => compute_line_width_list(data, device_pixels_per_css_pixel, length),
+                _ => StyleValueData::Length {
+                    value: compute_border_or_outline_width(data, device_pixels_per_css_pixel, length.zoom, None),
+                    unit: px_length_unit(),
+                },
+            }));
+        }
+        if property_id == prop::TEXT_ALIGN {
+            let Some(StyleValueData::Keyword { keyword }) = computed.optional_data() else {
+                return false;
+            };
+            let Some(StyleValueData::Keyword {
+                keyword: inherited_text_align,
+            }) = inherited(prop::TEXT_ALIGN).optional_data()
+            else {
+                return false;
+            };
+            let Some(StyleValueData::Keyword {
+                keyword: inherited_direction,
+            }) = inherited(prop::DIRECTION).optional_data()
+            else {
+                return false;
+            };
+            let adjustment = compute_text_align_adjustment(
+                *keyword,
+                is_th_element,
+                true,
+                *inherited_text_align,
+                *inherited_direction == keyword::LTR,
+            );
+            if adjustment.changed {
+                computed = std::borrow::Cow::Owned(RetainedStyleValueData::from_arc(StyleValueArc::new(
+                    StyleValueData::Keyword {
+                        keyword: adjustment.keyword,
+                    },
+                )));
+            }
+        }
+        // https://drafts.csswg.org/css-logical/#box
+        // The computed value of both properties of a logical pair derives from the specified value
+        // of the one declared with higher priority, and the winners arrive highest priority first.
+        // https://drafts.csswg.org/css-color-4/#resolving-other-colors
+        // As a drive does, the table keeps the specified value of a longhand whose computed value
+        // depends on what the element inherits, which the groups resolve `currentcolor` from.
+        let inheritance_dependent = prepared_dependencies
+            .or_else(|| try_external_value_dependencies(data))
+            .is_none_or(|dependencies| dependencies.inheritance_dependent);
+        if let Some(physical) = physical {
+            if is_decided(&decided, physical) || was_driven(physical) {
+                // The physical longhand won, and its value is the alias's too.
+                if let Some(winning) = values.get(physical).cloned() {
+                    computed = std::borrow::Cow::Owned(winning);
+                }
+            } else {
+                values.set_borrowed(physical, &computed);
+                // NB: The physical longhand is what its children inherit, so it keeps the specified
+                //     value as well, replacing the one the table it started from held.
+                values.set_inheritance_dependent_value(physical, inheritance_dependent.then(|| value.clone()));
+                let (word, bit) = longhand_bit(physical);
+                decided[word] |= bit;
+            }
+        } else if is_decided(&decided, property_id) || was_driven(property_id) {
+            continue;
+        }
+        let (word, bit) = longhand_bit(property_id);
+        decided[word] |= bit;
+        values.set_borrowed(property_id, &computed);
+        values.set_inheritance_dependent_value(property_id, inheritance_dependent.then(|| value.clone()));
+    }
+    // The overflow keywords as declared, which the box adjustments read.
+    let overflow_keyword = |values: &GroupValuesWriter<'_>, property_id: u16| match values
+        .get(property_id)
+        .and_then(RetainedStyleValueData::optional_data)
+    {
+        Some(StyleValueData::Keyword { keyword }) => Some(*keyword),
+        _ => None,
+    };
+    let overflow = [
+        overflow_keyword(values, prop::OVERFLOW_X),
+        overflow_keyword(values, prop::OVERFLOW_Y),
+    ];
+    // https://drafts.csswg.org/css-overflow-3/#overflow-control
+    // NB: The two overflow longhands compute together, as in a drive.
+    if is_decided(&decided, prop::OVERFLOW_X) || is_decided(&decided, prop::OVERFLOW_Y) {
+        let [Some(overflow_x), Some(overflow_y)] = overflow else {
+            return false;
+        };
+        let effective = resolve_effective_overflow_keywords(overflow_x, overflow_y);
+        for (changed, property_id, keyword) in [
+            (effective.changed_x, prop::OVERFLOW_X, effective.x_keyword),
+            (effective.changed_y, prop::OVERFLOW_Y, effective.y_keyword),
+        ] {
+            if !changed {
+                continue;
+            }
+            values.set_computed(property_id, StyleValueData::Keyword { keyword });
+        }
+    }
+    if context.resolved_viewport_relative_length.get() {
+        values.note_viewport_dependency();
+    }
+    if !adjust_box {
+        return true;
+    }
+    let computed = |property_id: u16| values.get(property_id).and_then(RetainedStyleValueData::optional_data);
+    let keyword = |property_id: u16| match computed(property_id) {
+        Some(StyleValueData::Keyword { keyword }) => Some(*keyword),
+        _ => None,
+    };
+    let Some(StyleValueData::Display { raw }) = computed(prop::DISPLAY) else {
+        return false;
+    };
+    let display = FfiDisplay::from_raw(*raw);
+    let ([Some(overflow_x), Some(overflow_y)], Some(float_value), Some(position), Some(text_align)) = (
+        overflow,
+        keyword(prop::FLOAT),
+        keyword(prop::POSITION),
+        keyword(prop::TEXT_ALIGN),
+    ) else {
+        return false;
+    };
+    let inputs = ComputedBoxInputs {
+        display,
+        overflow: [overflow_x, overflow_y],
+        float_value,
+        position,
+        text_align,
+    };
+    let metrics = FfiInputLineHeightMetrics {
+        current_line_height: 0.0,
+        minimum_line_height: 0.0,
+    };
+    adjust_computed_box(values, box_type_input, inputs, Some(&metrics));
+    true
+}
+
+/// The font longhands the engine computes natively, where the font group is all an element's
+/// declarations move beyond what computes directly: the ones the font resolution reads, the
+/// keyword-valued font features and line-height.
+pub(crate) fn font_value_computes_natively(property_id: u16, data: &StyleValueData) -> bool {
+    use crate::css::property_metadata::property_id as prop;
+    match property_id {
+        // A size relative to the viewport or a query container, or a math size, reads what only a
+        // drive resolves.
+        prop::FONT_SIZE => match data {
+            StyleValueData::Length { unit, .. } => matches!(
+                length_unit_kinds().get(usize::from(*unit)),
+                Some(LengthUnitKind::Px | LengthUnitKind::Absolute { .. } | LengthUnitKind::FontRelative { .. })
+            ),
+            StyleValueData::Percentage { .. } => true,
+            StyleValueData::Keyword { keyword } => *keyword != keyword::MATH,
+            _ => false,
+        },
+        prop::FONT_WEIGHT => matches!(data, StyleValueData::Number { .. } | StyleValueData::Keyword { .. }),
+        prop::FONT_WIDTH => matches!(data, StyleValueData::Percentage { .. } | StyleValueData::Keyword { .. }),
+        // NB: A calculated oblique angle may read lengths, such as query container units, that
+        //     only a drive resolves.
+        prop::FONT_STYLE => match data {
+            StyleValueData::Keyword { .. } => true,
+            StyleValueData::FontStyle { angle_value, .. } => {
+                !matches!(angle_value.optional_data(), Some(StyleValueData::Calculated { .. }))
+            }
+            _ => false,
+        },
+        // NB: A cascade ending in `font-family: monospace` recascades the font size, which only a
+        //     drive does.
+        prop::FONT_FAMILY => !font_family_is_monospace(data),
+        prop::LINE_HEIGHT => match data {
+            StyleValueData::Length { unit, .. } => matches!(
+                length_unit_kinds().get(usize::from(*unit)),
+                Some(LengthUnitKind::Px | LengthUnitKind::Absolute { .. } | LengthUnitKind::FontRelative { .. })
+            ),
+            StyleValueData::Keyword { keyword } => *keyword == keyword::NORMAL,
+            StyleValueData::Number { .. } | StyleValueData::Percentage { .. } => true,
+            _ => false,
+        },
+        // NB: The `font` shorthand resets these to keywords.
+        prop::FONT_SIZE_ADJUST => matches!(data, StyleValueData::Keyword { keyword } if *keyword == keyword::NONE),
+        prop::FONT_FEATURE_SETTINGS
+        | prop::FONT_KERNING
+        | prop::FONT_LANGUAGE_OVERRIDE
+        | prop::FONT_OPTICAL_SIZING
+        | prop::FONT_SYNTHESIS_STYLE
+        | prop::FONT_SYNTHESIS_WEIGHT
+        | prop::FONT_VARIANT_ALTERNATES
+        | prop::FONT_VARIANT_CAPS
+        | prop::FONT_VARIANT_EAST_ASIAN
+        | prop::FONT_VARIANT_EMOJI
+        | prop::FONT_VARIANT_LIGATURES
+        | prop::FONT_VARIANT_NUMERIC
+        | prop::FONT_VARIANT_POSITION
+        | prop::FONT_VARIATION_SETTINGS
+        | prop::TEXT_RENDERING => {
+            matches!(data, StyleValueData::Keyword { .. }) && value_absolutization_is_identity(data)
+        }
+        _ => false,
+    }
+}
+
+/// The engine's native computation of the font longhands an element declares, each classified by
+/// [`font_value_computes_natively`], by the rules the font and line-height phases of a drive
+/// apply: into `values`, which hold the element's inherited values, against `length`, the length
+/// context of its parent's font for the font longhands, and of its own font with its parent's line
+/// height for line-height. An element with no parent inherits `parentless_font_size`, the
+/// document's initial font size, as its font size. Answers false where a value does not compute.
+pub(crate) fn compute_font_values<'a>(
+    values: &mut GroupValuesWriter<'_>,
+    winners: impl Iterator<Item = (u16, &'a RetainedStyleValueData)>,
+    length: &FfiLengthResolutionContext,
+    default_font_size_raw: i32,
+    parentless_font_size: Option<CssPixels>,
+) -> bool {
+    use crate::css::property_metadata::property_id as prop;
+    let context = crate::css::absolutize::AbsolutizationContext {
+        length,
+        scheme: None,
+        resolved_viewport_relative_length: std::cell::Cell::new(false),
+        tree_counting: None,
+        random_base_values: &[],
+        document_base_url: &[],
+        style_sheet_resource_context: None,
+        current_color: None,
+    };
+    for (property_id, value) in winners {
+        let Some(data) = value.optional_data() else {
+            return false;
+        };
+        debug_assert!(font_value_computes_natively(property_id, data));
+        // What the element inherits, which the winner has not replaced yet.
+        let inherited = |property_id: u16| values.get(property_id).and_then(RetainedStyleValueData::optional_data);
+        let computed = match property_id {
+            prop::FONT_SIZE => {
+                let absolutized = match data {
+                    StyleValueData::Length { value, unit } => {
+                        let result = absolutize_length(*value, usize::from(*unit), length);
+                        if !result.handled {
+                            return false;
+                        }
+                        result.changed.then_some(result.px)
+                    }
+                    _ => None,
+                };
+                let inherited_size = match (parentless_font_size, inherited(prop::FONT_SIZE)) {
+                    (Some(size), _) => size.to_double(),
+                    (None, Some(StyleValueData::Length { value, unit })) if *unit == px_length_unit() => *value,
+                    _ => return false,
+                };
+                // NB: The element declares no math-depth of its own, so its computed one is the
+                //     one it inherits.
+                let math_depth = match inherited(prop::MATH_DEPTH) {
+                    Some(StyleValueData::Integer { value }) => *value,
+                    _ => 0,
+                };
+                let synthesized = absolutized.map(|px| StyleValueData::Length {
+                    value: px,
+                    unit: px_length_unit(),
+                });
+                let result = compute_font_size(
+                    synthesized.as_ref().unwrap_or(data),
+                    math_depth,
+                    inherited_size,
+                    math_depth,
+                    CssPixels::from_raw(default_font_size_raw),
+                    1.0,
+                );
+                match (result, synthesized) {
+                    (None, _) => return false,
+                    (Some(ComputedNumber::Unchanged), Some(synthesized)) => {
+                        RetainedStyleValueData::from_owned(synthesized)
+                    }
+                    (Some(ComputedNumber::Unchanged), None) => value.clone(),
+                    (Some(ComputedNumber::Computed(value)), _) => {
+                        RetainedStyleValueData::from_owned(StyleValueData::Length {
+                            value,
+                            unit: px_length_unit(),
+                        })
+                    }
+                }
+            }
+            prop::FONT_WEIGHT => {
+                let Some(StyleValueData::Number {
+                    value: inherited_weight,
+                }) = inherited(prop::FONT_WEIGHT)
+                else {
+                    return false;
+                };
+                match compute_font_weight(data, *inherited_weight) {
+                    None => return false,
+                    Some(ComputedNumber::Unchanged) => value.clone(),
+                    Some(ComputedNumber::Computed(value)) => {
+                        RetainedStyleValueData::from_owned(StyleValueData::Number { value })
+                    }
+                }
+            }
+            prop::LINE_HEIGHT => match data {
+                StyleValueData::Length {
+                    value: length_value,
+                    unit,
+                } => {
+                    let result = absolutize_length(*length_value, usize::from(*unit), length);
+                    match (result.handled, result.changed) {
+                        (false, _) => return false,
+                        (true, true) => RetainedStyleValueData::from_owned(StyleValueData::Length {
+                            value: result.px,
+                            unit: px_length_unit(),
+                        }),
+                        (true, false) => value.clone(),
+                    }
+                }
+                _ => match compute_line_height(data, length.font_metrics.font_size) {
+                    ComputedLineHeight::Unchanged => value.clone(),
+                    ComputedLineHeight::Number(value) => {
+                        RetainedStyleValueData::from_owned(StyleValueData::Number { value })
+                    }
+                    ComputedLineHeight::Px(value) => RetainedStyleValueData::from_owned(StyleValueData::Length {
+                        value,
+                        unit: px_length_unit(),
+                    }),
+                },
+            },
+            prop::FONT_WIDTH => match compute_font_width(data) {
+                None => return false,
+                Some(ComputedNumber::Unchanged) => value.clone(),
+                Some(ComputedNumber::Computed(value)) => {
+                    RetainedStyleValueData::from_owned(StyleValueData::Percentage { value })
+                }
+            },
+            _ => match (property_id, data) {
+                (prop::FONT_STYLE, StyleValueData::Keyword { keyword }) => {
+                    match keyword_to_font_style_keyword(*keyword) {
+                        Some(font_style) => RetainedStyleValueData::from_owned(StyleValueData::FontStyle {
+                            font_style,
+                            angle_value: RetainedStyleValueData::none(),
+                        }),
+                        None => value.clone(),
+                    }
+                }
+                _ if value_absolutization_is_identity(data) => value.clone(),
+                _ => match crate::css::absolutize::absolutize(data, &context) {
+                    Some(crate::css::absolutize::Absolutized::Unchanged) => value.clone(),
+                    Some(crate::css::absolutize::Absolutized::Changed(computed)) => computed,
+                    None => return false,
+                },
+            },
+        };
+        if context.resolved_viewport_relative_length.get() {
+            return false;
+        }
+        // As a drive does, the element keeps the specified value of a longhand whose computed
+        // value depends on what it inherits.
+        let inheritance_dependent = try_external_value_dependencies(data)
+            .is_none_or(|dependencies| dependencies.inheritance_dependent)
+            || value_depends_on_inherited_info_for_property(data, property_id);
+        let specified = inheritance_dependent.then(|| value.clone());
+        values.set(property_id, computed);
+        values.set_inheritance_dependent_value(property_id, specified);
+    }
+    true
+}
+
+/// The inputs every drive evaluates, selected or not.
+pub(crate) const REQUIRED_DRIVER_INPUTS: [u16; 11] = {
+    use crate::css::property_metadata::property_id as prop;
+    [
+        prop::APPEARANCE,
+        prop::COLOR_SCHEME,
+        prop::DIRECTION,
+        prop::DISPLAY,
+        prop::FLOAT,
+        prop::MATH_DEPTH,
+        prop::OVERFLOW_X,
+        prop::OVERFLOW_Y,
+        prop::POSITION,
+        prop::TEXT_ALIGN,
+        prop::WRITING_MODE,
+    ]
+};
+
+pub(crate) fn is_required_driver_input(property_id: u16) -> bool {
+    use crate::css::property_metadata::property_id as prop;
+    matches!(
+        property_id,
+        prop::APPEARANCE
+            | prop::COLOR_SCHEME
+            | prop::DIRECTION
+            | prop::DISPLAY
+            | prop::FLOAT
+            | prop::MATH_DEPTH
+            | prop::OVERFLOW_X
+            | prop::OVERFLOW_Y
+            | prop::POSITION
+            | prop::TEXT_ALIGN
+            | prop::WRITING_MODE
+    )
+}
+
+fn computed_value_list(longhands: crate::css::style::ViewLonghands<'_>, property_id: u16) -> &[RetainedStyleValueData] {
+    let StyleValueData::ValueList { values, .. } = longhands
+        .handle(property_id)
+        .expect("computed transition longhand must be present")
+        .data()
+    else {
+        unreachable!("computed transition longhand must be a value list")
+    };
+    values.as_slice()
+}
+
+fn property_id_from_custom_ident(custom_ident: &crate::css::css_string::CssString) -> Option<u16> {
+    crate::css::property_metadata::property_id_from_name(custom_ident.units())
+}
+
+fn time_value_to_milliseconds(value: &StyleValueData) -> f64 {
+    let StyleValueData::Time { value, unit } = value else {
+        unreachable!("computed transition time must be a time value")
+    };
+    crate::css::calc::time_to_milliseconds(*value, *unit)
+}
+
+/// The axes are read only when a logical alias needs mapping.
+fn append_transition_longhands(
+    properties: &mut Vec<u16>,
+    property: u16,
+    writing_mode_and_direction: &mut impl FnMut() -> (u8, u8),
+) {
+    use crate::css::property_metadata::{longhand_is_logical_alias, property_id as prop};
+
+    if property == prop::ALL {
+        let (writing_mode, direction) = writing_mode_and_direction();
+        properties.extend_from_slice(crate::css::computed_values::all_transition_longhands(
+            writing_mode,
+            direction,
+        ));
+    } else if property_is_shorthand(property) {
+        for &longhand in longhands_for_shorthand(property) {
+            append_transition_longhands(properties, longhand, writing_mode_and_direction);
+        }
+    } else if property != prop::CUSTOM {
+        properties.push(if longhand_is_logical_alias(property) {
+            let (writing_mode, direction) = writing_mode_and_direction();
+            map_logical_alias_to_physical(property, writing_mode, direction)
+        } else {
+            property
+        });
+    }
+}
+
+fn computed_writing_mode_and_direction(longhands: crate::css::style::ViewLonghands<'_>) -> (u8, u8) {
+    use crate::css::property_metadata::property_id as prop;
+
+    writing_mode_and_direction_of(longhands.handle(prop::WRITING_MODE), longhands.handle(prop::DIRECTION))
+}
+
+/// The writing mode and direction the computed `writing-mode` and `direction` values hold.
+pub(crate) fn writing_mode_and_direction_of(
+    writing_mode: Option<&RetainedStyleValueData>,
+    direction: Option<&RetainedStyleValueData>,
+) -> (u8, u8) {
+    let writing_mode = match writing_mode.unwrap().data() {
+        StyleValueData::Keyword { keyword } => keyword_to_writing_mode(*keyword).unwrap(),
+        _ => unreachable!("computed writing-mode must be a keyword"),
+    };
+    let direction = match direction.unwrap().data() {
+        StyleValueData::Keyword { keyword } => keyword_to_direction(*keyword).unwrap(),
+        _ => unreachable!("computed direction must be a keyword"),
+    };
+    (writing_mode, direction)
+}
+
+/// The properties a `transition-property` list names with a positive combined duration and delay.
+fn active_transition_property_ids_of<'a>(
+    property_values: &'a [RetainedStyleValueData],
+    duration_values: &'a [RetainedStyleValueData],
+    delay_values: &'a [RetainedStyleValueData],
+) -> impl Iterator<Item = u16> + 'a {
+    property_values
+        .iter()
+        .enumerate()
+        .filter_map(move |(index, property_value)| {
+            let duration = time_value_to_milliseconds(duration_values[index % duration_values.len()].data());
+            let delay = time_value_to_milliseconds(delay_values[index % delay_values.len()].data());
+            if duration.max(0.0) + delay <= 0.0 {
+                return None;
+            }
+            let StyleValueData::CustomIdent { custom_ident } = property_value.data() else {
+                return None;
+            };
+            property_id_from_custom_ident(custom_ident)
+        })
+}
+
+/// Whether computed `transition-property`, `transition-duration` and `transition-delay` values
+/// make any property transitionable.
+pub(crate) fn transition_values_declare_transitions(
+    properties: &RetainedStyleValueData,
+    durations: &RetainedStyleValueData,
+    delays: &RetainedStyleValueData,
+) -> bool {
+    fn value_list(value: &RetainedStyleValueData) -> &[RetainedStyleValueData] {
+        let StyleValueData::ValueList { values, .. } = value.data() else {
+            unreachable!("computed transition longhand must be a value list")
+        };
+        values.as_slice()
+    }
+    fn names_a_property(property: u16) -> bool {
+        use crate::css::property_metadata::property_id as prop;
+        property == prop::ALL
+            || property == prop::CUSTOM
+            || !property_is_shorthand(property)
+            || longhands_for_shorthand(property)
+                .iter()
+                .any(|&longhand| names_a_property(longhand))
+    }
+    active_transition_property_ids_of(value_list(properties), value_list(durations), value_list(delays))
+        .any(names_a_property)
+}
+
+/// The `transition-*` values of `longhands`, per physical longhand they name: shorthands expanded,
+/// logical aliases mapped, and a longhand named more than once taking its last entry.
+pub(crate) fn transition_entries(
+    longhands: crate::css::style::ViewLonghands<'_>,
+) -> Vec<crate::css::transition::TransitionEntry> {
+    use crate::css::property_metadata::property_id as prop;
+
+    let property_values = computed_value_list(longhands, prop::TRANSITION_PROPERTY);
+    let duration_values = computed_value_list(longhands, prop::TRANSITION_DURATION);
+    let timing_function_values = computed_value_list(longhands, prop::TRANSITION_TIMING_FUNCTION);
+    let delay_values = computed_value_list(longhands, prop::TRANSITION_DELAY);
+    let behavior_values = computed_value_list(longhands, prop::TRANSITION_BEHAVIOR);
+    let (writing_mode, direction) =
+        writing_mode_and_direction_of(longhands.handle(prop::WRITING_MODE), longhands.handle(prop::DIRECTION));
+
+    let mut entries: Vec<crate::css::transition::TransitionEntry> = Vec::new();
+    // Where each longhand's entry is in `entries`, so a longhand named again takes the later entry's place.
+    let mut entry_indices = [u16::MAX; crate::css::property_metadata::LAST_LONGHAND_PROPERTY_ID as usize + 1];
+    let mut properties = Vec::new();
+    for (index, property_value) in property_values.iter().enumerate() {
+        let transition_property = match property_value.data() {
+            StyleValueData::Keyword { keyword } if *keyword == keyword::NONE => None,
+            StyleValueData::CustomIdent { custom_ident } => property_id_from_custom_ident(custom_ident),
+            _ => unreachable!("computed transition-property must be none or a custom identifier"),
+        };
+        let Some(transition_property) = transition_property else {
+            continue;
+        };
+        properties.clear();
+        append_transition_longhands(&mut properties, transition_property, &mut || (writing_mode, direction));
+        // A `transition: all` entry names every longhand, and each takes the same attributes.
+        let delay = time_value_to_milliseconds(delay_values[index % delay_values.len()].data());
+        let duration = time_value_to_milliseconds(duration_values[index % duration_values.len()].data());
+        let timing_function = timing_function_values[index % timing_function_values.len()].pointer();
+        let behavior = match behavior_values[index % behavior_values.len()].data() {
+            StyleValueData::Keyword { keyword } => keyword_to_transition_behavior(*keyword).unwrap(),
+            _ => unreachable!("computed transition-behavior must be a keyword"),
+        };
+        entries.reserve(properties.len());
+        for &property_id in &properties {
+            let entry = crate::css::transition::TransitionEntry {
+                property_id,
+                delay,
+                duration,
+                timing_function,
+                behavior,
+            };
+            match entry_indices[usize::from(property_id)] {
+                u16::MAX => {
+                    entry_indices[usize::from(property_id)] = entries.len() as u16;
+                    entries.push(entry);
+                }
+                index => entries[usize::from(index)] = entry,
+            }
+        }
+    }
+    entries
+}
+
+/// The `transition-*` values of `longhands` as they apply to custom properties: a name takes its last entry, and a
+/// `transition: all` entry stands for every name no later entry gives its own.
+#[derive(Default)]
+pub(crate) struct CustomPropertyTransitionEntries {
+    named: Vec<(ak::Utf16FlyString, crate::css::transition::TransitionEntry)>,
+    all: Option<crate::css::transition::TransitionEntry>,
+}
+
+impl CustomPropertyTransitionEntries {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.named.is_empty() && self.all.is_none()
+    }
+
+    pub(crate) fn names_all_properties(&self) -> bool {
+        self.all.is_some()
+    }
+
+    pub(crate) fn named_properties(&self) -> impl Iterator<Item = &ak::Utf16FlyString> {
+        self.named.iter().map(|(name, _)| name)
+    }
+
+    pub(crate) fn entry_for(&self, raw_name: usize) -> Option<&crate::css::transition::TransitionEntry> {
+        self.named
+            .iter()
+            .find(|(name, _)| name.raw_identity() == raw_name)
+            .map(|(_, entry)| entry)
+            .or(self.all.as_ref())
+    }
+}
+
+pub(crate) fn custom_property_transition_entries(
+    longhands: crate::css::style::ViewLonghands<'_>,
+) -> CustomPropertyTransitionEntries {
+    use crate::css::property_metadata::property_id as prop;
+
+    let mut entries = CustomPropertyTransitionEntries::default();
+    let property_values = computed_value_list(longhands, prop::TRANSITION_PROPERTY);
+    for (index, property_value) in property_values.iter().enumerate() {
+        let StyleValueData::CustomIdent { custom_ident } = property_value.data() else {
+            continue;
+        };
+        let property = property_id_from_custom_ident(custom_ident);
+        if property != Some(prop::ALL) && property != Some(prop::CUSTOM) {
+            continue;
+        }
+        let at = |list: u16| {
+            let values = computed_value_list(longhands, list);
+            &values[index % values.len()]
+        };
+        let entry = crate::css::transition::TransitionEntry {
+            property_id: prop::CUSTOM,
+            delay: time_value_to_milliseconds(at(prop::TRANSITION_DELAY).data()),
+            duration: time_value_to_milliseconds(at(prop::TRANSITION_DURATION).data()),
+            timing_function: at(prop::TRANSITION_TIMING_FUNCTION).pointer(),
+            behavior: match at(prop::TRANSITION_BEHAVIOR).data() {
+                StyleValueData::Keyword { keyword } => keyword_to_transition_behavior(*keyword).unwrap(),
+                _ => unreachable!("computed transition-behavior must be a keyword"),
+            },
+        };
+        if property == Some(prop::ALL) {
+            entries.named.clear();
+            entries.all = Some(entry);
+            continue;
+        }
+        let name = ak::Utf16FlyString::from_utf16(custom_ident.units());
+        entries
+            .named
+            .retain(|(named, _)| named.raw_identity() != name.raw_identity());
+        entries.named.push((name, entry));
+    }
+    entries
+}
+
+/// Whether `transition_entries` answers any entry for `longhands`, without expanding them.
+pub(crate) fn has_transition_entries(longhands: crate::css::style::ViewLonghands<'_>) -> bool {
+    use crate::css::property_metadata::property_id as prop;
+
+    // Whether an entry for `property` names a longhand or a custom property.
+    fn names_a_property(property: u16) -> bool {
+        if property == prop::ALL || property == prop::CUSTOM {
+            return true;
+        }
+        if property_is_shorthand(property) {
+            return longhands_for_shorthand(property)
+                .iter()
+                .any(|&longhand| names_a_property(longhand));
+        }
+        true
+    }
+
+    computed_value_list(longhands, prop::TRANSITION_PROPERTY)
+        .iter()
+        .any(|value| match value.data() {
+            StyleValueData::CustomIdent { custom_ident } => {
+                property_id_from_custom_ident(custom_ident).is_some_and(names_a_property)
+            }
+            _ => false,
+        })
+}
+
+/// Whether the `transition-delay` and `transition-duration` of `longhands` are each the single
+/// value `0s`.
+pub(crate) fn transition_delay_and_duration_are_single_zero(longhands: crate::css::style::ViewLonghands<'_>) -> bool {
+    use crate::css::property_metadata::property_id as prop;
+
+    transition_delay_and_duration_values_are_single_zero(
+        longhands
+            .handle(prop::TRANSITION_DELAY)
+            .expect("computed transition longhand must be present"),
+        longhands
+            .handle(prop::TRANSITION_DURATION)
+            .expect("computed transition longhand must be present"),
+    )
+}
+
+/// Whether computed `transition-delay` and `transition-duration` values are each the single value
+/// `0s`, as `transition_delay_and_duration_are_single_zero` answers for a table.
+pub(crate) fn transition_delay_and_duration_values_are_single_zero(
+    delays: &RetainedStyleValueData,
+    durations: &RetainedStyleValueData,
+) -> bool {
+    fn value_list(value: &RetainedStyleValueData) -> &[RetainedStyleValueData] {
+        let StyleValueData::ValueList { values, .. } = value.data() else {
+            unreachable!("computed transition longhand must be a value list")
+        };
+        values.as_slice()
+    }
+    let duration_values = value_list(durations);
+    let delay_values = value_list(delays);
+    delay_values.len() == 1
+        && duration_values.len() == 1
+        && time_value_to_milliseconds(delay_values[0].data()) == 0.0
+        && time_value_to_milliseconds(duration_values[0].data()) == 0.0
+}
+
+fn fly_string_is_ascii(string: &crate::css::css_string::CssString, expected: &[u8]) -> bool {
+    string
+        .units()
+        .iter()
+        .copied()
+        .eq(expected.iter().copied().map(u16::from))
+}
+
+/// The computed value of a length-percentage that only a calculation can describe, such as `min(50%, 10px)`, which the
+/// host retains and resolves once it knows the size the percentages are of, or null for any other value.
+fn calculated_offset(value: &StyleValueData) -> *const c_void {
+    match value {
+        StyleValueData::Calculated { .. } => std::ptr::from_ref(value).cast(),
+        _ => std::ptr::null(),
+    }
+}
+
+/// The pixels of a computed length-percentage, resolving its percentages against `basis`.
+pub(crate) fn length_percentage_px(value: &StyleValueData, basis: f64) -> f64 {
+    crate::css::computed_value_views::LengthPercentageRef::over(value)
+        .to_px(CssPixels::nearest_value_for(basis))
+        .to_double()
+}
+
+/// Whether a computed length-percentage is a length plus a percentage of what it resolves against, which only a
+/// calculation may not be.
+pub(crate) fn length_percentage_is_linear(value: &StyleValueData) -> bool {
+    match value {
+        StyleValueData::Calculated(calculated) => calculated.rust_calculation.node().is_linear_in_percentages(),
+        _ => true,
+    }
+}
+
+/// A length-percentage computed value as a length plus a percentage of what it resolves against.
+fn length_plus_percentage(value: &StyleValueData) -> (f64, f64) {
+    match value {
+        StyleValueData::Percentage { value } => (0.0, *value),
+        value => {
+            let value = crate::css::computed_value_views::LengthPercentageRef::over(value);
+            let px = value.to_px(CssPixels::default()).to_double();
+            (px, value.to_px(CssPixels::from_integer(100)).to_double() - px)
+        }
+    }
+}
+
+/// The insets a computed `[ auto | <length-percentage> ]{1,2}` describes, or both auto where there is none.
+fn view_timeline_inset(value: Option<&StyleValueData>) -> FfiViewTimelineInset {
+    let side = |value: &StyleValueData| match value {
+        StyleValueData::Keyword { keyword } if *keyword == keyword::AUTO => (true, 0.0, 0.0, std::ptr::null()),
+        value => {
+            let (px, percentage) = length_plus_percentage(value);
+            (false, px, percentage, calculated_offset(value))
+        }
+    };
+    let (start, end) = match value {
+        None => ((true, 0.0, 0.0, std::ptr::null()), (true, 0.0, 0.0, std::ptr::null())),
+        Some(StyleValueData::ValueList { values, .. }) => match values.as_slice() {
+            [start, end] => (side(start.data()), side(end.data())),
+            [both] => (side(both.data()), side(both.data())),
+            _ => unreachable!("computed view timeline inset must have one or two sides"),
+        },
+        Some(value) => (side(value), side(value)),
+    };
+    FfiViewTimelineInset {
+        start_is_auto: start.0,
+        start_px: start.1,
+        start_percentage: start.2,
+        start_calculated: start.3,
+        end_is_auto: end.0,
+        end_px: end.1,
+        end_percentage: end.2,
+        end_calculated: end.3,
+    }
+}
+
+/// The insets a computed `view-timeline-inset` item describes, for a timeline script builds.
+pub(crate) fn script_view_timeline_inset(value: &StyleValueData) -> FfiViewTimelineInset {
+    let value = match value {
+        StyleValueData::ValueList { values, separator, .. } if *separator == 1 => values.as_slice()[0].data(),
+        value => value,
+    };
+    view_timeline_inset(Some(value))
+}
+
+/// One named timeline an element declares with `scroll-timeline` or `view-timeline`.
+/// https://drafts.csswg.org/scroll-animations-1/#timeline-scoping
+#[repr(C)]
+pub struct FfiTimelineDeclaration {
+    /// The name, as a CSS string.
+    pub name: *const CssString,
+    pub is_view: bool,
+    pub axis: u8,
+    pub view_inset: FfiViewTimelineInset,
+}
+
+/// Hands `declare` the named timelines `values` declares. Of the timelines that share a name, the one handed last is
+/// the one the element defines: names declared later in the naming property take precedence, and scroll progress
+/// timelines take precedence over view progress timelines.
+///
+/// # Safety
+/// `values` must point at a live animation style group, and `declare` must be safe to call with `context`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_animation_values_timeline_declarations(
+    values: &crate::css::computed_value_types::AnimationValues,
+    context: *mut c_void,
+    declare: unsafe extern "C" fn(*mut c_void, *const FfiTimelineDeclaration),
+) {
+    let items = |handle: &crate::css::computed_value_types::ComputedStyleValueHandle| -> Vec<&StyleValueData> {
+        // SAFETY: A computed style group's handles point at retained style values it owns.
+        match unsafe { handle.pointer.cast::<StyleValueData>().as_ref() } {
+            None => Vec::new(),
+            Some(StyleValueData::ValueList { values, separator, .. }) if *separator == 1 => {
+                values.as_slice().iter().map(|value| value.data()).collect()
+            }
+            Some(value) => vec![value],
+        }
+    };
+    let axis_of = |values: &[&StyleValueData], index: usize| match values.get(index % values.len().max(1)) {
+        Some(StyleValueData::Keyword { keyword }) => keyword_to_axis(*keyword).unwrap_or(axis::BLOCK),
+        _ => axis::BLOCK,
+    };
+    let declare_names =
+        |names: Vec<&StyleValueData>, is_view: bool, axes: Vec<&StyleValueData>, insets: Vec<&StyleValueData>| {
+            for (index, name) in names.iter().enumerate() {
+                let StyleValueData::CustomIdent { custom_ident } = name else {
+                    continue;
+                };
+                let declaration = FfiTimelineDeclaration {
+                    name: custom_ident.as_ptr(),
+                    is_view,
+                    axis: axis_of(&axes, index),
+                    view_inset: view_timeline_inset(insets.get(index % insets.len().max(1)).copied()),
+                };
+                // SAFETY: Guaranteed by the caller.
+                unsafe { declare(context, &raw const declaration) };
+            }
+        };
+    declare_names(
+        items(&values.view_timeline_name),
+        true,
+        items(&values.view_timeline_axis),
+        items(&values.view_timeline_inset),
+    );
+    declare_names(
+        items(&values.scroll_timeline_name),
+        false,
+        items(&values.scroll_timeline_axis),
+        Vec::new(),
+    );
+}
+
+/// The names `timeline-scope` in `values` scopes: none, all of them, or those handed to `scope`.
+/// https://drafts.csswg.org/scroll-animations-1/#timeline-scope
+///
+/// # Safety
+/// `values` must point at a live animation style group, and `scope` must be safe to call with `context`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_animation_values_timeline_scope(
+    values: &crate::css::computed_value_types::AnimationValues,
+    context: *mut c_void,
+    scope: unsafe extern "C" fn(*mut c_void, *const CssString),
+) -> FfiTimelineScope {
+    // SAFETY: A computed style group's handles point at retained style values it owns.
+    let Some(value) = (unsafe { values.timeline_scope.pointer.cast::<StyleValueData>().as_ref() }) else {
+        return FfiTimelineScope::None;
+    };
+    let names: Vec<&StyleValueData> = match value {
+        StyleValueData::Keyword { keyword } if *keyword == keyword::ALL => return FfiTimelineScope::All,
+        StyleValueData::Keyword { .. } => return FfiTimelineScope::None,
+        StyleValueData::ValueList { values, .. } => values.as_slice().iter().map(|value| value.data()).collect(),
+        value => vec![value],
+    };
+    for name in names {
+        if let StyleValueData::CustomIdent { custom_ident } = name {
+            // SAFETY: Guaranteed by the caller.
+            unsafe { scope(context, custom_ident.as_ptr()) };
+        }
+    }
+    FfiTimelineScope::Names
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq)]
+pub enum FfiTimelineScope {
+    None,
+    All,
+    Names,
+}
+
+/// Whether `a` and `b` declare the same named timelines, and scope the same timeline names.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_animation_values_timeline_declarations_equal(
+    a: &crate::css::computed_value_types::AnimationValues,
+    b: &crate::css::computed_value_types::AnimationValues,
+) -> bool {
+    let same = |a: &crate::css::computed_value_types::ComputedStyleValueHandle,
+                b: &crate::css::computed_value_types::ComputedStyleValueHandle| {
+        // SAFETY: A computed style group's handles point at retained style values it owns.
+        let (a, b) = unsafe {
+            (
+                a.pointer.cast::<StyleValueData>().as_ref(),
+                b.pointer.cast::<StyleValueData>().as_ref(),
+            )
+        };
+        a == b
+    };
+    same(&a.scroll_timeline_name, &b.scroll_timeline_name)
+        && same(&a.scroll_timeline_axis, &b.scroll_timeline_axis)
+        && same(&a.view_timeline_name, &b.view_timeline_name)
+        && same(&a.view_timeline_axis, &b.view_timeline_axis)
+        && same(&a.view_timeline_inset, &b.view_timeline_inset)
+        && same(&a.timeline_scope, &b.timeline_scope)
+}
+
+/// Whether `values` declares a named timeline, or scopes timeline names.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_animation_values_declare_timelines(
+    values: &crate::css::computed_value_types::AnimationValues,
+) -> bool {
+    fn declares_name(value: &StyleValueData) -> bool {
+        match value {
+            StyleValueData::Keyword { keyword } => *keyword != keyword::NONE,
+            StyleValueData::ValueList { values, .. } => values.as_slice().iter().any(|item| declares_name(item.data())),
+            _ => true,
+        }
+    }
+    let is_declared = |handle: &crate::css::computed_value_types::ComputedStyleValueHandle| {
+        // SAFETY: A computed style group's handles point at retained style values it owns.
+        unsafe { handle.pointer.cast::<StyleValueData>().as_ref() }.is_some_and(declares_name)
+    };
+    is_declared(&values.scroll_timeline_name)
+        || is_declared(&values.view_timeline_name)
+        || is_declared(&values.timeline_scope)
+}
+
+/// Whether a parsed `view-timeline-inset` value has a length in a unit that is not absolute.
+pub(crate) fn view_timeline_inset_has_relative_length(value: &StyleValueData) -> bool {
+    let is_absolute = |unit: u8| {
+        matches!(
+            length_unit_kinds().get(unit as usize),
+            Some(LengthUnitKind::Px | LengthUnitKind::Absolute { .. })
+        )
+    };
+    fn has_relative_length(value: &StyleValueData, is_absolute: &dyn Fn(u8) -> bool) -> bool {
+        match value {
+            StyleValueData::Length { unit, .. } => !is_absolute(*unit),
+            StyleValueData::Calculated(calculated_payload) => {
+                let CalculatedPayload { rust_calculation, .. } = &**calculated_payload;
+                !rust_calculation
+                    .node()
+                    .is_computationally_independent(&|unit| is_absolute(unit), &|_| false)
+            }
+            StyleValueData::ValueList { values, .. } => values
+                .as_slice()
+                .iter()
+                .any(|value| has_relative_length(value.data(), is_absolute)),
+            _ => false,
+        }
+    }
+    has_relative_length(value, &is_absolute)
+}
+
+/// The timeline a computed `animation-timeline` item asks for.
+struct AnimationTimelineDescriptor {
+    kind: FfiAnimationTimelineKind,
+    scroller: u8,
+    axis: u8,
+    view_inset: FfiViewTimelineInset,
+    name: *const CssString,
+}
+
+fn animation_timeline_descriptor(value: &StyleValueData) -> AnimationTimelineDescriptor {
+    let descriptor = |kind, scroller, axis| AnimationTimelineDescriptor {
+        kind,
+        scroller,
+        axis,
+        view_inset: view_timeline_inset(None),
+        name: std::ptr::null(),
+    };
+    let optional_axis = |value: &RetainedStyleValueData| {
+        value
+            .optional_data()
+            .map(|value| match value {
+                StyleValueData::Keyword { keyword } => keyword_to_axis(*keyword).unwrap(),
+                _ => unreachable!("computed timeline axis must be a keyword"),
+            })
+            .unwrap_or(axis::BLOCK)
+    };
+    match value {
+        StyleValueData::Keyword { keyword } if *keyword == keyword::AUTO => {
+            descriptor(FfiAnimationTimelineKind::Document, scroller::NEAREST, axis::BLOCK)
+        }
+        StyleValueData::Keyword { keyword } if *keyword == keyword::NONE => {
+            descriptor(FfiAnimationTimelineKind::None, scroller::NEAREST, axis::BLOCK)
+        }
+        StyleValueData::Function(function) if fly_string_is_ascii(&function.name, b"scroll") => {
+            let value = &function.value;
+            let StyleValueData::Tuple { values } = value.data() else {
+                unreachable!("computed scroll() timeline must contain a tuple")
+            };
+            let arguments = values.as_slice();
+            let scroller = arguments[0]
+                .optional_data()
+                .map(|value| match value {
+                    StyleValueData::Keyword { keyword } => keyword_to_scroller(*keyword).unwrap(),
+                    _ => unreachable!("computed scroll() scroller must be a keyword"),
+                })
+                .unwrap_or(scroller::NEAREST);
+            descriptor(FfiAnimationTimelineKind::Scroll, scroller, optional_axis(&arguments[1]))
+        }
+        // https://drafts.csswg.org/scroll-animations-1/#view-notation
+        StyleValueData::Function(function) if fly_string_is_ascii(&function.name, b"view") => {
+            let value = &function.value;
+            let StyleValueData::Tuple { values } = value.data() else {
+                unreachable!("computed view() timeline must contain a tuple")
+            };
+            let arguments = values.as_slice();
+            AnimationTimelineDescriptor {
+                view_inset: view_timeline_inset(arguments[1].optional_data()),
+                ..descriptor(
+                    FfiAnimationTimelineKind::View,
+                    scroller::NEAREST,
+                    optional_axis(&arguments[0]),
+                )
+            }
+        }
+        StyleValueData::CustomIdent { custom_ident } => AnimationTimelineDescriptor {
+            name: custom_ident.as_ptr(),
+            ..descriptor(FfiAnimationTimelineKind::Named, scroller::NEAREST, axis::BLOCK)
+        },
+        _ => descriptor(FfiAnimationTimelineKind::Document, scroller::NEAREST, axis::BLOCK),
+    }
+}
+
+/// One edge of a computed animation attachment range, as the host takes it: the `TimelineRangeName` it is measured in,
+/// and its offset from the start of that range as a length plus a percentage of the range. `normal` is the start or the
+/// end of the entire timeline.
+/// https://drafts.csswg.org/scroll-animations-1/#animation-range-start
+fn animation_range_edge(value: &StyleValueData, default_percentage: f64) -> (u8, f64, f64, *const c_void) {
+    let range_name = |keyword: u16| match keyword {
+        keyword::COVER => 1,
+        keyword::CONTAIN => 2,
+        keyword::ENTRY => 3,
+        keyword::EXIT => 4,
+        keyword::ENTRY_CROSSING => 5,
+        keyword::EXIT_CROSSING => 6,
+        keyword::SCROLL => 7,
+        _ => 0,
+    };
+    let offset = |value: &StyleValueData| {
+        let (px, percentage) = length_plus_percentage(value);
+        (px, percentage, calculated_offset(value))
+    };
+    match value {
+        StyleValueData::Keyword { keyword } => (range_name(*keyword), 0.0, default_percentage, std::ptr::null()),
+        StyleValueData::ValueList { values, .. } => {
+            let [name, length_percentage] = values.as_slice() else {
+                unreachable!("computed animation range edge must be a range name and an offset")
+            };
+            let StyleValueData::Keyword { keyword } = name.data() else {
+                unreachable!("computed animation range edge must start with a range name")
+            };
+            let (px, percentage, calculated) = offset(length_percentage.data());
+            (range_name(*keyword), px, percentage, calculated)
+        }
+        value => {
+            let (px, percentage, calculated) = offset(value);
+            (0, px, percentage, calculated)
+        }
+    }
+}
+
+/// One edge of an animation attachment range, as `animation_range_edge` describes it.
+#[repr(C)]
+pub struct FfiAnimationRangeEdge {
+    pub name: u8,
+    pub offset_px: f64,
+    pub offset_percentage: f64,
+    /// A calculation the offset resolves against the size of its range, or null. See `calculated_offset`.
+    pub offset_calculated: *const c_void,
+}
+
+/// The edge a computed `animation-range-start` or `animation-range-end` value with a single item describes, for a range
+/// script sets. Answers false where the value has more than one item.
+pub(crate) fn rust_animation_range_edge(value: &StyleValueData, is_end: bool, out: &mut FfiAnimationRangeEdge) -> bool {
+    let item = match value {
+        StyleValueData::ValueList { values, separator, .. } if *separator == 1 => match values.as_slice() {
+            [item] => item.data(),
+            _ => return false,
+        },
+        value => value,
+    };
+    let (name, offset_px, offset_percentage, offset_calculated) =
+        animation_range_edge(item, if is_end { 100.0 } else { 0.0 });
+    *out = FfiAnimationRangeEdge {
+        name,
+        offset_px,
+        offset_percentage,
+        offset_calculated,
+    };
+    true
+}
+
+/// Which of an element's animation lists a computation belongs to, in the host's own numbering:
+/// zero for the element itself, and the pseudo-element's value plus one for each pseudo-element.
+pub(crate) fn animation_slot(pseudo_kind: u8) -> crate::css::style::animations::AnimationSlot {
+    match pseudo_kind == crate::css::cascaded_properties::NO_PSEUDO_ELEMENT {
+        true => 0,
+        false => pseudo_kind + 1,
+    }
+}
+
+/// Whether the element whose animation plan is about to be applied is in a `display: none` subtree,
+/// where no animation starts. Only asked where a definition claims no existing animation, the one
+/// case that starts one.
+///
+/// <https://drafts.csswg.org/css-animations-1/#animations>
+fn in_display_none_subtree_for_animations(
+    style_engine: &crate::css::style::StyleEngine,
+    node: crate::css::style::tree::StyleNodeID,
+    pseudo_kind: u8,
+    longhands: crate::css::style::ViewLonghands<'_>,
+    definitions: &[FfiComputedAnimation],
+) -> bool {
+    if !definitions
+        .iter()
+        .any(|definition| definition.matched_existing_index == crate::css::style::animations::NO_MATCHED_ANIMATION)
+    {
+        return false;
+    }
+    if longhands.effective_display(None).is_none() && !longhands.display_none_is_animated() {
+        return true;
+    }
+    // The element's own display is answered above, so an element's walk starts at the slot it is
+    // assigned to or its parent; a pseudo-element's starts at its originating element.
+    let start = match pseudo_kind == crate::css::cascaded_properties::NO_PSEUDO_ELEMENT {
+        true if style_engine.is_child_of_shadow_host_no_slot_takes(node) => return true,
+        true => style_engine
+            .assigned_slot_of(node)
+            .or_else(|| style_engine.parent_or_shadow_host(node)),
+        false => Some(node),
+    };
+    start.is_some_and(|start| style_engine.has_inclusive_ancestor_with_display_none_ignoring_animations(start))
+}
+
+/// The animation plan the record an element or pseudo-element holds decides, where applying it
+/// would change anything, and whether it is in a `display: none` subtree: what a C++ computation
+/// decides beside the record it computes, decided for a record the style engine settled once the
+/// host has installed it. The definitions borrow the record's values.
+fn settled_animation_plan(
+    style_engine: &crate::css::style::StyleEngine,
+    node: crate::css::style::tree::StyleNodeID,
+    pseudo_kind: u8,
+    record: &std::sync::Arc<crate::css::style::pipeline::Record>,
+) -> Option<(AnimationPlan, bool)> {
+    let plan = style_engine.animation_plan_of_record(node, pseudo_kind, record)?;
+    let longhands = crate::css::style::StyleRecordView::of_host_record(record).longhands();
+    let in_display_none_subtree =
+        in_display_none_subtree_for_animations(style_engine, node, pseudo_kind, longhands, &plan.definitions);
+    Some((plan, in_display_none_subtree))
+}
+
+/// Hands `apply` the animation plan of an element, or of its pseudo-element `pseudo_kind`, whose
+/// record the style engine settled, decided from the record it holds now that the host has
+/// installed it, where applying the plan would change anything, with whether it is in a
+/// `display: none` subtree.
+///
+/// # Safety
+/// `host` must be a live document host, on its document's thread, `record` must be the record the
+/// element or pseudo-element holds, `has_animations` whether it holds CSS-defined animations, and
+/// `apply` must not retain the definitions it is handed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_settled_animation_plan(
+    host: &crate::render_state::DocumentHost,
+    read: &crate::render_state::BegunRead,
+    node: u32,
+    pseudo_kind: u32,
+    record: *const c_void,
+    has_animations: bool,
+    context: *mut c_void,
+    apply: unsafe extern "C" fn(*mut c_void, *const FfiComputedAnimation, usize, bool),
+) {
+    let pseudo_kind = pseudo_kind as u8;
+    let Some(node) = crate::css::style::tree::StyleNodeID::from_raw(node) else {
+        return;
+    };
+    // SAFETY: Guaranteed by the caller.
+    let Some(record) = (unsafe { crate::css::style::bridge::retain_host_record(record) }) else {
+        return;
+    };
+    // A record that names no animation plans none for an element that holds none, which the host reads off the
+    // record without asking.
+    if !has_animations
+        && !crate::css::style::StyleRecordView::of_host_record(&record)
+            .longhands()
+            .declares_css_animations()
+    {
+        return;
+    }
+    // Applying the plan publishes the element's animations to the engine, so nothing of the
+    // engine is borrowed while the host applies it: the definitions only point into the record and
+    // the keyframe sets the plan holds.
+    let Some((plan, in_display_none_subtree)) = crate::css::style::engine_calls::with_engine(read, host, |engine| {
+        settled_animation_plan(engine, node, pseudo_kind, &record)
+    }) else {
+        return;
+    };
+    // https://drafts.csswg.org/css-animations-1/#animations
+    // Setting the 'display' property to 'none' will terminate any running animation applied to the element and its
+    // descendants. If an element has a 'display' of 'none', updating 'display' to a value other than 'none' will
+    // start all animations applied to the element by the 'animation-name' property, as well as all animations
+    // applied to descendants with 'display' other than 'none'.
+    // NB: We must not start animations on elements that are not rendered due to display:none. Once display becomes
+    //     something other than none, the resulting style recomputation applies the plan again and starts them.
+    //     Termination of running animations when display becomes none is handled by
+    //     Element::play_or_cancel_animations_after_display_property_change(). An element that has no animations and
+    //     starts none has nothing to hold or publish.
+    if !has_animations && (plan.definitions.is_empty() || in_display_none_subtree) {
+        return;
+    }
+    unsafe {
+        apply(
+            context,
+            plan.definitions.as_ptr(),
+            plan.definitions.len(),
+            in_display_none_subtree,
+        );
+    }
+}
+
+/// Whether a computed `animation-name` value names any animation.
+pub(crate) fn animation_names_declare_css_animations(names: &RetainedStyleValueData) -> bool {
+    let StyleValueData::ValueList { values, .. } = names.data() else {
+        unreachable!("computed animation-name must be a value list")
+    };
+    values
+        .as_slice()
+        .iter()
+        .any(|name| !matches!(name.data(), StyleValueData::Keyword { keyword } if *keyword == keyword::NONE))
+}
+
+/// The animation definitions a record decides for an element or pseudo-element, with the keyframe
+/// sets they name, which the plan holds while the host applies it.
+#[derive(Default)]
+pub(crate) struct AnimationPlan {
+    pub(crate) definitions: smallvec::SmallVec<[FfiComputedAnimation; 1]>,
+    keyframe_sets: smallvec::SmallVec<[std::sync::Arc<crate::animations::keyframes::KeyframeSet>; 1]>,
+}
+
+// https://drafts.csswg.org/css-values-4/#linked-properties
+// https://drafts.csswg.org/css-animations-1/#animations
+pub(crate) fn build_computed_animation_list<'k>(
+    longhands: crate::css::style::ViewLonghands<'_>,
+    existing_animations: &[crate::css::style::animations::CssDefinedAnimation],
+    resolve_keyframes: impl Fn(&[u16]) -> Option<&'k std::sync::Arc<crate::animations::keyframes::KeyframeSet>>,
+    plan: &mut AnimationPlan,
+) {
+    let AnimationPlan {
+        definitions: animations,
+        keyframe_sets,
+    } = plan;
+    use crate::css::property_metadata::property_id as prop;
+
+    let name_values = computed_value_list(longhands, prop::ANIMATION_NAME);
+    let duration_values = computed_value_list(longhands, prop::ANIMATION_DURATION);
+    let timing_function_values = computed_value_list(longhands, prop::ANIMATION_TIMING_FUNCTION);
+    let iteration_count_values = computed_value_list(longhands, prop::ANIMATION_ITERATION_COUNT);
+    let direction_values = computed_value_list(longhands, prop::ANIMATION_DIRECTION);
+    let play_state_values = computed_value_list(longhands, prop::ANIMATION_PLAY_STATE);
+    let delay_values = computed_value_list(longhands, prop::ANIMATION_DELAY);
+    let fill_mode_values = computed_value_list(longhands, prop::ANIMATION_FILL_MODE);
+    let composition_values = computed_value_list(longhands, prop::ANIMATION_COMPOSITION);
+    let timeline_values = computed_value_list(longhands, prop::ANIMATION_TIMELINE);
+    let range_start_values = computed_value_list(longhands, prop::ANIMATION_RANGE_START);
+    let range_end_values = computed_value_list(longhands, prop::ANIMATION_RANGE_END);
+
+    // The name of each definition, for matching against the animations the host holds.
+    let mut definition_names = smallvec::SmallVec::<[&crate::css::css_string::CssString; 1]>::new();
+    for (index, name_value) in name_values.iter().enumerate() {
+        let name = match name_value.data() {
+            StyleValueData::Keyword { keyword } if *keyword == keyword::NONE => continue,
+            StyleValueData::CustomIdent { custom_ident } => custom_ident,
+            StyleValueData::String { string, .. } => string,
+            _ => unreachable!("computed animation-name must be none or a string"),
+        };
+        if !existing_animations.is_empty() {
+            definition_names.push(name);
+        }
+        let duration_value = duration_values[index % duration_values.len()].data();
+        let (duration_is_auto, duration) = match duration_value {
+            StyleValueData::Keyword { keyword } if *keyword == keyword::AUTO => (true, 0.0),
+            value => (false, time_value_to_milliseconds(value)),
+        };
+        let iteration_count = match iteration_count_values[index % iteration_count_values.len()].data() {
+            StyleValueData::Keyword { keyword } if *keyword == keyword::INFINITE => f64::INFINITY,
+            StyleValueData::Number { value } => *value,
+            _ => unreachable!("computed animation-iteration-count must be a number or infinite"),
+        };
+        let keyword_value = |values: &[RetainedStyleValueData]| match values[index % values.len()].data() {
+            StyleValueData::Keyword { keyword } => *keyword,
+            _ => unreachable!("computed animation enum must be a keyword"),
+        };
+        let timeline = animation_timeline_descriptor(timeline_values[index % timeline_values.len()].data());
+        let (range_start_name, range_start_px, range_start_percentage, range_start_calculated) =
+            animation_range_edge(range_start_values[index % range_start_values.len()].data(), 0.0);
+        let (range_end_name, range_end_px, range_end_percentage, range_end_calculated) =
+            animation_range_edge(range_end_values[index % range_end_values.len()].data(), 100.0);
+        animations.push(FfiComputedAnimation {
+            duration_is_auto,
+            duration,
+            timing_function: timing_function_values[index % timing_function_values.len()]
+                .pointer()
+                .cast(),
+            iteration_count,
+            direction: keyword_to_animation_direction(keyword_value(direction_values)).unwrap(),
+            play_state: keyword_to_animation_play_state(keyword_value(play_state_values)).unwrap(),
+            delay: time_value_to_milliseconds(delay_values[index % delay_values.len()].data()),
+            fill_mode: keyword_to_animation_fill_mode(keyword_value(fill_mode_values)).unwrap(),
+            composition: keyword_to_animation_composition(keyword_value(composition_values)).unwrap(),
+            name: name.as_ptr(),
+            timeline_kind: timeline.kind,
+            scroll_scroller: timeline.scroller,
+            scroll_axis: timeline.axis,
+            view_inset: timeline.view_inset,
+            timeline_name: timeline.name,
+            range_start_name,
+            range_start_px,
+            range_start_percentage,
+            range_start_calculated,
+            range_end_name,
+            range_end_px,
+            range_end_percentage,
+            range_end_calculated,
+            matched_existing_index: crate::css::style::animations::NO_MATCHED_ANIMATION,
+            keyframe_set: resolve_keyframes(name.units()).map_or(std::ptr::null(), |set| {
+                keyframe_sets.push(set.clone());
+                std::sync::Arc::as_ptr(set).cast()
+            }),
+        });
+    }
+
+    // Which animation each definition claims is decided here, from the names the host published,
+    // rather than by the host searching the list it holds. An index past what the host's list can
+    // hold claims nothing.
+    crate::css::style::animations::match_existing_animations(
+        existing_animations,
+        &definition_names,
+        |definition, animation| {
+            animations[definition].matched_existing_index =
+                i32::try_from(animation).unwrap_or(crate::css::style::animations::NO_MATCHED_ANIMATION);
+        },
+    );
+}
+
+fn effective_keyword(
+    longhands: crate::css::style::ViewLonghands<'_>,
+    overlay: Option<&AnimatedOverlay>,
+    property_id: u16,
+) -> u16 {
+    keyword_from_style_value(longhands.effective_value(overlay, property_id).data())
+}
+
+fn webkit_box_layout_transformation_applies(
+    longhands: crate::css::style::ViewLonghands<'_>,
+    overlay: Option<&AnimatedOverlay>,
+) -> bool {
+    effective_keyword(longhands, overlay, property_id::_WEBKIT_BOX_ORIENT) == keyword::VERTICAL
+        && effective_keyword(longhands, overlay, property_id::CONTINUE) != keyword::AUTO
+}
+
+fn keyword_from_style_value(value: &StyleValueData) -> u16 {
+    let StyleValueData::Keyword { keyword } = value else {
+        unreachable!("keyword longhand must have a keyword value")
+    };
+    *keyword
+}
+
+// https://drafts.csswg.org/css-writing-modes-4/#svg-writing-mode-css
+fn computed_writing_mode_keyword(keyword: u16) -> u16 {
+    match keyword {
+        keyword::LR | keyword::LR_TB | keyword::RL | keyword::RL_TB => keyword::HORIZONTAL_TB,
+        keyword::TB | keyword::TB_RL => keyword::VERTICAL_RL,
+        _ => keyword,
+    }
+}
+
+pub(crate) fn writing_mode_from_specified_keyword(keyword: u16) -> Option<u8> {
+    keyword_to_writing_mode(computed_writing_mode_keyword(keyword))
+}
+
+/// The writing mode a computed `writing-mode` value holds.
+pub(crate) fn writing_mode_of(value: &RetainedStyleValueData) -> u8 {
+    value
+        .optional_data()
+        .and_then(|data| keyword_to_writing_mode(keyword_from_style_value(data)))
+        .unwrap_or(crate::css::css_enums::writing_mode::HORIZONTAL_TB)
+}
+
+/// The display a computed `display` value holds.
+pub(crate) fn display_of(value: &RetainedStyleValueData) -> FfiDisplay {
+    let Some(StyleValueData::Display { raw }) = value.optional_data() else {
+        unreachable!("display must have a display value")
+    };
+    FfiDisplay::from_raw(*raw)
+}
+
+/// Computes the document's own style into a record no element holds, which holds the default
+/// groups until `rust_intern_document_style` builds its own. Unlike a normal element drive, no
+/// cascade, inheritance, or element-specific adjustment participates. Answers one reference to the
+/// record, which the caller releases with `style_engine_record_release`.
+///
+/// # Safety
+/// `host` must be a live document host, on its document's thread, and `input` must point at a valid
+/// input block for the duration of this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_create_document_style_record(
+    host: &crate::render_state::DocumentHost,
+    read: &crate::render_state::BegunRead,
+    input: &FfiDocumentLonghandInput,
+) -> *const crate::css::style::pipeline::Record {
+    crate::css::style::engine_calls::with_engine(read, host, |engine| {
+        // SAFETY: Guaranteed by the caller.
+        unsafe { create_document_style_record(engine.default_groups(), input) }
+    })
+}
+
+/// The record `rust_create_document_style_record` answers, computed from `defaults`.
+///
+/// # Safety
+/// As for `rust_create_document_style_record`.
+unsafe fn create_document_style_record(
+    defaults: &crate::css::computed_values::DefaultGroups,
+    input: &FfiDocumentLonghandInput,
+) -> *const crate::css::style::pipeline::Record {
+    let store = CascadedPropertyStore::new();
+    let environment = FfiStyleComputationEnvironment {
+        box_type_input: FfiBoxTypeTransformationInput {
+            display: FfiDisplay::inline(),
+            position: keyword::STATIC,
+            float_value: keyword::NONE,
+            is_br_element: false,
+            is_document_element: false,
+            is_mathml_element: false,
+            is_mathml_mtable: false,
+            is_mathml_mtr: false,
+            is_mathml_mtd: false,
+            has_parent_display: false,
+            writing_mode: crate::css::css_enums::writing_mode::HORIZONTAL_TB,
+            parent_writing_mode: crate::css::css_enums::writing_mode::HORIZONTAL_TB,
+            is_svg_element: false,
+            parent_display: FfiDisplay::block(),
+            is_wbr_element: false,
+            disallow_display_contents: false,
+            rewrite_inline_flow: false,
+            is_button_element: false,
+            force_line_height_normal: false,
+            check_input_line_height: false,
+            hide_audio_without_controls: false,
+            is_table_element: false,
+            force_position_static: false,
+            force_symbol_display_inline: false,
+            webkit_box_layout_transformation_applies: false,
+            in_top_layer: false,
+        },
+        color_scheme_input: input.color_scheme_input,
+        is_th_element: false,
+        has_new_font_size: false,
+        new_font_size_includes_cascaded_value: false,
+        has_tree_counting_context: false,
+        sibling_count: 0,
+        sibling_index: 0,
+        random_base_values: std::ptr::null(),
+        random_base_value_count: 0,
+        document_base_url: std::ptr::null(),
+        document_base_url_length: 0,
+        style_sheet_resource_contexts: std::ptr::null(),
+        style_sheet_resource_context_count: 0,
+        device_pixels_per_css_pixel: input.device_pixels_per_css_pixel,
+        initial_font_size_raw: input.initial_font_size_raw,
+        default_font_size_raw: input.default_font_size_raw,
+        root_effective_zoom: 1.0,
+    };
+    // The document's values compute from nothing: from the default groups, which hold no values.
+    crate::css::computed_values::with_default_seed(defaults, |seed| {
+        let mut writer = crate::css::computed_values::GroupValuesWriter::seeded_for_child(
+            seed,
+            seed,
+            std::iter::empty(),
+            LonghandTableFlags::empty(),
+            0,
+        );
+        let mut results = empty_longhand_driver_results();
+        let mut effective_color_scheme = -1;
+        for phase in [
+            LONGHAND_DRIVE_PHASE_FONT,
+            LONGHAND_DRIVE_PHASE_LINE_HEIGHT,
+            LONGHAND_DRIVE_PHASE_COLOR_SCHEME,
+            LONGHAND_DRIVE_PHASE_REMAINING,
+        ] {
+            let length_resolution_context =
+                (phase != LONGHAND_DRIVE_PHASE_COLOR_SCHEME).then_some(&input.length_resolution_context);
+            unsafe {
+                drive_property_computation(
+                    &mut writer,
+                    &store,
+                    None,
+                    None,
+                    &environment,
+                    None,
+                    phase,
+                    length_resolution_context,
+                    None,
+                    &mut results,
+                    &mut effective_color_scheme,
+                    true,
+                    false,
+                );
+            }
+        }
+        writer.set(
+            property_id::WIDTH,
+            retained_new(StyleValueData::Length {
+                value: input.viewport_width,
+                unit: px_length_unit(),
+            }),
+        );
+        writer.set(
+            property_id::HEIGHT,
+            retained_new(StyleValueData::Length {
+                value: input.viewport_height,
+                unit: px_length_unit(),
+            }),
+        );
+        writer.set(
+            property_id::DISPLAY,
+            retained_new(StyleValueData::Display {
+                raw: FfiDisplay::block().encoded(),
+            }),
+        );
+        let (values, flags, dependency_flags) = writer.finish(&[]);
+        crate::css::style::bridge::document_style_record(values, flags, dependency_flags, defaults)
+    })
+}
+
+/// Builds the groups of the document's own style from the record `rust_create_document_style_record` made and
+/// interns the record holding them, which the caller pins. Answers the record.
+///
+/// # Safety
+/// `host` must be a live document host, on its document's thread. `record` must be a record
+/// `rust_create_document_style_record` made, which the caller holds, `font` the platform font inputs of its font
+/// group and `length` the context its lengths resolve against, each live for the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_intern_document_style(
+    host: &crate::render_state::DocumentHost,
+    read: &crate::render_state::BegunRead,
+    record: *const c_void,
+    font: *const crate::css::table_group_builder::FfiFontGroupBuildInputs,
+    length: *const FfiLengthResolutionContext,
+) -> u64 {
+    // SAFETY: Guaranteed by the caller.
+    let (font, length) = unsafe { (&*font, &*length) };
+    crate::css::style::engine_calls::with_engine(read, host, |engine| unsafe {
+        crate::css::style::bridge::intern_document_style(engine, record, font, length)
+    })
+}
+
+/// The values the keyframes of a sample compute to, one per resolved property, and what they read.
+pub(crate) struct AnimationKeyframeLonghands {
+    pub(crate) values: Vec<RetainedStyleValueData>,
+    pub(crate) depends_on_viewport_metrics: bool,
+    pub(crate) font_metrics_depend_on_viewport_metrics: bool,
+}
+
+/// Computes every selected keyframe longhand through the Rust longhand driver.
+/// Each keyframe gets a temporary table and the driver's coordination inputs
+/// from the underlying style, then all of that keyframe's specified values are
+/// cascaded together before its selected properties are evaluated. A custom
+/// property's value is the one `custom_property_values` holds at its index.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn compute_animation_keyframe_longhands(
+    underlying_longhands: crate::css::style::ViewLonghands<'_>,
+    style_engine: &crate::css::style::StyleEngine,
+    inheritance_parent_record: Option<&std::sync::Arc<crate::css::style::pipeline::Record>>,
+    properties: &[crate::css::animation::ResolvedAnimationProperty],
+    environment: &FfiStyleComputationEnvironment,
+    length_contexts: &FfiAnimationLengthContexts,
+    custom_property_values: &[Option<RetainedStyleValueData>],
+    preserve_background_lists: bool,
+) -> AnimationKeyframeLonghands {
+    use crate::css::property_metadata::{
+        FIRST_LONGHAND_PROPERTY_ID, LAST_LONGHAND_PROPERTY_ID, NUMBER_OF_LONGHAND_PROPERTIES,
+    };
+
+    if properties.is_empty() {
+        return AnimationKeyframeLonghands {
+            values: Vec::new(),
+            depends_on_viewport_metrics: false,
+            font_metrics_depend_on_viewport_metrics: false,
+        };
+    }
+    let parent_snapshot = inheritance_parent_record.map(keyframe_parent_snapshot_of_record);
+    let mut longhands_by_keyframe = std::collections::BTreeMap::<usize, Vec<usize>>::new();
+    for (index, property) in properties.iter().enumerate() {
+        if property.custom_name_id != 0 {
+            continue;
+        }
+        assert!((FIRST_LONGHAND_PROPERTY_ID..=LAST_LONGHAND_PROPERTY_ID).contains(&property.physical_property_id));
+        longhands_by_keyframe
+            .entry(property.keyframe_index)
+            .or_default()
+            .push(index);
+    }
+
+    const LONGHAND_WORD_COUNT: usize = NUMBER_OF_LONGHAND_PROPERTIES.div_ceil(64);
+    let mut values = std::iter::repeat_with(|| None)
+        .take(properties.len())
+        .collect::<Vec<_>>();
+    for (index, property) in properties.iter().enumerate() {
+        if property.custom_name_id == 0 {
+            continue;
+        }
+        let value = custom_property_values[index]
+            .clone()
+            .expect("a custom property's keyframe has a computed value");
+        values[index] = Some(value);
+    }
+    let mut depends_on_viewport_metrics = false;
+    let mut font_metrics_depend_on_viewport_metrics = false;
+    for indices in longhands_by_keyframe.values() {
+        // The keyframe drive reads only the selected longhands and the coordination inputs
+        // seeded below. Starting from the underlying table would retain and release every
+        // unrelated longhand for every keyframe on every animation sample.
+        let seeded: SmallVec<[(u16, RetainedStyleValueData); 4]> = [
+            property_id::_WEBKIT_BOX_ORIENT,
+            property_id::CONTINUE,
+            property_id::BACKGROUND_IMAGE,
+            // https://drafts.csswg.org/css-viewport/#zoom-property
+            // NB: The keyframe lengths are zoomed by the element's zoom, as its own lengths are.
+            property_id::ZOOM,
+        ]
+        .into_iter()
+        .filter_map(|property_id| Some((property_id, underlying_longhands.handle(property_id)?.clone_retained())))
+        .collect();
+        let mut store = CascadedPropertyStore::new();
+        for property_id in FIRST_LONGHAND_PROPERTY_ID..=LAST_LONGHAND_PROPERTY_ID {
+            if !is_required_driver_input(property_id) {
+                continue;
+            }
+            if let Some(value) = underlying_longhands.handle(property_id) {
+                store.seed_retained_property(property_id, value.clone_retained(), false, false);
+            }
+        }
+        let mut selected_longhands = [0; LONGHAND_WORD_COUNT];
+        let mut style_sheet_resource_contexts = Vec::new();
+        for &index in indices {
+            use crate::css::animation::FfiAnimationSpecifiedValueSource;
+
+            let property = &properties[index];
+            let value = match property.value_source {
+                FfiAnimationSpecifiedValueSource::Value => property.value.clone(),
+                FfiAnimationSpecifiedValueSource::Initial => initial_value_handle(property.source_longhand_id).clone(),
+                FfiAnimationSpecifiedValueSource::Underlying => underlying_longhands
+                    .handle(property.source_longhand_id)
+                    .expect("an animated longhand must have an underlying value")
+                    .clone_retained(),
+                FfiAnimationSpecifiedValueSource::Inherited => parent_snapshot
+                    .as_ref()
+                    .and_then(|snapshot| snapshot.value_handle(property.source_longhand_id))
+                    .unwrap_or_else(|| initial_value_handle(property.source_longhand_id))
+                    .clone(),
+            };
+            if property.is_transition {
+                values[index] = Some(value);
+                continue;
+            }
+            let style_sheet_resource_context =
+                if matches!(property.value_source, FfiAnimationSpecifiedValueSource::Value) {
+                    FfiStyleSheetResourceContext {
+                        base_url: property.style_sheet_resource_context.base_url,
+                        base_url_length: property.style_sheet_resource_context.base_url_length,
+                        has_value: property.style_sheet_resource_context.has_value,
+                        origin_clean: property.style_sheet_resource_context.origin_clean,
+                    }
+                } else {
+                    FfiStyleSheetResourceContext::empty()
+                };
+            let has_style_sheet_context = style_sheet_resource_context.has_value;
+            let source_slot =
+                store.seed_retained_property(property.physical_property_id, value, false, has_style_sheet_context);
+            if has_style_sheet_context {
+                let source_slot = source_slot as usize;
+                if style_sheet_resource_contexts.len() <= source_slot {
+                    style_sheet_resource_contexts.resize(source_slot + 1, FfiStyleSheetResourceContext::empty());
+                }
+                style_sheet_resource_contexts[source_slot] = style_sheet_resource_context;
+            }
+            set_longhand_bit(&mut selected_longhands, property.physical_property_id);
+        }
+        if selected_longhands.iter().all(|word| *word == 0) {
+            continue;
+        }
+        let mut environment = *environment;
+        environment.style_sheet_resource_contexts = style_sheet_resource_contexts.as_ptr();
+        environment.style_sheet_resource_context_count = style_sheet_resource_contexts.len();
+
+        crate::css::computed_values::with_default_seed(style_engine.default_groups(), |seed| {
+            let mut writer = crate::css::computed_values::GroupValuesWriter::seeded_for_child(
+                seed,
+                seed,
+                seeded.into_iter(),
+                LonghandTableFlags::empty(),
+                0,
+            );
+            let mut results = empty_longhand_driver_results();
+            let mut effective_color_scheme = -1;
+            for phase in [
+                LONGHAND_DRIVE_PHASE_FONT,
+                LONGHAND_DRIVE_PHASE_LINE_HEIGHT,
+                LONGHAND_DRIVE_PHASE_COLOR_SCHEME,
+                LONGHAND_DRIVE_PHASE_REMAINING,
+            ] {
+                let length_resolution_context = match phase {
+                    LONGHAND_DRIVE_PHASE_FONT => Some(&length_contexts.font),
+                    LONGHAND_DRIVE_PHASE_LINE_HEIGHT => Some(&length_contexts.line_height),
+                    LONGHAND_DRIVE_PHASE_COLOR_SCHEME => None,
+                    LONGHAND_DRIVE_PHASE_REMAINING => Some(&length_contexts.remaining),
+                    _ => unreachable!(),
+                };
+                unsafe {
+                    drive_property_computation(
+                        &mut writer,
+                        &store,
+                        parent_snapshot.as_ref(),
+                        None,
+                        &environment,
+                        Some(&selected_longhands),
+                        phase,
+                        length_resolution_context,
+                        None,
+                        &mut results,
+                        &mut effective_color_scheme,
+                        false,
+                        preserve_background_lists,
+                    );
+                }
+            }
+            depends_on_viewport_metrics |= results.depends_on_viewport_metrics;
+            font_metrics_depend_on_viewport_metrics |= results.font_metrics_depend_on_viewport_metrics;
+            for &index in indices {
+                if properties[index].is_transition {
+                    continue;
+                }
+                let value = writer
+                    .get(properties[index].physical_property_id)
+                    .expect("the keyframe longhand drive must store every selected property");
+                values[index] = Some(value.clone_retained());
+            }
+        });
+    }
+
+    AnimationKeyframeLonghands {
+        values: values
+            .into_iter()
+            .map(|value| value.expect("the keyframe longhand drive must produce every requested value"))
+            .collect(),
+        depends_on_viewport_metrics,
+        font_metrics_depend_on_viewport_metrics,
+    }
+}
+
+/// The arbitrary-substitution functions a value a keyframe substituted against the element held,
+/// which the host records on the element the way its own resolver recorded them.
+pub const SUBSTITUTION_MARK_VAR: u8 = 1 << 0;
+pub const SUBSTITUTION_MARK_ATTR: u8 = 1 << 1;
+pub const SUBSTITUTION_MARK_IF: u8 = 1 << 2;
+pub const SUBSTITUTION_MARK_INHERIT: u8 = 1 << 3;
+pub const SUBSTITUTION_MARK_CUSTOM_FUNCTION: u8 = 1 << 4;
+
+/// The length-resolution contexts keyframe values compute in: a font's, a line height's, and every
+/// other longhand's.
+#[repr(C)]
+pub struct FfiAnimationLengthContexts {
+    pub font: FfiLengthResolutionContext,
+    pub line_height: FfiLengthResolutionContext,
+    pub remaining: FfiLengthResolutionContext,
+}
+
+/// One element's animation effects the host samples over its working set, in composite order, and
+/// what the sampling reads of the element.
+#[repr(C)]
+pub struct FfiHostAnimationSample {
+    /// The host of the element's document, whose style engine the sample reads.
+    pub host: *const crate::render_state::DocumentHost,
+    pub style_node: u32,
+    /// The pseudo-element sampled, or `NO_PSEUDO_ELEMENT` for the element itself.
+    pub pseudo_kind: u8,
+    /// The element's effects that target what is sampled, in composite order, which the host describes to the engine
+    /// and samples where they have an animation.
+    pub effects: *const crate::animations::ffi::FfiSampledEffect,
+    pub effect_count: usize,
+    /// The element's animations, which follow what the host published of their effects to the engine.
+    pub animations: *mut crate::animations::element_animations::ElementAnimations,
+    /// The style record whose longhands the working set reads, which the animations compose over.
+    pub record: *const c_void,
+    /// The working set's overlay before this sample, or null.
+    pub animated_overlay: *const c_void,
+    /// The record the host holds for the element where the working set was reconstructed from it,
+    /// which the engine builds the length contexts over, or null where the host builds them.
+    pub style_record: *const c_void,
+    /// The custom-property store the element holds now, which keyframes substitute against.
+    pub custom_property_store: *const c_void,
+    /// The same beneath the overlay of the sample before, which animations compose over.
+    pub base_custom_property_store: *const c_void,
+    /// The store of the element the sampled one inherits from.
+    pub inheritance_custom_property_store: *const c_void,
+    pub element_declares_own_custom_properties: bool,
+    /// The identities of the element's custom-property environment and the one it inherits, under
+    /// which values substituted against the element hold.
+    pub custom_property_environments: [u64; 2],
+    /// The host's current registrations, which the engine may not have consumed yet.
+    pub custom_property_registration_generation: u64,
+    /// The record the host holds for the element the sampled one inherits from, or null.
+    pub inheritance_parent_record: *const c_void,
+    /// The document's side of the environment keyframes compute in. The engine fills in the
+    /// element's own: its place among its siblings and its random bases.
+    pub environment: *const FfiStyleComputationEnvironment,
+    /// The slot of the row of the box of the sampled element, a `NodeSlotId`'s index, invalid where it has none: the
+    /// render owner reads the transform reference box transforms interpolate against from it.
+    pub element_box_slot: u32,
+    pub callback_context: *mut c_void,
+    /// Makes the working set's overlay writable and hands it over, the moment a value is written.
+    pub prepare_overlay_for_mutation: unsafe extern "C" fn(*mut c_void) -> *mut c_void,
+    /// The element's length-resolution contexts, with the container bases the unit mask asks for.
+    pub length_contexts: unsafe extern "C" fn(*mut c_void, u8, *mut FfiAnimationLengthContexts),
+}
+
+/// What sampling did to the working set's overlay.
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FfiHostAnimationSampleOutcome {
+    /// Nothing was written.
+    Unchanged,
+    /// No effect is active: the element's animated properties are to be cleared.
+    Cleared,
+    /// The overlay was written through `prepare_overlay_for_mutation`.
+    Evaluated,
+}
+
+/// One custom property an animation composed, by the raw representation of its name.
+#[repr(C)]
+pub struct FfiAnimatedCustomPropertyResult {
+    pub name: usize,
+    pub value: *const c_void,
+}
+
+/// What sampling found out that the host records on the element and its working set.
+#[repr(C)]
+pub struct FfiHostAnimationSampleResult {
+    pub outcome: FfiHostAnimationSampleOutcome,
+    pub custom_properties_trigger_restyle: bool,
+    /// The non-inherited style groups a keyframe saying `inherit` read from the parent.
+    pub keyframes_inherited_non_inherited_style_groups: u32,
+    pub depends_on_viewport_metrics: bool,
+    pub font_metrics_depend_on_viewport_metrics: bool,
+    pub uses_tree_counting_function: bool,
+    /// The `SUBSTITUTION_MARK_*` bits of what the values and easings substituted against the
+    /// element held.
+    pub substitution_marks: u8,
+    pub animated_custom_properties: *const FfiAnimatedCustomPropertyResult,
+    pub animated_custom_property_count: usize,
+    /// Released with `rust_release_animated_custom_property_results`.
+    pub animated_custom_properties_storage: *mut c_void,
+}
+
+impl FfiHostAnimationSampleResult {
+    fn with_outcome(outcome: FfiHostAnimationSampleOutcome) -> Self {
+        Self {
+            outcome,
+            custom_properties_trigger_restyle: true,
+            keyframes_inherited_non_inherited_style_groups: 0,
+            depends_on_viewport_metrics: false,
+            font_metrics_depend_on_viewport_metrics: false,
+            uses_tree_counting_function: false,
+            substitution_marks: 0,
+            animated_custom_properties: std::ptr::null(),
+            animated_custom_property_count: 0,
+            animated_custom_properties_storage: std::ptr::null_mut(),
+        }
+    }
+}
+
+/// The custom properties a sample composed, with the names and values the rows point into.
+pub struct AnimatedCustomPropertyResults {
+    rows: Vec<FfiAnimatedCustomPropertyResult>,
+    _retained: Vec<(RetainedUtf16FlyString, RetainedStyleValueData)>,
+}
+
+/// Release what `rust_sample_animation_effects` handed back for the animated custom properties.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_release_animated_custom_property_results(storage: OwnedBox<AnimatedCustomPropertyResults>) {
+    drop(storage);
+}
+
+pub(crate) fn animation_length_resolution_context(
+    context: &FfiLengthResolutionContext,
+) -> crate::css::animation::FfiAnimationLengthResolutionContext {
+    let font_metrics = |metrics: &FfiFontMetrics| crate::css::animation::FfiAnimationFontMetrics {
+        font_size: metrics.font_size,
+        x_height: metrics.x_height,
+        cap_height: metrics.cap_height,
+        zero_advance: metrics.zero_advance,
+        line_height: metrics.line_height,
+    };
+    crate::css::animation::FfiAnimationLengthResolutionContext {
+        viewport_width: context.viewport_width,
+        viewport_height: context.viewport_height,
+        font_metrics: font_metrics(&context.font_metrics),
+        root_font_metrics: font_metrics(&context.root_font_metrics),
+        font_metrics_depend_on_viewport_metrics: context.font_metrics_depend_on_viewport_metrics,
+        root_font_metrics_depend_on_viewport_metrics: context.root_font_metrics_depend_on_viewport_metrics,
+    }
+}
+
+/// One effect the host samples: its description, and the timing the host samples it with, from which the engine
+/// computes how far along it is on the scale the host keys keyframes by.
+pub(crate) struct HostSampledEffect {
+    pub(crate) description: std::sync::Arc<crate::css::style::effect_descriptions::EffectDescription>,
+    pub(crate) timing: crate::animations::snapshot::CompactEffectTiming,
+}
+
+/// The effects a host samples on an element, in composite order.
+pub(crate) type HostSampledEffects = smallvec::SmallVec<[HostSampledEffect; 4]>;
+
+/// What a sample reads of the element it samples and of the working set it samples over.
+pub(crate) struct AnimationSampleInput<'a> {
+    pub(crate) style_node: u32,
+    pub(crate) record_dependencies: bool,
+    /// The pseudo-element sampled, or `NO_PSEUDO_ELEMENT` for the element itself.
+    pub(crate) pseudo_kind: u8,
+    pub(crate) effects: HostSampledEffects,
+    /// The working set's longhands, which the animations compose over.
+    pub(crate) longhands: crate::css::style::ViewLonghands<'a>,
+    /// Whether the working set held an overlay before this sample.
+    pub(crate) has_animated_overlay: bool,
+    /// The working set's color before this sample, which `currentcolor` interpolates as.
+    pub(crate) current_color: RetainedStyleValueData,
+    /// The record the host holds for the element where the working set was reconstructed from it,
+    /// which the engine builds the length contexts over, or none where the host builds them.
+    pub(crate) style_record: Option<std::sync::Arc<crate::css::style::pipeline::Record>>,
+    pub(crate) stores: crate::css::animation::KeyframeStores,
+    /// The identities of the element's custom-property environment and the one it inherits, under
+    /// which values substituted against the element hold.
+    pub(crate) custom_property_environments: [u64; 2],
+    pub(crate) custom_property_registration_generation: u64,
+    /// The record the host holds for the element the sampled one inherits from.
+    pub(crate) inheritance_parent_record: Option<std::sync::Arc<crate::css::style::pipeline::Record>>,
+    /// The document's side of the environment keyframes compute in.
+    pub(crate) environment: &'a FfiStyleComputationEnvironment,
+    /// The slot of the row of the box of the sampled element, invalid where it has none.
+    pub(crate) element_box_slot: u32,
+}
+
+/// The color of a working set, as its record and its overlay hold it.
+pub(crate) fn working_set_current_color(
+    longhands: crate::css::style::ViewLonghands<'_>,
+    overlay: Option<&AnimatedOverlay>,
+) -> RetainedStyleValueData {
+    longhands
+        .effective_value(overlay, crate::css::property_metadata::property_id::COLOR)
+        .clone()
+}
+
+impl AnimationSampleInput<'_> {
+    /// The context the effects evaluate in, resolving lengths against `length_resolution_context`
+    /// where there is one, and transforms against `reference_box`.
+    fn animation_context(
+        &self,
+        length_resolution_context: Option<&FfiLengthResolutionContext>,
+        reference_box: Option<CssPixelRect>,
+    ) -> crate::css::animation::FfiAnimationContext<'_> {
+        let mut context = crate::css::animation::FfiAnimationContext {
+            allow_discrete: length_resolution_context.is_some(),
+            allow_keyword_size_interpolation: crate::css::animation::allows_keyword_size_interpolation(
+                self.longhands,
+                None,
+            ),
+            current_color: Some(&self.current_color),
+            has_length_resolution_context: length_resolution_context.is_some(),
+            length_resolution_context: length_resolution_context
+                .map(animation_length_resolution_context)
+                .unwrap_or_default(),
+            has_transform_reference_box: false,
+            transform_reference_box_width: 0.0,
+            transform_reference_box_height: 0.0,
+        };
+        context.set_transform_reference_box(reference_box);
+        context
+    }
+
+    fn pseudo(&self) -> Option<u8> {
+        (self.pseudo_kind != crate::css::cascaded_properties::NO_PSEUDO_ELEMENT).then_some(self.pseudo_kind)
+    }
+}
+
+/// Whoever holds the working set a sample writes into.
+pub(crate) trait AnimationSampleHost {
+    /// Makes the working set's overlay writable and hands it over, the moment a value is written.
+    fn overlay_for_mutation(&mut self) -> &mut AnimatedOverlay;
+
+    /// The element's length-resolution contexts, with the container bases `unit_mask` asks for.
+    fn length_contexts(&mut self, unit_mask: u8) -> FfiAnimationLengthContexts;
+}
+
+/// The host's side of a sample, through the callbacks its input names.
+struct HostSampleCallbacks {
+    context: *mut c_void,
+    prepare_overlay_for_mutation: unsafe extern "C" fn(*mut c_void) -> *mut c_void,
+    length_contexts: unsafe extern "C" fn(*mut c_void, u8, *mut FfiAnimationLengthContexts),
+}
+
+impl AnimationSampleHost for HostSampleCallbacks {
+    fn overlay_for_mutation(&mut self) -> &mut AnimatedOverlay {
+        // SAFETY: The callbacks come from a host's input, whose callback hands over the working set's overlay,
+        //         uniquely owned for the sample. The overlay is borrowed for as long as this is.
+        unsafe { &mut *(self.prepare_overlay_for_mutation)(self.context).cast::<AnimatedOverlay>() }
+    }
+
+    fn length_contexts(&mut self, unit_mask: u8) -> FfiAnimationLengthContexts {
+        let mut length_contexts = std::mem::MaybeUninit::<FfiAnimationLengthContexts>::uninit();
+        // SAFETY: The callbacks come from a host's input, whose callback writes every context.
+        unsafe {
+            (self.length_contexts)(self.context, unit_mask, length_contexts.as_mut_ptr());
+            length_contexts.assume_init()
+        }
+    }
+}
+
+impl FfiHostAnimationSample {
+    /// Publishes the descriptions of the effects the sample reads to `host`'s engine, where they differ from those the
+    /// host last published for the element or pseudo-element it samples, and answers the effects it samples.
+    ///
+    /// # Safety
+    /// The effects, animations and element animations the input names must be live for the call.
+    unsafe fn publish_effect_descriptions(&self, host: &crate::render_state::DocumentHost) -> HostSampledEffects {
+        // SAFETY: Guaranteed by the caller.
+        let described = unsafe {
+            crate::animations::ffi::describe_sampled_effects(ak::slice_from_raw_parts(self.effects, self.effect_count))
+        };
+        let Some(node) = crate::css::style::tree::StyleNodeID::from_raw(self.style_node) else {
+            return described.sampled;
+        };
+        let slot = animation_slot(self.pseudo_kind);
+        // SAFETY: Guaranteed by the caller.
+        let animations = unsafe { &mut *self.animations };
+        if animations.publish_effect_descriptions(
+            crate::animations::element_animations::AnimationOwnerSlot(slot),
+            &described.descriptions,
+        ) {
+            host.queue_change(crate::render_state::ArenaChange::Engine(
+                crate::css::style::engine_calls::EngineWrite::AnimationEffectDescriptions {
+                    node,
+                    slot,
+                    effects: described
+                        .descriptions
+                        .into_iter()
+                        .map(crate::css::style::effect_descriptions::PublishedEffect::new)
+                        .collect(),
+                },
+            ));
+        }
+        described.sampled
+    }
+
+    /// What the sample reads, with `effects`, the effects it samples, and the callbacks through which it asks the host.
+    ///
+    /// # Safety
+    /// Every pointer and callback the input names must be live for the sample, and nothing but the
+    /// sample may write the working set's overlay while it runs.
+    unsafe fn adopt(&self, effects: HostSampledEffects) -> (AnimationSampleInput<'_>, HostSampleCallbacks) {
+        // SAFETY: Guaranteed by the caller.
+        let (longhands, animated_overlay, environment, style_record, inheritance_parent_record) = unsafe {
+            (
+                crate::css::style::ViewLonghands::of_raw_record(self.record),
+                self.animated_overlay.cast::<AnimatedOverlay>().as_ref(),
+                &*self.environment,
+                crate::css::style::bridge::retain_host_record(self.style_record),
+                crate::css::style::bridge::retain_host_record(self.inheritance_parent_record),
+            )
+        };
+        let input = AnimationSampleInput {
+            style_node: self.style_node,
+            record_dependencies: true,
+            pseudo_kind: self.pseudo_kind,
+            effects,
+            longhands,
+            has_animated_overlay: animated_overlay.is_some(),
+            current_color: working_set_current_color(longhands, animated_overlay),
+            style_record,
+            stores: crate::css::animation::KeyframeStores {
+                substitution: self.custom_property_store,
+                base: self.base_custom_property_store,
+                inheritance: self.inheritance_custom_property_store,
+                element_declares_custom_properties: self.element_declares_own_custom_properties,
+            },
+            custom_property_environments: self.custom_property_environments,
+            custom_property_registration_generation: self.custom_property_registration_generation,
+            inheritance_parent_record,
+            environment,
+            element_box_slot: self.element_box_slot,
+        };
+        let callbacks = HostSampleCallbacks {
+            context: self.callback_context,
+            prepare_overlay_for_mutation: self.prepare_overlay_for_mutation,
+            length_contexts: self.length_contexts,
+        };
+        (input, callbacks)
+    }
+}
+
+#[repr(C)]
+pub struct FfiReflectedKeyframeProperty {
+    pub keyframe_index: usize,
+    pub property_id: u16,
+    pub value: *const StyleValueData,
+}
+
+/// Compute CSS keyframe declarations without sampling or publishing an effect.
+/// The callback receives underlying values with `keyframe_count` as their index.
+///
+/// # Safety
+/// The input, declarations, resource context, and callback must be live for the call.
+/// No caller may hold a borrow of the style engine.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_compute_css_keyframe_values(
+    input: &FfiHostAnimationSample,
+    read: &crate::render_state::BegunRead,
+    properties: *const FfiReflectedKeyframeProperty,
+    property_count: usize,
+    keyframe_count: usize,
+    resource_context: &FfiStyleSheetResourceContext,
+    context: *mut c_void,
+    emit: unsafe extern "C" fn(*mut c_void, usize, u16, *const StyleValueData),
+) {
+    use crate::animations::keyframes::{KeyframeSet, ResourceContext};
+    use crate::css::animation as anim;
+    use crate::css::style::effect_descriptions::{EffectAnimation, EffectDescription, PublishedEffect};
+    use crate::css::style::engine_calls::{document_host, with_engine};
+
+    // SAFETY: Guaranteed by the caller.
+    let (host, (sample, mut callbacks), properties) = unsafe {
+        (
+            document_host(input.host),
+            input.adopt(HostSampledEffects::new()),
+            ak::slice_from_raw_parts(properties, property_count),
+        )
+    };
+    let Some(node) = crate::css::style::tree::StyleNodeID::from_raw(sample.style_node) else {
+        return;
+    };
+    let mut frames = vec![Vec::new(); keyframe_count];
+    for property in properties {
+        // SAFETY: Each declaration's value is live for the call.
+        let value = unsafe {
+            RetainedStyleValueData::from_retained_pointer(crate::css::style_value::retain_style_value(property.value))
+        };
+        frames[property.keyframe_index].push((property.property_id, value));
+    }
+    let resource_context = resource_context.has_value.then(|| ResourceContext {
+        // SAFETY: The resource context's URL is live for the call.
+        base_url: unsafe { ak::slice_from_raw_parts(resource_context.base_url, resource_context.base_url_length) }
+            .into(),
+        origin_clean: resource_context.origin_clean,
+    });
+    // NB: The keyframes compute as those of an effect of no animation of its own, which the style engine is not told of.
+    let mut description = EffectDescription::new(Default::default());
+    description.keyframe_set = Some(std::sync::Arc::new(KeyframeSet::for_value_computation(
+        frames,
+        resource_context,
+    )));
+    description.animation = EffectAnimation::Animation(crate::animations::easing::CompactEasing::Linear);
+    let effect = PublishedEffect::new(std::sync::Arc::new(description));
+    let resolved = with_engine(read, host, |engine| {
+        let (writing_mode, direction) = computed_writing_mode_and_direction(sample.longhands);
+        let conversions = std::cell::RefCell::new(anim::KeyframeConversionCache::new(
+            None,
+            sample.stores,
+            sample.custom_property_registration_generation,
+        ));
+        anim::resolve_published_animation_declarations(
+            engine,
+            node,
+            sample.pseudo(),
+            &[anim::SelectedEffect {
+                effect: &effect,
+                current_key: 0.0,
+            }],
+            sample.longhands,
+            sample.stores,
+            writing_mode,
+            direction,
+            &[],
+            &conversions,
+        )
+        .resolved
+    });
+    let length_contexts = callbacks.length_contexts(resolved.container_relative_length_unit_mask);
+    let values = with_engine(read, host, |engine| {
+        let sibling_position = resolved
+            .uses_tree_counting_function
+            .then(|| engine.element_sibling_position(node))
+            .flatten();
+        let random_base_values = resolved
+            .unfixed_random_sharings
+            .iter()
+            .map(|sharing| FfiRandomBaseValue {
+                source: sharing.source.cast(),
+                value: engine.ensure_random_base_value(Some(node), &sharing.name, sharing.element_shared),
+            })
+            .collect::<Vec<_>>();
+        let mut environment = *sample.environment;
+        environment.has_tree_counting_context = sibling_position.is_some();
+        environment.sibling_count = sibling_position.map_or(0, |(count, _)| u64::from(count));
+        environment.sibling_index = sibling_position.map_or(0, |(_, index)| u64::from(index));
+        environment.random_base_values = random_base_values.as_ptr();
+        environment.random_base_value_count = random_base_values.len();
+        compute_animation_keyframe_longhands(
+            sample.longhands,
+            engine,
+            sample.inheritance_parent_record.as_ref(),
+            &resolved.properties,
+            &environment,
+            &length_contexts,
+            &[],
+            true,
+        )
+        .values
+    });
+    for (property, value) in resolved.properties.iter().zip(&values) {
+        let coordinated = sample
+            .longhands
+            .handle(property.physical_property_id)
+            .expect("an animated longhand has an underlying value");
+        let underlying = sample
+            .longhands
+            .uncoordinated_background_value(property.physical_property_id)
+            .unwrap_or(coordinated);
+        let mut reflected = value.clone();
+        // AD-HOC: Computed keyframe values need not have the underlying background list's length. For web
+        // compatibility, reflection preserves underlying layers beyond a shorter keyframe declaration.
+        if BACKGROUND_LAYER_LONGHANDS.contains(&property.physical_property_id)
+            && let StyleValueData::ValueList {
+                values: declared,
+                separator,
+                collapsible,
+            } = value.data()
+            && let StyleValueData::ValueList { values: base, .. } = coordinated.data()
+            && declared.as_slice().len() < base.as_slice().len()
+        {
+            let mut items = declared.as_slice().to_vec();
+            items.extend_from_slice(&base.as_slice()[items.len()..]);
+            reflected = RetainedStyleValueData::from_owned(StyleValueData::ValueList {
+                values: crate::css::style_value::RetainedStyleValueDataList::from_retained_values(items),
+                separator: *separator,
+                collapsible: *collapsible,
+            });
+        }
+        // SAFETY: The callback and underlying value are live for this call.
+        unsafe {
+            emit(
+                context,
+                keyframe_count,
+                property.physical_property_id,
+                underlying.pointer(),
+            );
+        }
+        // SAFETY: The callback is live, and each computed value stays live until it returns.
+        unsafe {
+            emit(
+                context,
+                property.keyframe_index,
+                property.physical_property_id,
+                reflected.pointer(),
+            );
+        };
+    }
+}
+
+/// Sample one element's animation effects onto its working set's overlay.
+///
+/// The effects are sampled from the descriptions the host published of them: the style engine
+/// resolves their declarations, substitutes what was written as a token stream against the
+/// element, computes the keyframe values, and evaluates them. An effect with fewer than two
+/// keyframes to interpolate between composes nothing.
+///
+/// # Safety
+/// Every pointer in `input` must be live for the call, and nothing may hold a borrow of the style
+/// engine.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_sample_animation_effects(
+    input: &FfiHostAnimationSample,
+    read: &crate::render_state::BegunRead,
+) -> FfiHostAnimationSampleResult {
+    use crate::css::style::engine_calls::{document_host, with_engine_and_arena};
+
+    // SAFETY: Guaranteed by the caller.
+    let host = unsafe { document_host(input.host) };
+    // SAFETY: As above.
+    let (sample, mut callbacks) = unsafe { input.adopt(input.publish_effect_descriptions(host)) };
+    // The first sample of the transitions a step just started rides the style job that decided the step.
+    if let Some(result) = host.answer_fresh_transition_sample(&sample, &mut callbacks) {
+        return result;
+    }
+    let step = with_engine_and_arena(read, host, |engine, arena| {
+        sample_in_engine(&sample, &mut callbacks, engine, arena)
+    });
+    finish_sample_with_host(&sample, &mut callbacks, host, read, step)
+}
+
+/// https://drafts.csswg.org/web-animations-1/#commit-computed-styles
+/// Sample the effects `input` names onto its working set's overlay as committing computed styles does: each at the key
+/// its timing gives with the endpoint-inclusive active interval flag set, from descriptions the sample makes of its own,
+/// publishing nothing to the style engine and recording nothing the element's style depends on.
+///
+/// # Safety
+/// As for [`rust_sample_animation_effects`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_sample_animation_effects_for_commit_styles(
+    input: &FfiHostAnimationSample,
+    read: &crate::render_state::BegunRead,
+) -> FfiHostAnimationSampleResult {
+    use crate::css::style::effect_descriptions::PublishedEffect;
+    use crate::css::style::engine_calls::{document_host, with_engine_and_arena};
+
+    // SAFETY: Guaranteed by the caller.
+    let (host, described) = unsafe {
+        (
+            document_host(input.host),
+            crate::animations::ffi::describe_sampled_effects(ak::slice_from_raw_parts(
+                input.effects,
+                input.effect_count,
+            )),
+        )
+    };
+    let descriptions: Vec<_> = described
+        .descriptions
+        .iter()
+        .cloned()
+        .map(PublishedEffect::new)
+        .collect();
+    let composed: SampledEffects = described
+        .sampled
+        .iter()
+        .filter(|effect| effect.description.keyframes().len() >= 2)
+        .filter_map(|effect| {
+            Some(crate::css::animation::SampledAnimationEffect {
+                description: effect.description.clone(),
+                current_key: effect
+                    .timing
+                    .endpoint_inclusive_key(effect.description.timing_function.as_easing())?,
+            })
+        })
+        .collect();
+    // SAFETY: Guaranteed by the caller.
+    let (mut sample, mut callbacks) = unsafe { input.adopt(described.sampled) };
+    sample.record_dependencies = false;
+    let step = with_engine_and_arena(read, host, |engine, arena| {
+        let element_box = crate::layout::node_data::NodeSlotId {
+            index: sample.element_box_slot,
+        };
+        let reference_box =
+            crate::painting::ffi::committed_transform_reference_box(&arena.paintable_rows(), element_box);
+        let step = begin_animation_sample(
+            &sample,
+            &mut callbacks,
+            engine,
+            &descriptions,
+            composed,
+            reference_box,
+            Default::default(),
+        );
+        finish_sample_in_engine(&sample, &mut callbacks, engine, reference_box, step)
+    });
+    finish_sample_with_host(&sample, &mut callbacks, host, read, step)
+}
+
+/// Sample each of `count` elements' animation effects onto its working set's overlay, as
+/// [`rust_sample_animation_effects`] samples one, in one call of the style engine, and write what
+/// each sample found to `results`. Every element is one of the same document's.
+///
+/// # Safety
+/// As for [`rust_sample_animation_effects`], for each of the `count` inputs, and `results` must
+/// have room for `count` results.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_sample_animation_effects_each(
+    inputs: *const FfiHostAnimationSample,
+    count: usize,
+    read: &crate::render_state::BegunRead,
+    results: *mut FfiHostAnimationSampleResult,
+) {
+    use crate::css::style::engine_calls::{document_host, with_engine_and_arena};
+
+    // SAFETY: Guaranteed by the caller.
+    let inputs = unsafe { ak::slice_from_raw_parts(inputs, count) };
+    let Some(first) = inputs.first() else {
+        return;
+    };
+    debug_assert!(
+        inputs.iter().all(|input| input.host == first.host),
+        "a batch samples one document"
+    );
+    // SAFETY: As above.
+    let host = unsafe { document_host(first.host) };
+    // SAFETY: As above.
+    let mut samples: Vec<_> = inputs
+        .iter()
+        .map(|input| unsafe { input.adopt(input.publish_effect_descriptions(host)) })
+        .collect();
+    let steps: Vec<_> = with_engine_and_arena(read, host, |engine, arena| {
+        samples
+            .iter_mut()
+            .map(|(sample, callbacks)| sample_in_engine(sample, callbacks, engine, arena))
+            .collect()
+    });
+    for (index, ((sample, callbacks), step)) in samples.iter_mut().zip(steps).enumerate() {
+        let result = finish_sample_with_host(sample, callbacks, host, read, step);
+        // SAFETY: As above.
+        unsafe { results.add(index).write(result) };
+    }
+}
+
+/// Take the sample `input` asks for as far as one call of the engine goes: to its end, or to the
+/// length contexts the host builds.
+fn sample_in_engine(
+    input: &AnimationSampleInput,
+    host: &mut dyn AnimationSampleHost,
+    engine: &mut crate::css::style::StyleEngine,
+    arena: &crate::layout::LayoutNodeArena,
+) -> AnimationSampleStep {
+    // Transforms interpolate against the transform reference box of the element's box, which the render owner reads.
+    let element_box = crate::layout::node_data::NodeSlotId {
+        index: input.element_box_slot,
+    };
+    let reference_box = crate::painting::ffi::committed_transform_reference_box(&arena.paintable_rows(), element_box);
+    let composed = host_sampled_effects(input, engine);
+    let step = begin_animation_sample(
+        input,
+        host,
+        engine,
+        described_effects(input, engine),
+        composed,
+        reference_box,
+        Default::default(),
+    );
+    finish_sample_in_engine(input, host, engine, reference_box, step)
+}
+
+fn finish_sample_in_engine(
+    input: &AnimationSampleInput,
+    host: &mut dyn AnimationSampleHost,
+    engine: &mut crate::css::style::StyleEngine,
+    reference_box: Option<CssPixelRect>,
+    step: AnimationSampleStep,
+) -> AnimationSampleStep {
+    match step {
+        AnimationSampleStep::Resolved(sample) => match engine_length_contexts(input, engine, &sample) {
+            Some(length_contexts) => AnimationSampleStep::Sampled(finish_animation_sample(
+                input,
+                host,
+                engine,
+                sample,
+                &length_contexts,
+                reference_box,
+            )),
+            None => AnimationSampleStep::Resolved(sample),
+        },
+        sampled => sampled,
+    }
+}
+
+/// Finish a sample one call of the engine took to `step`: building the length contexts may read
+/// the engine, so the host builds them between two calls of it, over what the first one resolved.
+fn finish_sample_with_host(
+    input: &AnimationSampleInput,
+    host: &mut dyn AnimationSampleHost,
+    document_host: &crate::render_state::DocumentHost,
+    read: &crate::render_state::BegunRead,
+    step: AnimationSampleStep,
+) -> FfiHostAnimationSampleResult {
+    let sample = match step {
+        AnimationSampleStep::Sampled(result) => return result,
+        AnimationSampleStep::Resolved(sample) => sample,
+    };
+    let length_contexts = host.length_contexts(sample.resolved.container_relative_length_unit_mask);
+    let element_box = crate::layout::node_data::NodeSlotId {
+        index: input.element_box_slot,
+    };
+    crate::css::style::engine_calls::with_engine_and_arena(read, document_host, |engine, arena| {
+        let reference_box =
+            crate::painting::ffi::committed_transform_reference_box(&arena.paintable_rows(), element_box);
+        finish_animation_sample(input, host, engine, sample, &length_contexts, reference_box)
+    })
+}
+
+/// How far one call of the style engine took a sample. It lives for one call, so the resolved
+/// sample stays inline rather than taking an allocation.
+#[allow(clippy::large_enum_variant)]
+enum AnimationSampleStep {
+    Sampled(FfiHostAnimationSampleResult),
+    /// The declarations are resolved, and the keyframes compute over the element's length contexts.
+    Resolved(ResolvedAnimationSample),
+}
+
+/// The length contexts a resolved sample's keyframes compute over, where the engine builds them: over
+/// a record the host holds. The host builds them over a working set it is computing, and wherever they
+/// need a container base: resolving one marks the container asked about and, before layout, has it
+/// evaluated again after.
+fn engine_length_contexts(
+    input: &AnimationSampleInput,
+    engine: &crate::css::style::StyleEngine,
+    sample: &ResolvedAnimationSample,
+) -> Option<FfiAnimationLengthContexts> {
+    let record = input.style_record.as_ref()?;
+    if sample.resolved.container_relative_length_unit_mask != 0 {
+        return None;
+    }
+    Some(engine.animation_sample_length_contexts(sample.node, input.pseudo(), record))
+}
+
+/// A sample whose declarations are resolved, which computes its keyframe values over the element's
+/// length contexts. It owns what it holds, so it holds nothing of the engine between two calls.
+struct ResolvedAnimationSample {
+    node: crate::css::style::tree::StyleNodeID,
+    composed: SampledEffects,
+    resolved: Box<crate::css::animation::ResolvedAnimationDeclarations>,
+    custom_properties: crate::css::animation::AnimatedCustomProperties,
+    /// The effects that custom property intervals were selected from, indexed by each interval's effect index, which
+    /// keep the interval values the sample retains.
+    interval_effects: Vec<crate::css::style::effect_descriptions::PublishedEffect>,
+    result: FfiHostAnimationSampleResult,
+}
+
+/// The effects the host samples that the sample composes, each at the key its timing gives at the time
+/// the host sampled its timeline, keeping each timing for a sample at another time.
+fn host_sampled_effects(input: &AnimationSampleInput, engine: &mut crate::css::style::StyleEngine) -> SampledEffects {
+    let Some(node) = crate::css::style::tree::StyleNodeID::from_raw(input.style_node) else {
+        return SampledEffects::new();
+    };
+    let slot = animation_slot(input.pseudo_kind);
+    input
+        .effects
+        .iter()
+        .filter_map(|effect| {
+            let key = engine.time_element_animation_effect(node, slot, &effect.description, effect.timing);
+            let described = engine
+                .element_animation_effects(node, slot)
+                .iter()
+                .any(|described| std::sync::Arc::ptr_eq(described.description(), &effect.description));
+            debug_assert!(described, "the host describes every effect it samples");
+            (described && effect.description.keyframes().len() >= 2).then_some(
+                crate::css::animation::SampledAnimationEffect {
+                    description: effect.description.clone(),
+                    current_key: key?,
+                },
+            )
+        })
+        .collect()
+}
+
+/// The effects the engine describes for the element or pseudo-element `input` samples.
+fn described_effects<'a>(
+    input: &AnimationSampleInput,
+    engine: &'a crate::css::style::StyleEngine,
+) -> &'a [crate::css::style::effect_descriptions::PublishedEffect] {
+    crate::css::style::tree::StyleNodeID::from_raw(input.style_node).map_or(&[], |node| {
+        engine.element_animation_effects(node, animation_slot(input.pseudo_kind))
+    })
+}
+
+/// The effects a sample composes, in composite order, each at the key it samples its keyframes at.
+pub(crate) type SampledEffects = smallvec::SmallVec<[crate::css::animation::SampledAnimationEffect; 4]>;
+
+fn implicit_will_change_properties(
+    descriptions: &[crate::css::style::effect_descriptions::PublishedEffect],
+    timeline_samples: crate::css::style::animations::AnimationTimelineSamples<'_>,
+    writing_mode: u8,
+    direction: u8,
+) -> smallvec::SmallVec<[u16; 8]> {
+    let mut properties = smallvec::SmallVec::new();
+
+    let applicable_effects = descriptions.iter().filter(|effect| {
+        effect
+            .timing
+            .as_ref()
+            .is_some_and(|timing| timing.implies_will_change(timeline_samples))
+    });
+
+    for effect in applicable_effects {
+        effect.for_each_animated_longhand(|property| {
+            properties.push(map_logical_alias_to_physical(property, writing_mode, direction));
+        });
+    }
+
+    properties.sort_unstable();
+    properties.dedup();
+    properties
+}
+
+/// Take a sample of `composed`, effects `descriptions` describes, as far as the style engine goes
+/// without the host: to its end, or to the length contexts its keyframes compute over.
+fn begin_animation_sample(
+    input: &AnimationSampleInput,
+    host: &mut dyn AnimationSampleHost,
+    engine: &crate::css::style::StyleEngine,
+    descriptions: &[crate::css::style::effect_descriptions::PublishedEffect],
+    composed: SampledEffects,
+    reference_box: Option<CssPixelRect>,
+    timeline_samples: crate::css::style::animations::AnimationTimelineSamples<'_>,
+) -> AnimationSampleStep {
+    use crate::css::animation as anim;
+    use FfiHostAnimationSampleOutcome::{Cleared, Evaluated, Unchanged};
+
+    let finished = |outcome| AnimationSampleStep::Sampled(FfiHostAnimationSampleResult::with_outcome(outcome));
+    let Some(node) = crate::css::style::tree::StyleNodeID::from_raw(input.style_node) else {
+        return finished(Cleared);
+    };
+    let pseudo = input.pseudo();
+    let (writing_mode, direction) = computed_writing_mode_and_direction(input.longhands);
+    let description = |composed: &crate::css::animation::SampledAnimationEffect| {
+        descriptions
+            .iter()
+            .find(|description| std::sync::Arc::ptr_eq(description.description(), &composed.description))
+    };
+    let new_implicit_will_change_properties =
+        implicit_will_change_properties(descriptions, timeline_samples, writing_mode, direction);
+    if composed.is_empty() && new_implicit_will_change_properties.is_empty() {
+        return finished(Cleared);
+    }
+    let mutated_overlay = host.overlay_for_mutation();
+    if composed.is_empty() {
+        *mutated_overlay = mutated_overlay.clone_inherited();
+    }
+    let old_implicit_will_change_entries = &mut mutated_overlay.implicit_will_change;
+    let implicit_will_change_entries_changed =
+        old_implicit_will_change_entries.as_slice() != new_implicit_will_change_properties.as_slice();
+    if implicit_will_change_entries_changed {
+        new_implicit_will_change_properties
+            .as_slice()
+            .clone_into(old_implicit_will_change_entries);
+    }
+    if composed.is_empty() {
+        return finished(Evaluated);
+    }
+
+    // A preparation the overlay already holds for exactly these effects needs no declarations and
+    // no keyframe values at all.
+    if anim::animation_preparation_matches(Some(mutated_overlay), &composed, input.custom_property_environments) {
+        anim::evaluate_animations(anim::ComputedAnimationBatch {
+            context: input.animation_context(None, reference_box),
+            device_pixels_per_css_pixel: input.environment.device_pixels_per_css_pixel,
+            sampled_effects: &composed,
+            custom_property_environments: input.custom_property_environments,
+            cache_preparation: true,
+            preparation_reads_custom_property_environments: false,
+            preparation_inputs: None,
+            underlying_longhands: input.longhands,
+            overlay: mutated_overlay,
+            custom_underlying_values: &[],
+            custom_initial_values: &[],
+        });
+        return finished(Evaluated);
+    }
+
+    let stores = input.stores;
+    let selected: smallvec::SmallVec<[anim::SelectedEffect; 4]> = composed
+        .iter()
+        .filter_map(|composed| {
+            Some(anim::SelectedEffect {
+                effect: description(composed)?,
+                current_key: composed.current_key,
+            })
+        })
+        .collect();
+    let anim::PublishedAnimationDeclarations {
+        resolved,
+        custom_properties,
+        substitution_marks,
+        ..
+    } = {
+        // A keyframe value substitutes to what it did at the last sample while the stores and registrations it read
+        // stand, so that sample's conversions are reused.
+        let conversions = std::cell::RefCell::new(anim::KeyframeConversionCache::new(
+            host.overlay_for_mutation().keyframe_conversions.as_ref(),
+            stores,
+            input.custom_property_registration_generation,
+        ));
+        let declarations = anim::resolve_published_animation_declarations(
+            engine,
+            node,
+            pseudo,
+            &selected,
+            input.longhands,
+            stores,
+            writing_mode,
+            direction,
+            input.longhands.importance_bits(),
+            &conversions,
+        );
+        // SAFETY: The stores are null or live for the sample.
+        host.overlay_for_mutation().keyframe_conversions = unsafe {
+            conversions
+                .into_inner()
+                .finish(stores, input.custom_property_registration_generation)
+        };
+        declarations
+    };
+    let interval_effects = if custom_properties.intervals.is_empty() {
+        Vec::new()
+    } else {
+        selected.iter().map(|selection| selection.effect.clone()).collect()
+    };
+    drop(selected);
+    let mut result = FfiHostAnimationSampleResult::with_outcome(if implicit_will_change_entries_changed {
+        Evaluated
+    } else {
+        Unchanged
+    });
+    result.substitution_marks = substitution_marks;
+    // Effects whose keyframes declare nothing the element animates compose nothing at all, and
+    // leave the overlay as it was.
+    if resolved.properties.is_empty() {
+        return AnimationSampleStep::Sampled(result);
+    }
+
+    // A keyframe that inherits a non-inherited property leaves an invalidation mark on the parent.
+    for property in &resolved.properties {
+        if property.value_source != anim::FfiAnimationSpecifiedValueSource::Inherited
+            || property.custom_name_id != 0
+            || property_is_inherited(property.source_longhand_id)
+        {
+            continue;
+        }
+        result.keyframes_inherited_non_inherited_style_groups |=
+            crate::css::property_metadata::property_style_group_index(property.source_longhand_id)
+                .map_or(u32::MAX, |index| 1 << index);
+    }
+
+    AnimationSampleStep::Resolved(ResolvedAnimationSample {
+        node,
+        composed,
+        resolved,
+        custom_properties,
+        interval_effects,
+        result,
+    })
+}
+
+/// Compute a resolved sample's keyframe values over the element's length contexts, and evaluate its
+/// effects onto the working set's overlay.
+fn finish_animation_sample(
+    input: &AnimationSampleInput,
+    host: &mut dyn AnimationSampleHost,
+    engine: &mut crate::css::style::StyleEngine,
+    sample: ResolvedAnimationSample,
+    length_contexts: &FfiAnimationLengthContexts,
+    reference_box: Option<CssPixelRect>,
+) -> FfiHostAnimationSampleResult {
+    use crate::css::animation as anim;
+
+    let ResolvedAnimationSample {
+        node,
+        composed,
+        resolved,
+        mut custom_properties,
+        interval_effects,
+        mut result,
+    } = sample;
+    let table = input.longhands;
+    if input.record_dependencies && input.pseudo_kind == crate::css::cascaded_properties::NO_PSEUDO_ELEMENT {
+        engine
+            .note_keyframes_read_parent_reset_values(node, result.keyframes_inherited_non_inherited_style_groups != 0);
+    }
+
+    // The element's own side of the environment: its place among its siblings, and the random base
+    // value each random function a keyframe holds draws.
+    let sibling_position = (resolved.uses_tree_counting_function || !custom_properties.is_empty())
+        .then(|| engine.element_sibling_position(node))
+        .flatten();
+    let random_base_values = resolved
+        .unfixed_random_sharings
+        .iter()
+        .map(|sharing| FfiRandomBaseValue {
+            source: sharing.source.cast(),
+            value: engine.ensure_random_base_value(Some(node), &sharing.name, sharing.element_shared),
+        })
+        .collect::<Vec<_>>();
+    let mut environment = *input.environment;
+    environment.has_tree_counting_context = sibling_position.is_some();
+    environment.sibling_count = sibling_position.map_or(0, |(count, _)| u64::from(count));
+    environment.sibling_index = sibling_position.map_or(0, |(_, index)| u64::from(index));
+    environment.random_base_values = random_base_values.as_ptr();
+    environment.random_base_value_count = random_base_values.len();
+
+    let registry = engine.custom_property_registry();
+    let finalization = crate::css::custom_properties::CustomPropertyFinalization {
+        length: Some(&length_contexts.remaining),
+        tree_counting: sibling_position.map(|(count, index)| (u64::from(count), u64::from(index))),
+        random_base_values: &random_base_values,
+        color_scheme: u8::try_from(table.effective_color_scheme())
+            .unwrap_or(environment.color_scheme_input.preferred_color_scheme),
+        draw_random_base_value: None,
+    };
+    let mut custom_value_reads = crate::css::custom_properties::RegisteredValueReads::default();
+    let custom_values = resolved
+        .properties
+        .iter()
+        .map(|property| match property.custom_name_id {
+            0 => None,
+            _ => {
+                let (value, reads) = custom_properties.computed_value(registry, property, &finalization);
+                custom_value_reads |= reads;
+                Some(value)
+            }
+        })
+        .collect::<Vec<_>>();
+    // https://drafts.csswg.org/css-values-4/#font-relative-lengths
+    // NB: A registered custom property's keyframe value relative to a metric of the element's or the document
+    //     element's first available font reads that font, as any other keyframe value does.
+    engine.want_first_available_font_loads_for(
+        node,
+        input.pseudo(),
+        crate::css::animation::FontMetricReads {
+            own: custom_value_reads.font_metrics,
+            parent: false,
+            root: custom_value_reads.root_font == RootFontReads::Metrics,
+        },
+    );
+    let (underlying_values, initial_values) = custom_properties.underlying_and_initial_values(registry);
+
+    let computed_keyframes = compute_animation_keyframe_longhands(
+        input.longhands,
+        engine,
+        input.inheritance_parent_record.as_ref(),
+        &resolved.properties,
+        &environment,
+        length_contexts,
+        &custom_values,
+        false,
+    );
+    result.depends_on_viewport_metrics = computed_keyframes.depends_on_viewport_metrics;
+    result.font_metrics_depend_on_viewport_metrics = computed_keyframes.font_metrics_depend_on_viewport_metrics;
+    // A custom property's keyframe that asks where the element sits among its siblings makes the
+    // element's style depend on it just as a longhand's does.
+    result.uses_tree_counting_function = resolved.uses_tree_counting_function
+        || resolved.properties.iter().any(|property| {
+            property.custom_name_id != 0
+                && property.value_source == anim::FfiAnimationSpecifiedValueSource::Value
+                && matches!(property.value.data(), StyleValueData::Unresolved(unresolved)
+                    if unresolved.facts().calls_tree_counting_function())
+        });
+
+    // A preparation cached under these effects must hold for as long as they stand, so one that
+    // read anything outside them is not kept, and one that substituted against the element's
+    // custom-property environments is kept only under those.
+    let cache_preparation = custom_properties.is_empty()
+        && !resolved.uses_tree_counting_function
+        && resolved.container_relative_length_unit_mask == 0
+        && !resolved.needs_document_base_url
+        && resolved.unfixed_random_sharings.is_empty();
+
+    let has_non_custom_property_animation = resolved.properties.iter().any(|property| property.custom_name_id == 0);
+
+    let mut batch = anim::ComputedAnimationBatch {
+        context: input.animation_context(Some(&length_contexts.remaining), reference_box),
+        device_pixels_per_css_pixel: input.environment.device_pixels_per_css_pixel,
+        sampled_effects: &composed,
+        custom_property_environments: input.custom_property_environments,
+        cache_preparation,
+        preparation_reads_custom_property_environments: result.substitution_marks != 0,
+        preparation_inputs: Some(anim::AnimationPreparationInputs {
+            resolved,
+            computed_keyframe_values: computed_keyframes.values,
+        }),
+        underlying_longhands: input.longhands,
+        overlay: host.overlay_for_mutation(),
+        custom_underlying_values: &underlying_values,
+        custom_initial_values: &initial_values,
+    };
+    let mut preparation = anim::prepare_animations(&mut batch);
+    let custom_results = anim::evaluate_prepared_animations(&preparation, &mut batch);
+    result.outcome = FfiHostAnimationSampleOutcome::Evaluated;
+    if !custom_results.is_empty() {
+        let mut retained = custom_results
+            .into_iter()
+            .map(|(custom_name_id, value)| (custom_properties.name(custom_name_id).clone(), value))
+            .collect::<Vec<_>>();
+        // https://drafts.csswg.org/css-values-5/#cyclic-substitution-contexts
+        // NB: The substitution contexts of a cycle through an animation are marked cyclic like those of any other,
+        //     where a property holding a value of its keyframes substitutes what it reads. What they read has to be
+        //     looked at here, since each pass only substitutes the values the last one left.
+        let cycle_pseudo =
+            (input.pseudo_kind != crate::css::cascaded_properties::NO_PSEUDO_ELEMENT).then_some(input.pseudo_kind);
+        // SAFETY: The stores are null or live for the sample.
+        let inherited = unsafe {
+            input
+                .stores
+                .inheritance
+                .cast::<crate::css::custom_properties::CustomPropertyStore>()
+                .as_ref()
+        };
+        let cyclic_declarations = engine.check_custom_property_animation_cycles(
+            node,
+            cycle_pseudo,
+            input.stores.base,
+            input.stores.inheritance,
+            &retained,
+            &mut custom_properties.intervals,
+        );
+        // NB: Preparations containing custom properties are not cached, so this sample owns its preparation.
+        let preparation =
+            std::sync::Arc::get_mut(&mut preparation).expect("custom-property preparations are not shared");
+        if preparation.replace_cyclic_custom_property_endpoints(&custom_properties.intervals, registry, inherited) {
+            retained = anim::evaluate_prepared_animations(preparation, &mut batch)
+                .into_iter()
+                .map(|(custom_name_id, value)| (custom_properties.name(custom_name_id).clone(), value))
+                .collect();
+            // NB: Resolve surviving unset markers to the inherited or initial value. See the AD-HOC comment
+            //     in PreparedAnimationBatch::replace_cyclic_custom_property_endpoints for why this is deferred.
+            for (name, value) in &mut retained {
+                if matches!(value.data(), StyleValueData::Keyword { keyword } if *keyword == keyword::UNSET) {
+                    *value = registry.invalid_at_computed_value_time(name, inherited);
+                }
+            }
+        }
+        for name in cyclic_declarations {
+            let value = registry.invalid_at_computed_value_time(&name, inherited);
+            retained.push((name, value));
+        }
+        // The element's own custom properties that read an animated one move with it, whether or
+        // not they resolved to what it inherits.
+        let pseudo =
+            (input.pseudo_kind != crate::css::cascaded_properties::NO_PSEUDO_ELEMENT).then_some(input.pseudo_kind);
+        let readers = engine.resolve_custom_properties_reading_animated_values(
+            node,
+            pseudo,
+            input.stores.base,
+            input.stores.inheritance,
+            &retained,
+            finalization,
+        );
+        // Failed resolution keeps the default full restyle. On success, only consumers not
+        // updated by this sample can require one.
+        if let Ok(readers) = readers {
+            retained.extend(readers);
+
+            let uncached_interval_values_may_need_substitution =
+                custom_properties.has_uncached_interval_values && result.substitution_marks != 0;
+
+            result.custom_properties_trigger_restyle = engine.animated_custom_properties_trigger_restyle(
+                node,
+                pseudo,
+                &retained,
+                has_non_custom_property_animation,
+                uncached_interval_values_may_need_substitution,
+                input.custom_property_registration_generation,
+            );
+        }
+        assert_eq!(
+            custom_properties.registration_generation,
+            engine.custom_property_registration_generation(),
+            "animation sampling preserves custom property registrations"
+        );
+        let registry = engine.custom_property_registry();
+        for interval in custom_properties.intervals {
+            interval_effects[interval.effect_index].update_retained_custom_property_interval_values(interval, registry);
+        }
+        let rows = retained
+            .iter()
+            .map(|(name, value)| FfiAnimatedCustomPropertyResult {
+                name: name.raw(),
+                value: value.pointer().cast(),
+            })
+            .collect();
+        let storage = Box::new(AnimatedCustomPropertyResults {
+            rows,
+            _retained: retained,
+        });
+        result.animated_custom_properties = storage.rows.as_ptr();
+        result.animated_custom_property_count = storage.rows.len();
+        result.animated_custom_properties_storage = Box::into_raw(storage).cast();
+    }
+    result
+}
+
+/// Samples `composed` onto the overlay `input` names, as far as the engine goes without the host, and
+/// answers what the sample found: for an element whose length contexts the engine builds over the
+/// record it holds, and whose keyframes read nothing else only the host knows, such as a container's
+/// size, a style query, an animated custom property, a document URL or a random base value. The effects
+/// are the element's, or `fresh` ones the engine does not describe yet. What a keyframe substitutes the
+/// host notes as its own sample substitutes it again.
+pub(crate) fn sample_without_host(
+    input: &AnimationSampleInput,
+    overlay: &mut AnimatedOverlay,
+    engine: &mut crate::css::style::StyleEngine,
+    fresh: Option<&[crate::css::style::effect_descriptions::PublishedEffect]>,
+    composed: SampledEffects,
+    reference_box: Option<CssPixelRect>,
+    timeline_samples: crate::css::style::animations::AnimationTimelineSamples<'_>,
+) -> Result<FfiHostAnimationSampleResult, crate::css::style::engine_sample::NeedsHost> {
+    use crate::css::style::engine_sample::NeedsHost;
+
+    let mut host = EngineSampleHost(overlay);
+    let descriptions = fresh.unwrap_or_else(|| described_effects(input, engine));
+    let sample = match begin_animation_sample(
+        input,
+        &mut host,
+        engine,
+        descriptions,
+        composed,
+        reference_box,
+        timeline_samples,
+    ) {
+        AnimationSampleStep::Sampled(result) => return Ok(result),
+        AnimationSampleStep::Resolved(sample) => sample,
+    };
+    let resolved = &sample.resolved;
+    let Some(length_contexts) = engine_length_contexts(input, engine, &sample) else {
+        return Err(NeedsHost);
+    };
+    if !sample.custom_properties.is_empty()
+        || resolved.needs_document_base_url
+        || !resolved.unfixed_random_sharings.is_empty()
+    {
+        return Err(NeedsHost);
+    }
+    let result = finish_animation_sample(input, &mut host, engine, sample, &length_contexts, reference_box);
+    debug_assert!(result.animated_custom_properties_storage.is_null());
+    Ok(result)
+}
+
+/// The engine's side of a sample without the host, which holds the overlay the sample writes, and
+/// builds the length contexts itself.
+struct EngineSampleHost<'a>(&'a mut AnimatedOverlay);
+
+impl AnimationSampleHost for EngineSampleHost<'_> {
+    fn overlay_for_mutation(&mut self) -> &mut AnimatedOverlay {
+        self.0
+    }
+
+    fn length_contexts(&mut self, _: u8) -> FfiAnimationLengthContexts {
+        unreachable!("a sample without the host builds its length contexts itself");
+    }
+}
+
+/// What the post-compute adjustments of an element change.
+struct PostComputeAdjustedValues {
+    /// The adjusted longhands' computed values.
+    values: SmallVec<[(u16, StyleValueData); 5]>,
+    /// The longhands whose computed values are no longer important or inherited.
+    cleared_flags: SmallVec<[u16; 5]>,
+}
+
+fn post_compute_adjusted_values(
+    adjustment: &PostComputeAdjustment,
+    input_line_height_metrics: &FfiInputLineHeightMetrics,
+) -> PostComputeAdjustedValues {
+    use crate::css::property_metadata::property_id as prop;
+
+    let transformation = adjustment.box_type_transformation;
+    let element_adjustment = adjustment.element_style_adjustment;
+    let clamp_input_line_height = should_clamp_input_line_height(&element_adjustment, input_line_height_metrics);
+    let display_after_box_type_transformation = if transformation.changed_display {
+        transformation.display
+    } else {
+        adjustment.display_before
+    };
+    let adjusted_display = if element_adjustment.changed_display {
+        element_adjustment.display
+    } else {
+        display_after_box_type_transformation
+    };
+    let mut adjusted = PostComputeAdjustedValues {
+        values: SmallVec::new(),
+        cleared_flags: SmallVec::new(),
+    };
+    let mut adjust = |changed: bool, property_id: u16, value: StyleValueData| {
+        if changed {
+            adjusted.values.push((property_id, value));
+        }
+    };
+    adjust(
+        transformation.set_float_none,
+        prop::FLOAT,
+        StyleValueData::Keyword { keyword: keyword::NONE },
+    );
+    adjust(
+        transformation.set_position_absolute,
+        prop::POSITION,
+        StyleValueData::Keyword {
+            keyword: keyword::ABSOLUTE,
+        },
+    );
+    adjust(
+        adjusted_display != adjustment.display_before,
+        prop::DISPLAY,
+        StyleValueData::Display {
+            raw: adjusted_display.encoded(),
+        },
+    );
+    let line_height_changed = element_adjustment.set_line_height_normal || clamp_input_line_height;
+    adjust(
+        line_height_changed,
+        prop::LINE_HEIGHT,
+        StyleValueData::Keyword {
+            keyword: keyword::NORMAL,
+        },
+    );
+    adjust(
+        element_adjustment.set_position_static,
+        prop::POSITION,
+        StyleValueData::Keyword {
+            keyword: keyword::STATIC,
+        },
+    );
+    adjust(
+        element_adjustment.changed_text_align,
+        prop::TEXT_ALIGN,
+        StyleValueData::Keyword {
+            keyword: element_adjustment.text_align,
+        },
+    );
+    for (changed, property_id) in [
+        (transformation.set_float_none, prop::FLOAT),
+        (transformation.set_position_absolute, prop::POSITION),
+        (
+            transformation.changed_display || element_adjustment.changed_display,
+            prop::DISPLAY,
+        ),
+        (line_height_changed, prop::LINE_HEIGHT),
+        (element_adjustment.set_position_static, prop::POSITION),
+        (element_adjustment.changed_text_align, prop::TEXT_ALIGN),
+    ] {
+        if changed {
+            adjusted.cleared_flags.push(property_id);
+        }
+    }
+    adjusted
+}
+
+fn property_affects_font_metrics(property_id: u16) -> bool {
+    property_id == crate::css::property_metadata::property_id::FONT_SIZE
+        || property_id == crate::css::property_metadata::property_id::LINE_HEIGHT
+}
+
+pub(crate) fn value_is_css_wide_keyword(value: &StyleValueData) -> bool {
+    match value {
+        StyleValueData::Keyword { keyword } => matches!(
+            *keyword,
+            keyword::INHERIT | keyword::INITIAL | keyword::UNSET | keyword::REVERT | keyword::REVERT_LAYER
+        ),
+        _ => false,
+    }
+}
+
+/// The expansion recursion over shared Rust value data. `has_style_sheet_context`
+/// follows boundary values through CSS-wide propagation, while nested shorthand
+/// values have no facade-local resource context.
+pub(crate) fn expand_shorthands_with<Sink>(
+    property_id: u16,
+    data: &RetainedStyleValueData,
+    has_style_sheet_context: bool,
+    sink: &mut Sink,
+) where
+    Sink: FnMut(u16, &RetainedStyleValueData, bool),
+{
+    let value = data.data();
+    let is_shorthand = property_is_shorthand(property_id);
+
+    if is_shorthand
+        && matches!(
+            value,
+            StyleValueData::Unresolved { .. } | StyleValueData::PendingSubstitution { .. }
+        )
+    {
+        // If a shorthand property contains an arbitrary substitution function in its value, the
+        // longhand properties it's associated with must instead be filled in with a special,
+        // unobservable-to-authors pending-substitution value that indicates the shorthand
+        // contains an arbitrary substitution function, and thus the longhand's value can't be
+        // determined until after substituted.
+        // https://drafts.csswg.org/css-values-5/#pending-substitution-value
+        // Ensure we keep the longhand around until it can be resolved.
+        sink(property_id, data, has_style_sheet_context);
+        let pending = RetainedStyleValueData::from_arc(StyleValueArc::new(StyleValueData::PendingSubstitution {
+            original_shorthand: property_id,
+            original_shorthand_value: data.clone(),
+        }));
+        for &longhand in longhands_for_shorthand(property_id) {
+            expand_shorthands_with(longhand, &pending, has_style_sheet_context, sink);
+        }
+        return;
+    }
+
+    if let StyleValueData::Shorthand(shorthand_payload) = value {
+        let ShorthandPayload {
+            sub_properties, values, ..
+        } = &**shorthand_payload;
+        for (&sub_property, sub_value) in sub_properties.as_slice().iter().zip(values.as_slice()) {
+            expand_shorthands_with(sub_property, sub_value, false, sink);
+        }
+        return;
+    }
+
+    if is_shorthand {
+        // ShorthandStyleValue was handled already, as were unresolved shorthands. That means the
+        // only values we should see are the CSS-wide keywords, or the guaranteed-invalid value.
+        // Both should be applied to our longhand properties. We do not directly set the longhand
+        // because the longhands might have longhands of their own.
+        assert!(value_is_css_wide_keyword(value) || matches!(value, StyleValueData::GuaranteedInvalid));
+        for &longhand in longhands_for_shorthand(property_id) {
+            expand_shorthands_with(longhand, data, has_style_sheet_context, sink);
+        }
+        return;
+    }
+
+    sink(property_id, data, has_style_sheet_context);
+}
+
+mod adjustments;
+pub(crate) use adjustments::*;
+
+/// The value of `property` the element whose style is `record` reads, with what `overlay` composes over it where
+/// `with_animations` asks for that, and which source it is.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_style_record_effective_value(
+    record: &crate::css::style::pipeline::Record,
+    overlay: Option<&AnimatedOverlay>,
+    property: u16,
+    with_animations: bool,
+) -> crate::css::computed_longhand_table::FfiEffectiveLonghandValue {
+    let longhands = crate::css::style::ViewLonghands::of_record(record);
+    let (value, source) = longhands.effective_value_and_source(overlay, property, with_animations);
+    crate::css::computed_longhand_table::FfiEffectiveLonghandValue {
+        value: value.pointer().cast(),
+        source,
+    }
+}
+
+/// The computed value of `property` that the style `record` holds, or null, borrowed while the
+/// record lives.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_style_record_longhand(
+    record: &crate::css::style::pipeline::Record,
+    property: u16,
+) -> *const c_void {
+    crate::css::style::ViewLonghands::of_record(record)
+        .handle(property)
+        .map_or(std::ptr::null(), |value| value.pointer().cast())
+}
+
+/// One bit per longhand of the style `record`: whether its value is important.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_style_record_importance_bits(record: &crate::css::style::pipeline::Record) -> *const u8 {
+    crate::css::style::ViewLonghands::of_record(record)
+        .importance_bits()
+        .as_ptr()
+}
+
+/// What the computation of the style `record` settled beside its values, which the host starts an update of the
+/// element's style from.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_style_record_metadata(
+    record: &crate::css::style::pipeline::Record,
+) -> crate::css::computed_longhand_table::FfiComputedStyleMetadata {
+    crate::css::style::ViewLonghands::of_record(record).metadata()
+}
+
+/// Computes the font-weight property from its absolutized value.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_compute_font_weight(
+    absolutized_value: &StyleValueData,
+    inherited_font_weight: f64,
+) -> FfiComputedNumber {
+    compute_font_weight(absolutized_value, inherited_font_weight).into()
+}
+
+#[cfg(test)]
+pub(crate) mod ffi_test_stubs;
+
+#[cfg(test)]
+mod tests;

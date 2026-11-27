@@ -1,0 +1,15 @@
+// https://compression.spec.whatwg.org/#enumdef-compressionformat
+enum CompressionFormat {
+    "brotli",
+    "deflate",
+    "deflate-raw",
+    "gzip",
+};
+
+// https://compression.spec.whatwg.org/#compressionstream
+[Exposed=*, ImplementedIn=Rust]
+interface CompressionStream {
+    constructor(CompressionFormat format);
+};
+
+CompressionStream includes GenericTransformStream;

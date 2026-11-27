@@ -1,0 +1,31 @@
+enum AddressType {
+    "i32",
+    "i64"
+};
+
+typedef any AddressValue;
+
+enum TableKind {
+    "externref",
+    "anyfunc"
+};
+
+dictionary TableDescriptor {
+    required TableKind element;
+    required AddressValue initial;
+    AddressValue maximum;
+    AddressType address;
+};
+
+// https://webassembly.github.io/spec/js-api/#tables
+[LegacyNamespace=WebAssembly, Exposed=*, ImplementedIn=Rust]
+interface Table {
+    constructor(TableDescriptor descriptor, optional any value);
+
+    [NeedsCallerRealm] AddressValue grow(AddressValue delta, optional any value);
+
+    [NeedsCallerRealm] any get(AddressValue index);
+    [NeedsCallerRealm] undefined set(AddressValue index, optional any value);
+
+    [NeedsCallerRealm] readonly attribute AddressValue length;
+};

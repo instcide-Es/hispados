@@ -1,0 +1,5 @@
+// https://html.spec.whatwg.org/multipage/links.html#htmlhyperlinkelementutils
+interface mixin HTMLHyperlinkElementUtils {
+    [CEReactions] stringifier attribute USVString href;
+    [CEReactions, Reflect] attribute DOMString target;
+};

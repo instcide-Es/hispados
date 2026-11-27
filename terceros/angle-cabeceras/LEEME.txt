@@ -1,0 +1,17 @@
+Las cabeceras de EGL y OpenGL ES (las de Khronos y las extensiones de ANGLE)
+que trae ANGLE (https://chromium.googlesource.com/angle/angle, la copia de
+github.com/google/angle, rama main, carpeta include/), sin cambiar nada:
+  EGL/egl.h, eglext.h, eglplatform.h (Khronos: Apache-2.0), EGL/eglext_angle.h
+  (ANGLE: BSD-3, ver LICENSE), GLES2/gl2.h, gl2ext.h (Khronos: MIT),
+  gl2platform.h (Khronos: Apache-2.0), GLES2/gl2ext_angle.h (ANGLE: BSD-3),
+  GLES3/gl3.h, gl3platform.h (Khronos: MIT o Apache-2.0, lo que dice cada
+  uno), KHR/khrplatform.h (Khronos: MIT).
+  Bajadas el 27/11/2026.
+Apache-2.0 es compatible con la GPL-3.0 (no con la 2.0): el conjunto queda en
+«GPL-2.0 o posterior» por la vía de la GPLv3, como con las otras de Apache.
+
+Lo usa Hispa-64 desde la etapa 10 g (docs/64/HISPA-64.md, sección 24): solo
+para compilar el Compositor de Ladybird (OpenGLContext.cpp: WebGL), con
+EGL_NO_X11. No va ANGLE: las funciones de EGL y GLES, en castel/nucleo64/
+programas/ladybird/hispa64/singl.c, dicen que no hay pantalla de EGL, y
+Ladybird dibuja con Skia por el procesador (sin WebGL).

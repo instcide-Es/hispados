@@ -1,0 +1,739 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+//! Allocation in JIT code, per the allocation contract (see
+//! `ObjectAllocationInfo`): a cell from the size class's local free list or
+//! its never-allocated cells, entirely inline, and a call of the runtime out
+//! of line when there is no local free cell or the heap wants to collect
+//! garbage.
+
+use ak::ZoneVec;
+
+use super::Codegen;
+use super::RegisterList;
+use super::call::ConstantField;
+use super::slow_path_calls::slow_path_saved_registers;
+use crate::CompileFailure;
+use crate::asm::Address;
+use crate::asm::Condition;
+use crate::asm::Gpr;
+use crate::asm::Label;
+use crate::asm::PortableMacroAssembler;
+use crate::ir::BlockId;
+use crate::ir::Graph;
+use crate::ir::NodeId;
+use crate::ir::Op;
+use crate::ir::value;
+use crate::snapshot::CellId;
+
+/// The runtime call that allocates what an allocation node allocates.
+#[derive(Clone, Copy)]
+pub(super) enum AllocationCall {
+    /// `ObjectAllocationInfo::slow_path` with the shape and the properties
+    /// to make room for.
+    Object(CellId, u32),
+    /// `ArrayAllocationInfo::slow_path` with the element count.
+    Array(u32),
+    /// `FunctionAllocationInfo::slow_path` with the sample slot and
+    /// the environments in the node's inputs.
+    Function(CellId),
+    /// `RuntimeInfo::create_lexical_environment` with the parent in the
+    /// node's input, the environment shape cache and the capacity.
+    Environment(u32, u32),
+    /// `RopeAllocationInfo::slow_path` with the strings in the node's
+    /// inputs.
+    Rope,
+}
+
+/// The out of line part of an allocation: the runtime call.
+pub(super) struct DeferredAllocation<'a> {
+    node: NodeId,
+    call: AllocationCall,
+    entry: Label,
+    resume: Label,
+    /// Constants the fast path stores into the new object's inline named
+    /// properties for `InitializeNamed` nodes, which emit nothing then, as
+    /// (byte offset in the cell, value).
+    constant_fields: &'a [(u32, u64)],
+}
+
+impl<M: PortableMacroAssembler> Codegen<'_, '_, M> {
+    /// `dst` = the value with tag `tag` of the cell pointer `src`, which is
+    /// `src` with what the two differ in flipped: cells are in the heap
+    /// region, which is aligned to its size, so a cell pointer is the
+    /// region's base or its offset, and the value is the tag or the offset.
+    /// NB: Flipping a value would keep any bits between its offset and its
+    ///     tag, which a forged value may have set, so values are only ever
+    ///     decoded with `emit_unbox_cell()`, which masks them.
+    pub(super) fn box_cell_with_tag(&mut self, dst: Gpr, src: Gpr, tag: u16) {
+        let difference = (u64::from(tag) << value::TAG_SHIFT) | self.runtime.heap_region_base;
+        if dst == src {
+            self.masm.xor64_imm(dst, src, difference);
+        } else {
+            self.masm.move_imm64(dst, difference);
+            self.masm.xor64(dst, dst, src);
+        }
+    }
+
+    /// `dst = the object value of the cell pointer in dst`.
+    pub(super) fn box_object(&mut self, dst: Gpr) {
+        self.box_cell_with_tag(dst, dst, value::OBJECT_TAG);
+    }
+
+    /// `dst = the cell value of the cell pointer src`, for cells that are no
+    /// objects, like environments.
+    pub(super) fn box_cell(&mut self, dst: Gpr, src: Gpr) {
+        self.masm.and64_imm(dst, src, self.runtime.heap_region_offset_mask);
+        self.masm.or64_imm(dst, dst, self.runtime.shifted_is_cell_pattern);
+    }
+
+    /// The entry and resume labels of the out-of-line call that allocates
+    /// for `node` where its inline allocation cannot (see
+    /// `emit_deferred_allocations()`).
+    pub(super) fn defer_allocation(&mut self, node: NodeId, call: AllocationCall) -> (Label, Label) {
+        let entry = self.masm.new_label();
+        let resume = self.masm.new_label();
+        self.deferred_allocations.push(DeferredAllocation {
+            node,
+            call,
+            entry,
+            resume,
+            constant_fields: &[],
+        });
+        (entry, resume)
+    }
+
+    pub(super) fn emit_allocate_object(
+        &mut self,
+        node: NodeId,
+        shape: CellId,
+        reserve: u32,
+    ) -> Result<(), CompileFailure> {
+        let info = &self.runtime.object_allocation;
+        let (entry, resume) = self.defer_allocation(node, AllocationCall::Object(shape, reserve));
+        // NB: The fallback to the runtime call takes no temps, but the lowering declares them for the fast path.
+        let (heap, next) = (self.temp(node, 0), self.temp(node, 1));
+        // NB: The cell's fields up to the inline storage come from the
+        //     template, patched with the shape and the inline capacity.
+        let template_bytes = 8 * info.template.len() as u64;
+        let fields_fit = u64::from(info.plain_inline_storage_offset) <= template_bytes
+            && info.plain_inline_storage_offset.is_multiple_of(8)
+            && info.named_properties_offset.is_multiple_of(8)
+            && info.shape_offset + 4 <= info.plain_inline_storage_offset
+            && info.inline_capacity_offset < info.plain_inline_storage_offset;
+        let size_class = info
+            .size_class_for(self.snapshot, reserve)
+            .copied()
+            .filter(|_| fields_fit);
+        let Some(size_class) = size_class else {
+            self.masm.jump(entry);
+            self.masm.bind(resume);
+            return Ok(());
+        };
+
+        let cell = self.output(node);
+        let info = self.runtime.object_allocation;
+        let at = |base: Gpr, offset: u32| Address::new(base, offset as i32);
+
+        self.emit_check_heap_threshold(size_class.cell_size, cell, heap, entry);
+        self.emit_pop_free_list(size_class.allocator, cell, next, entry);
+        self.emit_count_allocation(size_class.cell_size, size_class.cell_size, heap, true);
+
+        // The template, with the shape, the inline capacity and every inline
+        // value undefined. The pointer to the inline storage is stored last.
+        let inline_capacity = u8::try_from(size_class.inline_capacity).map_err(|_| CompileFailure::CodeGeneration)?;
+        let mut fields = self.spare_fields.take();
+        fields.clear();
+        let words = info.plain_inline_storage_offset as usize / 8;
+        fields.extend(
+            (0u32..)
+                .zip(&self.snapshot[info.template][..words])
+                .map(|(index, word)| (8 * index, 8, *word)),
+        );
+        set_field_bytes(
+            &mut fields,
+            info.shape_offset as usize,
+            &shape.compressed().to_le_bytes(),
+        );
+        set_field_bytes(&mut fields, info.inline_capacity_offset as usize, &[inline_capacity]);
+        fields.retain(|(offset, _, _)| *offset != info.named_properties_offset);
+        // NB: Of several initializations of a property, the last one wins.
+        //     If it is a constant, the allocation stores it, and none of
+        //     them runs; otherwise they all run.
+        let initialized = initializations_without_gc(self.graph, self.block, node);
+        self.inline_initializations
+            .extend(initialized.clone().map(|(_, initialization, _)| initialization));
+        let last_initialization = |index: u32| initialized.clone().rev().find(|(offset, _, _)| *offset == index);
+        for index in 0..size_class.inline_capacity {
+            let value = match last_initialization(index) {
+                // NB: Stored right after allocating, before anything could
+                //     look at the object.
+                Some((_, _, None)) => continue,
+                Some((_, _, Some(bits))) => bits,
+                None => value::UNDEFINED,
+            };
+            fields.push((info.plain_inline_storage_offset + 8 * index, 8, value));
+        }
+        let is_absorbed = |offset: u32| matches!(last_initialization(offset), Some((_, _, Some(_))));
+        self.absorbed_initializations.extend(
+            initialized
+                .clone()
+                .filter(|(offset, _, _)| is_absorbed(*offset))
+                .map(|(_, initialization, _)| initialization),
+        );
+        let constant_fields =
+            self.work
+                .alloc_slice_from_iter(initialized.clone().filter_map(|(offset, initialization, _)| {
+                    let (_, last, bits) = last_initialization(offset)?;
+                    (last == initialization).then_some((info.plain_inline_storage_offset + 8 * offset, bits?))
+                }));
+        self.deferred_allocations
+            .last_mut()
+            .expect("the allocation's slow path was deferred")
+            .constant_fields = constant_fields;
+        self.emit_constant_fields(cell, next, &mut fields)?;
+        self.spare_fields = fields;
+        self.masm
+            .load_effective_address(next, &at(cell, info.plain_inline_storage_offset));
+        self.masm.store64(&at(cell, info.named_properties_offset), next);
+        self.box_object(cell);
+        self.masm.bind(resume);
+        Ok(())
+    }
+
+    /// Calls the runtime for every allocation node that did not allocate
+    /// inline, saving the registers the call clobbers.
+    pub(super) fn emit_deferred_allocations(&mut self) {
+        for allocation in self.deferred_allocations.take() {
+            self.annotate(super::CodeAnnotation::Deferred(allocation.node));
+            let output = self.output(allocation.node);
+            self.masm.bind(allocation.entry);
+            let saved = slow_path_saved_registers::<M>()
+                .without(output)
+                .iter()
+                .collect::<RegisterList<_>>();
+            self.emit_save_registers(&saved);
+            let arguments = M::ARGUMENT_GPRS;
+            match allocation.call {
+                AllocationCall::Object(shape, reserve) => {
+                    self.masm.move64(arguments[0], self.pinned.vm);
+                    self.masm.move_imm64(arguments[1], shape.0);
+                    self.masm.move_imm32(arguments[2], reserve);
+                    self.masm.call_absolute(self.runtime.object_allocation.slow_path);
+                }
+                AllocationCall::Array(count) => {
+                    self.masm.move64(arguments[0], self.pinned.vm);
+                    self.masm.move_imm32(arguments[1], count);
+                    self.masm.call_absolute(self.runtime.array_allocation.slow_path);
+                }
+                AllocationCall::Function(sample_slot) => {
+                    // NB: The inputs may be in any argument register but
+                    //     the first two.
+                    let scratch = self.pinned.scratch;
+                    self.masm.move64(scratch, self.input(allocation.node, 1));
+                    self.masm.move64(arguments[2], self.input(allocation.node, 0));
+                    self.masm.move64(arguments[3], scratch);
+                    self.masm.move64(arguments[0], self.pinned.vm);
+                    self.masm.move_imm64(arguments[1], sample_slot.0);
+                    self.masm.call_absolute(self.runtime.function_allocation.slow_path);
+                }
+                AllocationCall::Environment(shape_cache, capacity) => {
+                    let parent = self.input(allocation.node, 0);
+                    let scratch = self.pinned.scratch;
+                    self.emit_unbox_cell(scratch, parent);
+                    self.masm.move64(arguments[1], scratch);
+                    self.masm.move64(arguments[0], self.pinned.vm);
+                    self.masm.move_imm64(arguments[2], self.snapshot.executables[0].cell.0);
+                    self.masm.move_imm32(arguments[3], shape_cache);
+                    self.masm.move_imm32(arguments[4], capacity);
+                    self.masm.call_absolute(self.runtime.create_lexical_environment);
+                }
+                AllocationCall::Rope => {
+                    // NB: Each input is read before the argument register
+                    //     that may hold it is written.
+                    let scratch = self.pinned.scratch;
+                    self.emit_unbox_cell(scratch, self.input(allocation.node, 1));
+                    self.emit_unbox_cell(arguments[1], self.input(allocation.node, 0));
+                    self.masm.move64(arguments[2], scratch);
+                    self.masm.move64(arguments[0], self.pinned.vm);
+                    self.masm.call_absolute(self.runtime.rope_allocation.slow_path);
+                }
+            }
+            for (offset, bits) in allocation.constant_fields {
+                self.masm.move_imm64(self.pinned.scratch, *bits);
+                self.masm
+                    .store64(&Address::new(M::RETURN_GPRS[0], *offset as i32), self.pinned.scratch);
+            }
+            self.masm.move64(output, M::RETURN_GPRS[0]);
+            match allocation.call {
+                AllocationCall::Environment(..) => self.box_cell(output, output),
+                AllocationCall::Rope => self.box_cell_with_tag(output, output, value::STRING_TAG),
+                _ => self.box_object(output),
+            }
+            self.emit_restore_registers(&saved, None);
+            self.masm.jump(allocation.resume);
+        }
+    }
+
+    /// Stores into a named property of an object being initialized, which
+    /// is a plain data property (see `Op::InitializeNamed`).
+    pub(super) fn emit_initialize_named(&mut self, node: NodeId, offset: u32) -> Result<(), CompileFailure> {
+        let storage = self.temp(node, 0);
+        // NB: The allocation stored constants already.
+        if self.absorbed_initializations.contains(&node) {
+            return Ok(());
+        }
+        let object = self.input(node, 0);
+        // NB: Objects allocated in a size class keep their properties inline, until their first indexed property. A
+        //     computed key of the literal can give them one, but only further down than right after the allocation.
+        let inline_storage = self.inline_initializations.contains(&node);
+        self.emit_unbox_cell(storage, object);
+        let slot = if inline_storage {
+            let offset = u64::from(self.runtime.object_allocation.plain_inline_storage_offset) + 8 * u64::from(offset);
+            Address::new(storage, super::checked_i32(offset)?)
+        } else {
+            let storage_field = Address::new(storage, self.runtime.offsets.object_named_properties as i32);
+            self.masm.load64(storage, &storage_field);
+            self.named_property_address(storage, offset)?
+        };
+        self.masm.store64(&slot, self.input(node, 1));
+        Ok(())
+    }
+
+    /// Branches to `slow` if taking a cell of `cell_size` bytes would take
+    /// the heap past its threshold for the next collection, which the slow
+    /// path starts. Clobbers `temp` and `heap`.
+    pub(super) fn emit_check_heap_threshold(&mut self, cell_size: u32, temp: Gpr, heap: Gpr, slow: Label) {
+        let info = &self.runtime.object_allocation;
+        let (heap_address, allocated, threshold) = (
+            info.heap,
+            info.heap_allocated_bytes_offset as i32,
+            info.heap_threshold_offset as i32,
+        );
+        self.masm.move_imm64(heap, heap_address);
+        self.masm.load64(temp, &Address::new(heap, threshold));
+        self.masm.sub64_imm(temp, temp, i64::from(cell_size));
+        // NB: Both counts are far below 2^63.
+        self.masm
+            .branch64_memory(Condition::GreaterThan, &Address::new(heap, allocated), temp, slow);
+    }
+
+    /// Counts cells taken from local free lists: `collected_bytes` towards
+    /// the next collection, and `total_bytes` in the heap's total. `heap`
+    /// holds the heap if `emit_check_heap_threshold()` left it there, and
+    /// is clobbered otherwise.
+    pub(super) fn emit_count_allocation(
+        &mut self,
+        collected_bytes: u32,
+        total_bytes: u32,
+        heap: Gpr,
+        heap_loaded: bool,
+    ) {
+        let info = &self.runtime.object_allocation;
+        let (heap_address, allocated, total) = (
+            info.heap,
+            info.heap_allocated_bytes_offset as i32,
+            info.heap_total_allocated_bytes_offset as i32,
+        );
+        let byte_count = |bytes: u32| i32::try_from(bytes).expect("cells are smaller than 2 GiB");
+        if !heap_loaded {
+            self.masm.move_imm64(heap, heap_address);
+        }
+        self.masm
+            .add64_to_memory_imm(&Address::new(heap, allocated), byte_count(collected_bytes));
+        self.masm
+            .add64_to_memory_imm(&Address::new(heap, total), byte_count(total_bytes));
+    }
+
+    /// Takes a local free cell of `allocator` into `cell`, or branches to
+    /// `slow` if there is none. Clobbers `temp` and the scratch register.
+    pub(super) fn emit_pop_free_list(&mut self, allocator: u64, cell: Gpr, temp: Gpr, slow: Label) {
+        let scratch = self.pinned.scratch;
+        self.masm.move_imm64(scratch, allocator);
+        self.emit_pop_free_list_of(scratch, cell, temp, slow);
+    }
+
+    /// Takes a local free cell of the allocator in `allocator` into `cell`:
+    /// the head of its local free list, or else its next never-allocated
+    /// cell, or branches to `slow` if there is neither. Clobbers `temp`.
+    pub(super) fn emit_pop_free_list_of(&mut self, allocator: Gpr, cell: Gpr, temp: Gpr, slow: Label) {
+        let info = &self.runtime.object_allocation;
+        let head = Address::new(allocator, info.local_free_list_offset as i32);
+        let (next, link_mask) = (info.freelist_next_offset as i32, u64::from(info.freelist_link_mask));
+        let cursor = Address::new(allocator, info.local_cursor_offset as i32);
+        let end = Address::new(allocator, info.local_end_offset as i32);
+        let cell_size = Address::new(allocator, info.local_cell_size_offset as i32);
+        let (bump, done) = (self.masm.new_label(), self.masm.new_label());
+        self.masm.load64(cell, &head);
+        self.masm.branch_test64(Condition::Zero, cell, link_mask, bump);
+        // NB: The next cell is the cell's address with the link's bits under
+        //     the mask, so it is in the cell's block whatever the link is.
+        self.masm.load64(temp, &Address::new(cell, next));
+        self.masm.xor64(temp, temp, cell);
+        self.masm.and64_imm(temp, temp, link_mask);
+        self.masm.xor64(temp, temp, cell);
+        self.masm.store64(&head, temp);
+        self.masm.jump(done);
+        self.masm.bind(bump);
+        self.masm.load64(cell, &cursor);
+        self.masm.branch64_memory(Condition::BelowOrEqual, &end, cell, slow);
+        self.masm.load64(temp, &cell_size);
+        self.masm.add64(temp, temp, cell);
+        self.masm.store64(&cursor, temp);
+        self.masm.bind(done);
+    }
+
+    /// Branches to `slow` unless the allocator in `allocator` has a local
+    /// free cell. Clobbers `temp`.
+    fn emit_branch_if_no_local_free_cell(&mut self, allocator: Gpr, temp: Gpr, slow: Label) {
+        let info = &self.runtime.object_allocation;
+        let head = Address::new(allocator, info.local_free_list_offset as i32);
+        let cursor = Address::new(allocator, info.local_cursor_offset as i32);
+        let end = Address::new(allocator, info.local_end_offset as i32);
+        let has_cell = self.masm.new_label();
+        self.masm.load64(temp, &head);
+        self.masm
+            .branch_test64(Condition::NonZero, temp, u64::from(info.freelist_link_mask), has_cell);
+        self.masm.load64(temp, &cursor);
+        self.masm.branch64_memory(Condition::BelowOrEqual, &end, temp, slow);
+        self.masm.bind(has_cell);
+    }
+
+    /// The array of `count` packed elements, all undefined (see
+    /// `ArrayAllocationInfo`).
+    pub(super) fn emit_allocate_array(&mut self, node: NodeId, count: u32) -> Result<(), CompileFailure> {
+        // Larger arrays are rare, and filling their storage takes longer
+        // than the runtime call.
+        const MAX_INLINE_ELEMENTS: u32 = 64;
+        let info = self.runtime.array_allocation;
+        let (entry, resume) = self.defer_allocation(node, AllocationCall::Array(count));
+        // NB: The fallback to the runtime call takes no temps, but the lowering declares them for the fast path.
+        let (storage, temp) = (self.temp(node, 0), self.temp(node, 1));
+        let storage_size_class = self.snapshot[info.storage_size_classes]
+            .iter()
+            .find(|size_class| size_class.capacity >= count)
+            .copied();
+        let objects = self.runtime.object_allocation;
+        let layout = self.runtime.layout;
+        let template_bytes = 8 * info.template.len() as u64;
+        let array_fields = [
+            objects.named_properties_offset,
+            layout.object_indexed_elements,
+            layout.object_indexed_storage_kind,
+            layout.object_indexed_array_like_size,
+        ];
+        let fits = info.allocator != 0
+            && count <= MAX_INLINE_ELEMENTS
+            && (count == 0 || storage_size_class.is_some())
+            && template_bytes <= u64::from(info.cell_size)
+            && array_fields
+                .iter()
+                .all(|offset| u64::from(*offset) + 8 <= template_bytes)
+            && objects.named_properties_offset.is_multiple_of(8)
+            && layout.object_indexed_elements.is_multiple_of(8)
+            && info.storage_values_offset as usize == 8 * info.storage_template.len()
+            && info.storage_capacity_offset + 4 <= info.storage_values_offset;
+        if !fits {
+            self.masm.jump(entry);
+            self.masm.bind(resume);
+            return Ok(());
+        }
+
+        let array = self.output(node);
+        let scratch = self.pinned.scratch;
+        let at = |base: Gpr, offset: u32| Address::new(base, offset as i32);
+
+        // NB: Both allocators must have a free cell before either gives one.
+        let storage_size_class = storage_size_class.filter(|_| count != 0);
+        let storage_cell_size = storage_size_class.map_or(0, |size_class| size_class.cell_size);
+        self.emit_check_heap_threshold(info.cell_size + storage_cell_size, array, temp, entry);
+        if let Some(size_class) = storage_size_class {
+            self.masm.move_imm64(scratch, size_class.allocator);
+            self.emit_branch_if_no_local_free_cell(scratch, temp, entry);
+        }
+        self.emit_pop_free_list(info.allocator, array, temp, entry);
+        if let Some(size_class) = storage_size_class {
+            self.emit_pop_free_list(size_class.allocator, storage, temp, entry);
+        }
+        self.emit_count_allocation(
+            info.cell_size + storage_cell_size,
+            info.cell_size + storage_cell_size,
+            temp,
+            false,
+        );
+
+        // The array, with its packed elements if it has any.
+        let mut fields = self.spare_fields.take();
+        fields.clear();
+        fields.extend(
+            (0u32..)
+                .zip(&self.snapshot[info.template])
+                .map(|(index, word)| (8 * index, 8, *word)),
+        );
+        if count != 0 {
+            set_field_bytes(
+                &mut fields,
+                layout.object_indexed_storage_kind as usize,
+                &[layout.indexed_storage_kind_packed],
+            );
+            set_field_bytes(
+                &mut fields,
+                layout.object_indexed_array_like_size as usize,
+                &count.to_le_bytes(),
+            );
+        }
+        fields.retain(|(offset, _, _)| {
+            *offset != objects.named_properties_offset && (count == 0 || *offset != layout.object_indexed_elements)
+        });
+        self.emit_constant_fields(array, temp, &mut fields)?;
+        self.masm
+            .load_effective_address(temp, &at(array, objects.inline_storage_offset));
+        self.masm.store64(&at(array, objects.named_properties_offset), temp);
+
+        if let Some(size_class) = storage_size_class {
+            fields.clear();
+            fields.extend(
+                (0u32..)
+                    .zip(&self.snapshot[info.storage_template])
+                    .map(|(index, word)| (8 * index, 8, *word)),
+            );
+            for index in 0..size_class.capacity {
+                let element = if index < count { value::UNDEFINED } else { value::EMPTY };
+                fields.push((info.storage_values_offset + 8 * index, 8, element));
+            }
+            self.emit_constant_fields(storage, temp, &mut fields)?;
+            self.masm.move_imm32(temp, size_class.capacity);
+            self.masm.store32(&at(storage, info.storage_capacity_offset), temp);
+            self.masm
+                .load_effective_address(temp, &at(storage, info.storage_values_offset));
+            self.masm.store64(&at(array, layout.object_indexed_elements), temp);
+        }
+        self.spare_fields = fields;
+        self.box_object(array);
+        self.masm.bind(resume);
+        Ok(())
+    }
+
+    /// Stores into an element of an array being initialized (see
+    /// `Op::InitializeElement`).
+    pub(super) fn emit_initialize_element(&mut self, node: NodeId, index: u32) -> Result<(), CompileFailure> {
+        let elements = self.temp(node, 0);
+        let slot = self.named_property_address(elements, index)?;
+        self.emit_unbox_cell(elements, self.input(node, 0));
+        let elements_field = Address::new(elements, self.runtime.layout.object_indexed_elements as i32);
+        self.masm.load64(elements, &elements_field);
+        self.masm.store64(&slot, self.input(node, 1));
+        Ok(())
+    }
+
+    /// A lexical environment of the compiled function's
+    /// `CreateLexicalEnvironment` with environment shape cache `shape_cache`
+    /// (see `LexicalEnvironmentTemplateSnapshot`).
+    pub(super) fn emit_allocate_environment(
+        &mut self,
+        node: NodeId,
+        shape_cache: u32,
+        capacity: u32,
+    ) -> Result<(), CompileFailure> {
+        let template = self.snapshot[self.snapshot.executables[0].lexical_environment_templates]
+            .get(shape_cache as usize)
+            .copied()
+            .flatten()
+            .ok_or(CompileFailure::CodeGeneration)?;
+        let (entry, resume) = self.defer_allocation(node, AllocationCall::Environment(shape_cache, capacity));
+        // NB: The fallback to the runtime call takes no temps, but the lowering declares them for the fast path.
+        let (environment, temp) = (self.temp(node, 0), self.temp(node, 1));
+        let template_bytes = 8 * template.words.len() as u64;
+        let stored = [(template.binding_values_offset, 8), (template.outer_offset, 4)];
+        let fits = template.allocator != 0
+            && template_bytes <= u64::from(template.cell_size)
+            && stored_fields_fit(&stored, template_bytes);
+        if !fits {
+            self.masm.jump(entry);
+            self.masm.bind(resume);
+            return Ok(());
+        }
+
+        // NB: The output may be in the register of the input.
+        let output = self.output(node);
+        let parent = self.input(node, 0);
+        let at = |base: Gpr, offset: u32| Address::new(base, offset as i32);
+
+        self.emit_check_heap_threshold(template.cell_size, environment, temp, entry);
+        self.emit_pop_free_list(template.allocator, environment, temp, entry);
+        self.emit_count_allocation(template.cell_size, template.cell_size, temp, false);
+
+        let mut fields = self.spare_fields.take();
+        template_fields(&self.snapshot[template.words], &stored, &mut fields);
+        self.emit_constant_fields(environment, temp, &mut fields)?;
+        self.spare_fields = fields;
+        if template.inline_binding_values {
+            self.masm
+                .load_effective_address(temp, &Address::new(environment, super::checked_i32(template_bytes)?));
+            self.masm
+                .store64(&at(environment, template.binding_values_offset), temp);
+        } else {
+            self.masm
+                .store_imm64(&at(environment, template.binding_values_offset), 0);
+        }
+        // NB: A cell value has the cell's offset into the heap region below its tag, so its low 32 bits shifted like
+        //     a cell pointer are the cell's compressed pointer.
+        self.emit_store_compressed_cell(&at(environment, template.outer_offset), parent, temp);
+        self.masm.move64(output, environment);
+        self.box_cell(output, output);
+        self.masm.bind(resume);
+        Ok(())
+    }
+
+    /// A closure of the compiled function's `NewFunction` of
+    /// `shared_function_data_index` (see `FunctionAllocationInfo`).
+    pub(super) fn emit_allocate_function(
+        &mut self,
+        node: NodeId,
+        executable: u32,
+        shared_function_data_index: u32,
+    ) -> Result<(), CompileFailure> {
+        let info = self.runtime.function_allocation;
+        let closure_templates = self
+            .snapshot
+            .executables
+            .get(executable as usize)
+            .ok_or(CompileFailure::CodeGeneration)?
+            .closure_templates;
+        let closure = self.snapshot[closure_templates]
+            .get(shared_function_data_index as usize)
+            .copied()
+            .flatten()
+            .ok_or(CompileFailure::CodeGeneration)?;
+        let (entry, resume) = self.defer_allocation(node, AllocationCall::Function(closure.sample_slot));
+        // NB: The fallback to the runtime call takes no temps, but the lowering declares them for the fast path.
+        let (function, temp) = (self.temp(node, 0), self.temp(node, 1));
+        let objects = self.runtime.object_allocation;
+        let offsets = self.runtime.offsets;
+        let stored = [
+            (objects.named_properties_offset, 8),
+            (offsets.ecmascript_function_environment, 4),
+        ];
+        let template_bytes = 8 * closure.words.len() as u64;
+        let fits = info.allocator != 0
+            && template_bytes <= u64::from(info.cell_size)
+            && stored_fields_fit(&stored, template_bytes);
+        if !fits {
+            self.masm.jump(entry);
+            self.masm.bind(resume);
+            return Ok(());
+        }
+
+        // NB: The output may be in the register of an input.
+        let output = self.output(node);
+        let (environment, private_environment) = (self.input(node, 0), self.input(node, 1));
+        let at = |base: Gpr, offset: u32| Address::new(base, offset as i32);
+
+        // NB: Functions with a private environment have rare data, unlike the template.
+        self.masm
+            .branch_test64(Condition::NonZero, private_environment, u64::MAX, entry);
+        self.emit_check_heap_threshold(info.cell_size, function, temp, entry);
+        self.emit_pop_free_list(info.allocator, function, temp, entry);
+        self.emit_count_allocation(info.cell_size, info.cell_size, temp, false);
+
+        let mut fields = self.spare_fields.take();
+        template_fields(&self.snapshot[closure.words], &stored, &mut fields);
+        self.emit_constant_fields(function, temp, &mut fields)?;
+        self.spare_fields = fields;
+        self.masm
+            .load_effective_address(temp, &at(function, objects.inline_storage_offset));
+        self.masm.store64(&at(function, objects.named_properties_offset), temp);
+        self.emit_store_compressed_cell(
+            &at(function, offsets.ecmascript_function_environment),
+            environment,
+            temp,
+        );
+        self.box_cell_with_tag(output, function, value::OBJECT_TAG);
+        self.masm.bind(resume);
+        Ok(())
+    }
+}
+
+/// The `InitializeNamed` nodes right after the `AllocateObject` `node` in
+/// `block`, before anything that could collect garbage or look at the object
+/// (a call, an allocation or an exit): their offsets, and their values if
+/// they are constants.
+fn initializations_without_gc<'g>(
+    graph: &'g Graph<'g>,
+    block: BlockId,
+    node: NodeId,
+) -> impl DoubleEndedIterator<Item = (u32, NodeId, Option<u64>)> + Clone + 'g {
+    let body = &graph.block(block).body;
+    let position = body
+        .iter()
+        .position(|id| *id == node)
+        .expect("the node is in the block");
+    let initialization = move |id: NodeId| {
+        let next = graph.node(id);
+        match next.op {
+            Op::InitializeNamed { offset } if next.inputs[0] == node => {
+                Some((offset, id, graph.constant_value(next.inputs[1])))
+            }
+            _ => None,
+        }
+    };
+    let rest = &body[position + 1..];
+    let end = rest
+        .iter()
+        .position(|id| {
+            let properties = graph.node(*id).op.properties();
+            initialization(*id).is_none()
+                && (properties.is_call
+                    || properties.allocates
+                    || graph.node(*id).op.can_eager_exit()
+                    || properties.can_lazy_exit)
+        })
+        .unwrap_or(rest.len());
+    rest[..end].iter().filter_map(move |id| initialization(*id))
+}
+
+/// Writes `bytes` at byte `offset` of the cell whose words `fields` hold, one
+/// field of 8 bytes for each word from the first on.
+fn set_field_bytes(fields: &mut [ConstantField], offset: usize, bytes: &[u8]) {
+    for (index, byte) in bytes.iter().enumerate() {
+        let at = offset + index;
+        let shift = 8 * (at % 8);
+        let word = &mut fields[at / 8].2;
+        *word = (*word & !(0xff << shift)) | (u64::from(*byte) << shift);
+    }
+}
+
+/// Whether the fields at `stored` (offsets and sizes of 4 or 8 bytes), which
+/// allocation stores itself, are aligned to their sizes and within the first
+/// `template_bytes` bytes of a cell.
+pub(super) fn stored_fields_fit(stored: &[(u32, u32)], template_bytes: u64) -> bool {
+    stored.iter().all(|&(offset, size)| {
+        matches!(size, 4 | 8) && offset.is_multiple_of(size) && u64::from(offset) + u64::from(size) <= template_bytes
+    })
+}
+
+/// Makes `fields` the constant fields of a cell image `words` without the
+/// fields at `stored` (see `stored_fields_fit()`): whole words, and the
+/// halves of the words that share theirs with a 4-byte stored field.
+pub(super) fn template_fields(words: &[u64], stored: &[(u32, u32)], fields: &mut ZoneVec<'_, ConstantField>) {
+    let is_stored = |offset: u32, size: u32| {
+        stored
+            .iter()
+            .any(|&(start, length)| start < offset + size && offset < start + length)
+    };
+    fields.clear();
+    for (offset, word) in (0u32..).step_by(8).zip(words) {
+        if !is_stored(offset, 8) {
+            fields.push((offset, 8, *word));
+            continue;
+        }
+        for (half_offset, half) in [(offset, *word & 0xffff_ffff), (offset + 4, *word >> 32)] {
+            if !is_stored(half_offset, 4) {
+                fields.push((half_offset, 4, half));
+            }
+        }
+    }
+}

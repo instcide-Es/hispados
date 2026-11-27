@@ -1,0 +1,267 @@
+:root {
+    --card-radius: 12px;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    max-width: 800px;
+
+    margin: 0 auto;
+    padding: 20px;
+}
+
+/* A page's title, with its actions on the same line. */
+header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+
+    margin-bottom: 18px;
+}
+
+header h1 {
+    flex: 1;
+    margin: 0;
+
+    font-size: 22px;
+    font-weight: 600;
+}
+
+.card-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+
+    font-size: 16px;
+    font-weight: 500;
+    margin: 0 0 8px 4px;
+}
+
+.card {
+    background-color: var(--card-background-color);
+
+    border: 1px solid var(--border-color);
+    border-radius: var(--card-radius);
+    margin-bottom: 20px;
+}
+
+.card-body {
+    padding: 20px;
+}
+
+.card-body > hr {
+    margin: 0 8px 16px 8px;
+}
+
+.card-group:not(.hidden) ~ .card-group:not(.hidden) {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-color);
+}
+
+.description {
+    margin-top: 4px;
+    color: var(--secondary-text-color);
+}
+
+.description:empty {
+    display: none;
+}
+
+/* Stretch the label across its row beneath the controls. Keep the hover fill clear of separators and leave it off
+   while a separate button in the row has its own hover fill. */
+.control-row {
+    position: relative;
+    isolation: isolate;
+}
+
+.control-row > label[for] {
+    cursor: pointer;
+}
+
+.control-row > label[for]::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+}
+
+.control-row > :not(label) {
+    position: relative;
+    z-index: 1;
+}
+
+.control-row:has(:is(input, select, textarea, button):disabled:not(.row-action)) > label[for] {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.control-row:not(
+        :has(:is(input, select, textarea, button):disabled:not(.row-action), .row-action:hover)
+    ):hover::before {
+    content: "";
+    position: absolute;
+    inset: var(--row-fill-inset, 0);
+    z-index: -1;
+    border-radius: var(--row-fill-radius, 8px);
+    background-color: var(--control);
+    pointer-events: none;
+}
+
+.choice-card {
+    margin: 0;
+    border-radius: 10px;
+    box-shadow: inset 0 0 0 1px var(--separator);
+}
+
+.choice-card > input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.choice-card:has(> input:enabled) {
+    cursor: pointer;
+}
+
+.choice-card:has(> input:enabled:not(:checked)):hover {
+    background-color: var(--control);
+}
+
+.choice-card:has(> input:checked) {
+    background-color: var(--choice-fill);
+    box-shadow: inset 0 0 0 1.5px var(--choice);
+}
+
+.choice-card:has(> input:focus-visible) {
+    box-shadow:
+        inset 0 0 0 1.5px var(--choice),
+        0 0 0 3px var(--focus-ring);
+}
+
+.search-container {
+    background-color: var(--control);
+
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    width: 280px;
+    height: 28px;
+    padding: 0 10px;
+
+    border: none;
+    border-radius: 7px;
+
+    /* The whole field is the label of its input, so a click anywhere in it puts the caret in the input. */
+    cursor: text;
+}
+
+.search-container:not(:focus-within):hover {
+    background-color: var(--control-hover);
+}
+
+.search-container:focus-within {
+    background-color: var(--page);
+    box-shadow:
+        0 0 0 1px var(--focus-edge),
+        0 0 0 3px var(--focus-ring);
+}
+
+.search-container .search-icon {
+    color: var(--muted);
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
+}
+
+.search-container .search-input,
+.search-container .search-input:focus,
+.search-container .search-input:focus-visible,
+.search-container .search-input:hover {
+    background: none;
+    color: inherit;
+
+    flex-grow: 1;
+
+    border: none;
+    outline: none;
+
+    font-size: 13px;
+    line-height: 1.2;
+
+    width: auto;
+    min-width: 0;
+    height: auto;
+
+    padding: 0;
+    box-shadow: none;
+}
+
+.menu-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    width: 32px;
+    height: 32px;
+
+    color: inherit;
+    background: none;
+    border: none;
+    border-radius: 6px;
+
+    cursor: pointer;
+}
+
+.menu-toggle:hover {
+    background-color: var(--menu-toggle-hover-color, var(--item-hover-color));
+}
+
+.menu-toggle svg {
+    width: 20px;
+    height: 20px;
+}
+
+.menu-dropdown {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: 10;
+
+    display: flex;
+    flex-direction: column;
+
+    min-width: 200px;
+    padding: 6px;
+    margin-top: 4px;
+
+    background-color: var(--menu-background-color);
+    border-radius: 10px;
+    box-shadow:
+        0 0 0 1px var(--edge),
+        var(--popover-shadow);
+}
+
+.menu-dropdown.hidden {
+    display: none;
+}
+
+.menu-item {
+    color: inherit;
+    background: none;
+    border: none;
+    border-radius: 6px;
+
+    padding: 8px 12px;
+    font-size: 13px;
+    text-align: left;
+
+    cursor: pointer;
+}
+
+.menu-item:hover {
+    background-color: var(--menu-item-hover-color, var(--menu-toggle-hover-color, var(--item-hover-color)));
+}

@@ -1,0 +1,15 @@
+// https://dom.spec.whatwg.org/#interface-nodeiterator
+[Exposed=Window]
+interface NodeIterator {
+    [DirectGetter, SameObject] readonly attribute Node root;
+    readonly attribute Node referenceNode;
+    readonly attribute boolean pointerBeforeReferenceNode;
+    readonly attribute unsigned long whatToShow;
+
+    [ImplementedInBindings, ReturnsJSValue] readonly attribute NodeFilter? filter;
+
+    [ImplementedInBindings] Node? nextNode();
+    [ImplementedInBindings] Node? previousNode();
+
+    undefined detach();
+};

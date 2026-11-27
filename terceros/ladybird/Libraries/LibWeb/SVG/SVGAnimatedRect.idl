@@ -1,0 +1,8 @@
+// https://svgwg.org/svg2-draft/types.html#InterfaceSVGAnimatedRect
+[Exposed=Window]
+interface SVGAnimatedRect {
+    [SameObject] readonly attribute DOMRect baseVal;
+
+    // INTEROP: Other engines expose animVal as DOMRect instead of DOMRectReadOnly.
+    [SameObject] readonly attribute DOMRect animVal;
+};

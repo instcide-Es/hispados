@@ -1,0 +1,188 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+use crate::css::css_pixels::{CssPixelRect, CssPixels};
+use crate::layout::node_data::{NodeKind, NodeSlotId};
+use crate::layout::svg_formatting_context::css_pixel_rect_of;
+use crate::painting::node_painting;
+use crate::painting::paint_read::PaintRead;
+use crate::painting::paintable_geometry;
+use crate::painting::style_queries;
+use libgfx_rust::matrix::multiply_affine;
+use libgfx_rust::{AffineTransform, FloatRect, MaskKind};
+
+pub(crate) fn first_child_paintable_of_kind(
+    arena: &impl PaintRead,
+    paintable: NodeSlotId,
+    kind: NodeKind,
+) -> Option<NodeSlotId> {
+    let node = arena
+        .children(paintable)
+        .find(|&node| arena.node_kind_if_live(node) == Some(kind))?;
+    arena.paintable_row_is_populated(node).then_some(node)
+}
+
+/// The transform from objectBoundingBox content units of `resource_box`, a mask, clip path or pattern box, to the user
+/// space of the element it was laid out for.
+pub(crate) fn object_bounding_box_content_units_transform(
+    arena: &impl PaintRead,
+    resource_box: NodeSlotId,
+) -> AffineTransform {
+    let bounding_box = css_pixel_rect_of(
+        paintable_geometry::committed_object_bounding_box_of_svg_resource_target(arena, resource_box)
+            .unwrap_or_default(),
+    );
+    AffineTransform {
+        values: [
+            bounding_box.width.to_float(),
+            0.0,
+            0.0,
+            bounding_box.height.to_float(),
+            bounding_box.x.to_float(),
+            bounding_box.y.to_float(),
+        ],
+    }
+}
+
+/// The masking area of the mask that `target` references, in the target's user space, as layout resolved it. A mask
+/// layer with an empty area clips the target away entirely.
+pub(crate) fn mask_area(arena: &impl PaintRead, target: NodeSlotId) -> Option<CssPixelRect> {
+    if !arena
+        .node_kind_if_live(target)
+        .is_some_and(node_painting::supports_svg_masking)
+    {
+        return None;
+    }
+    let mask_box = first_child_paintable_of_kind(arena, target, NodeKind::SVGMaskBox)?;
+    paintable_geometry::committed_svg_mask_area_in_target_user_space(arena, mask_box).map(css_pixel_rect_of)
+}
+
+fn committed_local_transform(arena: &impl PaintRead, slot: NodeSlotId) -> AffineTransform {
+    paintable_geometry::committed_svg_geometry(arena, slot)
+        .map_or_else(AffineTransform::identity, |geometry| geometry.local_transform.into())
+}
+
+/// https://drafts.csswg.org/css-masking-1/#ClipPathElement
+/// If a child element is made invisible by display or visibility it does not contribute to the
+/// clipping path.
+fn contributes_to_clip_path(arena: &impl PaintRead, node: NodeSlotId) -> bool {
+    arena.node_style_if_live(node).is_some_and(|style| {
+        style.visibility() == crate::css::css_enums::visibility::VISIBLE && !style.display().is_none()
+    })
+}
+
+struct ClipPathBoundingBox {
+    min_x: CssPixels,
+    min_y: CssPixels,
+    max_x: CssPixels,
+    max_y: CssPixels,
+    has_points: bool,
+}
+
+impl ClipPathBoundingBox {
+    fn add_point(&mut self, x: CssPixels, y: CssPixels) {
+        if !self.has_points {
+            self.min_x = x;
+            self.min_y = y;
+            self.max_x = x;
+            self.max_y = y;
+            self.has_points = true;
+            return;
+        }
+        self.min_x = self.min_x.min(x);
+        self.min_y = self.min_y.min(y);
+        self.max_x = self.max_x.max(x);
+        self.max_y = self.max_y.max(y);
+    }
+}
+
+/// https://drafts.csswg.org/css-masking-1/#ClipPathElement
+/// When the clipPath element contains multiple child elements, the silhouettes of the child
+/// elements are logically OR'd together to create a single silhouette which is then used to
+/// restrict the region onto which paint can be applied.
+fn svg_clip_path_geometry_bounds(
+    arena: &impl PaintRead,
+    node: NodeSlotId,
+    additional_transform: AffineTransform,
+) -> Option<CssPixelRect> {
+    if !contributes_to_clip_path(arena, node) {
+        return None;
+    }
+    let kind = arena.node_kind_if_live(node)?;
+    if node_painting::is_svg_path(kind) {
+        let path = paintable_geometry::committed_svg_path(arena, node)?;
+        let [x, y, width, height] = path.copy_transformed(additional_transform.values).bounding_box();
+        return Some(css_pixel_rect_of(FloatRect::new(x, y, width, height)));
+    }
+    let mut bounding_box = ClipPathBoundingBox {
+        min_x: CssPixels::default(),
+        min_y: CssPixels::default(),
+        max_x: CssPixels::default(),
+        max_y: CssPixels::default(),
+        has_points: false,
+    };
+    for child_node in arena.children(node) {
+        let Some(child_kind) = arena.node_kind_if_live(child_node) else {
+            continue;
+        };
+        if crate::layout::node_facts::kind_is_svg_resource_box(child_kind) {
+            continue;
+        }
+        if !arena.paintable_row_is_populated(child_node) || !node_painting::is_svg(child_kind) {
+            continue;
+        }
+        let child_transform = multiply_affine(additional_transform, committed_local_transform(arena, child_node));
+        let Some(child_bounds) = svg_clip_path_geometry_bounds(arena, child_node, child_transform) else {
+            continue;
+        };
+        bounding_box.add_point(child_bounds.x, child_bounds.y);
+        bounding_box.add_point(child_bounds.right(), child_bounds.bottom());
+    }
+    if !bounding_box.has_points {
+        return None;
+    }
+    Some(CssPixelRect::new(
+        bounding_box.min_x,
+        bounding_box.min_y,
+        bounding_box.max_x - bounding_box.min_x,
+        bounding_box.max_y - bounding_box.min_y,
+    ))
+}
+
+// An empty clipping path completely clips away the element that had the clip-path property applied.
+pub(crate) fn clip_area(arena: &impl PaintRead, target: NodeSlotId) -> Option<CssPixelRect> {
+    if !arena
+        .node_kind_if_live(target)
+        .is_some_and(node_painting::supports_svg_masking)
+    {
+        return None;
+    }
+    let clip_box = first_child_paintable_of_kind(arena, target, NodeKind::SVGClipBox)?;
+    let mut clip_path_transform = committed_local_transform(arena, clip_box);
+    if paintable_geometry::committed_svg_resource_content_units_are_object_bounding_box(arena, clip_box) {
+        clip_path_transform = multiply_affine(
+            object_bounding_box_content_units_transform(arena, clip_box),
+            clip_path_transform,
+        );
+    }
+    Some(svg_clip_path_geometry_bounds(arena, clip_box, clip_path_transform).unwrap_or_default())
+}
+
+pub(crate) fn mask_kind(arena: &impl PaintRead, target: NodeSlotId) -> MaskKind {
+    use crate::css::css_enums::keyword;
+    let Some(mask_box) = first_child_paintable_of_kind(arena, target, NodeKind::SVGMaskBox) else {
+        return MaskKind::Alpha;
+    };
+    let Some(style) = arena.node_style_if_live(mask_box) else {
+        return MaskKind::Alpha;
+    };
+    match style_queries::handle_value(&style.mask().mask_type) {
+        Some(crate::css::style_value::StyleValueData::Keyword { keyword }) if *keyword == keyword::LUMINANCE => {
+            MaskKind::Luminance
+        }
+        _ => MaskKind::Alpha,
+    }
+}

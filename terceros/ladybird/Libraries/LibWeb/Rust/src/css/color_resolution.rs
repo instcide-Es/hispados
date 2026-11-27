@@ -1,0 +1,2610 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+//! CSS color resolution primitives: the 8-bit sRGB color type mirroring Gfx::Color, the
+//! color-function descriptor table, the system-color keyword values, and the to_color()
+//! resolution layer over color-bearing style values.
+
+// The FFI consumer of to_color() lands with the FFI flip.
+// Color values use the same thread-confined shared graph as the rest of the style core.
+
+use crate::css::style_value::{
+    CalculatedPayload, ColorFunctionPayload, ColorMixPayload, LightDarkPayload, StyleValueBox,
+};
+use crate::css::style_value_arc::StyleValueArc;
+use ak::math;
+
+use crate::css::calc::{
+    ANGLE_UNIT_CANONICAL_RATIOS, ResolveAs, resolve_as_from_fields, resolve_calculated_angle_with_channels,
+    resolve_calculated_number_with_channels, resolve_calculated_percentage_with_channels,
+};
+use crate::css::color_conversion::{self, Components};
+use crate::css::color_interpolation::{MixItem, ResolvedColor, carry_forward_missing_components, mix_colors};
+use crate::css::computed_value_types::{InheritedTextValues, InheritedUIValues};
+use crate::css::computed_value_views::ComputedValuesView;
+use crate::css::css_enums::channel_keyword;
+use crate::css::css_enums::keyword;
+use crate::css::css_enums::keyword_to_channel_keyword;
+use crate::css::serialize::TextSink;
+use crate::css::style_compute::FfiLengthResolutionContext;
+use crate::css::style_value::{
+    ColorBase, CssString, RetainedStyleValueData, RetainedStyleValueDataList, StyleValueData, is_none_keyword,
+    value_depends_on_current_color,
+};
+
+/// Mirrors Gfx::Color: 8-bit unpremultiplied sRGB with alpha 255 meaning fully opaque.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Rgba {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub a: u8,
+}
+
+/// Mirrors the quantization in Gfx::srgb_to_color() and color_from_linear_srgb():
+/// lroundf (round half away from zero, which f32::round matches) then clamp to 0..=255.
+fn quantize(component: f32) -> u8 {
+    (component * 255.0).round().clamp(0.0, 255.0) as u8
+}
+
+/// The color types of the predefined color spaces of a 2D canvas, in the order of Web::Bindings::PredefinedColorSpace.
+const PREDEFINED_COLOR_SPACE_COLOR_TYPES: [u8; 4] = [
+    color_conversion::SRGB,
+    color_conversion::SRGB_LINEAR,
+    color_conversion::DISPLAY_P3,
+    color_conversion::DISPLAY_P3_LINEAR,
+];
+
+/// An 8-bit sRGB color converted to the predefined color space of a 2D canvas, clipped to its gamut.
+pub(crate) fn srgb_color_in_predefined_color_space(color: [u8; 4], predefined_color_space: u8) -> [u8; 4] {
+    let color_type = PREDEFINED_COLOR_SPACE_COLOR_TYPES[usize::from(predefined_color_space)];
+    if color_type == color_conversion::SRGB {
+        return color;
+    }
+    let components = color.map(|component| f32::from(component) / 255.0);
+    color_conversion::convert(color_conversion::SRGB, color_type, components)
+        .expect("sRGB converts to every predefined color space")
+        .map(quantize)
+}
+
+/// Converts a color in the color space of `color_type` to an 8-bit sRGB color, like the Gfx::Color::from_*()
+/// constructors, but with more precise color space conversions.
+fn from_converted(color_type: u8, components: Components) -> Rgba {
+    let srgb =
+        color_conversion::convert(color_type, color_conversion::SRGB, components).expect("color type converts to sRGB");
+    Rgba {
+        r: quantize(srgb[0]),
+        g: quantize(srgb[1]),
+        b: quantize(srgb[2]),
+        a: quantize(srgb[3]),
+    }
+}
+
+impl Rgba {
+    /// A color packed as the C++ Color::value() packs it.
+    pub(crate) fn from_packed(value: u32) -> Self {
+        let [b, g, r, a] = value.to_le_bytes();
+        Self { r, g, b, a }
+    }
+
+    pub(crate) const BLACK: Self = Self {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
+    pub(crate) const WHITE: Self = Self {
+        r: 255,
+        g: 255,
+        b: 255,
+        a: 255,
+    };
+
+    /// Port of Gfx::Color::from_hsla(): saturation and lightness clamp to 0..=1 before the
+    /// conversion, and hsl_to_srgb() clamps alpha itself. The C++ code narrows to f32 first.
+    pub(crate) fn from_hsla(h_degrees: f64, s: f64, l: f64, a: f64) -> Self {
+        let hsl = [
+            h_degrees as f32,
+            (s as f32).clamp(0.0, 1.0),
+            (l as f32).clamp(0.0, 1.0),
+            a as f32,
+        ];
+        let srgb = color_conversion::legacy_color_to_srgb(color_conversion::HSL, hsl).expect("HSL converts to sRGB");
+        Self {
+            r: quantize(srgb[0]),
+            g: quantize(srgb[1]),
+            b: quantize(srgb[2]),
+            a: quantize(srgb[3]),
+        }
+    }
+
+    /// Port of Gfx::Color::from_hsv(). The input ranges are the ones the C++ code VERIFYs.
+    /// Gfx::hsv_to_srgb() computes in f64 but stores through f32 components, and the result
+    /// rounds without clamping (the input ranges keep every product inside 0..=255).
+    pub(crate) fn from_hsv(hue: f64, saturation: f64, value: f64) -> Self {
+        debug_assert!((0.0..360.0).contains(&hue));
+        debug_assert!((0.0..=1.0).contains(&saturation));
+        debug_assert!((0.0..=1.0).contains(&value));
+
+        let hue = f64::from(hue as f32);
+        let saturation = f64::from(saturation as f32);
+        let value = f64::from(value as f32);
+
+        let high = ((hue / 60.0) as i32) % 6;
+        let f = hue / 60.0 - f64::from(high);
+        let c1 = value * (1.0 - saturation);
+        let c2 = value * (1.0 - saturation * f);
+        let c3 = value * (1.0 - saturation * (1.0 - f));
+
+        let (r, g, b) = match high {
+            0 => (value, c3, c1),
+            1 => (c2, value, c1),
+            2 => (c1, value, c3),
+            3 => (c1, c2, value),
+            4 => (c3, c1, value),
+            5 => (value, c1, c2),
+            _ => (0.0, 0.0, 0.0),
+        };
+
+        Self {
+            r: (r as f32 * 255.0).round() as u8,
+            g: (g as f32 * 255.0).round() as u8,
+            b: (b as f32 * 255.0).round() as u8,
+            a: 255,
+        }
+    }
+
+    /// Port of Gfx::srgb_to_color().
+    #[cfg(test)]
+    pub(crate) fn from_srgb(r: f32, g: f32, b: f32, alpha: f32) -> Self {
+        Self {
+            r: quantize(r),
+            g: quantize(g),
+            b: quantize(b),
+            a: quantize(alpha),
+        }
+    }
+
+    /// Port of Gfx::Color::from_linear_srgb().
+    pub(crate) fn from_linear_srgb(r: f32, g: f32, b: f32, alpha: f32) -> Self {
+        from_converted(color_conversion::SRGB_LINEAR, [r, g, b, alpha])
+    }
+
+    /// Port of Gfx::Color::from_a98rgb().
+    pub(crate) fn from_a98rgb(r: f32, g: f32, b: f32, alpha: f32) -> Self {
+        from_converted(color_conversion::A98_RGB, [r, g, b, alpha])
+    }
+
+    /// Port of Gfx::Color::from_display_p3().
+    pub(crate) fn from_display_p3(r: f32, g: f32, b: f32, alpha: f32) -> Self {
+        from_converted(color_conversion::DISPLAY_P3, [r, g, b, alpha])
+    }
+
+    /// Port of Gfx::Color::from_linear_display_p3().
+    pub(crate) fn from_display_p3_linear(r: f32, g: f32, b: f32, alpha: f32) -> Self {
+        from_converted(color_conversion::DISPLAY_P3_LINEAR, [r, g, b, alpha])
+    }
+
+    /// Port of Gfx::Color::from_pro_photo_rgb().
+    pub(crate) fn from_pro_photo(r: f32, g: f32, b: f32, alpha: f32) -> Self {
+        from_converted(color_conversion::PROPHOTO_RGB, [r, g, b, alpha])
+    }
+
+    /// Port of Gfx::Color::from_rec2020().
+    pub(crate) fn from_rec2020(r: f32, g: f32, b: f32, alpha: f32) -> Self {
+        from_converted(color_conversion::REC2020, [r, g, b, alpha])
+    }
+
+    /// Port of Gfx::Color::from_xyz50().
+    pub(crate) fn from_xyz50(x: f32, y: f32, z: f32, alpha: f32) -> Self {
+        from_converted(color_conversion::XYZ_D50, [x, y, z, alpha])
+    }
+
+    /// Port of Gfx::Color::from_xyz65().
+    pub(crate) fn from_xyz65(x: f32, y: f32, z: f32, alpha: f32) -> Self {
+        from_converted(color_conversion::XYZ_D65, [x, y, z, alpha])
+    }
+
+    /// Port of Gfx::Color::from_lab().
+    pub(crate) fn from_lab(lightness: f32, a: f32, b: f32, alpha: f32) -> Self {
+        from_converted(color_conversion::LAB, [lightness, a, b, alpha])
+    }
+
+    /// Port of Gfx::Color::from_oklab().
+    pub(crate) fn from_oklab(lightness: f32, a: f32, b: f32, alpha: f32) -> Self {
+        from_converted(color_conversion::OKLAB, [lightness, a, b, alpha])
+    }
+
+    pub(crate) fn with_alpha(self, a: u8) -> Self {
+        Self { a, ..self }
+    }
+
+    /// Port of Gfx::Color::with_opacity(): scales the alpha channel in f32 like the C++ float
+    /// parameter, rounding half away from zero. The C++ code VERIFYs the range.
+    pub(crate) fn with_opacity(self, opacity: f64) -> Self {
+        debug_assert!((0.0..=1.0).contains(&opacity));
+        let opacity = opacity as f32;
+        self.with_alpha((f32::from(self.a) * opacity).round() as u8)
+    }
+
+    /// Port of Gfx::Color::darkened(): the float products truncate through C++'s
+    /// float-to-u8 conversion, so no rounding here.
+    pub(crate) fn darkened(self, amount: f32) -> Self {
+        Self {
+            r: (f32::from(self.r) * amount) as u8,
+            g: (f32::from(self.g) * amount) as u8,
+            b: (f32::from(self.b) * amount) as u8,
+            a: self.a,
+        }
+    }
+
+    /// https://w3c.github.io/wcag/guidelines/22/#dfn-relative-luminance
+    pub(crate) fn relative_luminance(&self) -> f64 {
+        // Gfx::Color caches these per-component linearizations in a 256-entry table built
+        // with the same f64 arithmetic; computing directly yields identical values.
+        fn linearize(component: u8) -> f64 {
+            let srgb = f64::from(component) / 255.0;
+            if srgb <= 0.04045 {
+                srgb / 12.92
+            } else {
+                math::pow((srgb + 0.055) / 1.055, 2.4)
+            }
+        }
+        0.2126 * linearize(self.r) + 0.7152 * linearize(self.g) + 0.0722 * linearize(self.b)
+    }
+
+    /// https://w3c.github.io/wcag/guidelines/22/#dfn-contrast-ratio
+    pub(crate) fn contrast_ratio(&self, other: Rgba) -> f64 {
+        let l1 = self.relative_luminance();
+        let l2 = other.relative_luminance();
+        let darkest = l1.min(l2);
+        let brightest = l1.max(l2);
+        (brightest + 0.05) / (darkest + 0.05)
+    }
+
+    pub(crate) fn suggested_foreground_color(&self) -> Rgba {
+        if self.contrast_ratio(Self::BLACK) >= self.contrast_ratio(Self::WHITE) {
+            Self::BLACK
+        } else {
+            Self::WHITE
+        }
+    }
+
+    /// https://www.w3.org/TR/css-color-4/#serializing-sRGB-values
+    pub(crate) fn serialize_a_srgb_value(&self, sink: &mut TextSink) {
+        // The serialized form uses either the rgb() or rgba() form depending on whether the
+        // alpha is exactly 1; an "alpha of 1" is 255 in 8-bit storage.
+        if self.a == 0 {
+            sink.push_ascii(&format!("rgba({}, {}, {}, 0)", self.r, self.g, self.b));
+        } else if self.a == 255 {
+            sink.push_ascii(&format!("rgb({}, {}, {})", self.r, self.g, self.b));
+        } else {
+            let (digits, length) = format_to_8bit_compatible(self.a);
+            let fraction = std::str::from_utf8(&digits[..length]).expect("digits are ASCII");
+            sink.push_ascii(&format!("rgba({}, {}, {}, 0.{fraction})", self.r, self.g, self.b));
+        }
+    }
+}
+
+/// nth_digit(745, 1) is '5'; digit 3 is the hundreds place.
+fn nth_digit(mut value: u32, mut digit: u8) -> u8 {
+    debug_assert!(value < 1000);
+    debug_assert!((1..=3).contains(&digit));
+    while digit > 1 {
+        value /= 10;
+        digit -= 1;
+    }
+    b'0' + (value % 10) as u8
+}
+
+/// Port of format_to_8bit_compatible() in Gfx/Color.cpp: the shortest fractional digits that
+/// round-trip at 8 bits. 127/255 = 0.498 +- 0.001 and 128/255 = 0.502 +- 0.001, but
+/// round(0.5 * 255) == 128, so 127 formats as "498" while 128 formats as "5".
+pub(crate) fn format_to_8bit_compatible(value: u8) -> ([u8; 3], usize) {
+    let value = u32::from(value);
+
+    let three_digits = (value * 1000 + 127) / 255;
+    let rounded_to_two_digits = (three_digits + 5) / 10 * 10;
+
+    if (rounded_to_two_digits * 255 / 100 + 5) / 10 != value {
+        let digits = [
+            nth_digit(three_digits, 3),
+            nth_digit(three_digits, 2),
+            nth_digit(three_digits, 1),
+        ];
+        return (digits, 3);
+    }
+
+    let rounded_to_one_digit = (three_digits + 50) / 100 * 100;
+    if (rounded_to_one_digit * 255 / 100 + 5) / 10 != value {
+        let digits = [
+            nth_digit(rounded_to_two_digits, 3),
+            nth_digit(rounded_to_two_digits, 2),
+            0,
+        ];
+        return (digits, 2);
+    }
+
+    ([nth_digit(rounded_to_one_digit, 3), 0, 0], 1)
+}
+
+/// Mirrors Web::CSS::ChannelDescriptor; is_hue stands in for ChannelKind::Hue.
+pub(crate) struct ChannelDescriptor {
+    pub is_hue: bool,
+    pub percent_reference: f32,
+    pub serialize_clamp_min: Option<f64>,
+    pub serialize_clamp_max: Option<f64>,
+}
+
+/// Mirrors Web::CSS::SerializationBehavior.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SerializationBehavior {
+    /// rgb(), hsl(): commas or slash chosen via ColorSyntax; serializes via the sRGB shortcut.
+    SrgbLegacy,
+    /// hwb(): modern named function in the sRGB family; serializes via the sRGB shortcut.
+    SrgbModern,
+    /// lab(), oklab(), lch(), oklch(): modern named function, no sRGB shortcut.
+    ModernNamed,
+    /// color(&lt;space&gt; c1 c2 c3 / a).
+    ColorFunction,
+}
+
+/// Mirrors Web::CSS::ColorFunctionDescriptor.
+pub(crate) struct ColorFunctionDescriptor {
+    pub name: &'static str,
+    pub behavior: SerializationBehavior,
+    pub channels: [ChannelDescriptor; 3],
+    pub absolutizes_to_rgb: bool,
+}
+
+const fn number_channel(
+    percent_reference: f32,
+    serialize_clamp_min: Option<f64>,
+    serialize_clamp_max: Option<f64>,
+) -> ChannelDescriptor {
+    ChannelDescriptor {
+        is_hue: false,
+        percent_reference,
+        serialize_clamp_min,
+        serialize_clamp_max,
+    }
+}
+
+const fn hue_channel() -> ChannelDescriptor {
+    ChannelDescriptor {
+        is_hue: true,
+        percent_reference: 0.0,
+        serialize_clamp_min: None,
+        serialize_clamp_max: None,
+    }
+}
+
+const fn color_function(name: &'static str) -> ColorFunctionDescriptor {
+    ColorFunctionDescriptor {
+        name,
+        behavior: SerializationBehavior::ColorFunction,
+        channels: [
+            number_channel(1.0, None, None),
+            number_channel(1.0, None, None),
+            number_channel(1.0, None, None),
+        ],
+        absolutizes_to_rgb: false,
+    }
+}
+
+/// Color function metadata indexed by the frozen color-type codes.
+static COLOR_FUNCTION_DESCRIPTORS: [ColorFunctionDescriptor; 17] = [
+    // RGB
+    ColorFunctionDescriptor {
+        name: "rgb",
+        behavior: SerializationBehavior::SrgbLegacy,
+        channels: [
+            number_channel(255.0, Some(0.0), Some(255.0)),
+            number_channel(255.0, Some(0.0), Some(255.0)),
+            number_channel(255.0, Some(0.0), Some(255.0)),
+        ],
+        absolutizes_to_rgb: false,
+    },
+    // A98RGB
+    color_function("a98-rgb"),
+    // DisplayP3
+    color_function("display-p3"),
+    // DisplayP3Linear
+    color_function("display-p3-linear"),
+    // HSL
+    ColorFunctionDescriptor {
+        name: "hsl",
+        behavior: SerializationBehavior::SrgbLegacy,
+        channels: [
+            hue_channel(),
+            number_channel(100.0, Some(0.0), None),
+            number_channel(100.0, Some(0.0), None),
+        ],
+        absolutizes_to_rgb: true,
+    },
+    // HWB
+    ColorFunctionDescriptor {
+        name: "hwb",
+        behavior: SerializationBehavior::SrgbModern,
+        channels: [
+            hue_channel(),
+            number_channel(100.0, Some(0.0), None),
+            number_channel(100.0, Some(0.0), None),
+        ],
+        absolutizes_to_rgb: true,
+    },
+    // Lab
+    ColorFunctionDescriptor {
+        name: "lab",
+        behavior: SerializationBehavior::ModernNamed,
+        channels: [
+            number_channel(100.0, Some(0.0), Some(100.0)),
+            number_channel(125.0, None, None),
+            number_channel(125.0, None, None),
+        ],
+        absolutizes_to_rgb: false,
+    },
+    // LCH
+    ColorFunctionDescriptor {
+        name: "lch",
+        behavior: SerializationBehavior::ModernNamed,
+        channels: [
+            number_channel(100.0, Some(0.0), Some(100.0)),
+            number_channel(150.0, Some(0.0), None),
+            hue_channel(),
+        ],
+        absolutizes_to_rgb: false,
+    },
+    // OKLab
+    ColorFunctionDescriptor {
+        name: "oklab",
+        behavior: SerializationBehavior::ModernNamed,
+        channels: [
+            number_channel(1.0, Some(0.0), Some(1.0)),
+            number_channel(0.4, None, None),
+            number_channel(0.4, None, None),
+        ],
+        absolutizes_to_rgb: false,
+    },
+    // OKLCH
+    ColorFunctionDescriptor {
+        name: "oklch",
+        behavior: SerializationBehavior::ModernNamed,
+        channels: [
+            number_channel(1.0, Some(0.0), Some(1.0)),
+            number_channel(0.4, Some(0.0), None),
+            hue_channel(),
+        ],
+        absolutizes_to_rgb: false,
+    },
+    // sRGB
+    color_function("srgb"),
+    // sRGBLinear
+    color_function("srgb-linear"),
+    // ProPhotoRGB
+    color_function("prophoto-rgb"),
+    // Rec2020
+    color_function("rec2020"),
+    // XYZD50
+    color_function("xyz-d50"),
+    // XYZD65
+    color_function("xyz-d65"),
+    // Alpha
+    ColorFunctionDescriptor {
+        name: "alpha",
+        behavior: SerializationBehavior::ModernNamed,
+        channels: [
+            number_channel(1.0, None, None),
+            number_channel(1.0, None, None),
+            number_channel(1.0, None, None),
+        ],
+        absolutizes_to_rgb: false,
+    },
+];
+
+pub(crate) fn descriptor_for_color_type(color_type: u8) -> &'static ColorFunctionDescriptor {
+    &COLOR_FUNCTION_DESCRIPTORS[usize::from(color_type)]
+}
+
+/// Relative color syntax channel values, indexed by the generated `channel_keyword` codes
+/// (R = 0 through Z = 12).
+pub(crate) type RelativeColorContext = [Option<f64>; 13];
+
+const _: () = assert!(channel_keyword::Z as usize + 1 == 13);
+
+// System colors, transcribed from SystemColor.cpp. SystemColor::inactive_highlight() and
+// transform_selection_background_color() are not reachable from KeywordStyleValue::to_color()
+// and are intentionally absent.
+
+const fn rgb(r: u8, g: u8, b: u8) -> Rgba {
+    Rgba { r, g, b, a: 255 }
+}
+
+pub(crate) fn accent_color(_dark: bool) -> Rgba {
+    rgb(61, 174, 233)
+}
+
+fn accent_color_text(_dark: bool) -> Rgba {
+    rgb(0, 0, 0)
+}
+
+fn active_text(dark: bool) -> Rgba {
+    if dark { rgb(213, 97, 82) } else { rgb(255, 0, 0) }
+}
+
+// https://drafts.csswg.org/css-color-4/#css-system-colors
+// The base border color for push buttons.
+fn button_border(dark: bool) -> Rgba {
+    if dark { rgb(133, 133, 133) } else { rgb(118, 118, 118) }
+}
+
+fn button_face(dark: bool) -> Rgba {
+    if dark { rgb(107, 107, 107) } else { rgb(239, 239, 239) }
+}
+
+fn button_text(dark: bool) -> Rgba {
+    if dark { rgb(255, 255, 255) } else { rgb(0, 0, 0) }
+}
+
+// NB: The dark canvas is the page color of Ladybird's own pages, --page in ladybird.css.
+fn canvas(dark: bool) -> Rgba {
+    if dark { rgb(28, 28, 30) } else { rgb(255, 255, 255) }
+}
+
+fn canvas_text(dark: bool) -> Rgba {
+    if dark { rgb(255, 255, 255) } else { rgb(0, 0, 0) }
+}
+
+fn field(dark: bool) -> Rgba {
+    if dark { rgb(59, 59, 59) } else { rgb(255, 255, 255) }
+}
+
+fn field_text(dark: bool) -> Rgba {
+    if dark { rgb(255, 255, 255) } else { rgb(0, 0, 0) }
+}
+
+fn gray_text(_dark: bool) -> Rgba {
+    rgb(128, 128, 128)
+}
+
+fn highlight(_dark: bool) -> Rgba {
+    rgb(61, 174, 233).with_alpha(128)
+}
+
+fn highlight_text(dark: bool) -> Rgba {
+    if dark { rgb(20, 20, 20) } else { rgb(255, 255, 255) }
+}
+
+fn link_text(dark: bool) -> Rgba {
+    if dark { rgb(100, 149, 237) } else { rgb(0, 0, 238) }
+}
+
+fn mark(_dark: bool) -> Rgba {
+    rgb(255, 255, 0)
+}
+
+fn mark_text(_dark: bool) -> Rgba {
+    rgb(0, 0, 0)
+}
+
+fn selected_item(_dark: bool) -> Rgba {
+    rgb(61, 174, 233)
+}
+
+fn selected_item_text(dark: bool) -> Rgba {
+    if dark { rgb(20, 20, 20) } else { rgb(255, 255, 255) }
+}
+
+fn visited_text(dark: bool) -> Rgba {
+    if dark { rgb(156, 113, 212) } else { rgb(85, 26, 139) }
+}
+
+/// The system-color half of KeywordStyleValue::to_color(): the keyword fan-out is transcribed
+/// from KeywordStyleValue.cpp, including the two ad-hoc LibWeb derivations. Non-system-color
+/// keywords (currentcolor included) return None.
+// https://www.w3.org/TR/css-color-4/#css-system-colors
+// https://www.w3.org/TR/css-color-4/#deprecated-system-colors
+pub(crate) fn system_color_for_keyword(keyword_code: u16, dark: bool) -> Option<Rgba> {
+    match keyword_code {
+        // AD-HOC: The spec says that 'accentcolor' and 'accentcolortext' should be resolved
+        //         based on the value of the 'accent-color' property, but this isn't implemented
+        //         by any other browsers and isn't fully specified
+        //         (https://github.com/w3c/csswg-drafts/issues/10971).
+        keyword::ACCENTCOLOR => Some(accent_color(dark)),
+        keyword::ACCENTCOLORTEXT => Some(accent_color_text(dark)),
+        keyword::ACTIVETEXT => Some(active_text(dark)),
+        keyword::BUTTONBORDER
+        | keyword::ACTIVEBORDER
+        | keyword::INACTIVEBORDER
+        | keyword::THREEDDARKSHADOW
+        | keyword::THREEDHIGHLIGHT
+        | keyword::THREEDLIGHTSHADOW
+        | keyword::THREEDSHADOW
+        | keyword::WINDOWFRAME => Some(button_border(dark)),
+        keyword::BUTTONFACE | keyword::BUTTONHIGHLIGHT | keyword::BUTTONSHADOW | keyword::THREEDFACE => {
+            Some(button_face(dark))
+        }
+        keyword::BUTTONTEXT => Some(button_text(dark)),
+        keyword::CANVAS
+        | keyword::APPWORKSPACE
+        | keyword::BACKGROUND
+        | keyword::INACTIVECAPTION
+        | keyword::INFOBACKGROUND
+        | keyword::MENU
+        | keyword::SCROLLBAR
+        | keyword::WINDOW => Some(canvas(dark)),
+        keyword::CANVASTEXT
+        | keyword::ACTIVECAPTION
+        | keyword::CAPTIONTEXT
+        | keyword::INFOTEXT
+        | keyword::MENUTEXT
+        | keyword::WINDOWTEXT => Some(canvas_text(dark)),
+        keyword::FIELD => Some(field(dark)),
+        keyword::FIELDTEXT => Some(field_text(dark)),
+        keyword::GRAYTEXT | keyword::INACTIVECAPTIONTEXT => Some(gray_text(dark)),
+        keyword::HIGHLIGHT => Some(highlight(dark)),
+        keyword::HIGHLIGHTTEXT => Some(highlight_text(dark)),
+        keyword::MARK => Some(mark(dark)),
+        keyword::MARKTEXT => Some(mark_text(dark)),
+        keyword::SELECTEDITEM => Some(selected_item(dark)),
+        keyword::SELECTEDITEMTEXT => Some(selected_item_text(dark)),
+        keyword::_LIBWEB_BUTTONFACEDISABLED => Some(button_face(dark).with_alpha(128)),
+        keyword::_LIBWEB_BUTTONFACEHOVER => Some(button_face(dark).darkened(0.8)),
+        keyword::LINKTEXT => Some(link_text(dark)),
+        keyword::VISITEDTEXT => Some(visited_text(dark)),
+        _ => None,
+    }
+}
+
+// PreferredColorScheme.h: Auto = 0, Dark = 1, Light = 2.
+pub(crate) const PREFERRED_COLOR_SCHEME_DARK: u8 = 1;
+pub(crate) const PREFERRED_COLOR_SCHEME_LIGHT: u8 = 2;
+
+// Gfx::RectangularColorSpace::Oklab.
+pub(crate) const RECTANGULAR_COLOR_SPACE_OKLAB: u8 = 8;
+
+/// What a color resolves against: the used color scheme, the used value of currentcolor, the
+/// computed currentcolor style value, and the calculation-resolution inputs (a length context
+/// plus relative-color channel values).
+#[derive(Clone, Copy)]
+pub(crate) struct ColorResolutionInput<'a> {
+    /// The PreferredColorScheme code; Dark is 1.
+    pub scheme: Option<u8>,
+    pub current_color: Option<Rgba>,
+    pub current_color_value: Option<&'a StyleValueData>,
+    pub length: Option<&'a FfiLengthResolutionContext>,
+    pub channels: Option<&'a RelativeColorContext>,
+}
+
+impl ColorResolutionInput<'_> {
+    fn dark(&self) -> bool {
+        self.scheme == Some(PREFERRED_COLOR_SCHEME_DARK)
+    }
+}
+
+/// Resolution against no style at all: no scheme, no currentcolor, no length context, no channels.
+pub(crate) const EMPTY_INPUT: ColorResolutionInput<'static> = ColorResolutionInput {
+    scheme: None,
+    current_color: None,
+    current_color_value: None,
+    length: None,
+    channels: None,
+};
+
+impl<'a> ColorResolutionInput<'a> {
+    /// What a color resolves against in a computed style: the used color-scheme picks `light-dark()`
+    /// branches and system colors, and the computed `color` is what `currentcolor` names. A missing group
+    /// leaves its part unset. The values resolved here are absolutized, so no length context is needed.
+    pub(crate) fn for_style_groups(
+        inherited_ui_values: Option<&'a InheritedUIValues>,
+        inherited_text_values: Option<&'a InheritedTextValues>,
+    ) -> Self {
+        ColorResolutionInput {
+            scheme: inherited_ui_values.map(|values| values.color_scheme),
+            current_color: inherited_text_values.map(|values| Rgba::from_packed(values.color)),
+            current_color_value: inherited_text_values.and_then(|values| unsafe {
+                // SAFETY: A non-null handle points at the style value the group payload retains.
+                values.color_style_value.pointer.cast::<StyleValueData>().as_ref()
+            }),
+            length: None,
+            channels: None,
+        }
+    }
+
+    pub(crate) fn for_style(style: ComputedValuesView<'a>) -> Self {
+        Self::for_style_groups(Some(style.inherited_ui()), Some(style.inherited_text()))
+    }
+
+    /// # Safety
+    /// `style` must be null or point at an `FfiColorResolutionStyle` whose group payloads are live for `'a`.
+    pub(crate) unsafe fn for_ffi_style(style: *const FfiColorResolutionStyle) -> Self {
+        // SAFETY: Guaranteed by the caller.
+        let Some(style) = (unsafe { style.as_ref() }) else {
+            return EMPTY_INPUT;
+        };
+        // SAFETY: Guaranteed by the caller.
+        unsafe {
+            Self::for_style_groups(
+                style.inherited_ui_values.cast::<InheritedUIValues>().as_ref(),
+                style.inherited_text_values.cast::<InheritedTextValues>().as_ref(),
+            )
+        }
+    }
+}
+
+/// The computed style a color resolves against, as the host names it: the element's or layout node's
+/// InheritedUIValues and InheritedTextValues group payloads, either of which may be null.
+#[repr(C)]
+pub struct FfiColorResolutionStyle {
+    pub inherited_ui_values: *const core::ffi::c_void,
+    pub inherited_text_values: *const core::ffi::c_void,
+}
+
+/// Angle's base type index in the numeric type order, as fixed by
+/// resolve_calculated_angle_with_channels()'s matches_dimension(1, ..) check.
+const BASE_TYPE_ANGLE: usize = 1;
+
+/// The stored resolve-as target of a Calculated variant, or None for any other variant.
+fn calculated_resolve_as(value: &StyleValueData) -> Option<ResolveAs> {
+    let StyleValueData::Calculated(calculated_payload) = value else {
+        return None;
+    };
+    let CalculatedPayload {
+        has_percentages_resolve_as,
+        resolve_as_is_number,
+        resolve_as_base,
+        ..
+    } = &**calculated_payload;
+    resolve_as_from_fields(*has_percentages_resolve_as, *resolve_as_is_number, *resolve_as_base)
+}
+
+/// Port of JS::modulo() over doubles: fmod with a negative result shifted into the divisor's sign.
+fn js_modulo(x: f64, y: f64) -> f64 {
+    let result = x % y;
+    if result < 0.0 { result + y } else { result }
+}
+
+/// Port of ColorStyleValue::resolve_hue().
+pub(crate) fn resolve_hue(style_value: &StyleValueData, input: &ColorResolutionInput) -> Option<f64> {
+    // <number> | <angle> | none
+    let normalized = |mut number: f64| {
+        // +inf should be clamped to 360
+        if !number.is_finite() && number > 0.0 {
+            number = 360.0;
+        }
+
+        // -inf and NaN should be clamped to 0
+        if !number.is_finite() || number.is_nan() {
+            number = 0.0;
+        }
+
+        js_modulo(number, 360.0)
+    };
+
+    match style_value {
+        StyleValueData::Number { value } => Some(normalized(*value)),
+        // Angle::to_degrees(): the canonical angle unit is degrees.
+        StyleValueData::Angle { value, unit } => {
+            Some(normalized(value * ANGLE_UNIT_CANONICAL_RATIOS[usize::from(*unit)]))
+        }
+        StyleValueData::Keyword { keyword: code } => {
+            if let Some(channel) = keyword_to_channel_keyword(*code) {
+                let channels = input.channels?;
+                let resolved = channels[usize::from(channel)]?;
+                return Some(normalized(resolved));
+            }
+            Some(0.0)
+        }
+        StyleValueData::Calculated(calculated_payload) => {
+            let CalculatedPayload { resolved_type, .. } = &**calculated_payload;
+            let resolve_as = calculated_resolve_as(style_value);
+            let numeric_type = resolved_type.to_calc();
+            if numeric_type.matches_number(resolve_as) {
+                return resolve_calculated_number_with_channels(style_value, input.channels, input.length)
+                    .map(normalized);
+            }
+            if numeric_type.matches_dimension(BASE_TYPE_ANGLE, resolve_as) {
+                return resolve_calculated_angle_with_channels(style_value, input.channels, input.length)
+                    .map(normalized);
+            }
+            Some(0.0)
+        }
+        _ => Some(0.0),
+    }
+}
+
+/// Port of ColorStyleValue::resolve_with_reference_value().
+pub(crate) fn resolve_with_reference_value(
+    style_value: &StyleValueData,
+    one_hundred_percent_value: f64,
+    input: &ColorResolutionInput,
+) -> Option<f64> {
+    // <percentage> | <number> | none
+    let normalize_percentage = |percentage: f64| percentage / 100.0 * one_hundred_percent_value;
+
+    match style_value {
+        StyleValueData::Percentage { value } => Some(normalize_percentage(*value)),
+        StyleValueData::Number { value } => Some(*value),
+        StyleValueData::Keyword { keyword: code } => {
+            if let Some(channel) = keyword_to_channel_keyword(*code) {
+                let channels = input.channels?;
+                return channels[usize::from(channel)];
+            }
+            Some(0.0)
+        }
+        StyleValueData::Calculated(calculated_payload) => {
+            let CalculatedPayload { resolved_type, .. } = &**calculated_payload;
+            let resolve_as = calculated_resolve_as(style_value);
+            let numeric_type = resolved_type.to_calc();
+            if numeric_type.matches_number(resolve_as) {
+                return resolve_calculated_number_with_channels(style_value, input.channels, input.length);
+            }
+            if numeric_type.matches_percentage() {
+                return resolve_calculated_percentage_with_channels(style_value, input.channels, input.length)
+                    .map(normalize_percentage);
+            }
+            Some(0.0)
+        }
+        _ => Some(0.0),
+    }
+}
+
+/// Port of ColorStyleValue::resolve_alpha().
+pub(crate) fn resolve_alpha(style_value: &StyleValueData, input: &ColorResolutionInput) -> Option<f64> {
+    // <number> | <percentage> | none
+    let normalized = |number: f64| {
+        let number = if number.is_nan() { 0.0 } else { number };
+        number.clamp(0.0, 1.0)
+    };
+
+    match style_value {
+        StyleValueData::Number { value } => Some(normalized(*value)),
+        StyleValueData::Percentage { value } => Some(normalized(*value / 100.0)),
+        StyleValueData::Keyword { keyword: code } => {
+            if let Some(channel) = keyword_to_channel_keyword(*code) {
+                let channels = input.channels?;
+                let resolved = channels[usize::from(channel)]?;
+                return Some(normalized(resolved));
+            }
+            if *code == keyword::NONE {
+                return Some(0.0);
+            }
+            Some(1.0)
+        }
+        StyleValueData::Calculated(calculated_payload) => {
+            let CalculatedPayload { resolved_type, .. } = &**calculated_payload;
+            let resolve_as = calculated_resolve_as(style_value);
+            let numeric_type = resolved_type.to_calc();
+            if numeric_type.matches_number(resolve_as) {
+                return resolve_calculated_number_with_channels(style_value, input.channels, input.length)
+                    .map(normalized);
+            }
+            if numeric_type.matches_percentage() {
+                return resolve_calculated_percentage_with_channels(style_value, input.channels, input.length)
+                    .map(|percentage| normalized(percentage / 100.0));
+            }
+            Some(1.0)
+        }
+        _ => Some(1.0),
+    }
+}
+
+// Shared-graph retained-value constructors, mirroring make_result() in color_interpolation.rs.
+
+fn retained_value(value: StyleValueData) -> RetainedStyleValueData {
+    RetainedStyleValueData::from_arc(StyleValueArc::new(value))
+}
+
+fn retained_null() -> RetainedStyleValueData {
+    RetainedStyleValueData::none()
+}
+
+/// Clamp a legacy RGB channel to a byte. NaN becomes 0, then values round half away from zero.
+fn clamp_to_byte(value: f64) -> u8 {
+    let value = if value.is_nan() { 0.0 } else { value };
+    value.clamp(0.0, 255.0).round() as u8
+}
+
+/// Convert a normalized channel to a byte.
+fn fraction_to_byte(fraction_0_1: f64) -> u8 {
+    // Match CSS Color 4 "resolve to sRGB" rounding: round half away from zero,
+    // not the default round-half-to-even that cvtsd2si uses.
+    (fraction_0_1 * 255.0).clamp(0.0, 255.0).round() as u8
+}
+
+struct ResolvedChannels {
+    c1: f64,
+    c2: f64,
+    c3: f64,
+    alpha: f64,
+}
+
+fn resolve_channels_for(
+    descriptor: &ColorFunctionDescriptor,
+    channels: [&StyleValueData; 3],
+    alpha_style_value: Option<&StyleValueData>,
+    input: &ColorResolutionInput,
+) -> Option<ResolvedChannels> {
+    let resolve_channel = |index: usize| {
+        let channel_descriptor = &descriptor.channels[index];
+        if channel_descriptor.is_hue {
+            resolve_hue(channels[index], input)
+        } else {
+            resolve_with_reference_value(channels[index], f64::from(channel_descriptor.percent_reference), input)
+        }
+    };
+    let c1 = resolve_channel(0);
+    let c2 = resolve_channel(1);
+    let c3 = resolve_channel(2);
+    let alpha = match alpha_style_value {
+        Some(alpha) => resolve_alpha(alpha, input),
+        None => Some(1.0),
+    };
+
+    Some(ResolvedChannels {
+        c1: c1?,
+        c2: c2?,
+        c3: c3?,
+        alpha: alpha?,
+    })
+}
+
+fn construct_color(color_type: u8, c1: f64, c2: f64, c3: f64, alpha: f64) -> Option<Rgba> {
+    use color_conversion as ct;
+    Some(match color_type {
+        ct::RGB => Rgba {
+            r: clamp_to_byte(c1),
+            g: clamp_to_byte(c2),
+            b: clamp_to_byte(c3),
+            a: fraction_to_byte(alpha),
+        },
+        ct::HSL => Rgba::from_hsla(c1, c2 / 100.0, c3 / 100.0, alpha),
+        ct::HWB => {
+            // NB: White and black are not clamped to 100%, see hwb_to_absolutized_rgb().
+            let whiteness = (c2.max(0.0) / 100.0) as f32;
+            let blackness = (c3.max(0.0) / 100.0) as f32;
+            if whiteness + blackness >= 1.0 {
+                let gray = fraction_to_byte(f64::from(whiteness / (whiteness + blackness)));
+                return Some(Rgba {
+                    r: gray,
+                    g: gray,
+                    b: gray,
+                    a: fraction_to_byte(alpha),
+                });
+            }
+            let value = 1.0 - blackness;
+            let saturation = 1.0 - (whiteness / value);
+            Rgba::from_hsv(c1, f64::from(saturation), f64::from(value)).with_opacity(alpha)
+        }
+        ct::LAB => Rgba::from_lab(c1.clamp(0.0, 100.0) as f32, c2 as f32, c3 as f32, alpha as f32),
+        ct::OKLAB => Rgba::from_oklab(c1.clamp(0.0, 1.0) as f32, c2 as f32, c3 as f32, alpha as f32),
+        ct::LCH => {
+            let l = c1.clamp(0.0, 100.0);
+            let hue_radians = c3.to_radians();
+            Rgba::from_lab(
+                l as f32,
+                (c2 * math::cos(hue_radians)) as f32,
+                (c2 * math::sin(hue_radians)) as f32,
+                alpha as f32,
+            )
+        }
+        ct::OKLCH => {
+            let l = c1.clamp(0.0, 1.0);
+            // AK::max() keeps NaN chroma as NaN, unlike f64::max.
+            let chroma = if c2 < 0.0 { 0.0 } else { c2 };
+            let hue_radians = c3.to_radians();
+            Rgba::from_oklab(
+                l as f32,
+                (chroma * math::cos(hue_radians)) as f32,
+                (chroma * math::sin(hue_radians)) as f32,
+                alpha as f32,
+            )
+        }
+        ct::A98_RGB => Rgba::from_a98rgb(c1 as f32, c2 as f32, c3 as f32, alpha as f32),
+        ct::DISPLAY_P3 => Rgba::from_display_p3(c1 as f32, c2 as f32, c3 as f32, alpha as f32),
+        ct::DISPLAY_P3_LINEAR => Rgba::from_display_p3_linear(c1 as f32, c2 as f32, c3 as f32, alpha as f32),
+        ct::SRGB => {
+            // AK::round_to<u8> lowers to cvtsd2si: round half to even, unlike the two byte
+            // helpers above.
+            let to_u8 = |value: f64| (255.0 * value).clamp(0.0, 255.0).round_ties_even() as u8;
+            Rgba {
+                r: to_u8(c1),
+                g: to_u8(c2),
+                b: to_u8(c3),
+                a: to_u8(alpha),
+            }
+        }
+        ct::SRGB_LINEAR => Rgba::from_linear_srgb(c1 as f32, c2 as f32, c3 as f32, alpha as f32),
+        ct::PROPHOTO_RGB => Rgba::from_pro_photo(c1 as f32, c2 as f32, c3 as f32, alpha as f32),
+        ct::REC2020 => Rgba::from_rec2020(c1 as f32, c2 as f32, c3 as f32, alpha as f32),
+        ct::XYZ_D50 => Rgba::from_xyz50(c1 as f32, c2 as f32, c3 as f32, alpha as f32),
+        ct::XYZ_D65 => Rgba::from_xyz65(c1 as f32, c2 as f32, c3 as f32, alpha as f32),
+        _ => return None,
+    })
+}
+
+fn color_function_to_color(value: &StyleValueData, input: &ColorResolutionInput) -> Option<Rgba> {
+    let StyleValueData::ColorFunction(color_function_payload) = value else {
+        return None;
+    };
+    let ColorFunctionPayload {
+        color_base,
+        channel_0,
+        channel_1,
+        channel_2,
+        alpha,
+        origin_color,
+        ..
+    } = &**color_function_payload;
+    if !color_base.has_color_type {
+        return None;
+    }
+    let color_type = color_base.color_type;
+    if color_type == color_conversion::ALPHA {
+        return to_color(&resolve_relative_form(value, input)?, input);
+    }
+
+    let relative_channels;
+    let synthesized_alpha;
+    let mut effective_input = *input;
+    let mut alpha_value = alpha.optional_data();
+    if let Some(origin) = origin_color.optional_data() {
+        relative_channels = extract_channels_in_color_space(origin, color_type, input)?.0;
+        effective_input.channels = Some(&relative_channels);
+        // https://drafts.csswg.org/css-color-5/#rcs-intro
+        // If the alpha value of the relative color is omitted, it defaults to that of the origin
+        // color (rather than defaulting to 100%, as it does in the absolute syntax).
+        if alpha_value.is_none() {
+            synthesized_alpha = StyleValueData::Keyword {
+                keyword: keyword::ALPHA,
+            };
+            alpha_value = Some(&synthesized_alpha);
+        }
+    }
+
+    let resolved = resolve_channels_for(
+        descriptor_for_color_type(color_type),
+        [channel_0.data(), channel_1.data(), channel_2.data()],
+        alpha_value,
+        &effective_input,
+    )?;
+    construct_color(color_type, resolved.c1, resolved.c2, resolved.c3, resolved.alpha)
+}
+
+/// Port of native_channels_to_xyz65() in ColorStyleValue.cpp. The Gfx conversion chains are
+/// reached through color_conversion::convert(), whose to-XYZ-D65 compositions match them
+/// step for step; RGB, HSL and HWB first rescale into the fraction conventions convert()
+/// expects, with RGB routed through the sRGB code because convert()'s RGB arm additionally
+/// clamps to the 0..=1 gamut, which the C++ code does not.
+fn native_channels_to_xyz65(native: Components, native_type: u8) -> Components {
+    use color_conversion as ct;
+    let converted = match native_type {
+        ct::RGB => color_conversion::convert(
+            ct::SRGB,
+            ct::XYZ_D65,
+            [native[0] / 255.0, native[1] / 255.0, native[2] / 255.0, native[3]],
+        ),
+        ct::HSL | ct::HWB => color_conversion::convert(
+            native_type,
+            ct::XYZ_D65,
+            [native[0], native[1] / 100.0, native[2] / 100.0, native[3]],
+        ),
+        _ => color_conversion::convert(native_type, ct::XYZ_D65, native),
+    };
+    converted.expect("every color type converts to XYZ-D65")
+}
+
+/// Port of set_channels_for_target() in ColorStyleValue.cpp. Conversions out of XYZ-D65 and
+/// the sRGB fraction reuse color_conversion::convert(), whose from-XYZ-D65 chains match the
+/// Gfx compositions the C++ code spells out.
+fn set_channels_for_target(
+    context: &mut RelativeColorContext,
+    target_color_type: u8,
+    xyz65: Components,
+    srgb_fraction: Components,
+    linear_srgb: Components,
+) {
+    use channel_keyword as ck;
+    use color_conversion as ct;
+    let converted_from_xyz65 =
+        |target: u8| color_conversion::convert(ct::XYZ_D65, target, xyz65).expect("XYZ-D65 converts to the target");
+    let mut set = |slot: u8, value: f64| context[usize::from(slot)] = Some(value);
+    match target_color_type {
+        ct::RGB => {
+            set(ck::R, f64::from(srgb_fraction[0]) * 255.0);
+            set(ck::G, f64::from(srgb_fraction[1]) * 255.0);
+            set(ck::B, f64::from(srgb_fraction[2]) * 255.0);
+        }
+        ct::HSL => {
+            let hsl = color_conversion::convert(ct::SRGB, ct::HSL, srgb_fraction).expect("sRGB converts to HSL");
+            set(ck::H, f64::from(hsl[0]));
+            set(ck::S, f64::from(hsl[1]) * 100.0);
+            set(ck::L, f64::from(hsl[2]) * 100.0);
+        }
+        ct::HWB => {
+            let hwb = color_conversion::convert(ct::SRGB, ct::HWB, srgb_fraction).expect("sRGB converts to HWB");
+            set(ck::H, f64::from(hwb[0]));
+            set(ck::W, f64::from(hwb[1]) * 100.0);
+            set(ck::B, f64::from(hwb[2]) * 100.0);
+        }
+        ct::LAB => {
+            let lab = converted_from_xyz65(ct::LAB);
+            set(ck::L, f64::from(lab[0]));
+            set(ck::A, f64::from(lab[1]));
+            set(ck::B, f64::from(lab[2]));
+        }
+        ct::LCH => {
+            let lch = converted_from_xyz65(ct::LCH);
+            set(ck::L, f64::from(lch[0]));
+            set(ck::C, f64::from(lch[1]));
+            set(ck::H, f64::from(lch[2]));
+        }
+        ct::OKLAB => {
+            let oklab = converted_from_xyz65(ct::OKLAB);
+            set(ck::L, f64::from(oklab[0]));
+            set(ck::A, f64::from(oklab[1]));
+            set(ck::B, f64::from(oklab[2]));
+        }
+        ct::OKLCH => {
+            let oklch = converted_from_xyz65(ct::OKLCH);
+            set(ck::L, f64::from(oklch[0]));
+            set(ck::C, f64::from(oklch[1]));
+            set(ck::H, f64::from(oklch[2]));
+        }
+        ct::SRGB => {
+            set(ck::R, f64::from(srgb_fraction[0]));
+            set(ck::G, f64::from(srgb_fraction[1]));
+            set(ck::B, f64::from(srgb_fraction[2]));
+        }
+        ct::SRGB_LINEAR => {
+            set(ck::R, f64::from(linear_srgb[0]));
+            set(ck::G, f64::from(linear_srgb[1]));
+            set(ck::B, f64::from(linear_srgb[2]));
+        }
+        ct::A98_RGB | ct::DISPLAY_P3 | ct::DISPLAY_P3_LINEAR | ct::PROPHOTO_RGB | ct::REC2020 => {
+            let rgb = converted_from_xyz65(target_color_type);
+            set(ck::R, f64::from(rgb[0]));
+            set(ck::G, f64::from(rgb[1]));
+            set(ck::B, f64::from(rgb[2]));
+        }
+        ct::XYZ_D50 => {
+            let xyz50 = converted_from_xyz65(ct::XYZ_D50);
+            set(ck::X, f64::from(xyz50[0]));
+            set(ck::Y, f64::from(xyz50[1]));
+            set(ck::Z, f64::from(xyz50[2]));
+        }
+        ct::XYZ_D65 => {
+            set(ck::X, f64::from(xyz65[0]));
+            set(ck::Y, f64::from(xyz65[1]));
+            set(ck::Z, f64::from(xyz65[2]));
+        }
+        // The C++ switch is exhaustive over ColorType.
+        _ => {}
+    }
+}
+
+/// Port of resolve_origin_native_channels() in ColorStyleValue.cpp: resolves an absolute
+/// color-function origin's channels without going through the u8 sRGB representation. The
+/// C++ empty CalculationResolutionContext maps to no channels and no length context.
+fn resolve_origin_native_channels(origin: &StyleValueData) -> Option<(u8, Components, [bool; 4])> {
+    let StyleValueData::ColorFunction(color_function_payload) = origin else {
+        return None;
+    };
+    let ColorFunctionPayload {
+        color_base,
+        channel_0,
+        channel_1,
+        channel_2,
+        alpha,
+        origin_color,
+        ..
+    } = &**color_function_payload;
+    if origin_color.optional_data().is_some() {
+        return None;
+    }
+    if !color_base.has_color_type {
+        return None;
+    }
+
+    let descriptor = descriptor_for_color_type(color_base.color_type);
+    let channel_value = |channel: &RetainedStyleValueData, index: usize| -> Option<f64> {
+        let value = channel.data();
+        if is_none_keyword(value) {
+            return Some(0.0);
+        }
+        let channel_descriptor = &descriptor.channels[index];
+        if channel_descriptor.is_hue {
+            resolve_hue(value, &EMPTY_INPUT)
+        } else {
+            resolve_with_reference_value(value, f64::from(channel_descriptor.percent_reference), &EMPTY_INPUT)
+        }
+    };
+    let alpha_value = || -> Option<f64> {
+        match alpha.optional_data() {
+            // An omitted alpha on a non-relative color function defaults to 1.
+            None => Some(1.0),
+            Some(alpha) if is_none_keyword(alpha) => Some(0.0),
+            Some(alpha) => resolve_alpha(alpha, &EMPTY_INPUT),
+        }
+    };
+
+    let c1 = channel_value(channel_0, 0)?;
+    let c2 = channel_value(channel_1, 1)?;
+    let c3 = channel_value(channel_2, 2)?;
+    let alpha_resolved = alpha_value()?;
+    let missing = [
+        is_none_keyword(channel_0.data()),
+        is_none_keyword(channel_1.data()),
+        is_none_keyword(channel_2.data()),
+        alpha.optional_data().is_some_and(is_none_keyword),
+    ];
+
+    Some((
+        color_base.color_type,
+        [c1 as f32, c2 as f32, c3 as f32, alpha_resolved as f32],
+        missing,
+    ))
+}
+
+/// The channel keyword slots of a color type's three components, in order.
+fn channel_slots(color_type: u8) -> Option<[u8; 3]> {
+    use channel_keyword as ck;
+    use color_conversion as ct;
+    Some(match color_type {
+        ct::RGB => [ck::R, ck::G, ck::B],
+        ct::HSL => [ck::H, ck::S, ck::L],
+        ct::HWB => [ck::H, ck::W, ck::B],
+        ct::LAB | ct::OKLAB => [ck::L, ck::A, ck::B],
+        ct::LCH | ct::OKLCH => [ck::L, ck::C, ck::H],
+        ct::SRGB
+        | ct::SRGB_LINEAR
+        | ct::A98_RGB
+        | ct::DISPLAY_P3
+        | ct::DISPLAY_P3_LINEAR
+        | ct::PROPHOTO_RGB
+        | ct::REC2020 => [ck::R, ck::G, ck::B],
+        ct::XYZ_D50 | ct::XYZ_D65 => [ck::X, ck::Y, ck::Z],
+        _ => return None,
+    })
+}
+
+/// Applies the powerless hue rules to a color in its native units (hsl() and hwb() components other than hue in
+/// percent): a powerless hue becomes missing, and the colorfulness is set to zero.
+// https://drafts.csswg.org/css-color-4/#powerless
+pub(crate) fn make_powerless_hue_missing(color_type: u8, components: &mut [f64; 3], missing: &mut [bool; 3]) {
+    use color_conversion as ct;
+    // When performing color space conversion to a cylindrical polar color space, user agents shall treat a
+    // hue component as powerless if the chroma (or other measure of colorfulness, such as saturation in hsl)
+    // is less than or equal to the epsilon (ε) specified for that color space.
+    let (hue_index, colorfulness_index, epsilon) = match color_type {
+        ct::HSL => (0, 1, 0.001_f64),
+        ct::LCH => (2, 1, 0.0015),
+        ct::OKLCH => (2, 1, 0.000004),
+        ct::HWB => {
+            // For hwb follow these steps instead:
+            // NB: Components are stored in single precision, so they are compared at that precision.
+            let sum = components[1] + components[2];
+            if sum as f32 >= 99.999_f32 {
+                missing[0] = true;
+                // 1. if W + B is greater than or equal to ε and W + B is less than 100
+                if (sum as f32) < 100.0 {
+                    // 1.1. if W and B are not missing
+                    if !missing[1] && !missing[2] {
+                        // 1.1.1. set B to 100 - W
+                        components[2] = 100.0 - components[1];
+                    }
+                    // 1.2. else if W is not missing
+                    else if !missing[1] {
+                        // 1.2.1. set W to 100
+                        components[1] = 100.0;
+                    }
+                    // 1.3. else if B is not missing
+                    else if !missing[2] {
+                        // 1.3.1. set B to 100
+                        components[2] = 100.0;
+                    }
+                }
+            }
+            return;
+        }
+        _ => return,
+    };
+    let colorfulness = components[colorfulness_index];
+    if colorfulness as f32 <= epsilon as f32 {
+        missing[hue_index] = true;
+        // When changing a powerless hue component to a missing component, the chroma (or other measure of
+        // colorfulness, such as saturation in hsl; see analogous components) is set to zero to avoid amplifying
+        // floating-point noise. Negative values are not clamped to zero, this value is only set to zero when it
+        // is larger than zero but smaller or equal to ε.
+        if colorfulness > 0.0 {
+            components[colorfulness_index] = 0.0;
+        }
+    }
+}
+
+/// Applies the powerless hue rules to the converted target channels of a relative color.
+fn make_powerless_target_hue_missing(
+    context: &mut RelativeColorContext,
+    missing_slots: &mut u16,
+    target_color_type: u8,
+) {
+    let Some(slots) = channel_slots(target_color_type) else {
+        return;
+    };
+    let mut components = slots.map(|slot| context[usize::from(slot)].unwrap_or(0.0));
+    let mut missing = slots.map(|slot| *missing_slots & (1 << slot) != 0);
+    make_powerless_hue_missing(target_color_type, &mut components, &mut missing);
+    for (index, slot) in slots.into_iter().enumerate() {
+        if !missing[index] {
+            context[usize::from(slot)] = Some(components[index]);
+        }
+        if missing[index] {
+            *missing_slots |= 1 << slot;
+        }
+    }
+}
+
+/// Port of ColorFunctionStyleValue::resolve_relative_form(): flattens a relative color
+/// function into an absolute one whose channels are plain numbers (or `none` keywords).
+// https://drafts.csswg.org/css-color-5/#resolving-rcs
+pub(crate) fn resolve_relative_form(value: &StyleValueData, input: &ColorResolutionInput) -> Option<StyleValueData> {
+    let StyleValueData::ColorFunction(color_function_payload) = value else {
+        return None;
+    };
+    let ColorFunctionPayload {
+        color_base,
+        channel_0,
+        channel_1,
+        channel_2,
+        alpha,
+        origin_color,
+        ..
+    } = &**color_function_payload;
+    // The C++ code VERIFYs both of these.
+    let origin = origin_color.optional_data()?;
+    if !color_base.has_color_type {
+        return None;
+    }
+    let target_color_type = color_base.color_type;
+    if target_color_type == color_conversion::ALPHA {
+        return resolve_relative_alpha(origin, alpha.optional_data()?, input);
+    }
+
+    let (relative_channels, missing_slots) = extract_channels_in_color_space(origin, target_color_type, input)?;
+    let mut channel_input = *input;
+    channel_input.channels = Some(&relative_channels);
+
+    // https://drafts.csswg.org/css-color-5/#relative-syntax
+    // The component keywords return a <number>, or none
+    // NB: A component keyword returns none when it refers to a missing component. Calculations treat missing
+    //     components as 0.
+    let refers_to_missing_component = |value: &StyleValueData| {
+        matches!(value, StyleValueData::Keyword { keyword: code }
+            if keyword_to_channel_keyword(*code).is_some_and(|channel| missing_slots & (1 << channel) != 0))
+    };
+
+    let descriptor = descriptor_for_color_type(target_color_type);
+    let resolve_channel = |channel: &RetainedStyleValueData, index: usize| -> StyleValueData {
+        let value = channel.data();
+        if is_none_keyword(value) || refers_to_missing_component(value) {
+            return StyleValueData::Keyword { keyword: keyword::NONE };
+        }
+        let channel_descriptor = &descriptor.channels[index];
+        let resolved = if channel_descriptor.is_hue {
+            resolve_hue(value, &channel_input)
+        } else {
+            resolve_with_reference_value(value, f64::from(channel_descriptor.percent_reference), &channel_input)
+        };
+        StyleValueData::Number {
+            value: resolved.unwrap_or(0.0),
+        }
+    };
+
+    let resolved_alpha = {
+        // https://drafts.csswg.org/css-color-5/#rcs-intro
+        // If the alpha value of the relative color is omitted, it defaults to that of the origin
+        // color (rather than defaulting to 100%, as it does in the absolute syntax).
+        let synthesized_alpha;
+        let effective_alpha = match alpha.optional_data() {
+            Some(alpha) => alpha,
+            None => {
+                synthesized_alpha = StyleValueData::Keyword {
+                    keyword: keyword::ALPHA,
+                };
+                &synthesized_alpha
+            }
+        };
+        if is_none_keyword(effective_alpha) || refers_to_missing_component(effective_alpha) {
+            StyleValueData::Keyword { keyword: keyword::NONE }
+        } else {
+            StyleValueData::Number {
+                value: resolve_alpha(effective_alpha, &channel_input).unwrap_or(1.0),
+            }
+        }
+    };
+
+    Some(StyleValueData::ColorFunction(StyleValueBox::new(
+        ColorFunctionPayload {
+            color_base: *color_base,
+            channel_0: retained_value(resolve_channel(channel_0, 0)),
+            channel_1: retained_value(resolve_channel(channel_1, 1)),
+            channel_2: retained_value(resolve_channel(channel_2, 2)),
+            alpha: retained_value(resolved_alpha),
+            has_name: false,
+            name: CssString::none(),
+            origin_color: retained_null(),
+        },
+    )))
+}
+
+/// Resolves alpha(from <color> / <alpha>) to an absolute color in the color space of its origin color.
+// https://drafts.csswg.org/css-color-5/#relative-alpha
+fn resolve_relative_alpha(
+    origin_color: &StyleValueData,
+    alpha: &StyleValueData,
+    input: &ColorResolutionInput,
+) -> Option<StyleValueData> {
+    let mut effective_origin = origin_color;
+    if let StyleValueData::Keyword { keyword: code } = effective_origin
+        && *code == keyword::CURRENTCOLOR
+        && let Some(current_color_value) = input.current_color_value
+        && !value_depends_on_current_color(current_color_value)
+    {
+        effective_origin = current_color_value;
+    }
+    let resolved_origin_storage;
+    if let StyleValueData::ColorFunction(color_function_payload) = effective_origin
+        && color_function_payload.origin_color.optional_data().is_some()
+    {
+        resolved_origin_storage = resolve_relative_form(effective_origin, input)?;
+        effective_origin = &resolved_origin_storage;
+    }
+
+    // The color components of the origin color are unchanged, the alpha component is modified or replaced.
+    // The result of this function is in the color space of the origin color.
+    let (color_type, components, missing) = match resolve_origin_native_channels(effective_origin) {
+        Some(native) => native,
+        None => {
+            let color = to_color(effective_origin, input)?;
+            (
+                color_conversion::SRGB,
+                [
+                    f32::from(color.r) / 255.0,
+                    f32::from(color.g) / 255.0,
+                    f32::from(color.b) / 255.0,
+                    f32::from(color.a) / 255.0,
+                ],
+                [false; 4],
+            )
+        }
+    };
+    let component = |index: usize| {
+        if missing[index] {
+            StyleValueData::Keyword { keyword: keyword::NONE }
+        } else {
+            StyleValueData::Number {
+                value: f64::from(components[index]),
+            }
+        }
+    };
+
+    // alpha is a <number> that corresponds to the origin color's alpha transparency.
+    let mut channels: RelativeColorContext = [None; 13];
+    channels[usize::from(channel_keyword::ALPHA)] = Some(if missing[3] { 0.0 } else { f64::from(components[3]) });
+    let channel_input = ColorResolutionInput {
+        channels: Some(&channels),
+        ..*input
+    };
+    let refers_to_missing_alpha =
+        missing[3] && matches!(alpha, StyleValueData::Keyword { keyword: code } if *code == keyword::ALPHA);
+    let resolved_alpha = if is_none_keyword(alpha) || refers_to_missing_alpha {
+        StyleValueData::Keyword { keyword: keyword::NONE }
+    } else {
+        StyleValueData::Number {
+            value: resolve_alpha(alpha, &channel_input)?,
+        }
+    };
+
+    Some(StyleValueData::ColorFunction(StyleValueBox::new(
+        ColorFunctionPayload {
+            color_base: ColorBase {
+                has_color_type: true,
+                color_type,
+                color_syntax: crate::css::value_codes::COLOR_SYNTAX_MODERN,
+            },
+            channel_0: retained_value(component(0)),
+            channel_1: retained_value(component(1)),
+            channel_2: retained_value(component(2)),
+            alpha: retained_value(resolved_alpha),
+            has_name: false,
+            name: CssString::none(),
+            origin_color: retained_null(),
+        },
+    )))
+}
+
+/// The computed value form of an absolute rgb(), hsl() or hwb() function: the same color as
+/// color(srgb ...). Other color functions compute to themselves.
+// https://drafts.csswg.org/css-color-4/#resolving-sRGB-values
+pub(crate) fn relative_color_computed_value_form(value: StyleValueData) -> StyleValueData {
+    use color_conversion as ct;
+    let StyleValueData::ColorFunction(color_function_payload) = &value else {
+        return value;
+    };
+    let ColorFunctionPayload {
+        color_base,
+        channel_0,
+        channel_1,
+        channel_2,
+        alpha,
+        ..
+    } = &**color_function_payload;
+    let color_type = color_base.color_type;
+    if !matches!(color_type, ct::RGB | ct::HSL | ct::HWB) {
+        return value;
+    }
+    // https://drafts.csswg.org/css-color-5/#serial-relative-color
+    // However, if the resolved value of an hsl() or hwb() relative color has at least one missing color
+    // component (including a missing alpha carried forward from the origin color per
+    // [[css-color-4#interpolation-missing]]), the form used is the modern hsl(h s l / a) or hwb(h w b / a)
+    // syntax respectively, preserving the original color function and each none value, rather than
+    // degrading to color(srgb r g b) (which would lose the hsl/hwb identity).
+    if color_type != ct::RGB && crate::css::serialize::color_function_has_missing_component(&value) {
+        return value;
+    }
+    let number = |channel: &RetainedStyleValueData| match channel.optional_data() {
+        Some(StyleValueData::Number { value }) => Some(*value),
+        _ => None,
+    };
+    let none = || StyleValueData::Keyword { keyword: keyword::NONE };
+    let alpha = match alpha.optional_data() {
+        None => StyleValueData::Number { value: 1.0 },
+        Some(alpha) if is_none_keyword(alpha) => none(),
+        Some(_) => StyleValueData::Number {
+            value: number(alpha).unwrap_or(0.0),
+        },
+    };
+    let channels = if color_type == ct::RGB {
+        [channel_0, channel_1, channel_2].map(|channel| match number(channel) {
+            Some(value) => StyleValueData::Number { value: value / 255.0 },
+            None => none(),
+        })
+    } else {
+        let native = [
+            number(channel_0).unwrap_or(0.0) as f32,
+            (number(channel_1).unwrap_or(0.0) / 100.0) as f32,
+            (number(channel_2).unwrap_or(0.0) / 100.0) as f32,
+            1.0,
+        ];
+        let srgb = if color_type == ct::HSL {
+            ct::hsl_to_srgb(native)
+        } else {
+            ct::hwb_to_srgb(native)
+        };
+        [0, 1, 2].map(|index| StyleValueData::Number {
+            value: f64::from(srgb[index]),
+        })
+    };
+    let [channel_0, channel_1, channel_2] = channels;
+    StyleValueData::ColorFunction(StyleValueBox::new(ColorFunctionPayload {
+        color_base: ColorBase {
+            has_color_type: true,
+            color_type: ct::SRGB,
+            color_syntax: crate::css::value_codes::COLOR_SYNTAX_MODERN,
+        },
+        channel_0: retained_value(channel_0),
+        channel_1: retained_value(channel_1),
+        channel_2: retained_value(channel_2),
+        alpha: retained_value(alpha),
+        has_name: false,
+        name: CssString::none(),
+        origin_color: retained_null(),
+    }))
+}
+
+/// Port of ColorStyleValue::extract_channels_in_color_space().
+///
+/// NB: The C++ code computes linear sRGB with the direct transfer function; that function is
+/// private to color_conversion, so linear sRGB (and the gamma encode of an sRGB-linear origin)
+/// hop through XYZ-D65 via convert() here. The difference is one f32 matrix round-trip, as with
+/// from_converted() above.
+// https://drafts.csswg.org/css-color-5/#resolving-rcs
+fn extract_channels_in_color_space(
+    origin_color: &StyleValueData,
+    target_color_type: u8,
+    input: &ColorResolutionInput,
+) -> Option<(RelativeColorContext, u16)> {
+    let (mut context, missing_slots) = extract_channels_and_missing_slots(origin_color, target_color_type, input)?;
+    // https://drafts.csswg.org/css-color-5/#rcs-intro
+    // However, if calculations are done on missing values, none is treated as 0.
+    for (slot, channel) in context.iter_mut().enumerate() {
+        if missing_slots & (1 << slot) != 0 {
+            *channel = Some(0.0);
+        }
+    }
+    Some((context, missing_slots))
+}
+
+fn extract_channels_and_missing_slots(
+    origin_color: &StyleValueData,
+    target_color_type: u8,
+    input: &ColorResolutionInput,
+) -> Option<(RelativeColorContext, u16)> {
+    use channel_keyword as ck;
+    use color_conversion as ct;
+
+    let mut effective_origin = origin_color;
+    if let StyleValueData::Keyword { keyword: code } = effective_origin
+        && *code == keyword::CURRENTCOLOR
+        && let Some(current_color_value) = input.current_color_value
+        && !value_depends_on_current_color(current_color_value)
+    {
+        effective_origin = current_color_value;
+    }
+
+    let resolved_origin_storage;
+    if let StyleValueData::ColorFunction(color_function_payload) = effective_origin
+        && color_function_payload.origin_color.optional_data().is_some()
+    {
+        resolved_origin_storage = resolve_relative_form(effective_origin, input)?;
+        effective_origin = &resolved_origin_storage;
+    }
+
+    // High-precision path: for color-function origins, resolve channels directly without going
+    // through the u8 sRGB representation, which clips wide-gamut colors and loses precision.
+    if let Some((origin_native_type, mut native_channels, origin_missing)) =
+        resolve_origin_native_channels(effective_origin)
+    {
+        let mut context: RelativeColorContext = [None; 13];
+        context[usize::from(ck::ALPHA)] = Some(f64::from(native_channels[3]));
+        // https://drafts.csswg.org/css-color-5/#rcs-intro
+        // Missing components are handled the same way as with [[css-color-4#interpolation-missing]]: the origin
+        // colorspace and the relative function colorspace are checked for analogous components which are then
+        // carried forward as missing.
+        let mut missing_slots: u16 = if origin_missing[3] { 1 << ck::ALPHA } else { 0 };
+
+        // If the target matches the origin's native type, use the origin's channel values
+        // directly to avoid round-trip losses.
+        if origin_native_type == target_color_type {
+            let slots = channel_slots(target_color_type)?;
+            for (index, slot) in slots.into_iter().enumerate() {
+                context[usize::from(slot)] = Some(f64::from(native_channels[index]));
+                if origin_missing[index] {
+                    missing_slots |= 1 << slot;
+                }
+            }
+            return Some((context, missing_slots));
+        }
+
+        // https://drafts.csswg.org/css-color-4/#color-convert-algorithm
+        // To prepare a color col1 for conversion:
+        // 1. Change any powerless components in src to missing components
+        let mut source_components = [0, 1, 2].map(|index| f64::from(native_channels[index]));
+        let mut source_missing = [origin_missing[0], origin_missing[1], origin_missing[2]];
+        make_powerless_hue_missing(origin_native_type, &mut source_components, &mut source_missing);
+        for index in 0..3 {
+            native_channels[index] = source_components[index] as f32;
+        }
+        let carried_forward = carry_forward_missing_components(
+            [
+                source_missing[0],
+                source_missing[1],
+                source_missing[2],
+                origin_missing[3],
+            ],
+            origin_native_type,
+            target_color_type,
+        );
+        if let Some(slots) = channel_slots(target_color_type) {
+            for (index, slot) in slots.into_iter().enumerate() {
+                if carried_forward[index] {
+                    missing_slots |= 1 << slot;
+                }
+            }
+        }
+
+        // When both origin and target are in the sRGB gamut family, convert directly to avoid
+        // matrix round-trip precision loss.
+        let is_srgb_family =
+            |color_type: u8| matches!(color_type, ct::RGB | ct::HSL | ct::HWB | ct::SRGB | ct::SRGB_LINEAR);
+
+        if is_srgb_family(origin_native_type) && is_srgb_family(target_color_type) {
+            let mut srgb_fraction = match origin_native_type {
+                ct::RGB => [
+                    native_channels[0] / 255.0,
+                    native_channels[1] / 255.0,
+                    native_channels[2] / 255.0,
+                    native_channels[3],
+                ],
+                ct::HSL | ct::HWB => color_conversion::legacy_color_to_srgb(
+                    origin_native_type,
+                    [
+                        native_channels[0],
+                        native_channels[1] / 100.0,
+                        native_channels[2] / 100.0,
+                        native_channels[3],
+                    ],
+                )
+                .expect("HSL and HWB convert to sRGB"),
+                ct::SRGB => native_channels,
+                ct::SRGB_LINEAR => color_conversion::convert(ct::SRGB_LINEAR, ct::SRGB, native_channels)
+                    .expect("linear sRGB converts to sRGB"),
+                // The C++ switch VERIFYs past the family members.
+                _ => return None,
+            };
+            srgb_fraction[3] = native_channels[3];
+            let linear_srgb = color_conversion::convert(ct::SRGB, ct::SRGB_LINEAR, srgb_fraction)
+                .expect("sRGB converts to linear sRGB");
+            let xyz65 =
+                color_conversion::convert(ct::SRGB, ct::XYZ_D65, srgb_fraction).expect("sRGB converts to XYZ-D65");
+            set_channels_for_target(&mut context, target_color_type, xyz65, srgb_fraction, linear_srgb);
+            make_powerless_target_hue_missing(&mut context, &mut missing_slots, target_color_type);
+            return Some((context, missing_slots));
+        }
+
+        // Lab and LCH, and Oklab and OkLCh, are forms of the same color space, so convert between them directly.
+        if matches!(
+            (origin_native_type, target_color_type),
+            (ct::LAB, ct::LCH) | (ct::LCH, ct::LAB) | (ct::OKLAB, ct::OKLCH) | (ct::OKLCH, ct::OKLAB)
+        ) {
+            let converted = color_conversion::convert(origin_native_type, target_color_type, native_channels)?;
+            for (index, slot) in channel_slots(target_color_type)?.into_iter().enumerate() {
+                context[usize::from(slot)] = Some(f64::from(converted[index]));
+            }
+            make_powerless_target_hue_missing(&mut context, &mut missing_slots, target_color_type);
+            return Some((context, missing_slots));
+        }
+
+        let xyz65 = native_channels_to_xyz65(native_channels, origin_native_type);
+        let linear_srgb =
+            color_conversion::convert(ct::XYZ_D65, ct::SRGB_LINEAR, xyz65).expect("XYZ-D65 converts to linear sRGB");
+        let srgb_fraction = color_conversion::convert(ct::XYZ_D65, ct::SRGB, xyz65).expect("XYZ-D65 converts to sRGB");
+        set_channels_for_target(&mut context, target_color_type, xyz65, srgb_fraction, linear_srgb);
+        make_powerless_target_hue_missing(&mut context, &mut missing_slots, target_color_type);
+
+        return Some((context, missing_slots));
+    }
+
+    // Low-precision fallback through the resolved 8-bit color.
+    let color = to_color(effective_origin, input)?;
+
+    let mut context: RelativeColorContext = [None; 13];
+    let srgb_fraction: Components = [
+        f32::from(color.r) / 255.0,
+        f32::from(color.g) / 255.0,
+        f32::from(color.b) / 255.0,
+        f32::from(color.a) / 255.0,
+    ];
+
+    context[usize::from(ck::ALPHA)] = Some(f64::from(srgb_fraction[3]));
+
+    let linear_srgb =
+        color_conversion::convert(ct::SRGB, ct::SRGB_LINEAR, srgb_fraction).expect("sRGB converts to linear sRGB");
+    let xyz65 = color_conversion::convert(ct::SRGB, ct::XYZ_D65, srgb_fraction).expect("sRGB converts to XYZ-D65");
+    set_channels_for_target(&mut context, target_color_type, xyz65, srgb_fraction, linear_srgb);
+    let mut missing_slots = 0;
+    make_powerless_target_hue_missing(&mut context, &mut missing_slots, target_color_type);
+
+    Some((context, missing_slots))
+}
+
+/// Port of Percentage::from_style_value(). The C++ version VERIFYs on the remaining cases;
+/// here they surface as None and invalidate the surrounding color.
+pub(crate) fn percentage_from_style_value(value: &StyleValueData) -> Option<f64> {
+    match value {
+        StyleValueData::Percentage { value } => Some(*value),
+        StyleValueData::Calculated { .. } => resolve_calculated_percentage_with_channels(value, None, None),
+        _ => None,
+    }
+}
+
+/// The result of normalizing mix percentages. Percentages are represented as values from 0 to 100.
+pub(crate) struct NormalizedMixPercentages {
+    pub(crate) percentages: Vec<f64>,
+    pub(crate) leftover: f64,
+}
+
+// https://drafts.csswg.org/css-values-5/#normalize-mix-percentages
+pub(crate) fn normalize_mix_percentages(items: &[Option<f64>], force_normalization: bool) -> NormalizedMixPercentages {
+    // 1. Let specified sum be the sum of the percentages specified in items (clamped to 100%), or 0% if the
+    //    percentages are omitted for all items.
+    let specified_sum = items.iter().flatten().sum::<f64>().min(100.0);
+
+    // 2. For each omitted percentage in items, set it to (100% - specified sum) / (number of omitted percentages).
+    let omitted_count = items.iter().filter(|percentage| percentage.is_none()).count();
+    let mut percentages: Vec<f64> = items
+        .iter()
+        .map(|percentage| percentage.unwrap_or_else(|| (100.0 - specified_sum) / omitted_count as f64))
+        .collect();
+
+    // 3. Let total be the sum of the percentages of all the items.
+    let total: f64 = percentages.iter().sum();
+
+    // 4. If total is greater than 100%, or if total is greater than 0% and the force normalization flag is true,
+    //    multiply every percentage in items by (100% / total).
+    if total > 100.0 || (total > 0.0 && force_normalization) {
+        for percentage in &mut percentages {
+            *percentage *= 100.0 / total;
+        }
+    }
+
+    // 5. If total is less than 100%, let leftover be (100% - total). Otherwise, let leftover be 0%.
+    let leftover = if total < 100.0 { 100.0 - total } else { 0.0 };
+
+    // 6. Return items and leftover.
+    NormalizedMixPercentages { percentages, leftover }
+}
+
+/// The specified percentages of a color-mix(), resolved to numbers. Returns None when one does
+/// not resolve.
+pub(crate) fn color_mix_specified_percentages(percentages: &RetainedStyleValueDataList) -> Option<Vec<Option<f64>>> {
+    percentages
+        .as_slice()
+        .iter()
+        .map(|percentage| match percentage.optional_data() {
+            None => Some(None),
+            Some(value) => Some(Some(percentage_from_style_value(value)?)),
+        })
+        .collect()
+}
+
+fn resolve_native_color_components(
+    style_value: &StyleValueData,
+    input: &ColorResolutionInput,
+) -> Option<(u8, Components)> {
+    use color_conversion as ct;
+    let StyleValueData::ColorFunction(color_function_payload) = style_value else {
+        return None;
+    };
+    let ColorFunctionPayload {
+        color_base,
+        channel_0,
+        channel_1,
+        channel_2,
+        alpha,
+        origin_color,
+        ..
+    } = &**color_function_payload;
+    if !color_base.has_color_type || origin_color.optional_data().is_some() {
+        return None;
+    }
+
+    let resolve_alpha_value = || -> Option<f64> {
+        match alpha.optional_data() {
+            // An omitted alpha on a color function is treated as 1 for interpolation.
+            None => Some(1.0),
+            Some(alpha) => resolve_alpha(alpha, input),
+        }
+    };
+    let (c0, c1, c2) = (channel_0.data(), channel_1.data(), channel_2.data());
+
+    let components = match color_base.color_type {
+        ct::HSL => {
+            let h = resolve_hue(c0, input)?;
+            let s = resolve_with_reference_value(c1, 100.0, input)?;
+            let l = resolve_with_reference_value(c2, 100.0, input)?;
+            let a = resolve_alpha_value()?;
+            [h as f32, (s / 100.0) as f32, (l / 100.0) as f32, a as f32]
+        }
+        ct::HWB => {
+            let h = resolve_hue(c0, input)?;
+            let w = resolve_with_reference_value(c1, 100.0, input)?;
+            let b = resolve_with_reference_value(c2, 100.0, input)?;
+            let a = resolve_alpha_value()?;
+            [h as f32, (w / 100.0) as f32, (b / 100.0) as f32, a as f32]
+        }
+        ct::LAB => {
+            let l = resolve_with_reference_value(c0, 100.0, input)?;
+            let a_component = resolve_with_reference_value(c1, 125.0, input)?;
+            let b_component = resolve_with_reference_value(c2, 125.0, input)?;
+            let alpha = resolve_alpha_value()?;
+            [l as f32, a_component as f32, b_component as f32, alpha as f32]
+        }
+        ct::OKLAB => {
+            let l = resolve_with_reference_value(c0, 1.0, input)?;
+            let a_component = resolve_with_reference_value(c1, 0.4, input)?;
+            let b_component = resolve_with_reference_value(c2, 0.4, input)?;
+            let alpha = resolve_alpha_value()?;
+            [l as f32, a_component as f32, b_component as f32, alpha as f32]
+        }
+        ct::LCH => {
+            let l = resolve_with_reference_value(c0, 100.0, input)?;
+            let c = resolve_with_reference_value(c1, 150.0, input)?;
+            let h = resolve_hue(c2, input)?;
+            let a = resolve_alpha_value()?;
+            [l as f32, c as f32, h as f32, a as f32]
+        }
+        ct::OKLCH => {
+            let l = resolve_with_reference_value(c0, 1.0, input)?;
+            let c = resolve_with_reference_value(c1, 0.4, input)?;
+            let h = resolve_hue(c2, input)?;
+            let a = resolve_alpha_value()?;
+            [l as f32, c as f32, h as f32, a as f32]
+        }
+        ct::RGB => {
+            let r = resolve_with_reference_value(c0, 255.0, input)?;
+            let g = resolve_with_reference_value(c1, 255.0, input)?;
+            let b = resolve_with_reference_value(c2, 255.0, input)?;
+            let a = resolve_alpha_value()?;
+            [
+                (r.clamp(0.0, 255.0) / 255.0) as f32,
+                (g.clamp(0.0, 255.0) / 255.0) as f32,
+                (b.clamp(0.0, 255.0) / 255.0) as f32,
+                a as f32,
+            ]
+        }
+        _ => {
+            let first = resolve_with_reference_value(c0, 1.0, input)?;
+            let second = resolve_with_reference_value(c1, 1.0, input)?;
+            let third = resolve_with_reference_value(c2, 1.0, input)?;
+            let alpha = resolve_alpha_value()?;
+            [first as f32, second as f32, third as f32, alpha as f32]
+        }
+    };
+    Some((color_base.color_type, components))
+}
+
+pub(crate) fn resolve_color_for_interpolation(
+    input_value: &StyleValueData,
+    input: &ColorResolutionInput,
+) -> Option<ResolvedColor> {
+    let resolved_relative_storage;
+    let mut style_value = input_value;
+    if let StyleValueData::ColorFunction(color_function_payload) = input_value
+        && color_function_payload.origin_color.optional_data().is_some()
+    {
+        resolved_relative_storage = resolve_relative_form(input_value, input)?;
+        style_value = &resolved_relative_storage;
+    }
+    // NB: currentcolor and a nested mix interpolate from the color they name, not from that color rounded to 8-bit
+    //     channels.
+    if let StyleValueData::Keyword { keyword: code } = style_value
+        && *code == keyword::CURRENTCOLOR
+        && let Some(current_color_value) = input.current_color_value
+        && !value_depends_on_current_color(current_color_value)
+    {
+        return resolve_color_for_interpolation(current_color_value, input);
+    }
+    let resolved_mix_storage;
+    if let StyleValueData::ColorMix { .. } = style_value {
+        resolved_mix_storage = resolve_color_mix(style_value, input)?;
+        style_value = &resolved_mix_storage;
+    }
+
+    if let Some((color_type, components)) = resolve_native_color_components(style_value, input) {
+        let StyleValueData::ColorFunction(color_function_payload) = style_value else {
+            // resolve_native_color_components() only accepts color functions.
+            return None;
+        };
+        let ColorFunctionPayload {
+            channel_0,
+            channel_1,
+            channel_2,
+            alpha,
+            ..
+        } = &**color_function_payload;
+        return Some(ResolvedColor {
+            color_type,
+            components,
+            missing: [
+                is_none_keyword(channel_0.data()),
+                is_none_keyword(channel_1.data()),
+                is_none_keyword(channel_2.data()),
+                alpha.optional_data().is_some_and(is_none_keyword),
+            ],
+            has_native_components: true,
+        });
+    }
+
+    let color = to_color(style_value, input)?;
+    // Gfx::color_to_srgb(): the u8 channels back to fractions.
+    Some(ResolvedColor {
+        color_type: color_conversion::SRGB,
+        components: [
+            f32::from(color.r) / 255.0,
+            f32::from(color.g) / 255.0,
+            f32::from(color.b) / 255.0,
+            f32::from(color.a) / 255.0,
+        ],
+        missing: [false; 4],
+        has_native_components: false,
+    })
+}
+
+// https://drafts.csswg.org/css-color-5/#color-mix-result
+pub(crate) fn resolve_color_mix(value: &StyleValueData, input: &ColorResolutionInput) -> Option<StyleValueData> {
+    let StyleValueData::ColorMix(color_mix_payload) = value else {
+        return None;
+    };
+    let ColorMixPayload {
+        color_interpolation_method,
+        colors,
+        percentages,
+        ..
+    } = &**color_mix_payload;
+
+    // An absent method interpolates in the rectangular Oklab space.
+    let default_method = StyleValueData::ColorInterpolationMethod {
+        is_polar: false,
+        color_space: RECTANGULAR_COLOR_SPACE_OKLAB,
+        hue_interpolation_method: 0,
+    };
+    let method = color_interpolation_method.optional_data().unwrap_or(&default_method);
+    calculate_a_color_mix(
+        colors.as_slice().iter().map(|color| color.data()),
+        &color_mix_specified_percentages(percentages)?,
+        method,
+        input,
+    )
+}
+
+// https://drafts.csswg.org/css-color-5/#calculate-a-color-mix
+pub(crate) fn calculate_a_color_mix<'a>(
+    colors: impl Iterator<Item = &'a StyleValueData>,
+    specified_percentages: &[Option<f64>],
+    method: &StyleValueData,
+    input: &ColorResolutionInput,
+) -> Option<StyleValueData> {
+    // 1. Normalize mix percentages from the list of mix items passed to the function, with the "forced
+    //    normalization" flag set to true, letting items and leftover be the result.
+    let normalized = normalize_mix_percentages(specified_percentages, true);
+
+    // 2. Let alpha mult be 1 - leftover, interpreting leftover as a number between 0 and 1.
+    let alpha_multiplier = 1.0 - normalized.leftover / 100.0;
+
+    let items = colors
+        .zip(normalized.percentages)
+        .map(|(color, percentage)| {
+            Some(MixItem {
+                color: resolve_color_for_interpolation(color, input)?,
+                percentage,
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    mix_colors(items, method, alpha_multiplier as f32)
+}
+
+fn color_mix_to_color(value: &StyleValueData, input: &ColorResolutionInput) -> Option<Rgba> {
+    to_color(&resolve_color_mix(value, input)?, input)
+}
+
+/// The color-resolution fan-out over the color-bearing style value variants: the union of
+/// ColorStyleValue::to_color() and KeywordStyleValue::to_color(). Non-color variants resolve
+/// to None.
+pub(crate) fn to_color(value: &StyleValueData, input: &ColorResolutionInput) -> Option<Rgba> {
+    match value {
+        // Port of KeywordStyleValue::to_color(); an unset scheme falls back to Light, matching
+        // the C++ value_or(PreferredColorScheme::Light).
+        StyleValueData::Keyword { keyword: code } => {
+            if *code == keyword::CURRENTCOLOR {
+                return Some(input.current_color.unwrap_or(Rgba::BLACK));
+            }
+            system_color_for_keyword(*code, input.dark())
+        }
+        StyleValueData::ColorFunction { .. } => color_function_to_color(value, input),
+        StyleValueData::ColorMix { .. } => color_mix_to_color(value, input),
+        // https://drafts.csswg.org/css-color-5/#contrast-color
+        StyleValueData::ContrastColor { color, .. } => {
+            Some(to_color(color.data(), input)?.suggested_foreground_color())
+        }
+        // https://drafts.csswg.org/css-color-5/#funcdef-light-dark
+        // A missing scheme takes the light branch.
+        StyleValueData::LightDark(light_dark_payload) => {
+            let LightDarkPayload { light, dark, .. } = &**light_dark_payload;
+            if input.scheme == Some(PREFERRED_COLOR_SCHEME_DARK) {
+                to_color(dark.data(), input)
+            } else {
+                to_color(light.data(), input)
+            }
+        }
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::items_after_test_module)]
+mod tests {
+    use super::*;
+    use crate::css::style_value::ColorBase;
+
+    fn fraction_for(alpha: u8) -> String {
+        let (digits, length) = format_to_8bit_compatible(alpha);
+        String::from_utf8(digits[..length].to_vec()).unwrap()
+    }
+
+    #[test]
+    fn shortest_roundtripping_alpha_fraction() {
+        assert_eq!(fraction_for(127), "498");
+        assert_eq!(fraction_for(128), "5");
+        assert_eq!(fraction_for(64), "25");
+    }
+
+    #[test]
+    fn serializes_srgb_values() {
+        let serialize = |color: Rgba| {
+            let mut sink = TextSink::new();
+            color.serialize_a_srgb_value(&mut sink);
+            sink
+        };
+        let expect = |text: &str| {
+            let mut sink = TextSink::new();
+            sink.push_ascii(text);
+            sink
+        };
+        assert!(
+            serialize(Rgba {
+                r: 1,
+                g: 2,
+                b: 3,
+                a: 255
+            })
+            .content_equals(&expect("rgb(1, 2, 3)"))
+        );
+        assert!(serialize(Rgba { r: 1, g: 2, b: 3, a: 0 }).content_equals(&expect("rgba(1, 2, 3, 0)")));
+        assert!(
+            serialize(Rgba {
+                r: 1,
+                g: 2,
+                b: 3,
+                a: 128
+            })
+            .content_equals(&expect("rgba(1, 2, 3, 0.5)"))
+        );
+        assert!(
+            serialize(Rgba {
+                r: 1,
+                g: 2,
+                b: 3,
+                a: 64
+            })
+            .content_equals(&expect("rgba(1, 2, 3, 0.25)"))
+        );
+    }
+
+    #[test]
+    fn hsla_matches_gfx_color() {
+        assert_eq!(Rgba::from_hsla(0.0, 1.0, 0.5, 1.0), rgb(255, 0, 0));
+        assert_eq!(Rgba::from_hsla(120.0, 1.0, 0.5, 1.0), rgb(0, 255, 0));
+        // 0.5 * 255 = 127.5 rounds half away from zero to 128, matching lroundf.
+        assert_eq!(
+            Rgba::from_hsla(240.0, 1.0, 0.25, 0.5),
+            Rgba {
+                r: 0,
+                g: 0,
+                b: 128,
+                a: 128
+            }
+        );
+        // Saturation and lightness clamp before conversion.
+        assert_eq!(Rgba::from_hsla(0.0, 2.0, 1.5, 1.0), Rgba::WHITE);
+    }
+
+    #[test]
+    fn hsv_matches_gfx_color() {
+        assert_eq!(Rgba::from_hsv(0.0, 0.0, 0.0), Rgba::BLACK);
+        assert_eq!(Rgba::from_hsv(0.0, 0.0, 1.0), Rgba::WHITE);
+        assert_eq!(Rgba::from_hsv(120.0, 1.0, 1.0), rgb(0, 255, 0));
+    }
+
+    #[test]
+    fn quantizes_wide_gamut_endpoints() {
+        assert_eq!(Rgba::from_srgb(0.5, 0.5, 0.5, 1.0), rgb(128, 128, 128));
+        assert_eq!(Rgba::from_linear_srgb(0.0, 0.0, 0.0, 1.0), Rgba::BLACK);
+        assert_eq!(Rgba::from_linear_srgb(1.0, 1.0, 1.0, 1.0), Rgba::WHITE);
+        assert_eq!(Rgba::from_display_p3(1.0, 1.0, 1.0, 1.0), Rgba::WHITE);
+        assert_eq!(Rgba::from_rec2020(0.0, 0.0, 0.0, 1.0), Rgba::BLACK);
+        assert_eq!(Rgba::from_lab(100.0, 0.0, 0.0, 1.0), Rgba::WHITE);
+        assert_eq!(Rgba::from_oklab(1.0, 0.0, 0.0, 1.0), Rgba::WHITE);
+    }
+
+    #[test]
+    fn darkened_truncates_like_the_cpp_float_conversion() {
+        assert_eq!(
+            Rgba {
+                r: 100,
+                g: 200,
+                b: 50,
+                a: 255
+            }
+            .darkened(0.5),
+            Rgba {
+                r: 50,
+                g: 100,
+                b: 25,
+                a: 255
+            }
+        );
+        // 212 * 0.8 = 169.6 truncates to 169.
+        assert_eq!(rgb(212, 208, 200).darkened(0.8), rgb(169, 166, 160));
+    }
+
+    #[test]
+    fn luminance_and_contrast() {
+        assert_eq!(Rgba::BLACK.relative_luminance(), 0.0);
+        assert!((Rgba::WHITE.relative_luminance() - 1.0).abs() < 0.00001);
+        assert!((Rgba::BLACK.contrast_ratio(Rgba::WHITE) - 21.0).abs() < 0.001);
+        assert_eq!(Rgba::WHITE.suggested_foreground_color(), Rgba::BLACK);
+        assert_eq!(Rgba::BLACK.suggested_foreground_color(), Rgba::WHITE);
+    }
+
+    #[test]
+    fn descriptor_table_matches_frozen_codes() {
+        assert_eq!(descriptor_for_color_type(color_conversion::RGB).name, "rgb");
+        assert_eq!(descriptor_for_color_type(color_conversion::HSL).name, "hsl");
+        assert_eq!(descriptor_for_color_type(color_conversion::OKLCH).name, "oklch");
+        assert_eq!(descriptor_for_color_type(color_conversion::XYZ_D65).name, "xyz-d65");
+        let hsl = descriptor_for_color_type(color_conversion::HSL);
+        assert!(hsl.channels[0].is_hue);
+        assert!(hsl.absolutizes_to_rgb);
+        let lch = descriptor_for_color_type(color_conversion::LCH);
+        assert_eq!(lch.channels[1].percent_reference, 150.0);
+        assert_eq!(lch.channels[0].serialize_clamp_max, Some(100.0));
+        assert!(lch.channels[2].is_hue);
+        assert_eq!(
+            descriptor_for_color_type(color_conversion::SRGB_LINEAR).behavior,
+            SerializationBehavior::ColorFunction
+        );
+    }
+
+    fn number(value: f64) -> StyleValueData {
+        StyleValueData::Number { value }
+    }
+
+    fn percentage(value: f64) -> StyleValueData {
+        StyleValueData::Percentage { value }
+    }
+
+    fn keyword_value(code: u16) -> StyleValueData {
+        StyleValueData::Keyword { keyword: code }
+    }
+
+    fn color_function(color_type: u8, channels: [StyleValueData; 3], alpha: Option<StyleValueData>) -> StyleValueData {
+        let [c0, c1, c2] = channels;
+        StyleValueData::ColorFunction(StyleValueBox::new(ColorFunctionPayload {
+            color_base: ColorBase {
+                has_color_type: true,
+                color_type,
+                color_syntax: 0,
+            },
+            channel_0: retained_value(c0),
+            channel_1: retained_value(c1),
+            channel_2: retained_value(c2),
+            alpha: alpha.map_or_else(retained_null, retained_value),
+            has_name: false,
+            name: CssString::none(),
+            origin_color: retained_null(),
+        }))
+    }
+
+    #[test]
+    fn hue_resolution_normalizes_like_the_cpp_resolver() {
+        let hue = |value: &StyleValueData| resolve_hue(value, &EMPTY_INPUT);
+        assert_eq!(hue(&number(0.0)), Some(0.0));
+        assert_eq!(hue(&number(370.0)), Some(10.0));
+        assert_eq!(hue(&number(-30.0)), Some(330.0));
+        // +inf clamps to 360, which then wraps to 0; -inf and NaN clamp to 0.
+        assert_eq!(hue(&number(f64::INFINITY)), Some(0.0));
+        assert_eq!(hue(&number(f64::NEG_INFINITY)), Some(0.0));
+        assert_eq!(hue(&number(f64::NAN)), Some(0.0));
+        // Angles resolve through their canonical-degree ratios: deg, then turn.
+        assert_eq!(hue(&StyleValueData::Angle { value: 450.0, unit: 0 }), Some(90.0));
+        assert_eq!(hue(&StyleValueData::Angle { value: 0.5, unit: 3 }), Some(180.0));
+        // The `none` keyword (and any non-channel keyword) falls through to 0.
+        assert_eq!(hue(&keyword_value(keyword::NONE)), Some(0.0));
+
+        // Channel keywords need a relative-color context and normalize their value.
+        let mut channels: RelativeColorContext = [None; 13];
+        channels[usize::from(channel_keyword::H)] = Some(400.0);
+        let input = ColorResolutionInput {
+            channels: Some(&channels),
+            ..EMPTY_INPUT
+        };
+        assert_eq!(resolve_hue(&keyword_value(keyword::H), &input), Some(40.0));
+        assert_eq!(resolve_hue(&keyword_value(keyword::H), &EMPTY_INPUT), None);
+        // A channel without a resolved value is still unresolvable.
+        assert_eq!(resolve_hue(&keyword_value(keyword::S), &input), None);
+    }
+
+    #[test]
+    fn alpha_resolution_clamps_like_the_cpp_resolver() {
+        let alpha = |value: &StyleValueData| resolve_alpha(value, &EMPTY_INPUT);
+        assert_eq!(alpha(&number(0.5)), Some(0.5));
+        assert_eq!(alpha(&number(2.0)), Some(1.0));
+        assert_eq!(alpha(&number(-1.0)), Some(0.0));
+        assert_eq!(alpha(&number(f64::NAN)), Some(0.0));
+        assert_eq!(alpha(&percentage(50.0)), Some(0.5));
+        assert_eq!(alpha(&percentage(250.0)), Some(1.0));
+        assert_eq!(alpha(&percentage(-10.0)), Some(0.0));
+        // `none` resolves to 0; any other non-channel keyword takes the fallback 1.
+        assert_eq!(alpha(&keyword_value(keyword::NONE)), Some(0.0));
+        assert_eq!(alpha(&keyword_value(keyword::AUTO)), Some(1.0));
+
+        let mut channels: RelativeColorContext = [None; 13];
+        channels[usize::from(channel_keyword::ALPHA)] = Some(2.5);
+        let input = ColorResolutionInput {
+            channels: Some(&channels),
+            ..EMPTY_INPUT
+        };
+        assert_eq!(resolve_alpha(&keyword_value(keyword::ALPHA), &input), Some(1.0));
+        assert_eq!(resolve_alpha(&keyword_value(keyword::ALPHA), &EMPTY_INPUT), None);
+    }
+
+    #[test]
+    fn reference_value_resolution_scales_percentages() {
+        let resolve =
+            |value: &StyleValueData, reference: f64| resolve_with_reference_value(value, reference, &EMPTY_INPUT);
+        assert_eq!(resolve(&number(12.5), 255.0), Some(12.5));
+        assert_eq!(resolve(&percentage(50.0), 255.0), Some(127.5));
+        assert_eq!(resolve(&keyword_value(keyword::NONE), 255.0), Some(0.0));
+        assert_eq!(resolve(&keyword_value(keyword::R), 255.0), None);
+    }
+
+    #[test]
+    fn to_color_resolves_rgb_and_hsl_functions() {
+        let rgb_value = color_function(color_conversion::RGB, [number(255.0), number(127.5), number(0.0)], None);
+        // clamp_to_byte rounds half away from zero: 127.5 becomes 128.
+        assert_eq!(
+            to_color(&rgb_value, &EMPTY_INPUT),
+            Some(Rgba {
+                r: 255,
+                g: 128,
+                b: 0,
+                a: 255
+            })
+        );
+
+        let translucent = color_function(
+            color_conversion::RGB,
+            [number(1.0), number(2.0), number(3.0)],
+            Some(number(0.5)),
+        );
+        assert_eq!(
+            to_color(&translucent, &EMPTY_INPUT),
+            Some(Rgba {
+                r: 1,
+                g: 2,
+                b: 3,
+                a: 128
+            })
+        );
+
+        let hsl_value = color_function(
+            color_conversion::HSL,
+            [number(120.0), percentage(100.0), percentage(50.0)],
+            None,
+        );
+        assert_eq!(to_color(&hsl_value, &EMPTY_INPUT), Some(rgb(0, 255, 0)));
+    }
+
+    #[test]
+    fn to_color_resolves_keywords_and_light_dark() {
+        // currentcolor takes the used value, falling back to black.
+        assert_eq!(
+            to_color(&keyword_value(keyword::CURRENTCOLOR), &EMPTY_INPUT),
+            Some(Rgba::BLACK)
+        );
+        let red = rgb(255, 0, 0);
+        let input = ColorResolutionInput {
+            current_color: Some(red),
+            ..EMPTY_INPUT
+        };
+        assert_eq!(to_color(&keyword_value(keyword::CURRENTCOLOR), &input), Some(red));
+
+        // System colors follow the scheme; a missing scheme means light.
+        assert_eq!(
+            to_color(&keyword_value(keyword::CANVAS), &EMPTY_INPUT),
+            Some(rgb(255, 255, 255))
+        );
+        let dark_input = ColorResolutionInput {
+            scheme: Some(PREFERRED_COLOR_SCHEME_DARK),
+            ..EMPTY_INPUT
+        };
+        assert_eq!(
+            to_color(&keyword_value(keyword::CANVAS), &dark_input),
+            Some(rgb(28, 28, 30))
+        );
+        assert_eq!(to_color(&keyword_value(keyword::AUTO), &EMPTY_INPUT), None);
+
+        let light_dark = StyleValueData::LightDark(StyleValueBox::new(LightDarkPayload {
+            color_base: ColorBase {
+                has_color_type: false,
+                color_type: 0,
+                color_syntax: 0,
+            },
+            light: retained_value(color_function(
+                color_conversion::RGB,
+                [number(255.0), number(255.0), number(255.0)],
+                None,
+            )),
+            dark: retained_value(color_function(
+                color_conversion::RGB,
+                [number(0.0), number(0.0), number(0.0)],
+                None,
+            )),
+        }));
+        assert_eq!(to_color(&light_dark, &EMPTY_INPUT), Some(Rgba::WHITE));
+        assert_eq!(to_color(&light_dark, &dark_input), Some(Rgba::BLACK));
+    }
+
+    #[test]
+    fn to_color_mixes_srgb_endpoints() {
+        let mix = StyleValueData::ColorMix(StyleValueBox::new(ColorMixPayload {
+            color_base: ColorBase {
+                has_color_type: false,
+                color_type: 0,
+                color_syntax: 0,
+            },
+            // Gfx::RectangularColorSpace::Srgb is 0.
+            color_interpolation_method: retained_value(StyleValueData::ColorInterpolationMethod {
+                is_polar: false,
+                color_space: 0,
+                hue_interpolation_method: 0,
+            }),
+            colors: RetainedStyleValueDataList::from_retained_values(vec![
+                retained_value(color_function(
+                    color_conversion::RGB,
+                    [number(0.0), number(0.0), number(0.0)],
+                    None,
+                )),
+                retained_value(color_function(
+                    color_conversion::RGB,
+                    [number(255.0), number(255.0), number(255.0)],
+                    None,
+                )),
+            ]),
+            percentages: RetainedStyleValueDataList::from_retained_values(vec![retained_null(), retained_null()]),
+        }));
+        // A 50/50 sRGB mix of black and white; 127.5 rounds half-to-even to 128 through the
+        // sRGB construction arm.
+        assert_eq!(to_color(&mix, &EMPTY_INPUT), Some(rgb(128, 128, 128)));
+    }
+
+    #[test]
+    fn mix_percentage_normalization_matches_the_spec_steps() {
+        let normalized = normalize_mix_percentages(&[None, None], true);
+        assert_eq!(normalized.percentages, [50.0, 50.0]);
+        assert_eq!(normalized.leftover, 0.0);
+
+        let normalized = normalize_mix_percentages(&[Some(30.0), None], true);
+        assert_eq!(normalized.percentages, [30.0, 70.0]);
+
+        let normalized = normalize_mix_percentages(&[None, Some(30.0)], true);
+        assert_eq!(normalized.percentages, [70.0, 30.0]);
+
+        let normalized = normalize_mix_percentages(&[Some(100.0), Some(100.0)], true);
+        assert_eq!(normalized.percentages, [50.0, 50.0]);
+        assert_eq!(normalized.leftover, 0.0);
+
+        let normalized = normalize_mix_percentages(&[Some(20.0), Some(30.0)], true);
+        assert_eq!(normalized.percentages, [40.0, 60.0]);
+        assert_eq!(normalized.leftover, 50.0);
+
+        let normalized = normalize_mix_percentages(&[Some(0.0), Some(0.0)], true);
+        assert_eq!(normalized.leftover, 100.0);
+
+        let normalized = normalize_mix_percentages(&[Some(50.0), None, None], true);
+        assert_eq!(normalized.percentages, [50.0, 25.0, 25.0]);
+    }
+
+    #[test]
+    fn system_colors_cover_both_schemes() {
+        assert_eq!(
+            system_color_for_keyword(keyword::CANVAS, false),
+            Some(rgb(255, 255, 255))
+        );
+        assert_eq!(system_color_for_keyword(keyword::CANVAS, true), Some(rgb(28, 28, 30)));
+        assert_eq!(
+            system_color_for_keyword(keyword::SCROLLBAR, false),
+            Some(rgb(255, 255, 255))
+        );
+        assert_eq!(
+            system_color_for_keyword(keyword::HIGHLIGHT, false),
+            Some(rgb(61, 174, 233).with_alpha(128))
+        );
+        assert_eq!(
+            system_color_for_keyword(keyword::_LIBWEB_BUTTONFACEDISABLED, false),
+            Some(rgb(239, 239, 239).with_alpha(128))
+        );
+        assert_eq!(
+            system_color_for_keyword(keyword::_LIBWEB_BUTTONFACEHOVER, false),
+            Some(rgb(191, 191, 191))
+        );
+        assert_eq!(
+            system_color_for_keyword(keyword::VISITEDTEXT, true),
+            Some(rgb(156, 113, 212))
+        );
+        assert_eq!(system_color_for_keyword(keyword::CURRENTCOLOR, false), None);
+        assert_eq!(system_color_for_keyword(keyword::AUTO, false), None);
+    }
+}
+
+/// A resolved color handed back to C++; `resolved` is false when the value names no color.
+#[repr(C)]
+pub struct FfiResolvedColorValue {
+    pub resolved: bool,
+    pub rgba: [u8; 4],
+}
+
+/// Resolves a parsed style value to an sRGB color against a style record of `host`'s document, as the record
+/// computes its own values: its used color-scheme and `color`, and its lengths. A null record names no style.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_style_value_to_color_against_style_record(
+    host: &crate::render_state::DocumentHost,
+    read: &crate::render_state::BegunRead,
+    style_record: u64,
+    value: &crate::css::style_value::StyleValueData,
+) -> FfiResolvedColorValue {
+    let color = crate::css::style::engine_calls::with_engine(read, host, |engine| {
+        engine.color_against_style_record(style_record, value)
+    });
+    match color {
+        Some(color) => FfiResolvedColorValue {
+            resolved: true,
+            rgba: [color.r, color.g, color.b, color.a],
+        },
+        None => FfiResolvedColorValue {
+            resolved: false,
+            rgba: [0; 4],
+        },
+    }
+}
+
+/// Resolves an absolutized style value to an sRGB color against a style, or declines.
+///
+/// # Safety
+/// `style` must be null or point at a style whose group payloads outlive the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_style_value_to_color(
+    value: &crate::css::style_value::StyleValueData,
+    style: *const FfiColorResolutionStyle,
+) -> FfiResolvedColorValue {
+    // SAFETY: Guaranteed by the caller.
+    let resolution_input = unsafe { ColorResolutionInput::for_ffi_style(style) };
+    match to_color(value, &resolution_input) {
+        Some(color) => FfiResolvedColorValue {
+            resolved: true,
+            rgba: [color.r, color.g, color.b, color.a],
+        },
+        None => FfiResolvedColorValue {
+            resolved: false,
+            rgba: [0; 4],
+        },
+    }
+}
+
+#[repr(C)]
+pub struct FfiResolvedColorComponents {
+    pub resolved: bool,
+    pub components: [f32; 4],
+}
+
+/// Resolves a parsed style value to a used color against a style, converted to the color space of
+/// `target_color_type` (a ColorStyleValue::ColorType), or declines. Unlike rust_style_value_to_color(), the
+/// components keep their full precision and range, with missing components as 0.
+///
+/// # Safety
+/// `style` must be null or point at a style whose group payloads outlive the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_style_value_to_color_components(
+    value: &StyleValueData,
+    style: *const FfiColorResolutionStyle,
+    target_color_type: u8,
+) -> FfiResolvedColorComponents {
+    // SAFETY: Guaranteed by the caller.
+    let resolution_input = unsafe { ColorResolutionInput::for_ffi_style(style) };
+    let components = resolve_color_for_interpolation(value, &resolution_input)
+        .and_then(|resolved| color_conversion::convert(resolved.color_type, target_color_type, resolved.components));
+    match components {
+        Some(components) => FfiResolvedColorComponents {
+            resolved: true,
+            components,
+        },
+        None => FfiResolvedColorComponents {
+            resolved: false,
+            components: [0.0; 4],
+        },
+    }
+}
