@@ -239,6 +239,10 @@
 #      (pruebas_movil.sh): RNDIS y CDC-NCM (usbmovil.cas y rmovil.cas) en QEMU,
 #      con el móvil de mentira (tests/movil_ncm.py): DHCP, PING, la prioridad
 #      cable > móvil > Wi-Fi, enchufar y desenchufar.
+#  59. (RTL8153, SOLO=redusb) La red por USB de cable, CDC-ECM (pruebas_redusb.sh):
+#      el RTL8153 de mentira por usb-redir (tests/tools/usbrtl8153.py; la
+#      configuración 2, el enlace por sus avisos, DHCP, PING, DESCARGAR) y el
+#      usb-net de QEMU por ECM («usbecm»).
 #  56. (BLUETOOTH, SOLO=bt) El Bluetooth (pruebas_bt.sh): la pila de BT.BIN contra
 #      el modelo (build/bt_prueba) y en QEMU con el adaptador de mentira por
 #      usb-redir (emparejar, teclear, reconectar, la ventana, el Intel 0AAA).
@@ -465,6 +469,7 @@
 #   SOLO=touchpad ./pruebas.sh    la primera y la 50 (TOUCHPAD: el touchpad; pruebas_touchpad.sh)
 #   SOLO=sdhci ./pruebas.sh       la primera y la 53 (SDHCI: las tarjetas SD y el eMMC; pruebas_sdhci.sh)
 #   SOLO=movil ./pruebas.sh       la primera y la 55 (MÓVIL: el móvil por USB, el anclaje de USB de Android; pruebas_movil.sh)
+#   SOLO=redusb ./pruebas.sh      la primera y la 59 (RTL8153: la red por USB de cable, CDC-ECM; pruebas_redusb.sh)
 #   SOLO=rtl ./pruebas.sh         la primera y la 57 (RTL8723BS: el Wi-Fi por SDIO de las tabletas; pruebas_rtl.sh; RTL_FW=rtl8723bs_nic.bin)
 #   SOLO=punteros ./pruebas.sh    la primera y la 51 (PUNTEROS: los punteros del ratón; pruebas_punteros.sh)
 #   SOLO=bt ./pruebas.sh          la primera y la 56 (BLUETOOTH: pruebas_bt.sh)
@@ -543,6 +548,7 @@ miracap() {    # lo que se prueba, la captura y sus comprobaciones
 . $AQUI/pruebas_i2chid.sh          # (I2CHID) la parte 52, como parte_i2chid
 . $AQUI/pruebas_movil.sh           # (MÓVIL) la parte 55, como parte_movil
 . $AQUI/pruebas_bt.sh              # (BLUETOOTH) la parte 56, como parte_bt
+. $AQUI/pruebas_redusb.sh          # (RTL8153) la parte 59, como parte_redusb
 . $AQUI/pruebas64.sh               # [CASTEL64] la parte 23 (CASTEL64), como la función parte23
 
 # ---------------------------------------------------------------- 1. errores
@@ -565,7 +571,7 @@ if grep -q "^    público constante VERSIÓN_TEXTO = \"$VERSION_BASE\"$" $AQUI/n
 else ko "VERSIÓN_TEXTO de usuario.cas no es la $VERSION_BASE de la base de hpq.py"; fi
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|informe|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|intel|accesorios|sonido|pdf|zip|mirador|usuarios|remota|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura|cortes|iconos|uefi|termo|compat|touchpad|punteros|i2chid|sdhci|movil|bt|rtl) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac   # (TERMO) (UEFI) (COMPAT) (TOUCHPAD) (PUNTEROS) (I2CHID) (INTELWIFI) (SDHCI)
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|informe|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|intel|accesorios|sonido|pdf|zip|mirador|usuarios|remota|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura|cortes|iconos|uefi|termo|compat|touchpad|punteros|i2chid|sdhci|movil|bt|rtl|redusb) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac   # (TERMO) (UEFI) (COMPAT) (TOUCHPAD) (PUNTEROS) (I2CHID) (INTELWIFI) (SDHCI)
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -6187,6 +6193,8 @@ if parte08 i2chid; then parte_i2chid; else echo "  (SOLO=${SOLO08:-$SOLO}: sin l
 if parte08 movil; then parte_movil; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el móvil por USB)"; fi
 # ------------------------- 56. (BLUETOOTH) el Bluetooth (pruebas_bt.sh)
 if parte08 bt; then parte_bt; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el Bluetooth)"; fi
+# ------------------------- 59. (RTL8153) la red por USB de cable (pruebas_redusb.sh)
+if parte08 redusb; then parte_redusb; else echo "  (SOLO=${SOLO08:-$SOLO}: sin la red por USB de cable)"; fi
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 # ------------------------------------- 35. (BLOC) el Bloc de notas 1.0

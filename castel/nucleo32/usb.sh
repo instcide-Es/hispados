@@ -57,6 +57,10 @@
 # (RTL8723BS) Con PRUEBA_WIFI_SDIO=1, la del Wi-Fi por SDIO de las tabletas: sus
 # tres entradas primero (sin ACPI, con ACPI —aprende \SDIO.TXT— y las órdenes)
 # y un RED.INI con Registro=SI (RED.LOG) y Preferir=WIFI.
+# (RTL8153) Con PRUEBA_RED_USB=1, la de la red por USB de cable (el Realtek
+# RTL8153 del Monovate y del MacBook Air 2012): sus cuatro entradas primero (el
+# escritorio con la ficha del equipo, las órdenes, sin ACPI y con la red USB
+# apagada, «sinredusb») y un RED.INI con Registro=SI (RED.LOG).
 # (0.8.12) Las entradas con ACPI de las dos llevan «fichaequipo»: ACPI.BIN deja
 # la ficha técnica en X:\EQUIPO (las tablas ACPI y PCI.TXT) y en ACPI.TXT los
 # aparatos de las I2C (la pantalla táctil y el acelerómetro).
@@ -119,6 +123,7 @@ fi
 cp $W/f/* $W/m/
 # (RTL8723BS) la memoria de prueba del Wi-Fi por SDIO: RED.LOG y el Wi-Fi primero
 [ -n "${PRUEBA_WIFI_SDIO:-}" ] && printf 'Registro=SI\r\nPreferir=WIFI\r\n' > $W/m/RED.INI
+[ -n "${PRUEBA_RED_USB:-}" ] && printf 'Registro=SI\r\n' > $W/m/RED.INI      # (RTL8153)
 [ -n "${TERMO:-}" ] && cp -r $W/termo $W/m/TERMO
 # lo que solo es para instalar (los textos del sistema instalado, lo que va a
 # otra carpeta y el arranque del disco), en \INSTALA
@@ -238,6 +243,12 @@ G
       menu_efi "3. eMMC y SD, SIN ACPI: la consola del nucleo (texto: dice los discos)" SEMILLA.BIN "$N sinacpi" "$M2" auto
       menu_efi "4. eMMC y SD, SIN ACPI, despacio (PIO, 1 bit, sin alta velocidad)" ESCRIT8.BIN "escritorio $N sinacpi sdhcipio sdhci1bit sdhcilento" "$M2" auto
     fi
+    if [ -n "${PRUEBA_RED_USB:-}" ]; then
+      menu_efi "1. Red USB (RTL8153, UEFI): el escritorio y la ficha del equipo (pruebe esta primero)" ESCRIT8.BIN "escritorio $N fichaequipo" "$M2" auto
+      menu_efi "2. Red USB (UEFI): el interprete de ordenes (texto: IPCONFIG, PING)" SEMILLA.BIN "ordenes $N" "$M2" auto
+      menu_efi "3. Red USB (UEFI), SIN ACPI: el escritorio (si la 1 se queda colgada)" ESCRIT8.BIN "escritorio $N sinacpi" "$M2" auto
+      menu_efi "4. Red USB APAGADA (UEFI): el escritorio sin usar el adaptador (si el teclado deja de ir)" ESCRIT8.BIN "escritorio $N sinredusb fichaequipo" "$M2" auto
+    fi
     if [ -n "${PRUEBA_WIFI_SDIO:-}" ]; then
       menu_efi "${W1}Wi-Fi (Realtek por SDIO), SIN ACPI: el escritorio" ESCRIT8.BIN "escritorio $N sinacpi conred" "$M2" auto
       menu_efi "${W2}Wi-Fi, CON ACPI: aprende la controladora y como se enciende (puede congelarse)" ESCRIT8.BIN "escritorio $N conred fichaequipo" "$M2" auto
@@ -316,6 +327,12 @@ G
     entrada "2. eMMC y SD, CON ACPI: el escritorio (si con la 1 no salen; puede congelarse)" ESCRIT8.BIN "escritorio $N fichaequipo"
     entrada "3. eMMC y SD, SIN ACPI: la consola del nucleo (texto: dice los discos)" SEMILLA.BIN "$N sinacpi"
     entrada "4. eMMC y SD, SIN ACPI, despacio (PIO, 1 bit, sin alta velocidad)" ESCRIT8.BIN "escritorio $N sinacpi sdhcipio sdhci1bit sdhcilento"
+  fi
+  if [ -n "${PRUEBA_RED_USB:-}" ]; then
+    entrada "1. Red USB (RTL8153): el escritorio y la ficha del equipo (pruebe esta primero)" ESCRIT8.BIN "escritorio $N fichaequipo"
+    entrada "2. Red USB: el interprete de ordenes (texto: IPCONFIG, PING)" SEMILLA.BIN "ordenes $N"
+    entrada "3. Red USB, SIN ACPI: el escritorio (si la 1 se queda colgada)" ESCRIT8.BIN "escritorio $N sinacpi"
+    entrada "4. Red USB APAGADA: el escritorio sin usar el adaptador (si el teclado deja de ir)" ESCRIT8.BIN "escritorio $N sinredusb fichaequipo"
   fi
   if [ -n "${PRUEBA_WIFI_SDIO:-}" ]; then
     entrada "${W1}Wi-Fi (Realtek por SDIO), SIN ACPI: el escritorio" ESCRIT8.BIN "escritorio $N sinacpi conred"

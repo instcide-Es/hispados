@@ -73,12 +73,17 @@ módulo Uipconf
         si info.estado = RED_SIN_TARJETA entonces
             escribir("  No hay ninguna tarjeta de red que Hispa-Pentium sepa llevar\n")
             escribir("  (las que lleva: Intel PRO/1000, Realtek RTL8139 y RTL8111/8168, Marvell Yukon 88E8059;\n")
+            escribir("  los adaptadores de red USB de CDC-ECM, como el Realtek RTL8153;\n")
             escribir("  y el móvil por USB: en Android, Ajustes > Conexión y compartir > Anclaje de USB).\n")
         sino
             si info.pci = 0xFFFFFFFF entonces
                 ; (MÓVIL) el móvil por USB (el anclaje de USB de Android): no es del PCI
                 imprimir3("  Tarjeta . . . . . . . : %s (USB %04X:%04X)\n", nat32(dirección(info.tarjeta[0])), info.id_pci yb 0xFFFF, info.id_pci >> 16)
-                escribir("  Por . . . . . . . . . : el cable USB del móvil (Anclaje de USB)\n")
+                si buscar(dirección(info.tarjeta[0]), "CDC-ECM") <> nulo entonces
+                    escribir("  Por . . . . . . . . . : el adaptador de red USB (y su cable de red)\n")     ; (RTL8153)
+                sino
+                    escribir("  Por . . . . . . . . . : el cable USB del móvil (Anclaje de USB)\n")
+                fin
             sino
                 imprimir4("  Tarjeta . . . . . . . : %s (%04X:%04X, IRQ %u)\n", nat32(dirección(info.tarjeta[0])), info.id_pci yb 0xFFFF, info.id_pci >> 16, info.irq)
                 imprimir3("  En el bus PCI  . . . : %02X:%02X.%u\n", (info.pci >> 16) yb 0xFF, (info.pci >> 11) yb 31, (info.pci >> 8) yb 7)

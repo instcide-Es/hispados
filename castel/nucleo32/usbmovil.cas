@@ -6,11 +6,16 @@
 ;  y la de datos CDC, 0A) y, en algunos, CDC-NCM (02/0D/00 y la de datos, en
 ;  su variante 1). Este módulo solo lo reconoce y lo aparta para el servicio
 ;  de red: lo de RNDIS y NCM (los mensajes, los paquetes) lo hace RED.BIN
-;  (rmovil.cas) por la llamada 101 (red.cas), que aquí son cuatro cosas:
-;  cómo está, una petición de control, enviar a granel y recibir a granel
+;  (rmovil.cas) por la llamada 101 (red.cas), que aquí son cinco cosas:
+;  cómo está, una petición de control, enviar a granel, recibir a granel
 ;  (sin esperar: lo que llega se va guardando mientras tanto; usb.cas,
-;  granel_abre). No toca nada más del USB: solo un aparato de esas clases
-;  (los adaptadores de red por USB, como el RTL8153, no: siguen sin usarse).
+;  granel_abre) y los avisos de la interfaz de control (su extremo de
+;  interrupción). No toca nada más del USB: solo un aparato de esas clases.
+;  (RTL8153) Y los adaptadores de red por USB de cable de CDC-ECM (02/06/00):
+;  el Realtek RTL8153 (0BDA:8153; el del Monovate y el del MacBook Air de
+;  2012), en su segunda configuración (usb.cas la elige: la primera es la
+;  propia de Realtek), y los demás de esa clase. Van por el mismo camino
+;  (M_ECM): una trama por transferencia, sin cabeceras.
 ;  Lo atiende usbcal.cas, como lo demás que se enchufa en marcha; y, si el
 ;  servicio de red no está en marcha, lo pone (lanzador, de semilla.cas).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
@@ -21,6 +26,7 @@ módulo Usbmovil
 
     público constante M_RNDIS = 1
     público constante M_NCM = 2
+    público constante M_ECM = 3                  ; (RTL8153) un adaptador de red por USB de cable (CDC-ECM)
     público constante BÚFER = 16384             ; lo que se recibe de una vez (y lo más que se envía)
     constante BÚFER_UHCI = 4096                 ; (en la UHCI, que espera: lo que cabe en una tanda)
 
@@ -36,6 +42,8 @@ módulo Usbmovil
     variable if_control, if_datos, alt_datos, triple: nat32
     variable e_entra, e_sale, e_aviso: nat32    ; sus extremos (índices en el aparato)
     variable tubo: nat32 = 0xFFFFFFFF           ; la tubería a granel de entrada (NINGUNO: aún no, o UHCI)
+    variable tubo_aviso: nat32 = 0xFFFFFFFF     ; (RTL8153) la de interrupción de los avisos (NINGUNO: aún no)
+    variable aviso_pedido, sin_avisos: bool
     variable sin_asinc: bool                    ; (la UHCI) se recibe con granel(), esperando poco
     variable pedido: bool                       ; hay una petición de recibir en marcha
     variable entra_f, sale_f: nat32             ; los búferes (físicos, 16 K alineados a 16 K)
@@ -48,12 +56,12 @@ módulo Usbmovil
         si c = 0xEF y s = 0x04 y p = 0x01 entonces devolver M_RNDIS fin       ; «misc», RNDIS sobre Ethernet
         si c = 0x02 y s = 0x02 y p = 0xFF entonces devolver M_RNDIS fin       ; CDC ACM «del fabricante» (Linux, QEMU)
         si c = 0x02 y s = 0x0D y p = 0x00 entonces devolver M_NCM fin         ; CDC-NCM
+        si c = 0x02 y s = 0x06 y p = 0x00 entonces devolver M_ECM fin         ; (RTL8153) CDC-ECM
         devolver 0
     fin
 
     función nombre_clase(): puntero a byte
-        si clase = M_NCM entonces devolver "CDC-NCM" fin
-        devolver "RNDIS"
+        devolver nombre_de(clase)
     fin
 
     ; los búferes (una vez): 16 K alineados a 16 K (no cruzan una frontera
@@ -85,7 +93,17 @@ módulo Usbmovil
                 si m <> 0 entonces ic := k - 1 fin
             fin
         fin
-        si m = 0 entonces devolver falso fin
+        si m = 0 entonces
+            ; (RTL8153) un adaptador de Realtek sin la configuración de ECM
+            si aparatos[a].fabricante = 0x0BDA y (aparatos[a].producto = 0x8153 o aparatos[a].producto = 0x8152 o aparatos[a].producto = 0x8156) entonces
+                si sin_red_usb entonces
+                    apunta2("usb: el adaptador de red USB Realtek %04X (aparato %u): la red USB está apagada («sinredusb»): no se usa\n", aparatos[a].producto, a)
+                sino
+                    apunta3("usb: el adaptador de red USB Realtek %04X (aparato %u) no trae CDC-ECM (%u configuraciones): no se usa\n", aparatos[a].producto, a, aparatos[a].n_conf)
+                fin
+            fin
+            devolver falso
+        fin
         ; la de datos: la primera de la clase 0Ah detrás de la de control
         id := NINGUNO
         para k desde ic + 2 hasta aparatos[a].n_interfaces hacer
@@ -129,10 +147,22 @@ módulo Usbmovil
         e_sale := sa
         e_aviso := av
         tubo := NINGUNO
+        tubo_aviso := NINGUNO
+        aviso_pedido := falso
+        sin_avisos := falso
         sin_asinc := falso
         pedido := falso
         generación := generación + 1
         soltar(cerrojo)
+        si m = M_ECM entonces
+            apunta3("usb: el adaptador de red USB (%s, configuración %u): aparato %u, ", nat32(nombre_clase()), aparatos[a].configuración, a)
+            apunta2("%04X:%04X", aparatos[a].fabricante, aparatos[a].producto)
+            apunta3("; interfaces %u y %u (variante %u)", if_control, if_datos, alt_datos)
+            si av <> NINGUNO entonces apunta1(", avisos por %02X", aparatos[a].extremos[av].número) fin
+            apunta2(", extremos %02X y %02X\n", aparatos[a].extremos[en].número, aparatos[a].extremos[sa].número)
+            si lanzador <> 0 entonces crear_tarea("red-usb", lanzador, 0) fin
+            devolver cierto
+        fin
         apunta3("usb: el móvil por USB (Android, %s): aparato %u, %04X:", nat32(nombre_clase()), a, aparatos[a].fabricante)
         apunta3("%04X; interfaces %u y %u", aparatos[a].producto, if_control, if_datos)
         apunta3(" (clase %06X), extremos %02X y %02X\n", triple, aparatos[a].extremos[en].número, aparatos[a].extremos[sa].número)
@@ -143,7 +173,13 @@ módulo Usbmovil
 
     función nombre_de(m: nat32): puntero a byte
         si m = M_NCM entonces devolver "CDC-NCM" fin
+        si m = M_ECM entonces devolver "CDC-ECM" fin
         devolver "RNDIS"
+    fin
+
+    ; (RTL8153) ¿es un adaptador de red de cable (CDC-ECM), y no un móvil?
+    público función es_adaptador(): bool
+        devolver aparato <> NINGUNO y clase = M_ECM
     fin
 
     ; el aparato a se ha desenchufado (o ha cambiado de cara: el móvil se
@@ -154,8 +190,14 @@ módulo Usbmovil
         aparato := NINGUNO
         tomar(cerrojo)
         tubo := NINGUNO
+        tubo_aviso := NINGUNO
+        aviso_pedido := falso
         pedido := falso
         soltar(cerrojo)
+        si clase = M_ECM entonces
+            apunta1("usb: el adaptador de red USB (aparato %u) ya no está\n", a)
+            devolver cierto
+        fin
         apunta1("usb: el móvil por USB (aparato %u) ya no está\n", a)
         devolver cierto
     fin
@@ -287,6 +329,49 @@ módulo Usbmovil
         fin
         ; lo siguiente, ya pedido (llega mientras RED.BIN mira esto)
         si no sin_asinc entonces pedido := granel_pide(tubo, entra_f, BÚFER) fin
+        soltar(cerrojo)
+        devolver nat32(r)
+    fin
+
+    ; 4: (RTL8153) lo que haya llegado por el extremo de interrupción de la
+    ; interfaz de control (los avisos de CDC: NETWORK_CONNECTION,
+    ; CONNECTION_SPEED_CHANGE), a «d» (hasta 16 octetos): cuántos (0: nada
+    ; aún, o no tiene ese extremo). Se pide lo siguiente en el acto.
+    público función aviso(gen: nat32, d: puntero a byte, n: nat32): nat32
+        variable a: nat32
+        variable r: ent32
+        a := aparato
+        si a = NINGUNO o gen <> generación entonces devolver MV_NO_HAY fin
+        si e_aviso = NINGUNO o sin_avisos entonces devolver 0 fin
+        si n > 16 entonces n := 16 fin
+        tomar(cerrojo)
+        si tubo_aviso = NINGUNO entonces
+            tubo_aviso := tubo_abre(a, e_aviso)
+            si tubo_aviso = NINGUNO entonces
+                sin_avisos := cierto
+                soltar(cerrojo)
+                apunta0("usb: el adaptador de red USB: sin la tubería de sus avisos (¿no quedan?): con enlace siempre\n")
+                devolver 0
+            fin
+        fin
+        si no aviso_pedido entonces
+            tubo_pide(tubo_aviso, 16)
+            aviso_pedido := cierto
+        fin
+        r := tubo_mira(tubo_aviso, 16)
+        si r = T_ESPERA entonces
+            soltar(cerrojo)
+            devolver 0
+        fin
+        aviso_pedido := falso
+        si r < 0 entonces
+            soltar(cerrojo)
+            devolver MV_FALLO
+        fin
+        si nat32(r) > n entonces r := ent32(n) fin
+        si r > 0 entonces copiar_memoria(d, tubo_datos(tubo_aviso), nat32(r)) fin
+        tubo_pide(tubo_aviso, 16)
+        aviso_pedido := cierto
         soltar(cerrojo)
         devolver nat32(r)
     fin
