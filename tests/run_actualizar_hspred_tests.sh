@@ -28,7 +28,7 @@ fi
 T=$(mktemp -d)
 PORT=${PORT:-8080}
 mkdir -p $T/www
-printf '[0.9.31]\ncpu=386\n' > $T/www/aldia.txt
+printf '[0.9.32]\ncpu=386\n' > $T/www/aldia.txt
 # [FIRMA] (0.9.31) la lista, firmada con la clave de prueba, y en el disquete
 # el ACTUALIZAR que la lleva (build/ACTPRUEB.COM)
 python3 tools/firma_versiones.py firma $T/www/aldia.txt --clave tests/firma/clave_prueba.key > /dev/null || exit 1
@@ -68,7 +68,7 @@ nocheck(){ if grep -qF -- "$2" $T/$1.txt; then ko "NO debía aparecer: $2"; else
 echo "== ACTUALIZAR carga HSPRED solo (con tarjeta: $NIC) =="
 corre con 120 1 "9|ACTUALIZAR $U/aldia.txt" '2|ECHO fin-con'
 check   con "Cargando el controlador de red (HSPRED)"
-check   con "Hispa-DOS 0.9.31 está al día."
+check   con "Hispa-DOS 0.9.32 está al día."
 nocheck con "Cargue HSPRED y configure la red (CONFRED) antes de buscar"
 check   con "fin-con"
 
