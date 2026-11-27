@@ -267,7 +267,7 @@ y la Wi-Fi son lo que más puede alargarlo.
 | 7 | musl, POSIX, herramientas de compilar cruzado | **hecha (24/11)** | — |
 | 8 | Gráficos: compositor, ventanas, ratón, oficina | **hecha (24/11)** | — |
 | 9 | Red por cable, TCP/IP, TLS; Wi-Fi en paralelo | **hecha (25/11)** (la Wi-Fi, en paralelo: 3–5 meses) | — |
-| 10 | Navegador moderno (Ladybird o WebKit) | **la base, hecha (25/11)**: C++, la letra (FreeType y HarfBuzz), TCP de hoy; y lo que quedaba de la 9 (sección 16). **La base de la 10 b, hecha (25/11)**: curl 8.14.1 con BearSSL (la orden y libcurl, con «multi») e ICU 77.1 (con sus datos filtrados), readlink (sección 19). **La 10 c, hecha (26/11)**: una referencia al descriptor durante cada llamada, la causa de fondo de lo lento con varios procesadores (la TLB: la cuarentena del montón) y de los cortes del sonido, el compilador cruzado (GCC 14.3 con la libstdc++ para musl; C++ dinámico), **IPv6** (SLAAC, ND, ICMPv6, AF_INET6) y lo de la auditoría (sección 20). **La 10 d, hecha (26/11)**: los sockets de Unix (AF_UNIX, con SCM_RIGHTS y SCM_CREDENTIALS), `memfd_create` con sus sellos, un programa de C++23 que se habla con otro como los de Ladybird, el vigilante, el HPET de 32 bits y H4 y H11 de la auditoría (sección 21). Queda el navegador mismo: lo que pide, en las secciones 20 y 21 | (8–12 sem.) |
+| 10 | Navegador moderno (Ladybird o WebKit) | **la base, hecha (25/11)**: C++, la letra (FreeType y HarfBuzz), TCP de hoy; y lo que quedaba de la 9 (sección 16). **La base de la 10 b, hecha (25/11)**: curl 8.14.1 con BearSSL (la orden y libcurl, con «multi») e ICU 77.1 (con sus datos filtrados), readlink (sección 19). **La 10 c, hecha (26/11)**: una referencia al descriptor durante cada llamada, la causa de fondo de lo lento con varios procesadores (la TLB: la cuarentena del montón) y de los cortes del sonido, el compilador cruzado (GCC 14.3 con la libstdc++ para musl; C++ dinámico), **IPv6** (SLAAC, ND, ICMPv6, AF_INET6) y lo de la auditoría (sección 20). **La 10 d, hecha (26/11)**: los sockets de Unix (AF_UNIX, con SCM_RIGHTS y SCM_CREDENTIALS), `memfd_create` con sus sellos, un programa de C++23 que se habla con otro como los de Ladybird, el vigilante, el HPET de 32 bits y H4 y H11 de la auditoría (sección 21). **La 10 e, hecha (27/11)**: Skia m148 (la de Ladybird) con el procesador, las bibliotecas que pide Ladybird (17 en `terceros/`, con su prueba), AK, LibCore, LibFileSystem, LibThreading y LibTest de Ladybird con sus pruebas de AK (970 casos) dentro de Hispa-64, preadv y pwritev (sección 22). Queda el navegador mismo: lo que pide, en la sección 22 | (8–12 sem.) |
 | 11 | Impresión IPP, sonido HDA, energía (suspender, batería) | **la base, hecha (25/11)**: el planificador, TCP con congestión, la INTx, el tiempo de procesador y **el sonido (HD Audio, /dev/dsp)** (sección 17). **La 11 b, hecha (25/11)**: el tic estable (la calibración del APIC), **ACPICA en el núcleo** (la batería, el cable, el EC, apagar por `_S5`, el `_CRS` de los enlaces de los `_PRT`), el brillo y HWP (sección 18). Quedan suspender, los P-states sin HWP, IPP y la mezcla del sonido | (en paralelo) |
 | 12 | Instalar en el disco, actualizar, cuentas | 3–4 sem. | (en paralelo) |
 | 13 | (opcional) Cargador UEFI propio, Secure Boot; UEFI de 32 bits | 3–4 sem. | — |
@@ -4089,3 +4089,211 @@ primero mira en su memoria (la misma).
   no siempre se queda con el más corto que vale; ensambla.py sí. Hacer que
   elija igual que NASM en todos los casos pide copiar su forma de pasar por
   el archivo (hoy, cuando salga, se mueve el código: `añade_arg`).
+
+## 22. La etapa 10 e, hecha (27/11/2026): Skia, las bibliotecas de Ladybird y AK
+
+### Las decisiones
+
+- **Por qué la 10 e**: lo siguiente de la lista de la sección 21 («las
+  bibliotecas y Ladybird sin ventana»). La lista de bibliotecas no es la de
+  memoria: es la del `vcpkg.json` de Ladybird (el commit 830fbef6 del
+  26/11/2026), con **sus mismas versiones** (los «overrides»), y mirando en
+  su código para qué usa cada una.
+- **Skia m148**, la que fija Ladybird (su overlay-port: el commit e7c90ecc
+  de google/skia), con **su gn** (gn 2175, el de `bin/fetch-gn`) y el
+  compilador cruzado, en el PC de Albinyana: dibujar con el procesador (sin
+  GL ni Vulkan; con Ganesh sin motores, para que estén las funciones que
+  llama Ladybird), FreeType, HarfBuzz e ICU nuestros, PNG, JPEG y WebP con
+  nuestras bibliotecas (abajo), sin fontconfig (las letras, por su ruta),
+  sin PDF, SVG, Skottie, XPS, skparagraph, wuffs, DNG ni piex. Con el parche
+  de Ladybird `010-always-build-pathops.patch` (pathops dentro de libskia:
+  Ladybird lo usa; sin él, `Op` no estaba). Opciones en
+  `terceros/skia/args.gn`.
+- **Skia sin gn en las pruebas**: como con curl y FreeType, «un archivo cada
+  vez». `skia-lista.py` saca de ninja (`-t commands` y `-t deps`) la lista
+  de lo que se compila y con qué opciones (`terceros/skia/compila.txt`: 22
+  grupos, 804 archivos) y las cabeceras que de verdad se usan (1.830): en
+  `terceros/skia` van solo esos archivos (22 MB de 74). `hazskia.sh` la
+  sigue (sin `-I/usr/include/freetype2` ni `harfbuzz`, que gn pone del
+  anfitrión); con 10 hilos en el PC, 3 min 20 s; con uno en el servidor,
+  más de una hora (los objetos se pueden copiar del PC: `build/skia-obj`).
+  El libskia.a de hazskia.sh y el de gn dan el mismo dibujo, octeto a octeto.
+- **El camino de Skia**: Skia elige al arrancar, según el procesador, SSE2,
+  «ML3» (AVX2, BMI1, BMI2, F16C y FMA) o «ML4» (AVX-512). En las pruebas de
+  QEMU sin KVM (el `qemu64`) va por SSE2; el servidor y el PC, por ML3. Los
+  píxeles no son los mismos (el FMA), así que MSKIA dice su camino y el crc32
+  de lo dibujado y del PNG (iguales a los de Linux si el camino es el mismo)
+  y una **huella**: la media de cada cuadro de 16 x 16 en RGB (375 cuadros),
+  que debe quedar a 2 como mucho de la de Linux con cualquier camino (con SSE2
+  frente a ML3 sale igual: 0 de diferencia).
+- **Las bibliotecas de las imágenes**, las que pide Skia (y Ladybird):
+  zlib 1.4, libpng 1.6.59, libjpeg-turbo 3.2.1 (sin su SIMD de NASM, por
+  ahora) y libwebp 1.6.0 (con demux y mux, lo de «anim» y «libwebpmux»; SSE2,
+  y SSE4.1 y AVX2 si los hay). Lo que en ellas hace configure o CMake (las
+  cabeceras de configuración), sacado una vez con `hispa64.cmake` y guardado;
+  luego, `libs/hazimg.sh`, un archivo cada vez.
+- **Las demás** (`libs/hazlibs.sh`): simdutf 9.5.0, fast_float 8.3.3, zmij
+  1.2 (con el parche de Ladybird), mimalloc 2.2.7 (MI_SECURE=4, como el de
+  Ladybird), sqlite 3.54.1 (FTS5 y las matemáticas), woff2 1.0.2 (con
+  nuestro brotli), dav1d 1.5.4 (en C, sin ensamblador) y libavif 1.4.2,
+  libpsl 0.23.3 (con la lista de Ladybird), simdjson 5.1.1, zstd 1.5.7 y
+  libtiff 4.7.2. **wuffs, la 0.4 y no la 0.3**: `wuffs-v0.3.c` dice solo
+  Apache-2.0 (lo mismo que OpenSSL: sin decidir); la 0.4 ya es «Apache-2.0 OR
+  MIT», con las mismas funciones del GIF (en Ladybird habrá que cambiar el
+  `#include` de su GIFLoader, en la capa `Platform/Hispa64`).
+- **Las licencias** (todas compatibles con la GPL-2.0 o posterior): Skia,
+  libwebp, libjpeg-turbo (también IJG y zlib), libtiff y zstd (BSD o GPL-2.0),
+  BSD; dav1d y libavif, BSD-2 (con su trozo de libyuv, BSD-3); zlib, la de
+  zlib; libpng, la suya (PNG v2); woff2, mimalloc, zmij y libpsl, MIT (la
+  lista de libpsl, MPL-2.0, compatible por su 3.3); simdutf, simdjson y
+  wuffs 0.4, MIT o Apache-2.0 (se elige la MIT); fast_float, MIT, Apache o
+  BSL; sqlite, dominio público; Ladybird, BSD-2; llvm-libc, Apache-2.0 con
+  la excepción de LLVM (hecha para casar con la GPL-2.0).
+- **Lo de Ladybird mismo** (punto 3): AK, LibCore, LibFileSystem,
+  LibThreading y LibTest (y la cabecera de LibMain), del mismo commit, en
+  `terceros/ladybird` sin cambiar nada, con **sus opciones de GCC**
+  (`Meta/CMake/compile_options.cmake`: C++23, `-fno-exceptions`,
+  `-ffp-contract=off`, `-ftrivial-auto-var-init=zero`...; sin `-Werror`) y lo
+  que hace su CMake hecho por `ladybird/hazak.sh` (Debug.h, Backtrace.h,
+  BrowserVersion.h y los Export.h, en `build/ladybird-obj/gen`). Compila
+  todo con GCC 14.3 y musl. Las cabeceras de Linux que el cruzado no trae
+  (`<linux/fs.h>`: RENAME_NOREPLACE), en `ladybird/compat`. Las matemáticas
+  de AK son las de llvm-libc (solo cabeceras: las 1.238 que incluye, en
+  `terceros/llvm-libc`). Sus pruebas de AK, **TestAK** (un solo programa,
+  como el `ladybird_test_suite` de Ladybird), y **MAK**, que lo corre con lo
+  que dice a `/tmp` y da el resumen.
+- **Sin LibUnicode, LibIPC ni LibGfx** (aún): LibUnicode pide ICU 78.3 (así,
+  EXACT, en su `find_package`; tenemos la 77.1) y un «crate» de Rust (IDNA);
+  **LibIPC** tiene su transporte en Rust (`libipc_rust`, salvo en Windows) y
+  **LibGfx** su `libgfx_rust` y LibCrypto (OpenSSL). Ladybird ya no es solo
+  C++: hace falta **Rust para x86_64-unknown-linux-musl** con nuestro
+  enlazador (el cruzado) en el PC. Sin LibUnicode, fuera LibCore/TimeZone.cpp
+  y las pruebas TestString y TestUtf16String (además, una llama a un
+  constructor `consteval` de Utf16View por `construct_at` en tiempo de
+  ejecución: clang lo deja pasar, GCC no lo emite).
+- **TLS, sin OpenSSL** (Carlos aún no ha decidido): lo que la pide en Ladybird
+  es poco. **LibCrypto** son 399 líneas (OpenSSL.cpp, HMAC, Hash, EC, RSA,
+  EdwardsCurve: lo que usa LibWeb, sobre todo SHA para SRI y WebCrypto) y la
+  enlazan LibGfx (sin llamarla) y LibWeb; **RequestServer** baja todo con
+  curl y ya mira si curl usa la misma OpenSSL (`curl_uses_openssl()`): si
+  no, **deja el TLS a curl** (el nuestro, con BearSSL); aparte usa OpenSSL
+  para las cadenas de AIA (`AIA.cpp`: X509, PKCS7, PEM), las excepciones de
+  certificados (`CertificateExceptions.cpp`) y `SSL_CTX` en `CURL.cpp`; y
+  **WebContent** solo llama a `OSSL_set_max_threads`. El punto de enganche:
+  una LibCrypto de `Platform/Hispa64` sobre BearSSL (SHA-1/2, HMAC, RSA,
+  ECDSA P-256/384/521) y monocypher (Ed25519, X25519), con la misma
+  interfaz; en RequestServer, `curl_uses_openssl()` falso (curl con BearSSL),
+  AIA y las excepciones con el decodificador de X.509 de BearSSL; y en
+  WebContent, sin `OSSL_set_max_threads`. Con OpenSSL (GPL-3 para el
+  conjunto), nada de eso.
+- **`readlink("/proc/self/exe")`** (y `/proc/PID/exe` con el suyo), de
+  verdad: la sección 21 lo daba por hecho, pero solo estaba
+  `/etc/localtime` (daba ENOENT; MSKIA y MICU se arreglaban con la carpeta
+  actual). TestAK lo pide para encontrarse (LibTest) y, sin él, no corría
+  ninguna prueba. Cada proceso guarda la ruta absoluta de su programa
+  (`exe`: la de execve, normalizada, o «/» y su nombre si es de la unidad).
+- **close_range** (436): Ladybird (Core::Process::spawn, en Linux con
+  `clone(CLONE_VM | CLONE_VFORK)`) cierra en el hijo, antes de execve, los
+  descriptores que no ha pedido; sin close_range lo hace leyendo
+  `/proc/self/fd`, que no hay: TestAK no podía lanzar sus grupos
+  (`Cannot start the suite`). Con CLOSE_RANGE_CLOEXEC, solo los marca.
+- **TestAK es lento en Hispa-64** (en Linux, 1,7 s; con KVM, 23 s; con TCG
+  y 4 procesadores, 211 s): lanza un proceso de 5 MB por grupo (85), y cada
+  arranque de un programa grande cuesta (con TCG, de 0,1 a 2 s; muy
+  variable: los avisos entre procesadores al soltar y volver a pedir sus
+  marcos). Lo hecho: **execve de un programa de la unidad ya no lo copia**
+  al montón (`vfs_entero_o_unidad`: lo lee de donde lo dejó el cargador,
+  como hace `lanza`). Y en las pruebas, **MAK corre 12 grupos** (334 casos)
+  en cada arranque y **«MAK todas»** (los 85, 970 casos) en el de KVM, con
+  `ak=todas` en la línea del núcleo. Medido de paso (con KVM anidado, el del
+  servidor): una falta de página cuesta 3 µs, pero 70 µs en la memoria que
+  el anfitrión aún no ha tocado (es el KVM anidado, no Hispa-64); y
+  **`clock_gettime` cuesta de 50 a 90 µs** (es una llamada al sistema: no
+  hay vDSO), lo que Ladybird hace a cada paso: queda apuntado abajo.
+- **preadv, pwritev, preadv2 y pwritev2** (295, 296, 327 y 328: sqlite los
+  pide) y **fchown** (93: los discos de Hispa-64 no guardan dueños; vale sin
+  cambiar nada, como en un FAT de Linux), con su prueba en MUNIX (85 pruebas, con las de `/proc/self/exe` y close_range: eran 77).
+- Hispa-64 **0.11.5** (uname: «etapa 10 e (Skia y las imágenes)»).
+
+### Qué hace
+
+| Archivo | Qué |
+|---|---|
+| `programas/libs/hazimg.sh`, `mimg.c` | zlib, libpng, libjpeg-turbo y libwebp; MIMG (16 pruebas) y PNGTEST.PNG |
+| `programas/libs/hazlibs.sh`, `mlibs.cpp` | las otras 13; MLIBS (28 pruebas), letra.woff2 y colores.avif |
+| `programas/cxx/hazskia.sh`, `mskia.cpp`, `skia-lista.py` | Skia (libskia.a con skshaper, skunicode y skcms); MSKIA (20 pruebas) |
+| `programas/ladybird/hazak.sh`, `mak.c`, `compat/` | AK, LibCore, LibFileSystem, LibThreading y LibTest; TestAK y MAK (12 grupos; «MAK todas», los 85) |
+| `programas/cxx/hazcxx.sh` | los llama, después de ICU |
+| `prmusl64.cas`, `hispa64.cas` | MIMG, MLIBS, MSKIA y MAK en cada arranque con musl («MAK todas» con `ak=todas`) |
+| `vfs64.cas`, `procesos.cas` | `vfs_entero_o_unidad`: execve de la unidad sin copiar |
+| `sistema.cas`, `procesos.cas` | preadv, pwritev, preadv2, pwritev2, fchown y close_range; `/proc/self/exe` (`exe` en Proceso) |
+| `terceros/` | skia, zlib, libpng, libjpeg-turbo, libwebp, simdutf, fast_float, zmij, mimalloc, sqlite, woff2, wuffs, dav1d, libavif, libpsl, simdjson, zstd, tiff, ladybird y llvm-libc, cada una con su LEEME.txt (versión, de dónde, SHA-256, licencia, qué se ha quitado) |
+
+Lo que dicen (q35, 4 procesadores, sin KVM):
+
+```
+MSKIA: Skia m148 (la de Ladybird) con el procesador, sin GPU; el camino: SSE2
+  HarfBuzz (SkShaper) con DejaVu Sans: 52 glifos, 382 de ancho
+  JPEG (calidad 90) y WebP sin pérdidas, de ida y vuelta
+  PNGTEST.PNG de 91 x 69 (SkPngDecoder), a 1,5 veces con filtro lineal; un degradado, formas, una sombra, SkPathOps y SkSL
+  dibujado (SSE2): 400 x 240, los píxeles con crc32 ea6f60f5; a PNG en 37727 octetos (crc32 8c0e4794), en /tmp/mskia.png
+MSKIA: todo bien (20 pruebas)
+MAK: las pruebas de AK de Ladybird (TestAK: C++23 con GCC 14.3 y musl), 12 grupos
+  12 grupos, 334 casos: todos bien
+MAK: todo bien (334 pruebas)
+```
+
+(Con ML3, en Linux y con KVM: los píxeles, crc32 45c3513c; el PNG, 37.728
+octetos, crc32 d5e5283c. «MAK todas», con KVM: «85 grupos, 970 casos: todos
+bien», en 23 s.) MIMG y MLIBS dicen cifras exactas de cada
+biblioteca (tamaños, crc32 o FNV de lo que sale), las mismas en Linux y en
+Hispa-64; MSKIA dibuja en 400 x 240 un degradado, un rectángulo redondeado
+con sombra difuminada, un círculo con borde, la unión (SkPathOps) de una
+estrella y una curva, una línea de rayas, un sombreador de SkSL (que Skia
+compila en marcha), PNGTEST.PNG a 1,5 veces y «¡Señor Muñoz, qué pingüino
+tan añejo! Ñandú y árbol.» colocado con HarfBuzz (SkShaper y SkUnicode
+sobre ICU), y lo guarda en `/tmp/mskia.png`, que lee otra vez.
+
+### Cómo se ha probado
+
+- MIMG, MLIBS, MSKIA y MAK, los mismos programas (estáticos) en Linux (el
+  servidor y el PC: lo mismo) y en Hispa-64 en cada arranque con musl
+  (`pruebas.sh`, etapa 7: las líneas de Linux, tal cual; lo de MSKIA, con
+  `skia_bien`), también con 1 procesador y 128 MB («pc»).
+- **La batería** (`castel/nucleo64/pruebas.sh`): BATERÍA_PENDIENTE
+
+### Lo que queda (y más adelante)
+
+- **Rust** para `x86_64-unknown-linux-musl` con el cruzado de enlazador (en
+  el PC; no en el servidor): lo piden LibIPC, LibGfx, LibUnicode, LibURL y
+  LibJS de Ladybird.
+- **ICU 78.3** (Ladybird la pide exacta) y HarfBuzz 10.2.0 y brotli 1.2.1
+  (las suyas; tenemos la 10.1.0 y la 1.1.0).
+- **LibUnicode, LibIPC, LibGfx** (con LibCrypto sobre BearSSL, arriba),
+  luego LibJS, LibWeb, RequestServer, WebContent y `headless-browser`.
+- **ANGLE**: el Compositor de Ladybird (el único proceso con Skia) pide
+  `angle` (`pkg_check_modules(angle REQUIRED)`): hay que ver si va con
+  SwiftShader o con el dibujo de Skia por el procesador.
+- **fontconfig** (Ladybird lo pide en Linux para buscar las letras) o su
+  `Platform/Hispa64` con las letras por su ruta.
+- **Las cabeceras de Linux** («UAPI», `make headers_install`) en el cruzado
+  (hazgcc.sh), en vez de `ladybird/compat`.
+- **-march=x86-64-v2**: Ladybird se compila así en x86-64 (SSE4.2, POPCNT):
+  no correría en el `qemu64` de QEMU sin KVM (sí en VirtualBox y en los
+  equipos de verdad de 2009 en adelante). Para las pruebas, sin él.
+- El SIMD de libjpeg-turbo (NASM) y el ensamblador de dav1d.
+- **La memoria mínima por UEFI**: con los 45 MB de la unidad (eran 23),
+  GRUB ya no carga todos los módulos con 128 MB (los dos últimos se quedaban
+  fuera): la prueba, con 192 MB (por multiboot, 128 siguen valiendo). Cargar
+  los programas grandes desde el disco en vez de como módulos de GRUB.
+- **La hora sin llamar al sistema** (un vDSO, o una página de solo leer con
+  el TSC y su escala): `clock_gettime` cuesta hoy de 50 a 90 µs con KVM.
+- **Arrancar programas grandes**: execve copia los segmentos página a página
+  y, al acabar, sus marcos vuelven con aviso a los demás procesadores; con
+  TCG, de 0,1 a 2 s por un programa de 5 MB (Ladybird lanza varios
+  procesos de decenas de MB): mapear el archivo y compartir sus páginas.
+- **Los cerrojos de fcntl** (F_SETLK, F_GETLK, F_OFD_*): hoy EINVAL; sqlite
+  con su VFS de Unix los usa (MLIBS va con «unix-none»; LibDatabase de
+  Ladybird los pedirá).
+- Lo de antes (sección 21): los sockets de Unix en el disco, el recolector
+  de ciclos, H12 y H13, VirtualBox, ensambla.py frente a NASM.

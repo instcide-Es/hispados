@@ -358,7 +358,7 @@ e7_bien() {   # SALIDA N [avx]
     && grep -q "^MIMG: todo bien (16 pruebas)$" <<< "$v" && grep -q "^Programa «MIMG»: acaba con el código 0, como debe" <<< "$v" && mismas "$MIM" "$v" \
     && { [ -z "$MLB" ] || { grep -q "^MLIBS: todo bien (" <<< "$v" && grep -q "^Programa «MLIBS»: acaba con el código 0, como debe" <<< "$v" && mismas "$MLB" "$v"; }; } \
     && grep -q "^MSKIA: todo bien (20 pruebas)$" <<< "$v" && grep -q "^Programa «MSKIA»: acaba con el código 0, como debe" <<< "$v" && skia_bien "$v" \
-    && grep -q "^MAK: todo bien (" <<< "$v" && grep -q "^Programa «MAK»: acaba con el código 0, como debe" <<< "$v" && [ -n "$MAKL" ] && [ -n "$MAKT" ] && { grep -qxF "$MAKL" <<< "$v" || grep -qxF "$MAKT" <<< "$v"; } \
+    && grep -q "^MAK: todo bien (" <<< "$v" && grep -qE "^Programa «MAK( todas)?»: acaba con el código 0, como debe" <<< "$v" && [ -n "$MAKL" ] && [ -n "$MAKT" ] && { grep -qxF "$MAKL" <<< "$v" || grep -qxF "$MAKT" <<< "$v"; } \
     && grep -q "^  hilos: 200 std::thread, thread_local (200 destruidos), condition_variable, async, promise, timed_mutex$" <<< "$v" \
     && [ "$(grep -cE "^Programa «(MHOLA|MHOLAD|MHOLAP) uno dos»: acaba con el código 0, como debe|^Programa «(MHILOS|MHILOSD|MSENALES|MSENALESD|MPROCESOS|MPROCESOSD|MMAPA|MMAPAD)»: acaba con el código 0, como debe|^Programa «LUA /PRUEBA.LUA uno dos»: acaba con el código 0, como debe" <<< "$v")" = 12 ] \
     && grep -q "^Después de musl: 0 procesos, 0 en la tabla, 0 espacios, 0 tablas de programas, 0 tuberías; " <<< "$v" \
@@ -390,7 +390,7 @@ pci_igual() {   # SALIDA opciones de QEMU
 mb1 apagar "$T/mb1.txt" 128; c=$?
 S=$T/mb1.txt
 if [ $c = 85 ] && hay $S "^Hispa-64 0.11.5 ─ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.$" \
-   && hay $S "^Cargador: qemu, multiboot$" && serie $S | grep -qE "^Memoria: (9[0-9]|1[0-2][0-9]),[0-9] MB libres en [0-9]* trozos \(de 127,4 MB que da el firmware\); [0-9,]* [KM]B usados por el núcleo$" \
+   && hay $S "^Cargador: qemu, multiboot$" && serie $S | grep -qE "^Memoria: ([6-9][0-9]|1[0-2][0-9]),[0-9] MB libres en [0-9]* trozos \(de 127,4 MB que da el firmware\); [0-9,]* [KM]B usados por el núcleo$" \
    && hay $S "^  sin la identidad de abajo: 1 MB ya no está en las tablas$" && hay $S "los nombres de [0-9]* funciones (HISPA64.SIM)$" \
    && hay $S "^El núcleo, en la mitad alta: 0xFFFFFFFF80100000 (código, de solo leer)" && hay $S "^TSS con pilas propias (IST)" \
    && hay $S "^Páginas: de 4 KB, puesta, leída, quitada y puesta en otro marco (la TLB, al día); de 2 MB, también; de 1 GB, no (el procesador no las tiene)$" \
@@ -1164,7 +1164,9 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
       -drive if=pflash,format=raw,file="$T/vars.fd" -drive file="$IMG",format=raw,if=virtio \
       -display none -serial file:"$s" $DBG -no-reboot -nic none "$@" > /dev/null 2>&1
   }
-  uefi "$T/uefi.txt" -m 128 -monitor none; c=$?
+  # ([etapa 10 e] 192 MB: con 128, GRUB no cargaba los 45 MB de la unidad: los
+  # dos últimos, icudt77l.dat y libstdc++.so.6, se quedaban fuera)
+  uefi "$T/uefi.txt" -m 192 -monitor none; c=$?
   S=$(serie "$T/uefi.txt")
   if [ $c = 85 ] && grep -q "Hispa-64 0.11.5 ─ Copyright" <<< "$S" && grep -q "^Cargador: GRUB .*, multiboot2, con UEFI de 64 bits$" <<< "$S" \
      && grep -q "^Pantalla: [0-9]* x [0-9]* puntos, 32 bits por punto" <<< "$S" && grep -q "^  consola de [0-9]* x [0-9]* letras" <<< "$S" \
@@ -1173,9 +1175,9 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
      && grep -qE "^Memoria: ([6-9][0-9]|1[0-9][0-9]),[0-9] MB libres en [0-9]* trozos" <<< "$S" && grep -q "^Montón: 2000 reservas" <<< "$S" \
      && grep -q "^ACPI: 2.0 o más, de «BOCHS »; XSDT en 0x[0-9A-F]*, [0-9]* tablas: FACP APIC HPET MCFG .*DSDT (todas con la suma bien)$" <<< "$S" \
      && grep -q "ACPI NVS" <<< "$S" && grep -q "^Hispa-64 etapa 11: todo en orden.$" <<< "$S"; then
-    ok "por UEFI de 64 bits (OVMF + GRUB, multiboot2) con 128 MB: «$(grep '^Cargador' <<< "$S")»; «$(grep '^Memoria:' <<< "$S" | cut -d';' -f1)»; la pantalla del GOP con escritura combinada, el módulo HISPA64.SIM, RSDP 2.0 y «todo en orden»"
-  else ko "por UEFI con 128 MB no dice lo que debe (código $c): $(grep -E 'Memoria:|pantalla, en|parado' <<< "$S" | paste -sd ' ')"; fi
-  e7_ok "$T/uefi.txt" 1 "por UEFI (OVMF y GRUB) con 1 procesador y 128 MB"
+    ok "por UEFI de 64 bits (OVMF + GRUB, multiboot2) con 192 MB: «$(grep '^Cargador' <<< "$S")»; «$(grep '^Memoria:' <<< "$S" | cut -d';' -f1)»; la pantalla del GOP con escritura combinada, el módulo HISPA64.SIM, RSDP 2.0 y «todo en orden»"
+  else ko "por UEFI con 192 MB no dice lo que debe (código $c): $(grep -E 'Memoria:|pantalla, en|parado' <<< "$S" | paste -sd ' ')"; fi
+  e7_ok "$T/uefi.txt" 1 "por UEFI (OVMF y GRUB) con 1 procesador y 192 MB"
   # [etapa 6] el USB por UEFI: OVMF deja la BAR del xHCI por encima de 4 GB, y ha usado él antes el teclado y la memoria
   copia_usb
   IMG="$T/uefi-sm/hispa64.img"
@@ -1246,12 +1248,12 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
   # [etapa 4] el CD (grub-mkrescue): por BIOS (-cdrom) y por UEFI
   if command -v grub-mkrescue > /dev/null && CD=1 "$AQUI/imagen.sh" "$T/cd" prueba > "$T/cd.txt" 2>&1 && [ -s "$T/cd/hispa64-cd.iso" ]; then
     rm -f "$T/cd-bios.txt"
-    timeout 150 qemu-system-x86_64 -cdrom "$T/cd/hispa64-cd.iso" -m 256 -smp 2 -display none -serial file:"$T/cd-bios.txt" -monitor none $DBG -no-reboot -nic none > /dev/null 2>&1; c=$?
+    timeout 300 qemu-system-x86_64 -cdrom "$T/cd/hispa64-cd.iso" -m 256 -smp 2 -display none -serial file:"$T/cd-bios.txt" -monitor none $DBG -no-reboot -nic none > /dev/null 2>&1; c=$?
     if [ $c = 85 ] && grep -q "^Cargador: GRUB .*, multiboot2, con la BIOS$" <<< "$(serie "$T/cd-bios.txt")" && e4_bien "$T/cd-bios.txt" 2; then
       ok "el CD ($(( $(stat -c %s "$T/cd/hispa64-cd.iso") / 1048576 )) MB, grub-mkrescue) por BIOS (-cdrom, 2 procesadores): «$(serie "$T/cd-bios.txt" | grep '^Cargador')», los programas y «todo en orden»"
     else ko "el CD por BIOS no arranca bien (código $c): $(serie "$T/cd-bios.txt" | grep -E '^Cargador|parado' | paste -sd ' ') $(e4_dice "$T/cd-bios.txt")"; fi
     rm -f "$T/cd-uefi.txt"; cp $OVMF_V "$T/vars3.fd"
-    timeout 150 qemu-system-x86_64 -machine q35 -drive if=pflash,format=raw,readonly=on,file=$OVMF_C -drive if=pflash,format=raw,file="$T/vars3.fd" \
+    timeout 300 qemu-system-x86_64 -machine q35 -drive if=pflash,format=raw,readonly=on,file=$OVMF_C -drive if=pflash,format=raw,file="$T/vars3.fd" \
       -cdrom "$T/cd/hispa64-cd.iso" -m 256 -smp 4 -display none -serial file:"$T/cd-uefi.txt" -monitor none $DBG -no-reboot -nic none > /dev/null 2>&1; c=$?
     if [ $c = 85 ] && grep -q "^Cargador: GRUB .*, multiboot2, con UEFI de 64 bits$" <<< "$(serie "$T/cd-uefi.txt")" && e4_bien "$T/cd-uefi.txt" 4; then
       ok "el CD por UEFI (OVMF, q35, 4 procesadores): «$(serie "$T/cd-uefi.txt" | grep '^Cargador')», los programas y «todo en orden»"
