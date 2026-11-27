@@ -17,6 +17,14 @@
 ;     16 bits (la cabecera NTH16, su NDP16 con los datagramas), los
 ;     parámetros de GET_NTB_PARAMETERS, la MAC de la cadena iMACAddress del
 ;     descriptor funcional de Ethernet, y la interfaz de datos en su variante 1.
+;   - (RTL8153) CDC-ECM (la norma «Ethernet Control Model» 1.2 del USB-IF):
+;     los adaptadores de red por USB de cable (el Realtek RTL8153 en su
+;     configuración de ECM, que elige usb.cas). La MAC, como en NCM; la
+;     variante 1 de los datos y el filtro; cada transferencia es una trama
+;     tal cual, sin cabecera; y el enlace, de los avisos de su interfaz de
+;     control (NETWORK_CONNECTION y CONNECTION_SPEED_CHANGE: la llamada 101,
+;     op 4). Sin cable, no se elige si hay otra cosa (ured.cas). Como
+;     cdc_ether.c y usbnet.c de Linux (el octeto de más), sin copiar su código.
 ;  Hecho mirando cómo lo hacen rndis_host.c y cdc_ncm.c de Linux (GPL-2.0),
 ;  sin copiar su código: el orden de los pasos (INITIALIZE, la MAC, el
 ;  filtro 0x2D), el octeto de más cuando lo que sale es un múltiplo del
@@ -29,6 +37,7 @@ módulo Rmovil
 
     constante M_RNDIS = 1
     constante M_NCM = 2
+    constante M_ECM = 3                         ; (RTL8153) un adaptador de red por USB de cable
     constante BÚFER = 16384
     constante MAX_TRAMAS = 64
     constante MV_NO_HAY = 0xFFFFFFF7
@@ -51,6 +60,7 @@ módulo Rmovil
     público variable listo: bool                ; el móvil está, y puesto en marcha
     público variable enlace_movil: bool
     público variable cambió: bool               ; ha llegado, se ha ido o ha cambiado: que se mire ya
+    público variable fue_adaptador: bool        ; (RTL8153) el que se acaba de ir era un adaptador de red USB
     público variable mac_movil: arreglo [8] de byte
     público variable nombre_movil: arreglo [48] de byte
     público variable id_movil: nat32            ; fabricante (abajo) y modelo (arriba) del USB
@@ -67,6 +77,8 @@ módulo Rmovil
     variable ctl: arreglo [262] de nat32        ; la petición de control (5 palabras) y sus datos (1024)
     variable pedido_id: nat32
     variable dev_max: nat32                     ; (RNDIS) lo más que recibe el móvil de una vez
+    variable aviso_: arreglo [16] de byte       ; (RTL8153) el último aviso de la interfaz de control
+    variable avisos_m: nat32
     ; (NCM) los parámetros de los NTB
     variable ncm_div, ncm_resto, ncm_alin, ncm_sal_max, ncm_sec: nat32
 
@@ -298,12 +310,23 @@ módulo Rmovil
 
     ; la MAC: la cadena iMACAddress del descriptor funcional de Ethernet
     ; (CS_INTERFACE 24h, subtipo 0Fh), 12 cifras hexadecimales en UTF-16
+    ; (RTL8153) en la configuración puesta: la que tenga ese número
+    ; (GET_CONFIGURATION), que en el RTL8153 no es la primera
     función ncm_mac(): bool
         variable d: puntero a byte
-        variable r, i, cadena, a, b: nat32
+        variable r, i, cadena, a, b, conf, k: nat32
         d := datos_ctl()
-        r := control(0x80, 6, 0x0200, 0, 1024)
-        si es_error(r) o r < 9 entonces devolver falso fin
+        conf := 0
+        r := control(0x80, 8, 0, 0, 1)                            ; GET_CONFIGURATION
+        si no es_error(r) y r = 1 entonces conf := d[0] fin
+        k := 0
+        mientras k < 8 hacer
+            r := control(0x80, 6, 0x0200 ob k, 0, 1024)
+            si es_error(r) o r < 9 entonces devolver falso fin
+            si conf = 0 o d[5] = conf entonces romper fin
+            k := k + 1
+        fin
+        si k >= 8 entonces devolver falso fin
         cadena := 0
         i := 0
         mientras i + 3 < r y d[i] >= 2 hacer
@@ -436,16 +459,123 @@ módulo Rmovil
     fin
 
     ; =========================================================================
+    ;  (RTL8153) CDC-ECM
+    ; =========================================================================
+    función ecm_iniciar(): bool
+        variable r: nat32
+        si no ncm_mac() entonces
+            apunta("red USB: CDC-ECM: no se sabe la MAC (iMACAddress)")
+            devolver falso
+        fin
+        ; los datos: la variante 0 y luego la 1 (la que tiene los extremos)
+        control(0x01, 11, 0, if_datos, 0)                         ; SET_INTERFACE
+        r := control(0x01, 11, 1, if_datos, 0)
+        si es_error(r) entonces
+            apunta4("red USB: CDC-ECM: no deja poner la variante 1 de la interfaz de datos (%08X)", r, 0, 0, 0)
+            devolver falso
+        fin
+        ; el filtro: a mí, difusión y toda la multidifusión
+        r := control(0x21, 0x43, 0x0E, if_control, 0)             ; SET_ETHERNET_PACKET_FILTER
+        si es_error(r) entonces apunta4("red USB: CDC-ECM: sin SET_ETHERNET_PACKET_FILTER (%08X): se sigue", r, 0, 0, 0) fin
+        devolver cierto
+    fin
+
+    ; CONNECTION_SPEED_CHANGE (en aviso_): la velocidad de bajada
+    función apunta_vel()
+        variable v: nat32
+        avisos_m := avisos_m + 1
+        v := le32(dirección(aviso_[8])) div 1000000
+        si v <> 0 y v <> vel_movil entonces
+            vel_movil := v
+            apunta4("red USB: el adaptador dice que el enlace va a %u Mbit/s", v, 0, 0, 0)
+        fin
+    fin
+
+    ; los avisos que hayan llegado (cada cuarto de segundo, desde mirar): el
+    ; enlace (NETWORK_CONNECTION, 00h) y la velocidad (CONNECTION_SPEED_CHANGE, 2Ah)
+    función ecm_avisos()
+        variable r, vueltas: nat32
+        variable e: bool
+        vueltas := 0
+        mientras vueltas < 4 hacer
+            r := ll(4, nat32(dirección(aviso_[0])), 16)
+            si es_error(r) o r < 8 entonces devolver fin
+            avisos_m := avisos_m + 1
+            si aviso_[0] = 0xA1 y aviso_[1] = 0x00 entonces
+                e := le16(dirección(aviso_[2])) <> 0
+                si e <> enlace_movil entonces
+                    enlace_movil := e
+                    cambió := cierto
+                    si e entonces
+                        apunta("red USB: el adaptador dice que hay enlace (cable)")
+                        ; (la velocidad viene detrás, enseguida: se espera un poco)
+                        r := 0
+                        mientras r < 10 hacer
+                            si ll(4, nat32(dirección(aviso_[0])), 16) >= 16 y aviso_[1] = 0x2A entonces
+                                apunta_vel()
+                                r := 10
+                            sino
+                                dormir(1)
+                            fin
+                            r := r + 1
+                        fin
+                    sino
+                        apunta("red USB: el adaptador dice que no hay enlace (¿el cable?)")
+                    fin
+                fin
+            sino si aviso_[0] = 0xA1 y aviso_[1] = 0x2A y r >= 16 entonces
+                apunta_vel()
+            fin
+            vueltas := vueltas + 1
+        fin
+    fin
+
+    ; una trama tal cual; si mide un múltiplo del paquete, un octeto de más
+    ; (así acaba en uno corto, como usbnet de Linux: Ethernet lo tolera)
+    función ecm_envía(t: puntero a byte, n: nat32): bool
+        variable k: nat32
+        copiar_memoria(dirección(sal[0]), t, n)
+        k := n
+        si paquete_sale <> 0 y k mod paquete_sale = 0 entonces
+            sal[k] := 0
+            k := k + 1
+        fin
+        devolver no es_error(ll(2, nat32(dirección(sal[0])), k))
+    fin
+
+    ; lo de una transferencia: una trama (si no, se tira)
+    función ecm_parte(n: nat32)
+        si n >= 14 y n <= 1518 entonces
+            tramas_ini[0] := 0
+            tramas_largo[0] := n
+            n_tramas := 1
+        sino
+            tiradas_m := tiradas_m + 1
+        fin
+    fin
+
+    ; (RTL8153) ¿es un adaptador de red por USB (de cable), y no un móvil?
+    público función es_adaptador(): bool
+        devolver listo y clase = M_ECM
+    fin
+
+    ; =========================================================================
     ;  Lo común
     ; =========================================================================
     función nombre_clase(): puntero a byte
         si clase = M_NCM entonces devolver "CDC-NCM" fin
+        si clase = M_ECM entonces devolver "CDC-ECM" fin
         devolver "RNDIS"
     fin
 
     función se_fue()
         si gen <> 0 o listo entonces
-            si listo entonces apunta("móvil por USB: se ha ido (desenchufado, o se ha quitado el anclaje de USB)") fin
+            fue_adaptador := listo y clase = M_ECM
+            si listo y clase = M_ECM entonces
+                apunta("red USB: el adaptador de red USB se ha ido (desenchufado)")
+            sino si listo entonces
+                apunta("móvil por USB: se ha ido (desenchufado, o se ha quitado el anclaje de USB)")
+            fin
             cambió := cierto
         fin
         gen := 0
@@ -458,6 +588,7 @@ módulo Rmovil
     ; el móvil de la generación g: ponerlo en marcha
     función iniciar()
         variable ok: bool
+        variable vueltas: nat32
         clase := info[2]
         id_movil := info[3]
         if_control := info[8]
@@ -470,21 +601,54 @@ módulo Rmovil
             caso 4: vel_movil := 5000
             si no: vel_movil := 0
         fin
-        copiar(nombre_movil, "el móvil por USB (Android, ")
-        concatenar(nombre_movil, nombre_clase())
-        concatenar(nombre_movil, ")")
         intentos := intentos + 1
-        apunta4("móvil por USB: %04X:%04X, %s, %u Mbit/s", id_movil yb 0xFFFF, id_movil >> 16, nat32(nombre_clase()), vel_movil)
+        fue_adaptador := falso
         llenar(dirección(mac_movil[0]), 8, 0)
-        si clase = M_NCM entonces ok := ncm_iniciar() sino ok := rndis_iniciar() fin
+        si clase = M_ECM entonces
+            ; (RTL8153) un adaptador de red por USB de cable
+            si id_movil = 0x81530BDA entonces
+                copiar(nombre_movil, "Realtek RTL8153 por USB (CDC-ECM)")
+            sino si id_movil = 0x81520BDA entonces
+                copiar(nombre_movil, "Realtek RTL8152 por USB (CDC-ECM)")
+            sino
+                copiar(nombre_movil, "el adaptador de red USB (CDC-ECM)")
+            fin
+            apunta4("red USB: %04X:%04X, CDC-ECM (adaptador de red por USB de cable), USB a %u Mbit/s", id_movil yb 0xFFFF, id_movil >> 16, vel_movil, 0)
+            ok := ecm_iniciar()
+        sino
+            copiar(nombre_movil, "el móvil por USB (Android, ")
+            concatenar(nombre_movil, nombre_clase())
+            concatenar(nombre_movil, ")")
+            apunta4("móvil por USB: %04X:%04X, %s, %u Mbit/s", id_movil yb 0xFFFF, id_movil >> 16, nat32(nombre_clase()), vel_movil)
+            si clase = M_NCM entonces ok := ncm_iniciar() sino ok := rndis_iniciar() fin
+        fin
         n_tramas := 0
         i_trama := 0
-        si ok entonces
+        si ok y clase = M_ECM entonces
+            listo := cierto
+            ; (sin avisos, con enlace: el que los manda lo dice enseguida)
+            enlace_movil := cierto
+            cambió := cierto
+            avisos_m := 0
+            apunta4("red USB: en marcha; MAC %02X:%02X:%02X:%02X", mac_movil[0], mac_movil[1], mac_movil[2], mac_movil[3])
+            apunta4("red USB: MAC ...:%02X:%02X", mac_movil[4], mac_movil[5], 0, 0)
+            ; (los primeros avisos, el enlace y su velocidad, llegan enseguida:
+            ; se esperan un poco, para que IPCONFIG no diga la del USB)
+            vueltas := 0
+            mientras vueltas < 30 y avisos_m < 2 hacer
+                ecm_avisos()
+                si avisos_m < 2 entonces dormir(1) fin
+                vueltas := vueltas + 1
+            fin
+        sino si ok entonces
             listo := cierto
             enlace_movil := cierto
             cambió := cierto
             apunta4("móvil por USB: en marcha; MAC %02X:%02X:%02X:%02X", mac_movil[0], mac_movil[1], mac_movil[2], mac_movil[3])
             apunta4("móvil por USB: MAC ...:%02X:%02X", mac_movil[4], mac_movil[5], 0, 0)
+        sino si clase = M_ECM entonces
+            apunta4("red USB: el adaptador no se ha podido poner en marcha (intento %u de 4)", intentos, 0, 0, 0)
+            próximo := ahora() + 200
         sino
             apunta4("móvil por USB: no se ha podido poner en marcha (intento %u de 4)", intentos, 0, 0, 0)
             próximo := ahora() + 200
@@ -508,6 +672,8 @@ módulo Rmovil
             iniciar()
         sino si no listo y intentos < 4 y ent32(ahora() - próximo) >= 0 entonces
             iniciar()
+        sino si listo y clase = M_ECM entonces
+            ecm_avisos()                                ; (RTL8153) el enlace
         fin
     fin
 
@@ -515,7 +681,13 @@ módulo Rmovil
     público función enviar(t: puntero a byte, n: nat32): bool
         variable ok: bool
         si no listo o n > 1514 entonces devolver falso fin
-        si clase = M_NCM entonces ok := ncm_envía(t, n) sino ok := rndis_envía(t, n) fin
+        si clase = M_ECM entonces
+            ok := ecm_envía(t, n)                       ; (RTL8153)
+        sino si clase = M_NCM entonces
+            ok := ncm_envía(t, n)
+        sino
+            ok := rndis_envía(t, n)
+        fin
         si ok entonces enviadas_m := enviadas_m + 1 fin
         devolver ok
     fin
@@ -533,7 +705,13 @@ módulo Rmovil
                 devolver 0
             fin
             si es_error(r) o r = 0 entonces devolver 0 fin
-            si clase = M_NCM entonces ncm_parte(r) sino rndis_parte(r) fin
+            si clase = M_ECM entonces
+                ecm_parte(r)                            ; (RTL8153)
+            sino si clase = M_NCM entonces
+                ncm_parte(r)
+            sino
+                rndis_parte(r)
+            fin
             si n_tramas = 0 entonces devolver 0 fin
         fin
         l := tramas_largo[i_trama]
@@ -553,7 +731,7 @@ módulo Rmovil
         n_tramas := 0
         i_trama := 0
         tiradas_m := 0
-        si c = M_NCM entonces ncm_parte(n) sino rndis_parte(n) fin
+        si c = M_ECM entonces ecm_parte(n) sino si c = M_NCM entonces ncm_parte(n) sino rndis_parte(n) fin
         devolver n_tramas
     fin
 

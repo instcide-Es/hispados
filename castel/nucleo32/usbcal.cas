@@ -179,7 +179,9 @@ módulo Usbcal
                 m := Usbalm.nueva(j)
                 si m <> NINGUNO entonces memoria_nueva(m) fin
                 ; (MÓVIL) el anclaje de USB de un móvil (RNDIS o NCM): para la red
-                si Usbmovil.nuevo(j) entonces avisa("Móvil conectado por USB: la red va por él") fin
+                si Usbmovil.nuevo(j) entonces
+                    si Usbmovil.es_adaptador() entonces avisa("Adaptador de red USB conectado") sino avisa("Móvil conectado por USB: la red va por él") fin    ; (RTL8153)
+                fin
                 Usbbt.nuevo(j)                  ; (BLUETOOTH) un adaptador: el escritorio pone en marcha BT.BIN
             fin
         fin
@@ -197,7 +199,11 @@ módulo Usbcal
                 Usbbt.se_va(j)                  ; (BLUETOOTH)
                 m := Usbalm.se_va(j)
                 si m <> NINGUNO entonces memoria_ida(m) fin
-                si Usbmovil.se_va(j) entonces avisa("El móvil por USB se ha desconectado") fin     ; (MÓVIL)
+                si j = Usbmovil.aparato y Usbmovil.es_adaptador() entonces
+                    si Usbmovil.se_va(j) entonces avisa("El adaptador de red USB se ha desconectado") fin     ; (RTL8153)
+                sino si Usbmovil.se_va(j) entonces
+                    avisa("El móvil por USB se ha desconectado")     ; (MÓVIL)
+                fin
             fin
         fin
         quita(a)

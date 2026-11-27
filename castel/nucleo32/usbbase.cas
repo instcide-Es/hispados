@@ -76,6 +76,8 @@ módulo Usbbase
         fabricante, producto: nat32             ; VID y PID
         clase: nat32                            ; la del aparato (0: la dice cada interfaz)
         configuración: nat32
+        n_conf: nat32                           ; (RTL8153) cuántas configuraciones tiene
+        conf_índice: nat32                      ; (RTL8153) la que se le ha puesto (su índice: 0, la primera)
         n_interfaces: nat32
         interfaces: arreglo [MAX_INTERFACES] de Interfaz
         n_extremos: nat32

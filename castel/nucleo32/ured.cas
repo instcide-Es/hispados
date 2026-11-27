@@ -51,6 +51,7 @@ módulo Ured
         ; (WIFI) el bit 9: por el Wi-Fi; los 12 y 13: lo que se prefiere (RED.INI)
         si tarjeta = T_WIFI entonces e := e ob 0x200 fin
         si tarjeta = T_MOVIL entonces e := e ob 0x400 fin         ; (MÓVIL) el bit 10: por el móvil por USB
+        si tarjeta = T_MOVIL y Rmovil.es_adaptador() entonces e := e ob 0x800 fin     ; (RTL8153) el 11: un adaptador de red USB
         e := e ob (preferir << 12)
         si e <> estado_dicho o mi_ip <> ip_dicha o túnel_ip <> túnel_dicho entonces
             ; (el aparato que hace DMA para RED.BIN: el del cable; el Wi-Fi lo dice WIFI.BIN)
@@ -72,7 +73,15 @@ módulo Ured
             apunta4("enlace: sí (%u Mbit/s)", velocidad(), 0, 0, 0)
             dhcp_empezar()
         sino
-            si tarjeta = T_WIFI entonces apunta("enlace: no (el Wi-Fi no está conectado)") sino si tarjeta = T_MOVIL entonces apunta("enlace: no (el móvil por USB)") sino apunta("enlace: no (¿el cable?)") fin    ; (WIFI) (MÓVIL)
+            si tarjeta = T_WIFI entonces
+                apunta("enlace: no (el Wi-Fi no está conectado)")                 ; (WIFI)
+            sino si tarjeta = T_MOVIL y Rmovil.es_adaptador() entonces
+                apunta("enlace: no (el adaptador de red USB: ¿el cable?)")        ; (RTL8153)
+            sino si tarjeta = T_MOVIL entonces
+                apunta("enlace: no (el móvil por USB)")                           ; (MÓVIL)
+            sino
+                apunta("enlace: no (¿el cable?)")
+            fin
             dhcp_parar()
             pila_sin_cable()
             tcp_sin_red(SIN_CABLE)
@@ -92,10 +101,16 @@ módulo Ured
     ; (WIFI) ¿por el cable o por el Wi-Fi? (Rwifi.conviene, con lo que dice RED.INI)
     ; (MÓVIL) y el móvil por USB: el cable de verdad (con enlace) antes que el
     ; móvil, y el móvil antes que el Wi-Fi (salvo con «Preferir=WIFI»)
+    ; (RTL8153) un adaptador de red USB de cable, como el móvil, pero solo
+    ; con enlace (si no, se va por el Wi-Fi o la tarjeta de dentro; y, si no
+    ; hay nada más, por él: así IPCONFIG dice que no tiene cable)
+    variable adaptador_antes: bool              ; (RTL8153) se iba por el adaptador de red USB
+
     función elige_tarjeta()
         variable cable_ok, w: bool
         variable quiero, antes: nat32
         Rwifi.cambió := falso
+        adaptador_antes := tarjeta = T_MOVIL y (Rmovil.es_adaptador() o Rmovil.fue_adaptador)
         Rmovil.mirar()
         Rmovil.cambió := falso
         cable_ok := tarjeta_cable <> T_NINGUNA y enlace_de(tarjeta_cable)
@@ -103,7 +118,7 @@ módulo Ured
         quiero := tarjeta_cable
         si w y preferir = PREFIERE_WIFI entonces
             quiero := T_WIFI
-        sino si no cable_ok y Rmovil.listo entonces
+        sino si no cable_ok y Rmovil.listo y (Rmovil.enlace_movil o (no w y tarjeta_cable = T_NINGUNA)) entonces
             quiero := T_MOVIL
         sino si w entonces
             quiero := T_WIFI
@@ -114,8 +129,12 @@ módulo Ured
             usar(quiero)
             si tarjeta = T_WIFI entonces
                 apunta("la red va por el Wi-Fi")
+            sino si tarjeta = T_MOVIL y Rmovil.es_adaptador() entonces
+                apunta("la red va por el adaptador de red USB")                   ; (RTL8153)
             sino si tarjeta = T_MOVIL entonces
                 apunta("la red va por el móvil por USB")
+            sino si tarjeta = T_NINGUNA y antes = T_MOVIL y adaptador_antes entonces
+                apunta("la red ya no va por el adaptador de red USB")            ; (RTL8153)
             sino si tarjeta = T_NINGUNA y antes = T_MOVIL entonces
                 apunta("la red ya no va por el móvil por USB (no hay cable)")
             sino si tarjeta = T_NINGUNA entonces
@@ -332,7 +351,7 @@ módulo Ured
                 fin
                 r := 0
                 si tarjeta = T_WIFI entonces r := 1 fin
-                si tarjeta = T_MOVIL entonces r := 2 fin      ; (MÓVIL)
+                si tarjeta = T_MOVIL y no Rmovil.es_adaptador() entonces r := 2 fin      ; (MÓVIL) ((RTL8153) el adaptador es un cable)
                 contestar(h, s, preferir, r, 0, nulo, 0)
             caso O_UDP:
                 si tarjeta = T_NINGUNA entonces
@@ -360,6 +379,7 @@ módulo Ured
         si apuntarse() <> 0 entonces salir(1) fin
         apunta("Hispa-Pentium 0.8: el servicio de red (RED.BIN)")
         apunta("(red 0.8.12: también el móvil por USB, el anclaje de USB de Android: RNDIS y CDC-NCM)")
+        apunta("(red 0.8.14: y los adaptadores de red USB de cable, CDC-ECM: el Realtek RTL8153)")
         ; (WIFI) RED.INI y, si hay tarjeta Wi-Fi, WIFI.BIN (antes que la del
         ; cable: así enciende su radio mientras tanto)
         Rwifi.arrancar()

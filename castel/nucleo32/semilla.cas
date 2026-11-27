@@ -730,6 +730,8 @@ módulo Semilla
         ; ratones y las memorias (con «sinusb», se queda como lo dejó la BIOS)
         si buscar(línea_del_cargador(), "sinusb") = nulo entonces
             Usbalm.prueba_asinc := buscar(línea_del_cargador(), "usbasinc") <> nulo     ; (MÓVIL) las pruebas
+            Usb.sin_red_usb := buscar(línea_del_cargador(), "sinredusb") <> nulo        ; (RTL8153) sin la red por USB de cable
+            Usb.prefiere_ecm := buscar(línea_del_cargador(), "usbecm") <> nulo          ; (RTL8153) las pruebas (el usb-net de QEMU, por ECM)
             Usb.prepara()
             si controladoras <> 0 entonces
                 Usb.enseña()

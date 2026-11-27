@@ -64,6 +64,12 @@ módulo Usb
     fin
     variable fallos: arreglo [MAX_FALLOS] de Fallo
     público variable n_fallos: nat32
+    ; (RTL8153) la red por USB de cable (CDC-ECM): con «sinredusb» en la línea
+    ; del cargador, no se busca otra configuración (la de siempre, la primera);
+    ; con «usbecm» (las pruebas: el usb-net de QEMU, que da RNDIS en la
+    ; primera), la de ECM aunque la primera sea de una clase que se atiende
+    público variable sin_red_usb: bool
+    público variable prefiere_ecm: bool
     constante DATOS = 0x400
     constante MAX_DATOS = 1024
 
@@ -414,6 +420,64 @@ módulo Usb
         fin
     fin
 
+    ; (RTL8153) ¿lleva la configuración leída (en la página, largo octetos)
+    ; una interfaz de CDC-ECM (02/06/00)?
+    función con_ecm(largo: nat32): bool
+        variable p: puntero a byte
+        variable d: nat32
+        p := puntero(página + DATOS)
+        d := 0
+        mientras d + 9 <= largo y p[d] >= 2 y d + p[d] <= largo hacer
+            si p[d + 1] = 4 y p[d + 5] = 2 y p[d + 6] = 6 entonces devolver cierto fin
+            d := d + p[d]
+        fin
+        devolver falso
+    fin
+
+    ; (RTL8153) ¿son todas sus interfaces de la clase «del fabricante» (FFh)?
+    función solo_del_fabricante(largo: nat32): bool
+        variable p: puntero a byte
+        variable d, n: nat32
+        p := puntero(página + DATOS)
+        d := 0
+        n := 0
+        mientras d + 9 <= largo y p[d] >= 2 y d + p[d] <= largo hacer
+            si p[d + 1] = 4 entonces
+                si p[d + 5] <> 0xFF entonces devolver falso fin
+                n := n + 1
+            fin
+            d := d + p[d]
+        fin
+        devolver n > 0
+    fin
+
+    ; (RTL8153) mira las demás configuraciones del aparato (hasta la 8.ª): la
+    ; primera con CDC-ECM queda en la página (y su índice, en conf_índice);
+    ; si no hay, se vuelve a leer la primera. Da lo leído (como haz_control)
+    función busca_ecm(ref a: Aparato, largo0: nat32): ent32
+        variable p: puntero a byte
+        variable k, largo: nat32
+        variable r: ent32
+        p := puntero(página + DATOS)
+        k := 1
+        mientras k < a.n_conf y k < 8 hacer
+            r := haz_control(a, 0x80, PIDE_DESCRIPTOR, 0x0200 ob k, 0, 9)
+            si r >= 9 entonces
+                largo := dato16(dirección(p[2]))
+                si largo > MAX_DATOS entonces largo := MAX_DATOS fin
+                r := haz_control(a, 0x80, PIDE_DESCRIPTOR, 0x0200 ob k, 0, largo)
+                si r >= 9 y con_ecm(nat32(r)) entonces
+                    a.conf_índice := k
+                    devolver r
+                fin
+            fin
+            k := k + 1
+        fin
+        ; (ninguna: la primera, como siempre)
+        r := haz_control(a, 0x80, PIDE_DESCRIPTOR, 0x0200, 0, largo0)
+        devolver r
+    fin
+
     ; el aparato de la ficha i no se deja enumerar: se apunta en qué paso
     ; (1: la dirección; 2 y 3: su descriptor; 4 y 5: su configuración; 6:
     ; los extremos; 7: ponerle la configuración). Da NINGUNO.
@@ -538,6 +602,7 @@ módulo Usb
         aparatos[i].clase := p[4]
         aparatos[i].fabricante := dato16(dirección(p[8]))
         aparatos[i].producto := dato16(dirección(p[10]))
+        aparatos[i].n_conf := p[17]
         ; su configuración (la primera): cuánto mide, y entera
         r := haz_control(aparatos[i], 0x80, PIDE_DESCRIPTOR, 0x0200, 0, 9)
         si r < 9 entonces devolver no_se_deja(i, 4) fin
@@ -545,6 +610,12 @@ módulo Usb
         si largo > MAX_DATOS entonces largo := MAX_DATOS fin
         r := haz_control(aparatos[i], 0x80, PIDE_DESCRIPTOR, 0x0200, 0, largo)
         si r < 9 entonces devolver no_se_deja(i, 5) fin
+        ; (RTL8153) si la primera es solo «del fabricante» (la de Realtek, la de
+        ; su controlador r8152) y otra es de CDC-ECM, esa (como Hispa-64)
+        si aparatos[i].n_conf > 1 y no sin_red_usb y (prefiere_ecm o solo_del_fabricante(nat32(r))) y no con_ecm(nat32(r)) entonces
+            r := busca_ecm(aparatos[i], nat32(r))
+            si r < 9 entonces devolver no_se_deja(i, 5) fin
+        fin
         lee_configuración(aparatos[i], nat32(r))
         si hc_clase = HC_XHCI entonces
             si no Xhci.configura(hc, aparatos[i]) entonces devolver no_se_deja(i, 6) fin
@@ -941,6 +1012,8 @@ módulo Usb
             apunta2(", en el puerto %u (%s)", aparatos[i].puerto_raíz, nat32(nombre_hc(aparatos[i].hc_clase)))
         fin
         si aparatos[i].es_concentrador entonces apunta1(": concentrador de %u puertos", aparatos[i].puertos) fin
+        ; (RTL8153) la configuración, si no es la primera (la de CDC-ECM): la n.ª
+        si aparatos[i].conf_índice <> 0 entonces apunta2("; configuración %u de %u", aparatos[i].conf_índice + 1, aparatos[i].n_conf) fin
         para k desde 1 hasta aparatos[i].n_interfaces hacer
             d[0] := aparatos[i].interfaces[k - 1].clase
             d[1] := aparatos[i].interfaces[k - 1].subclase

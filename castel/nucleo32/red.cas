@@ -154,6 +154,7 @@ módulo Red
     variable aparato_wifi: nat32
     público variable por_wifi: bool                      ; RED.BIN va por el Wi-Fi (bit 9 de su 96)
     público variable por_movil: bool                     ; (MÓVIL) RED.BIN va por el móvil por USB (bit 10 de su 96)
+    público variable por_adaptador: bool                 ; (RTL8153) y es un adaptador de red USB de cable (bit 11)
     público variable preferir_red: nat32                 ; PREFIERE_... (bits 12 y 13 de la 96 de RED.BIN)
     variable preferencia_pedida: nat32 = 0xFFFFFFFF      ; la que ha pedido el escritorio, para RED.BIN
     público variable estado_red: nat32
@@ -670,6 +671,7 @@ módulo Red
             ip_red := 0
             por_wifi := falso                       ; (WIFI)
             por_movil := falso                      ; (MÓVIL)
+            por_adaptador := falso                  ; (RTL8153)
             cambios_red := cambios_red + 1
             n_avisos[A_RED] := 0
             ; los que esperaban, con SIN_RED
@@ -732,11 +734,12 @@ módulo Red
                 fin
                 si no es_servicio() entonces devolver NO_VALE fin
                 ; (WIFI) el bit 9: por el Wi-Fi; los 12 y 13: lo que prefiere; (TAILSCALE) el 8: el túnel
-                si estado_red <> (a yb 0xFF) o ip_red <> b o túnel_red <> ((a >> 8) yb 1) o por_wifi <> ((a >> 9) yb 1 = 1) o por_movil <> ((a >> 10) yb 1 = 1) o preferir_red <> ((a >> 12) yb 3) entonces cambios_red := cambios_red + 1 fin
+                si estado_red <> (a yb 0xFF) o ip_red <> b o túnel_red <> ((a >> 8) yb 1) o por_wifi <> ((a >> 9) yb 1 = 1) o por_movil <> ((a >> 10) yb 1 = 1) o por_adaptador <> ((a >> 11) yb 1 = 1) o preferir_red <> ((a >> 12) yb 3) entonces cambios_red := cambios_red + 1 fin
                 estado_red := a yb 0xFF
                 túnel_red := (a >> 8) yb 1             ; (TAILSCALE)
                 por_wifi := (a >> 9) yb 1 = 1
                 por_movil := (a >> 10) yb 1 = 1        ; (MÓVIL)
+                por_adaptador := (a >> 11) yb 1 = 1    ; (RTL8153)
                 preferir_red := (a >> 12) yb 3
                 ip_red := b
                 aparato := c
@@ -761,7 +764,8 @@ módulo Red
     fin
 
     ; (MÓVIL) la llamada 101: «op» (0, cómo está; 1, una petición de control;
-    ; 2, enviar; 3, recibir), la generación del móvil, el puntero y cuántos
+    ; 2, enviar; 3, recibir; (RTL8153) 4, los avisos), la generación del
+    ; móvil, el puntero y cuántos
     función móvil(op: nat32, gen: nat32, p: nat32, n: nat32): nat32
         según nat16(op)
             caso 0:
@@ -776,6 +780,10 @@ módulo Red
             caso 3:
                 si n > Usbmovil.BÚFER o no puede(p, n, cierto) entonces devolver NO_VALE fin
                 devolver Usbmovil.recibir(gen, puntero(p), n)
+            caso 4:
+                ; (RTL8153) los avisos del adaptador de red USB (CDC-ECM)
+                si n > 16 o no puede(p, n, cierto) entonces devolver NO_VALE fin
+                devolver Usbmovil.aviso(gen, puntero(p), n)
         fin
         devolver NO_VALE
     fin
