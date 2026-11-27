@@ -355,6 +355,7 @@ módulo Smp64
         carga_idt()
         prepara_cpu()                   ; [etapa 4] syscall, SMEP, SMAP, PCID
         pv_este(c.número)               ; [etapa 10 f] el reloj de KVM, si lo hay
+        pon_tsc_aux(c.número)           ; [etapa 10 g] su número, para rdtscp (getcpu)
         c.tipo_núcleo := tipo_de_este()
         pon_lapic()
         si tic_va entonces pon_tic() fin

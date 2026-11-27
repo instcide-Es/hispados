@@ -40,18 +40,19 @@ static const struct { const char *dónde, *porqué; } conocidos[] = {
 /* los grupos que aún no salen en Hispa-64 por algo que le falta al núcleo
  * (no a Ladybird ni a lo compilado: en Linux salen bien): se corren y se dice
  * cómo acaban, con un plazo de 30 s, pero no cuentan. Quitar de aquí en cuanto
- * el núcleo lo tenga. */
+ * el núcleo lo tenga. [etapa 10 g] Ninguno: los 4 de la 10 f ya salen
+ * (TestURLPattern se colgaba porque mremap daba siempre ENOMEM y el
+ * pthread_getattr_np de musl, con el que AK::StackInfo mide la pila, no
+ * acababa; TestConnection y TestTransportSocket pedían un memfd de 65 MB con
+ * read y write, y más de 256 descriptores; TestSharedFontProvider, symlink). */
 static const struct { const char *grupo, *porqué; } pendientes[] = {
-	{ "TestURLPattern", "se queda colgado en url_pattern_matches_named_groups (LibRegex, Rust): por mirar" },
-	{ "TestConnection", "sync_wait_on_a_closed_peer_that_owns_this_process_shuts_down: el otro lado cerrado no se ve igual que en Linux" },
-	{ "TestTransportSocket", "abre más descriptores de los que deja Hispa-64 (EMFILE)" },
-	{ "TestSharedFontProvider", "pide symlink (la llamada 88), que Hispa-64 aún no tiene" },
+	{ NULL, NULL },
 };
 #define N_PENDIENTES (sizeof pendientes / sizeof pendientes[0])
 
 static const char *pendiente(const char *g)
 {
-	for (unsigned i = 0; i < N_PENDIENTES; i++) if (!strcmp(pendientes[i].grupo, g)) return pendientes[i].porqué;
+	for (unsigned i = 0; i < N_PENDIENTES; i++) if (pendientes[i].grupo && !strcmp(pendientes[i].grupo, g)) return pendientes[i].porqué;
 	return NULL;
 }
 

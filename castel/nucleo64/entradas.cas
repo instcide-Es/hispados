@@ -1488,6 +1488,20 @@ módulo Entradas
         fin
     fin
 
+    ; [etapa 10 g] IA32_TSC_AUX (0xC0000103) con el número del procesador k,
+    ; como Linux (el nodo, de 12 en adelante: 0): lo leen rdtscp y rdpid, y
+    ; __vdso_getcpu (Vdso64) sin llamar al sistema; sin rdtscp, nada (el vDSO
+    ; llama a getcpu)
+    público variable con_rdtscp: bool
+    público función pon_tsc_aux(k: nat32)
+        cpuid(0x80000000, 0)
+        si ra < 0x80000001 entonces devolver fin
+        cpuid(0x80000001, 0)
+        si rd yb 0x8000000 = 0 entonces devolver fin
+        con_rdtscp := cierto
+        pon_msr(0xC0000103, nat64(k))
+    fin
+
     ; la primera entrada de un hilo en su programa: iretq al anillo 3, en rip
     ; con la pila en rsp, los registros a cero y las interrupciones puestas
     ; (el planificador ya ha puesto CR3, FS y la pila del núcleo). No vuelve.

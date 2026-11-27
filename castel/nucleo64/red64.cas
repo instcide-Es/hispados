@@ -90,7 +90,7 @@ módulo Red64
     ; el socket del descriptor fd (o nulo, con el error)
     función de_fd(p: puntero a Proceso, fd: nat64, ref err: ent64): puntero a Sock
         err := 0
-        si fd >= MAX_FD o p.fd_clase[nat32(fd)] = 0 o p.fd_clase[nat32(fd)] = F_APARTADO entonces
+        si fd >= p.fd_cap o p.fd_clase[nat32(fd)] = 0 o p.fd_clase[nat32(fd)] = F_APARTADO entonces
             err := EBADF
             devolver nulo
         fin

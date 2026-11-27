@@ -126,6 +126,7 @@ módulo Disp64
         cabe: nat64
         sellos: nat64                           ; [etapa 10 d] los de memfd (F_SEAL_*)
         nombre: arreglo [64] de byte
+        pos: nat64                              ; [etapa 10 g] la posición de read, write y lseek
     fin
     variable shms: arreglo [MAX_SHM] de nat64
     variable shm_mutex: Mutex
@@ -1037,6 +1038,105 @@ módulo Disp64
         abre_mutex(dirección(shm_mutex))
         obj := nat64(s)
         devolver 0
+    fin
+
+    ; [etapa 10 g] read, write, pread y pwrite de un memfd o de /dev/shm (en
+    ; Linux, un archivo de tmpfs): lo que hay; escribir más allá del final, lo
+    ; agranda (con F_SEAL_GROW, EPERM; con F_SEAL_WRITE o F_SEAL_FUTURE_WRITE,
+    ; EPERM siempre). LibIPC manda así lo grande (un memfd: ftruncate, write,
+    ; los sellos y mmap del otro lado). La posición es del objeto: la de un
+    ; memfd es la de su única descripción (la comparten dup y fork, como en
+    ; Linux); la de uno de /dev/shm abierto dos veces, la misma para los dos (lo
+    ; de siempre con ellos es mmap). pos: -1, la del objeto.
+    público función lee_shm(p: puntero a Proceso, d: nat64, v: nat64, n: nat64, pos: ent64): ent64
+        variable s: puntero a Shm
+        variable a, hecho, t, off: nat64
+        variable pm: puntero a nat64
+        s := puntero(d)
+        cierra_mutex(dirección(shm_mutex))
+        si pos < 0 entonces a := s.pos sino a := nat64(pos) fin
+        hecho := 0
+        mientras hecho < n y a + hecho < s.tamaño hacer
+            off := (a + hecho) yb 4095
+            t := 4096 - off
+            si t > n - hecho entonces t := n - hecho fin
+            si t > s.tamaño - (a + hecho) entonces t := s.tamaño - (a + hecho) fin
+            pm := puntero(s.marcos + ((a + hecho) >> 12) * 8)
+            si no copia_a(p, v + hecho, virt(valor(pm)) + off, t) entonces
+                abre_mutex(dirección(shm_mutex))
+                si hecho = 0 entonces devolver EFAULT fin
+                devolver ent64(hecho)
+            fin
+            hecho := hecho + t
+        fin
+        si pos < 0 entonces s.pos := a + hecho fin
+        abre_mutex(dirección(shm_mutex))
+        devolver ent64(hecho)
+    fin
+
+    público función escribe_shm(p: puntero a Proceso, d: nat64, v: nat64, n: nat64, pos: ent64): ent64
+        variable s: puntero a Shm
+        variable a, hecho, t, off: nat64
+        variable r: ent64
+        variable pm: puntero a nat64
+        s := puntero(d)
+        si n = 0 entonces devolver 0 fin
+        cierra_mutex(dirección(shm_mutex))
+        si s.sellos yb (F_SEAL_WRITE ob F_SEAL_FUTURE_WRITE) <> 0 entonces
+            abre_mutex(dirección(shm_mutex))
+            devolver EPERM
+        fin
+        si pos < 0 entonces a := s.pos sino a := nat64(pos) fin
+        si a + n < a o a + n > MÁX_SHM_PÁG * 4096 entonces
+            abre_mutex(dirección(shm_mutex))
+            devolver -27                                ; EFBIG
+        fin
+        si a + n > s.tamaño entonces
+            r := trunca_shm_(s, a + n)
+            si r < 0 entonces
+                abre_mutex(dirección(shm_mutex))
+                devolver r
+            fin
+        fin
+        hecho := 0
+        mientras hecho < n hacer
+            off := (a + hecho) yb 4095
+            t := 4096 - off
+            si t > n - hecho entonces t := n - hecho fin
+            pm := puntero(s.marcos + ((a + hecho) >> 12) * 8)
+            si no copia_de(p, virt(valor(pm)) + off, v + hecho, t) entonces
+                abre_mutex(dirección(shm_mutex))
+                si hecho = 0 entonces devolver EFAULT fin
+                devolver ent64(hecho)
+            fin
+            hecho := hecho + t
+        fin
+        si pos < 0 entonces s.pos := a + hecho fin
+        abre_mutex(dirección(shm_mutex))
+        devolver ent64(hecho)
+    fin
+
+    ; lseek: SEEK_SET, SEEK_CUR, SEEK_END y SEEK_DATA y SEEK_HOLE (sin huecos:
+    ; todo es dato, y el hueco, el final)
+    público función sitúa_shm(d: nat64, desp: ent64, de_dónde: nat64): ent64
+        variable s: puntero a Shm
+        variable r: ent64
+        s := puntero(d)
+        cierra_mutex(dirección(shm_mutex))
+        r := -22                                        ; EINVAL
+        si de_dónde = 0 entonces r := desp
+        sino si de_dónde = 1 entonces r := ent64(s.pos) + desp
+        sino si de_dónde = 2 entonces r := ent64(s.tamaño) + desp
+        sino si de_dónde = 3 o de_dónde = 4 entonces
+            si desp < 0 entonces r := -22
+            sino si nat64(desp) >= s.tamaño entonces r := -6           ; ENXIO
+            sino si de_dónde = 3 entonces r := desp
+            sino r := ent64(s.tamaño)
+            fin
+        fin
+        si r >= 0 entonces s.pos := nat64(r) sino si de_dónde < 3 y r <> -22 entonces r := -22 fin
+        abre_mutex(dirección(shm_mutex))
+        devolver r
     fin
 
     ; [etapa 10 d] fcntl F_ADD_SEALS (1033) y F_GET_SEALS (1034)

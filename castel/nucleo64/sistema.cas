@@ -102,13 +102,13 @@ módulo Sistema
 
     ; ¿es fd un archivo abierto del programa?
     función fd_bien(p: puntero a Proceso, fd: nat64): bool
-        si fd >= MAX_FD entonces devolver falso fin
+        si fd >= p.fd_cap entonces devolver falso fin
         devolver p.fd_clase[nat32(fd)] <> 0 y p.fd_clase[nat32(fd)] <> F_APARTADO
     fin
 
     ; [etapa 10 d] ¿es fd un socket de Unix?
     función es_unix(p: puntero a Proceso, fd: nat64): bool
-        devolver fd < MAX_FD y p.fd_clase[nat32(fd)] = F_UNIX
+        devolver fd < p.fd_cap y p.fd_clase[nat32(fd)] = F_UNIX
     fin
 
     ; [etapa 10 d] memfd_create: memoria compartida sin nombre (la de
@@ -292,6 +292,8 @@ módulo Sistema
             devolver lee_unix(p, fd, v, n)
         fin
         si es_objeto(p.fd_clase[nat32(fd)]) entonces devolver lee_objeto(p, p.fd_clase[nat32(fd)], p.fd_obj[nat32(fd)], v, n, p.fd_nobloq[nat32(fd)] <> 0) fin
+        ; [etapa 10 g] un memfd o /dev/shm: lo que tiene
+        si p.fd_clase[nat32(fd)] = F_SHM entonces devolver lee_shm(p, p.fd_obj[nat32(fd)], v, n, pos) fin
         ; [etapa 8] los dispositivos (Disp64)
         si es_de_disp(p.fd_clase[nat32(fd)]) entonces devolver lee_disp(p, p.fd_clase[nat32(fd)], p.fd_obj[nat32(fd)], v, n, p.fd_nobloq[nat32(fd)] <> 0) fin
         si n = 0 entonces devolver 0 fin
@@ -343,6 +345,7 @@ módulo Sistema
             devolver escribe_unix(p, fd, v, n)
         fin
         si es_objeto(p.fd_clase[nat32(fd)]) entonces devolver escribe_objeto(p, p.fd_clase[nat32(fd)], p.fd_obj[nat32(fd)], v, n, p.fd_nobloq[nat32(fd)] <> 0) fin
+        si p.fd_clase[nat32(fd)] = F_SHM entonces devolver escribe_shm(p, p.fd_obj[nat32(fd)], v, n, pos) fin     ; [etapa 10 g]
         si es_de_disp(p.fd_clase[nat32(fd)]) entonces devolver escribe_disp(p, p.fd_clase[nat32(fd)], p.fd_obj[nat32(fd)], v, n) fin
         si n = 0 entonces devolver 0 fin
         k := nat64(reserva(TROZO))
@@ -505,9 +508,9 @@ módulo Sistema
         variable i: nat64
         variable b: nat64
         si marcas > 7 o marcas yb 1 <> 0 o primero > último entonces devolver EINVAL fin
-        si último >= MAX_FD entonces último := MAX_FD - 1 fin
+        si último >= p.fd_cap entonces último := p.fd_cap - 1 fin
         i := primero
-        mientras i <= último y i < MAX_FD hacer
+        mientras i <= último y i < p.fd_cap hacer
             si marcas yb 4 <> 0 entonces
                 b := toma(dirección(p.fd_cerrojo))
                 si fd_bien(p, i) entonces p.fd_cloexec[nat32(i)] := 1 fin
@@ -525,7 +528,7 @@ módulo Sistema
         variable ob_: nat64
         variable b: nat64
         ; ([etapa 10 b] con fd_cerrojo: dos hilos que cierran el mismo no lo cierran dos veces)
-        si fd >= MAX_FD entonces devolver EBADF fin
+        si fd >= p.fd_cap entonces devolver EBADF fin
         b := toma(dirección(p.fd_cerrojo))
         si no fd_bien(p, fd) entonces
             suelta(dirección(p.fd_cerrojo), b)
@@ -555,12 +558,17 @@ módulo Sistema
         variable c: nat32
         variable ob_: nat64
         si a >= 0 entonces
-            si a >= MAX_FD entonces devolver EBADF fin
+            si nat64(a) >= p.fd_lím entonces devolver EBADF fin         ; ([etapa 10 g] RLIMIT_NOFILE)
             si nat64(a) = fd entonces devolver a fin
             ; ([etapa 10 b] uno que otro hilo está abriendo: EBUSY, como Linux)
-            si p.fd_clase[nat32(a)] = F_APARTADO entonces devolver -16 fin
+            si nat64(a) < p.fd_cap y p.fd_clase[nat32(a)] = F_APARTADO entonces devolver -16 fin
             si fd_bien(p, nat64(a)) entonces cierra(p, nat64(a)) fin
             b := toma(dirección(p.fd_cerrojo))
+            ; ([etapa 10 g] las tablas, hasta él)
+            si no fds_asegura(p, nat64(a)) entonces
+                suelta(dirección(p.fd_cerrojo), b)
+                devolver EMFILE
+            fin
             si p.fd_clase[nat32(a)] <> 0 entonces
                 suelta(dirección(p.fd_cerrojo), b)
                 devolver -16
@@ -593,6 +601,8 @@ módulo Sistema
 
     función fcntl_(p: puntero a Proceso, fd: nat64, orden: nat64, arg: nat64): ent64
         si no fd_bien(p, fd) entonces devolver EBADF fin
+        ; ([etapa 10 g] desde más allá del límite: EINVAL, como Linux)
+        si (orden = 0 o orden = 1030) y arg >= p.fd_lím entonces devolver EINVAL fin
         si orden = 0 entonces devolver duplica(p, fd, -1, nat32(arg)) fin               ; F_DUPFD
         si orden = 1030 entonces devolver con_cloexec(p, duplica(p, fd, -1, nat32(arg))) fin      ; F_DUPFD_CLOEXEC
         si orden = 1 entonces devolver ent64(p.fd_cloexec[nat32(fd)]) fin                ; F_GETFD
@@ -627,6 +637,7 @@ módulo Sistema
     función sitúa(p: puntero a Proceso, fd: nat64, d: ent64, de_dónde: nat64): ent64
         si no fd_bien(p, fd) entonces devolver EBADF fin
         si p.fd_clase[nat32(fd)] = F_TEXTO entonces devolver sitúa_texto(p.fd_obj[nat32(fd)], d, de_dónde) fin
+        si p.fd_clase[nat32(fd)] = F_SHM entonces devolver sitúa_shm(p.fd_obj[nat32(fd)], d, de_dónde) fin              ; [etapa 10 g]
         si p.fd_clase[nat32(fd)] <> F_ARCHIVO entonces devolver ESPIPE fin
         devolver vfs_sitúa(abierto(p, fd), d, de_dónde)
     fin
@@ -735,11 +746,32 @@ módulo Sistema
                 devolver err
             fin
         fin
-        err := vfs_stat(base, t, nat64(dirección(st[0])))
+        err := vfs_stat_e(base, t, nat64(dirección(st[0])), marcas_ yb 0x100 = 0)     ; ([etapa 10 g] AT_SYMLINK_NOFOLLOW: lstat)
         libera(t)
         si err < 0 entonces devolver err fin
         si no copia_a(p, v, nat64(dirección(st[0])), 144) entonces devolver EFAULT fin
         devolver 0
+    fin
+
+    ; [etapa 10 g] symlink y symlinkat (Vfs64.vfs_symlink: los enlaces de /tmp)
+    función symlink_(p: puntero a Proceso, destino: nat64, dirfd: ent64, ruta: nat64): ent64
+        variable d, t, base: puntero a byte
+        variable err: ent64
+        d := ruta_de(p, destino, err)
+        si d = nulo entonces devolver err fin
+        t := ruta_de(p, ruta, err)
+        si t = nulo entonces
+            libera(d)
+            devolver err
+        fin
+        base := nulo
+        si t[0] <> '/' y t[0] <> 0 entonces base := base_de(p, dirfd, err) fin
+        si t[0] = 0 entonces err := ENOENT
+        sino si t[0] = '/' o base <> nulo entonces err := vfs_symlink(d, base, t)
+        fin
+        libera(d)
+        libera(t)
+        devolver err
     fin
 
     función stat_ruta(p: puntero a Proceso, t: puntero a byte, v: nat64): ent64
@@ -900,6 +932,7 @@ módulo Sistema
     función readlink_(p: puntero a Proceso, dirfd: ent64, ruta: nat64, v: nat64, n: nat64): ent64
         variable t, base, z: puntero a byte
         variable err: ent64
+        variable r: ent64
         variable st: arreglo [18] de nat64
         variable d: arreglo [96] de byte
         variable i, j: nat32
@@ -942,6 +975,34 @@ módulo Sistema
             si n < nat64(i) entonces i := nat32(n) fin
             si no copia_a(p, v, nat64(dirección(p.exe[0])), nat64(i)) entonces devolver EFAULT fin
             devolver ent64(i)
+        fin
+        ; [etapa 10 g] un enlace (los de /tmp: Vfs64)
+        si n_enlaces > 0 entonces
+            base := nulo
+            err := 0
+            si t[0] <> '/' entonces base := base_de(p, dirfd, err) fin
+            si err < 0 entonces
+                libera(t)
+                devolver err
+            fin
+            z := reserva(LARGO_RUTA)
+            si z = nulo entonces
+                libera(t)
+                devolver ENOMEM
+            fin
+            r := vfs_readlink(base, t, z, err)
+            si r >= 0 entonces
+                libera(t)
+                si n < nat64(r) entonces r := ent64(n) fin
+                si no copia_a(p, v, nat64(z), nat64(r)) entonces r := EFAULT fin
+                libera(z)
+                devolver r
+            fin
+            libera(z)
+            si err < 0 entonces
+                libera(t)
+                devolver err
+            fin
         fin
         ; las carpetas que «hay» en el camino: /etc, /dev, /proc, y las de la zona
         z := t
@@ -1114,6 +1175,8 @@ módulo Sistema
                 devolver r
             fin
         fin
+        ; [etapa 10 g] lo del archivo, para volver a leerlo (madvise)
+        si ab <> nulo entonces p.reg_arch[nat32(región_de(p, a))] := pon_mapa(p, nat64(ab), a, desp) fin
         abre_mem(p)
         devolver ent64(a)
     fin
@@ -1197,26 +1260,90 @@ módulo Sistema
     fin
 
     ; [etapa 7] madvise: MADV_DONTNEED (4) suelta las páginas de la memoria
-    ; anónima y privada (al tocarlas otra vez, a cero, como en Linux); lo
-    ; demás (MADV_FREE, las pistas), aceptado sin más
+    ; anónima y privada (al tocarlas otra vez, a cero, como en Linux); [etapa
+    ; 10 g] las de un archivo, otra vez lo del archivo (lo privado que se
+    ; hubiera escrito, perdido, como Linux); las compartidas anónimas y las
+    ; de los dispositivos se quedan como están (en Linux, también: lo de la
+    ; memoria compartida no se pierde). Lo demás (MADV_WILLNEED...), nada.
     función aconseja(p: puntero a Proceso, dir_: nat64, largo: nat64, qué: nat64): ent64
-        variable l: nat64
+        variable l, a, b, ab, desp: nat64
         variable i: nat32
-        variable solo_anónima: bool
+        variable r: ent64
         si dir_ yb 4095 <> 0 entonces devolver EINVAL fin
         l := arriba(largo)
         si l < largo o dir_ + l < dir_ o dir_ + l > TOPE entonces devolver EINVAL fin
         si qué <> 4 entonces devolver 0 fin
         cierra_mem(p)
-        solo_anónima := cierto
+        r := 0
         i := 0
         mientras nat64(i) < p.n_reg hacer
-            si p.reg_ini[i] < dir_ + l y p.reg_fin[i] > dir_ y p.reg_ext[i] <> 0 entonces solo_anónima := falso fin
+            si p.reg_ini[i] < dir_ + l y p.reg_fin[i] > dir_ entonces
+                a := p.reg_ini[i]
+                si a < dir_ entonces a := dir_ fin
+                b := p.reg_fin[i]
+                si b > dir_ + l entonces b := dir_ + l fin
+                si p.reg_ext[i] = 0 entonces
+                    quita_rango(puntero(p.espacio), a, b)
+                sino si p.reg_ext[i] = R_ARCHIVO entonces
+                    ab := mapa_de(p, i, a, desp)
+                    si ab <> 0 entonces
+                        quita_rango(puntero(p.espacio), a, b)
+                        r := llena_de_archivo(p, a, b - a, puntero(ab), desp, p.reg_prot[i])
+                        si r < 0 entonces romper fin
+                    fin
+                fin
+            fin
             i := i + 1
         fin
-        si solo_anónima entonces quita_rango(puntero(p.espacio), dir_, dir_ + l) fin
         abre_mem(p)
-        devolver 0
+        devolver r
+    fin
+
+    ; [etapa 10 g] mremap: achicar (lo de más, fuera) y crecer en su sitio una
+    ; región anónima y privada si lo de después está libre; moverla
+    ; (MREMAP_MAYMOVE sin sitio, MREMAP_FIXED), no: ENOMEM, y musl copia. Lo
+    ; importante, los errores de Linux: lo que no está puesto, EFAULT. El
+    ; pthread_getattr_np de musl, el del hilo principal, mide la pila así: baja
+    ; de página en página con mremap mientras dé ENOMEM (dentro de la pila) y
+    ; para con el EFAULT de debajo; con ENOMEM siempre no acababa nunca (la
+    ; causa de TestURLPattern colgado: AK::StackInfo, en LibRegex y LibJS)
+    función remapea(p: puntero a Proceso, viejo: nat64, l_viejo: nat64, l_nuevo: nat64, marcas_: nat64): ent64
+        variable lv, ln: nat64
+        variable i: ent32
+        variable k: nat32
+        variable r: ent64
+        si marcas_ yb (nob nat64(7)) <> 0 o viejo yb 4095 <> 0 o l_nuevo = 0 entonces devolver EINVAL fin
+        si marcas_ yb 2 <> 0 y marcas_ yb 1 = 0 entonces devolver EINVAL fin      ; MREMAP_FIXED sin MREMAP_MAYMOVE
+        si l_viejo = 0 entonces devolver EINVAL fin
+        lv := arriba(l_viejo)
+        ln := arriba(l_nuevo)
+        si lv < l_viejo o ln < l_nuevo o viejo + lv < viejo o viejo + lv > TOPE entonces devolver EINVAL fin
+        cierra_mem(p)
+        i := región_de(p, viejo)
+        si i < 0 entonces
+            abre_mem(p)
+            devolver EFAULT
+        fin
+        k := nat32(i)
+        si viejo + lv > p.reg_fin[k] entonces
+            abre_mem(p)
+            devolver EFAULT
+        fin
+        r := ENOMEM
+        si marcas_ yb 6 <> 0 entonces
+            r := ENOMEM                                 ; (MREMAP_FIXED, MREMAP_DONTUNMAP: no)
+        sino si ln <= lv entonces
+            ; achicar: lo de más, fuera
+            si ln = lv o quita_de(p, viejo + ln, viejo + lv) entonces r := ent64(viejo) fin
+        sino si viejo + lv = p.reg_fin[k] y p.reg_ext[k] = 0 y p.reg_clase[k] = R_MMAP y viejo + ln > viejo y viejo + ln <= TOPE - PILA_PROG entonces
+            ; crecer en su sitio, si lo de después está libre (las páginas, a cero al tocarlas)
+            si hueco(p, ln - lv, viejo + lv, viejo + ln) = viejo + lv entonces
+                p.reg_fin[k] := viejo + ln
+                r := ent64(viejo)
+            fin
+        fin
+        abre_mem(p)
+        devolver r
     fin
 
     función desmapea_(p: puntero a Proceso, dir_: nat64, largo: nat64): ent64
@@ -1531,8 +1658,8 @@ módulo Sistema
     fin
 
     ; select y pselect6. [etapa 11] Los fd_set de hasta 1024 (FD_SETSIZE:
-    ; 16 palabras); los descriptores abiertos llegan hasta MAX_FD (256): uno
-    ; más alto pedido, EBADF. (Hasta la 10, solo hasta el 63.)
+    ; 16 palabras); un descriptor pedido que no está abierto, EBADF. (Hasta la
+    ; 10, solo hasta el 63.)
     constante SEL_PAL = 16
     función bit_(ref c: arreglo [SEL_PAL] de nat64, i: nat32): bool
         devolver (c[i >> 6] >> (i yb 63)) yb 1 <> 0
@@ -1913,20 +2040,38 @@ módulo Sistema
         devolver r xob (azar_x xob (azar_x >> 29))
     fin
 
-    ; [etapa 7] prlimit64, getrlimit: los límites (los de siempre)
+    ; [etapa 7] prlimit64, getrlimit: los límites (los de siempre); [etapa
+    ; 10 g] y setrlimit; de verdad, RLIMIT_NOFILE (el del proceso: fd_lím, y
+    ; lo más, fd_lím_máx, hasta 65.536: más, EPERM; lo de ahora más que lo
+    ; más, EINVAL; se hereda al bifurcar); los demás se aceptan sin más
     función límite_rec(p: puntero a Proceso, pid: nat64, rec: nat64, v_nuevo: nat64, v_viejo: nat64): ent64
-        variable l: arreglo [2] de nat64
+        variable l, n: arreglo [2] de nat64
+        variable b: nat64
         si pid <> 0 y pid <> p.id entonces devolver ESRCH fin
         si rec >= 16 entonces devolver EINVAL fin
-        si v_viejo <> 0 entonces
-            l[0] := nob nat64(0)
-            l[1] := nob nat64(0)
-            si rec = 3 entonces l[0] := PILA_PROG fin                    ; RLIMIT_STACK
-            si rec = 7 entonces                                          ; RLIMIT_NOFILE
-                l[0] := MAX_FD
-                l[1] := MAX_FD
+        si v_nuevo <> 0 entonces
+            si no copia_de(p, nat64(dirección(n[0])), v_nuevo, 16) entonces devolver EFAULT fin
+            si n[0] > n[1] entonces devolver EINVAL fin
+        fin
+        b := toma(dirección(p.fd_cerrojo))
+        l[0] := nob nat64(0)
+        l[1] := nob nat64(0)
+        si rec = 3 entonces l[0] := PILA_PROG fin                        ; RLIMIT_STACK
+        si rec = 7 entonces                                              ; RLIMIT_NOFILE
+            l[0] := p.fd_lím
+            l[1] := p.fd_lím_máx
+        fin
+        si rec = 4 entonces l[0] := 0 fin                                ; RLIMIT_CORE
+        si v_nuevo <> 0 y rec = 7 entonces
+            si n[1] > FD_MÁX entonces
+                suelta(dirección(p.fd_cerrojo), b)
+                devolver -1                                              ; EPERM
             fin
-            si rec = 4 entonces l[0] := 0 fin                            ; RLIMIT_CORE
+            p.fd_lím := n[0]
+            p.fd_lím_máx := n[1]
+        fin
+        suelta(dirección(p.fd_cerrojo), b)
+        si v_viejo <> 0 entonces
             si no copia_a(p, v_viejo, nat64(dirección(l[0])), 16) entonces devolver EFAULT fin
         fin
         devolver 0
@@ -1940,6 +2085,23 @@ módulo Sistema
         si n_en_marcha < 64 entonces x := (nat64(1) << nat64(n_en_marcha)) - 1 fin
         si no copia_a(p, v, nat64(dirección(x)), 8) entonces devolver EFAULT fin
         devolver 8
+    fin
+
+    ; [etapa 10 g] getcpu: el procesador en el que va (y el nodo: 0)
+    función getcpu_(p: puntero a Proceso, vc: nat64, vn: nat64): ent64
+        variable c, n: nat32
+        variable b: nat64
+        b := sin_ints()
+        c := yo().número
+        restaura(b)
+        n := 0
+        si vc <> 0 entonces
+            si no copia_a(p, vc, nat64(dirección(c)), 4) entonces devolver EFAULT fin
+        fin
+        si vn <> 0 entonces
+            si no copia_a(p, vn, nat64(dirección(n)), 4) entonces devolver EFAULT fin
+        fin
+        devolver 0
     fin
 
     ; [etapa 7] sysinfo: lo que lleva en marcha, la memoria, los procesos
@@ -2034,7 +2196,8 @@ módulo Sistema
             caso 2: r := abre(p, -100, a1, a2)
             caso 3: r := cierra(p, a1)
             caso 436: r := cierra_rango(p, a1, a2, a3)                ; [etapa 10 e] close_range
-            caso 4, 6: r := stat_(p, -100, a1, a2, 0)
+            caso 4: r := stat_(p, -100, a1, a2, 0)
+            caso 6: r := stat_(p, -100, a1, a2, 0x100)       ; [etapa 10 g] lstat (AT_SYMLINK_NOFOLLOW)
             caso 5: r := fstat_(p, a1, a2)
             caso 8: r := sitúa(p, a1, ent64(a2), a3)
             caso 9: r := mapea_(p, a1, a2, a3, a4, ent64(ent32(nat32(a5 yb 0xFFFFFFFF))), a6)
@@ -2137,7 +2300,7 @@ módulo Sistema
             ; [etapa 7]
             caso 22: r := tubo_(p, a1, 0)
             caso 293: r := tubo_(p, a1, a2)
-            caso 25: r := ENOMEM                            ; mremap: no (musl copia)
+            caso 25: r := remapea(p, a1, a2, a3, a4)        ; [etapa 10 g] mremap (sin mover: musl copia)
             caso 28: r := aconseja(p, a1, a2, a3)
             caso 34:
                 duerme_hasta(p, nob nat64(0))
@@ -2224,10 +2387,11 @@ módulo Sistema
                 fin
             caso 302: r := límite_rec(p, a1, a2, a3, a4)
             caso 97: r := límite_rec(p, 0, a1, 0, a2)
-            caso 160: r := 0
+            caso 160: r := límite_rec(p, 0, a1, a2, 0)          ; [etapa 10 g] setrlimit
             caso 203: r := 0
             caso 204: r := afinidad_(p, a2, a3)
             caso 99: r := sysinfo_(p, a1)
+            caso 309: r := getcpu_(p, a1, a2)                  ; [etapa 10 g] getcpu (y __vdso_getcpu, sin llamar)
             caso 95: r := 18                                 ; umask: 022
             caso 98: r := uso_(p, a1, a2)
             caso 213:
@@ -2250,6 +2414,8 @@ módulo Sistema
             caso 84: r := con_ruta(p, -100, a1, 2)
             caso 87: r := con_ruta(p, -100, a1, 1)
             caso 89: r := readlink_(p, -100, a1, a2, a3)        ; [etapa 10 b]
+            caso 88: r := symlink_(p, a1, -100, a2)             ; [etapa 10 g] symlink y symlinkat
+            caso 266: r := symlink_(p, a1, ent64(a2), a3)
             caso 267: r := readlink_(p, ent64(a1), a2, a3, a4)
             caso 102, 104, 107, 108: r := 0
             caso 158: r := arch_(p, a1, a2)

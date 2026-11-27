@@ -1480,6 +1480,7 @@ módulo Hispa64
         prepara_mitad_alta()
         si tiene("sinpcid") entonces sin_pcid() fin
         prepara_cpu()
+        pon_tsc_aux(0)                  ; [etapa 10 g] el número de este (el 0), para rdtscp (getcpu)
         unidad()
         si hay_fb y no temprana entonces
             si abre(fb_virt, fb_ancho, fb_alto, fb_paso, fb_bpp, fb_r, fb_v, fb_a) entonces en_pantalla := cierto fin

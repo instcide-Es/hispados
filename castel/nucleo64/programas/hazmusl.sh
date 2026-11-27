@@ -12,6 +12,8 @@
 #   MCANDADOS                   [etapa 10 f] los cerrojos de fcntl (y sqlite con ellos)
 #   MBUCLE                      da vueltas sin llamar al sistema (Ctrl+C)
 #   MUNIX                       [etapa 10 d] los sockets de Unix, SCM_RIGHTS y memfd
+#   MPOSIX                      [etapa 10 g] enlaces, 65.536 descriptores, el otro
+#                               lado cerrado, memfd grande, madvise, mremap, EDEADLK, getcpu
 #   ld-musl-x86_64.so.1         el cargador dinámico (la libc.so de musl):
 #                               en Hispa-64, /lib/ld-musl-x86_64.so.1
 #   libsaludo.so                una biblioteca compartida de prueba
@@ -62,12 +64,13 @@ done
 "$M" $CF -static -o "$S/MDISP" "$P/mdisp.c"          # [etapa 8] los dispositivos
 "$M" $CF -static -o "$S/MSONIDO" "$P/msonido.c" -lm  # [etapa 11] el sonido (/dev/dsp)
 "$M" $CF -static -pthread -o "$S/MUNIX" "$P/munix.c"  # [etapa 10 d] AF_UNIX y memfd
+"$M" $CF -static -pthread -o "$S/MPOSIX" "$P/mposix.c"  # [etapa 10 g] lo de POSIX que pide Ladybird
 cp "$T/libsaludo.so" "$S/libsaludo.so"
 cp "$B/musl/lib/libc.so" "$S/ld-musl-x86_64.so.1"
 cp "$B/lua-obj/lua" "$S/LUA"
 cp "$P/prueba.lua" "$S/PRUEBA.LUA"
 rm -rf "$T"
-for f in MHOLA MHOLAP MHOLAD MHILOS MHILOSD MSENALES MSENALESD MPROCESOS MPROCESOSD MMAPA MMAPAD MRELOJ MRELOJD MBUCLE MDISP MSONIDO MUNIX LUA libsaludo.so ld-musl-x86_64.so.1; do
+for f in MHOLA MHOLAP MHOLAD MHILOS MHILOSD MSENALES MSENALESD MPROCESOS MPROCESOSD MMAPA MMAPAD MRELOJ MRELOJD MBUCLE MDISP MSONIDO MUNIX MPOSIX LUA libsaludo.so ld-musl-x86_64.so.1; do
   strip --strip-unneeded "$S/$f"
 done
 RED=$("$AQUI/hazred.sh" "$S"); RED=${RED##*hechos: }   # [etapa 9] los programas de red (programas/red/)
@@ -80,4 +83,4 @@ if [ -f "$B/sqlite-obj/libsqlite.a" ]; then
   strip --strip-unneeded "$S/MCANDADOS"
   CAND=" MCANDADOS"
 fi
-echo "hechos: MHOLA MHOLAP MHOLAD MHILOS MHILOSD MSENALES MSENALESD MPROCESOS MPROCESOSD MMAPA MMAPAD MRELOJ MRELOJD MBUCLE MDISP MSONIDO MUNIX ld-musl-x86_64.so.1 libsaludo.so LUA PRUEBA.LUA $RED $CURLS $CXX$CAND"
+echo "hechos: MHOLA MHOLAP MHOLAD MHILOS MHILOSD MSENALES MSENALESD MPROCESOS MPROCESOSD MMAPA MMAPAD MRELOJ MRELOJD MBUCLE MDISP MSONIDO MUNIX MPOSIX ld-musl-x86_64.so.1 libsaludo.so LUA PRUEBA.LUA $RED $CURLS $CXX$CAND"

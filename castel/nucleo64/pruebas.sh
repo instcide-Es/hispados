@@ -235,6 +235,9 @@ mlb_bien() {   # TEXTO
 # sqlite con ellos) en Linux: en Hispa-64, las mismas líneas
 MRL=$(cd "$T/prog" && ./MRELOJ 2> /dev/null | grep '^  ')
 MCD=$( [ -x "$T/prog/MCANDADOS" ] && cd "$T/prog" && ./MCANDADOS 2> /dev/null | grep '^  ')
+# [etapa 10 g] MPOSIX (los enlaces, 65.536 descriptores, el otro lado cerrado,
+# un memfd grande, madvise, mremap, EDEADLK, getcpu) en Linux: lo mismo en Hispa-64
+MPX=$( [ -x "$T/prog/MPOSIX" ] && cd "$T/prog" && ./MPOSIX 2> /dev/null | grep '^  ')
 # skia_bien TEXTO: MSKIA en Hispa-64 frente a MSKIA en Linux: las mismas
 # líneas (menos la de lo dibujado y la huella); si el camino es el mismo, lo
 # dibujado igual (el crc32 de los píxeles y del PNG); y la huella (la media de
@@ -382,6 +385,7 @@ e7_bien() {   # SALIDA N [avx]
     && grep -q "^MUNIX: todo bien (85 pruebas)$" <<< "$v" && grep -q "^Programa «MUNIX»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^  SCM_RIGHTS a otro proceso (una tubería, un eventfd y un memfd hechos después del fork), MSG_CTRUNC; SCM_CREDENTIALS; memfd compartido y sus sellos; 300 pasados$" <<< "$v" \
     && grep -q "^  /tmp: 100 KB escritos, leídos y borrados; pwritev, preadv, pwritev2, preadv2 y fchown; /proc/self/exe; close_range$" <<< "$v" && grep -q "^  /tmp: FAT16 «TMP», 31,9 MB en 8179 cúmulos de 4 KB, .*; de leer y escribir$" <<< "$v" \
+    && { [ -z "$MPX" ] || { grep -q "^MPOSIX: todo bien (96 pruebas)$" <<< "$v" && grep -q "^Programa «MPOSIX»: acaba con el código 0, como debe" <<< "$v" && mismas "$MPX" "$v"; }; } \
     && grep -q "^MIPC: todo bien (9 pruebas)$" <<< "$v" && grep -q "^Programa «MIPC»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^  dos mapas de 256 x 256 compartidos (memfd): 60 cuadros pintados por el otro proceso, la suma bien, en " <<< "$v" \
     && [ "$(grep -c "^MCXX: todo bien (35 pruebas)$" <<< "$v")" = 2 ] && grep -q "^Programa «MCXX»: acaba con el código 0, como debe" <<< "$v" \

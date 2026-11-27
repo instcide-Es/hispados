@@ -158,7 +158,7 @@ módulo Unix64
     ; el socket de Unix del descriptor fd (o nulo, con el error)
     función de_fd(p: puntero a Proceso, fd: nat64, ref err: ent64): puntero a Unix
         err := 0
-        si fd >= MAX_FD entonces
+        si fd >= p.fd_cap entonces
             err := EBADF
             devolver nulo
         fin

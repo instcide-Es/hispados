@@ -100,6 +100,7 @@ módulo PrMusl64
         si busca_archivo("MRED") >= 0 entonces corre("MRED", 0) fin            ; [etapa 9] los sockets por 127.0.0.1, eventfd, timerfd, el azar
         si busca_archivo("MRED6") >= 0 entonces corre("MRED6", 0) fin          ; [etapa 10 c] IPv6 por ::1
         si busca_archivo("MUNIX") >= 0 entonces corre("MUNIX", 0) fin          ; [etapa 10 d] AF_UNIX, SCM_RIGHTS y memfd
+        si busca_archivo("MPOSIX") >= 0 entonces corre("MPOSIX", 0) fin        ; [etapa 10 g] enlaces, descriptores, memfd, madvise, mremap, EDEADLK
         si busca_archivo("MRELOJ") >= 0 entonces corre("MRELOJ", 0) fin        ; [etapa 10 f] el vDSO y la hora
         si busca_archivo("MRELOJD") >= 0 entonces corre("MRELOJD", 0) fin      ; [etapa 10 f] lo mismo, dinámico (el vDSO, una biblioteca más)
         si busca_archivo("MCANDADOS") >= 0 entonces corre("MCANDADOS", 0) fin  ; [etapa 10 f] los cerrojos de fcntl (y sqlite)

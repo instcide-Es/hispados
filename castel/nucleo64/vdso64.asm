@@ -19,6 +19,16 @@
 ;    24  ns0      CLOCK_MONOTONIC en tsc0
 ;    32  mult     ns = ns0 + ((tsc - tsc0) * mult) >> 32 (lo mismo que el núcleo)
 ;    40  desfase  CLOCK_REALTIME - CLOCK_MONOTONIC
+;    48  con_tscp [etapa 10 g] 1: el procesador tiene rdtscp y el núcleo ha
+;                 puesto en IA32_TSC_AUX el número de cada uno (getcpu)
+;  [etapa 10 g] Y __vdso_getcpu (sched_getcpu de musl), como el de Linux: el
+;  procesador con rdtscp (en ECX: el número; el nodo, de 12 en adelante, 0),
+;  sin llamar al sistema; sin rdtscp, la llamada (getcpu, 309). Del reloj de
+;  KVM sin el TSC estable (pvclock sin PVCLOCK_TSC_STABLE_BIT) el vDSO de
+;  Linux tampoco lee: llama al sistema (vread_pvclock da U64_MAX), porque cada
+;  procesador tiene el suyo y lo que asegura que no vaya hacia atrás de uno a
+;  otro es el «cmpxchg» del núcleo con lo último dado, que desde el programa no
+;  se puede; con el bit, el núcleo ya va con el TSC (y el vDSO también).
 ;  Se compila con NASM (nasm -f bin) y sus octetos van en vdso64.cas (la
 ;  batería mira que sean los mismos).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
@@ -67,9 +77,9 @@ fin_dinamico:
 
 dispersion:
     ; (un solo cubo: la cadena va del último símbolo al primero)
-    dd 1, 4                             ; nbucket, nchain
-    dd 3                                ; el cubo 0
-    dd 0, 0, 1, 2                       ; las cadenas
+    dd 1, 5                             ; nbucket, nchain
+    dd 4                                ; el cubo 0
+    dd 0, 0, 1, 2, 3                    ; las cadenas
 
     align 8
 simbolos:
@@ -84,12 +94,14 @@ simbolos:
     SIMBOLO n_cgt, clock_gettime
     SIMBOLO n_gtod, gettimeofday
     SIMBOLO n_time, time_
+    SIMBOLO n_cpu, getcpu
 
 nombres:
     db 0
 n_cgt:  db "__vdso_clock_gettime", 0
 n_gtod: db "__vdso_gettimeofday", 0
 n_time: db "__vdso_time", 0
+n_cpu:  db "__vdso_getcpu", 0
 fin_nombres:
 
     align 16
@@ -208,5 +220,30 @@ time_:
     syscall
     ret
 time__fin:
+
+; [etapa 10 g] long __vdso_getcpu(unsigned *cpu, unsigned *node, void *cache)
+getcpu:
+    lea r8, [rel cabecera + DATOS]
+    cmp qword [r8 + 48], 0
+    je .llama
+    rdtscp
+    mov eax, ecx
+    test rdi, rdi
+    jz .nodo
+    and ecx, 0xFFF
+    mov [rdi], ecx
+.nodo:
+    test rsi, rsi
+    jz .bien
+    shr eax, 12
+    mov [rsi], eax
+.bien:
+    xor eax, eax
+    ret
+.llama:
+    mov eax, 309                        ; getcpu
+    syscall
+    ret
+getcpu_fin:
 
 fin_:

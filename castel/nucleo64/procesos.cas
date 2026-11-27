@@ -65,7 +65,7 @@ módulo Procesos
 
     público constante MAX_REG = 1024            ; (48 hasta la etapa 6; 256 hasta la 9)
     público constante MAX_HILOS = 512           ; [etapa 7] los hilos de un proceso (64 hasta la 9: el navegador, a cientos)
-    público constante MAX_FD = 256              ; (16 hasta la etapa 4; 32 hasta la 9)
+    público constante MAX_FD = 65536            ; (16 hasta la etapa 4; 32 hasta la 9; 256 hasta la 10 f) [etapa 10 g] lo más que puede llegar a tener: FD_MÁX
     público constante LEER = 1                  ; los permisos (los PROT_ de Linux)
     público constante ESCRIBE = 2
     público constante EJECUTAR = 4
@@ -131,8 +131,10 @@ módulo Procesos
         n_reg: nat64
         reg_ini, reg_fin: arreglo [MAX_REG] de nat64
         reg_prot, reg_clase: arreglo [MAX_REG] de nat32
-        fd_clase: arreglo [MAX_FD] de nat32
-        fd_obj: arreglo [MAX_FD] de nat64       ; [etapa 5] lo abierto (Vfs64.Abierto)
+        ; [etapa 10 g] las tablas de los descriptores, en la zona de los
+        ; descriptores (no se mueven al crecer: fds_crece); caben fd_cap
+        fd_clase: puntero a nat32
+        fd_obj: puntero a nat64                 ; [etapa 5] lo abierto (Vfs64.Abierto)
         fpu_bloque: nat64           ; el bloque del montón de sus registros x87 y SSE
         nombre: arreglo [32] de byte
         línea: arreglo [256] de byte
@@ -150,11 +152,11 @@ módulo Procesos
         al_dir, al_phnum: nat64     ; AT_PHDR y AT_PHNUM (del cargador)
         marco: arreglo [20] de nat64            ; los registros del padre en el syscall de fork
         acción: arreglo [65] de nat64           ; lo de cada señal: 0 SIG_DFL, 1 SIG_IGN, o una función
-        fd_cloexec: arreglo [MAX_FD] de nat32   ; O_CLOEXEC (FD_CLOEXEC): se cierra en execve
+        fd_cloexec: puntero a nat32             ; O_CLOEXEC (FD_CLOEXEC): se cierra en execve
         ; [etapa 7] los hilos, las señales y la memoria
         m_cerrojo, m_primero, m_último, m_dueño, m_veces, m_esperas: nat64     ; el mutex de la memoria (la forma de Sinc64.Mutex)
         reg_ext: arreglo [MAX_REG] de nat32     ; 0; R_COMPARTIDA (MAP_SHARED anónima); R_ARCHIVO (mmap de un archivo)
-        fd_nobloq: arreglo [MAX_FD] de nat32    ; O_NONBLOCK (de las tuberías)
+        fd_nobloq: puntero a nat32              ; O_NONBLOCK (de las tuberías)
         n_hilos: nat64              ; los que tiene
         hilos: arreglo [MAX_HILOS] de nat64
         h_cerrojo: nat64            ; el de la lista de los hilos y las señales pendientes
@@ -186,11 +188,22 @@ módulo Procesos
         ; número se cierra o se le pone otra cosa); y los aplazados: lo de un
         ; descriptor cerrado mientras alguna llamada lo usaba, que se suelta
         ; cuando acaba la última (fget y fput de Linux)
-        fd_uso: arreglo [MAX_FD] de nat32
-        fd_gen: arreglo [MAX_FD] de nat32
+        fd_uso: puntero a nat32
+        fd_gen: puntero a nat32
         apl_n: nat64
         apl_fd, apl_gen, apl_clase, apl_usos: arreglo [MAX_APL] de nat32
         apl_obj: arreglo [MAX_APL] de nat64
+        ; [etapa 10 g] los descriptores que caben (las páginas puestas), su
+        ; sitio en la zona (más 1; 0: sin tabla) y RLIMIT_NOFILE (lo de ahora y
+        ; lo más)
+        fd_cap, fd_sitio, fd_lím, fd_lím_máx: nat64
+        ; [etapa 10 g] lo de cada mmap de un archivo (madvise(MADV_DONTNEED) lo
+        ; vuelve a leer, como Linux): reg_arch, su registro (más 1; 0: no es de
+        ; un archivo) en «mapas» (del montón: mapas_cap de MAPA_LARGO octetos:
+        ; lo abierto, con una referencia, la dirección y el desplazamiento en el
+        ; archivo); los que ya no usa ninguna región se sueltan al quitar
+        reg_arch: arreglo [MAX_REG] de nat32
+        mapas, mapas_cap: nat64
     fin
 
     ; [etapa 7] lo que arranca un hilo nuevo (clone con CLONE_THREAD)
@@ -350,6 +363,7 @@ módulo Procesos
         p.reg_prot[i] := prot
         p.reg_clase[i] := clase
         p.reg_ext[i] := 0
+        p.reg_arch[i] := 0
         p.n_reg := p.n_reg + 1
         devolver cierto
     fin
@@ -362,6 +376,7 @@ módulo Procesos
         p.reg_prot[i] := p.reg_prot[u]
         p.reg_clase[i] := p.reg_clase[u]
         p.reg_ext[i] := p.reg_ext[u]
+        p.reg_arch[i] := p.reg_arch[u]
         p.n_reg := p.n_reg - 1
     fin
 
@@ -375,6 +390,7 @@ módulo Procesos
         si p.reg_ini[k] = v entonces devolver cierto fin
         si no nueva_región(p, v, p.reg_fin[k], p.reg_prot[k], p.reg_clase[k]) entonces devolver falso fin
         p.reg_ext[nat32(p.n_reg) - 1] := p.reg_ext[k]
+        p.reg_arch[nat32(p.n_reg) - 1] := p.reg_arch[k]
         p.reg_fin[k] := v
         devolver cierto
     fin
@@ -430,6 +446,121 @@ módulo Procesos
             fin
         fin
         suelta_páginas(p, a, b)
+        si p.mapas <> 0 entonces recoge_mapas(p) fin
+        devolver cierto
+    fin
+
+    ; ---- [etapa 10 g] lo de los mmap de un archivo ----
+    constante MAPA_LARGO = 24                   ; lo abierto, la dirección y el desplazamiento
+
+    función mapa_(p: puntero a Proceso, k: nat64): puntero a nat64
+        devolver puntero(p.mapas + k * MAPA_LARGO)
+    fin
+
+    ; (con el mutex de la memoria) un registro para el mmap de «ab» en a, desde
+    ; desp en el archivo (con una referencia a lo abierto): su número más 1, o 0
+    público función pon_mapa(p: puntero a Proceso, ab: nat64, a: nat64, desp: nat64): nat32
+        variable k, n, nm: nat64
+        variable m: puntero a nat64
+        k := 0
+        mientras k < p.mapas_cap y mapa_(p, k)[0] <> 0 hacer k := k + 1 fin
+        si k >= p.mapas_cap entonces
+            n := p.mapas_cap * 2
+            si n < 8 entonces n := 8 fin
+            nm := nat64(reserva(n * MAPA_LARGO))
+            si nm = 0 entonces devolver 0 fin
+            ceros_mem(nm, n * MAPA_LARGO)
+            si p.mapas <> 0 entonces
+                copia_mem(nm, p.mapas, p.mapas_cap * MAPA_LARGO)
+                libera(puntero(p.mapas))
+            fin
+            p.mapas := nm
+            p.mapas_cap := n
+        fin
+        vfs_otro(puntero(ab))
+        m := mapa_(p, k)
+        m[0] := ab
+        m[1] := a
+        m[2] := desp
+        devolver nat32(k) + 1
+    fin
+
+    ; (con el mutex de la memoria) el registro de la región i: lo abierto (0:
+    ; no es de un archivo) y el desplazamiento en el archivo de la dirección v
+    público función mapa_de(p: puntero a Proceso, i: nat32, v: nat64, ref desp: nat64): nat64
+        variable m: puntero a nat64
+        si p.reg_arch[i] = 0 o nat64(p.reg_arch[i]) > p.mapas_cap entonces devolver 0 fin
+        m := mapa_(p, nat64(p.reg_arch[i]) - 1)
+        desp := m[2] + (v - m[1])
+        devolver m[0]
+    fin
+
+    ; (con el mutex de la memoria) suelta los registros que ya no usa ninguna región
+    función recoge_mapas(p: puntero a Proceso)
+        variable k: nat64
+        variable i: nat32
+        variable usado: bool
+        variable m: puntero a nat64
+        k := 0
+        mientras k < p.mapas_cap hacer
+            m := mapa_(p, k)
+            si m[0] <> 0 entonces
+                usado := falso
+                i := 0
+                mientras nat64(i) < p.n_reg y no usado hacer
+                    si nat64(p.reg_arch[i]) = k + 1 entonces usado := cierto fin
+                    i := i + 1
+                fin
+                si no usado entonces
+                    vfs_cierra(puntero(m[0]))
+                    m[0] := 0
+                fin
+            fin
+            k := k + 1
+        fin
+    fin
+
+    ; todos los registros, fuera (al acabar, en execve)
+    público función suelta_mapas(p: puntero a Proceso)
+        variable k: nat64
+        variable m: puntero a nat64
+        si p.mapas = 0 entonces devolver fin
+        k := 0
+        mientras k < p.mapas_cap hacer
+            m := mapa_(p, k)
+            si m[0] <> 0 entonces vfs_cierra(puntero(m[0])) fin
+            k := k + 1
+        fin
+        libera(puntero(p.mapas))
+        p.mapas := 0
+        p.mapas_cap := 0
+    fin
+
+    ; (bifurcar) los de q, una copia de los de p (con sus referencias); falso
+    ; si no hay memoria (y q, sin ninguno)
+    función copia_mapas(q: puntero a Proceso, p: puntero a Proceso): bool
+        variable k: nat64
+        variable m: puntero a nat64
+        q.mapas := 0
+        q.mapas_cap := 0
+        si p.mapas = 0 entonces devolver cierto fin
+        q.mapas := nat64(reserva(p.mapas_cap * MAPA_LARGO))
+        si q.mapas = 0 entonces
+            k := 0
+            mientras k < MAX_REG hacer
+                q.reg_arch[nat32(k)] := 0
+                k := k + 1
+            fin
+            devolver falso
+        fin
+        q.mapas_cap := p.mapas_cap
+        copia_mem(q.mapas, p.mapas, p.mapas_cap * MAPA_LARGO)
+        k := 0
+        mientras k < q.mapas_cap hacer
+            m := mapa_(q, k)
+            si m[0] <> 0 entonces vfs_otro(puntero(m[0])) fin
+            k := k + 1
+        fin
         devolver cierto
     fin
 
@@ -718,6 +849,196 @@ módulo Procesos
         activa_espacio(puntero(n.espacio))
     fin
 
+    ; ---- [etapa 10 g] las tablas de los descriptores ----
+    ; Cada proceso tiene las suyas en un sitio fijo de la zona de los
+    ; descriptores (desde 0xFFFFD00000000000, en el núcleo: 2 MB por proceso),
+    ; las seis (fd_clase, fd_obj, fd_cloexec, fd_nobloq, fd_uso y fd_gen) en
+    ; su sitio para FD_MÁX (65.536) descriptores, con solo las páginas de los
+    ; que caben puestas (fd_cap, de 1.024 en 1.024). Así crecen sin moverse
+    ; (los demás hilos del proceso las leen sin cerrojo hasta fd_cap, que solo
+    ; crece) y sin gastar más de lo que se usa (28 KB al empezar; con los
+    ; 65.536, 1,75 MB). Eran arreglos de 256 dentro del Proceso: Ladybird
+    ; sube RLIMIT_NOFILE a 65.536 (LibMain) y LibIPC pasa hasta 16.000
+    ; descriptores en un mensaje. RLIMIT_NOFILE: 1.024 al empezar, como Linux;
+    ; lo más, 65.536.
+    público constante FD_MÁX = 65536
+    constante ZONA_FD = 0xFFFFD00000000000
+    constante SITIO_FD = 0x200000
+    constante MAX_SITIOS_FD = 1024
+    constante TROZO_FD = 1024
+    constante FD_PRIMEROS = 1024
+    constante DESP_OBJ = 0x40000
+    constante DESP_CLOEXEC = 0xC0000
+    constante DESP_NOBLOQ = 0x100000
+    constante DESP_USO = 0x140000
+    constante DESP_GEN = 0x180000
+    variable sitios_fd: arreglo [16] de nat64       ; (MAX_SITIOS_FD bits)
+    variable sitios_cerrojo: nat64
+    público variable fd_páginas: nat64              ; las páginas puestas de todas
+    público variable fd_sitios: nat64               ; los sitios en uso
+
+    ; pone en v, con páginas nuevas a cero, n octetos (de 4 KB en 4 KB); falso si no hay memoria
+    función pon_páginas_fd(v: nat64, n: nat64): bool
+        variable k, f: nat64
+        k := 0
+        mientras k < n hacer
+            ; (las de un crecer que no acabó, ya puestas: a cero)
+            si traduce(v + k) <> nob nat64(0) entonces
+                ceros_mem(v + k, 4096)
+                k := k + 4096
+                seguir
+            fin
+            f := pide()
+            si f = 0 entonces devolver falso fin
+            ceros_mem(virt(f), 4096)
+            si no mapea(v + k, f, K4, datos()) entonces
+                devuelve(f)
+                devolver falso
+            fin
+            suma_atómica(dirección(fd_páginas), 1)
+            k := k + 4096
+        fin
+        devolver cierto
+    fin
+
+    ; las tablas de p, hasta «hasta» descriptores (de TROZO_FD en TROZO_FD);
+    ; falso si no hay memoria. Con fd_cerrojo, o sin que nadie más vea p.
+    función fds_crece(p: puntero a Proceso, tope: nat64): bool
+        variable base, c, n: nat64
+        si tope > FD_MÁX entonces devolver falso fin
+        base := ZONA_FD + (p.fd_sitio - 1) * SITIO_FD
+        mientras p.fd_cap < tope hacer
+            c := p.fd_cap
+            n := TROZO_FD
+            si no pon_páginas_fd(base + c * 4, n * 4) entonces devolver falso fin
+            si no pon_páginas_fd(base + DESP_OBJ + c * 8, n * 8) entonces devolver falso fin
+            si no pon_páginas_fd(base + DESP_CLOEXEC + c * 4, n * 4) entonces devolver falso fin
+            si no pon_páginas_fd(base + DESP_NOBLOQ + c * 4, n * 4) entonces devolver falso fin
+            si no pon_páginas_fd(base + DESP_USO + c * 4, n * 4) entonces devolver falso fin
+            si no pon_páginas_fd(base + DESP_GEN + c * 4, n * 4) entonces devolver falso fin
+            p.fd_cap := c + n               ; (después: los demás hilos miran fd_cap antes de leerlas)
+        fin
+        devolver cierto
+    fin
+
+    ; un sitio en la zona para las tablas de p (nuevas, con los primeros
+    ; FD_PRIMEROS); falso si no hay sitio o memoria
+    función fds_nuevas(p: puntero a Proceso): bool
+        variable b, base: nat64
+        variable i: nat32
+        p.fd_sitio := 0
+        p.fd_cap := 0
+        p.fd_clase := nulo
+        p.fd_obj := nulo
+        p.fd_cloexec := nulo
+        p.fd_nobloq := nulo
+        p.fd_uso := nulo
+        p.fd_gen := nulo
+        b := toma(dirección(sitios_cerrojo))
+        i := 0
+        mientras i < MAX_SITIOS_FD y (sitios_fd[i >> 6] >> (i yb 63)) yb 1 <> 0 hacer i := i + 1 fin
+        si i < MAX_SITIOS_FD entonces
+            sitios_fd[i >> 6] := sitios_fd[i >> 6] ob (nat64(1) << (i yb 63))
+            fd_sitios := fd_sitios + 1
+        fin
+        suelta(dirección(sitios_cerrojo), b)
+        si i >= MAX_SITIOS_FD entonces devolver falso fin
+        p.fd_sitio := nat64(i) + 1
+        base := ZONA_FD + nat64(i) * SITIO_FD
+        p.fd_clase := puntero(base)
+        p.fd_obj := puntero(base + DESP_OBJ)
+        p.fd_cloexec := puntero(base + DESP_CLOEXEC)
+        p.fd_nobloq := puntero(base + DESP_NOBLOQ)
+        p.fd_uso := puntero(base + DESP_USO)
+        p.fd_gen := puntero(base + DESP_GEN)
+        si no fds_crece(p, FD_PRIMEROS) entonces
+            fds_suelta(p)
+            devolver falso
+        fin
+        devolver cierto
+    fin
+
+    ; las de un proceso nuevo: 1.024 (RLIMIT_NOFILE: 1.024, hasta 65.536)
+    función fds_proceso(p: puntero a Proceso): bool
+        p.fd_lím := FD_PRIMEROS
+        p.fd_lím_máx := FD_MÁX
+        devolver fds_nuevas(p)
+    fin
+
+    ; (bifurcar) las de q, una copia de las de p, que caben lo mismo
+    función fds_copia(q: puntero a Proceso, p: puntero a Proceso): bool
+        variable cap: nat64
+        cap := p.fd_cap
+        si no fds_nuevas(q) entonces devolver falso fin
+        si no fds_crece(q, cap) entonces
+            fds_suelta(q)
+            devolver falso
+        fin
+        copia_mem(nat64(q.fd_clase), nat64(p.fd_clase), cap * 4)
+        copia_mem(nat64(q.fd_obj), nat64(p.fd_obj), cap * 8)
+        copia_mem(nat64(q.fd_cloexec), nat64(p.fd_cloexec), cap * 4)
+        copia_mem(nat64(q.fd_nobloq), nat64(p.fd_nobloq), cap * 4)
+        copia_mem(nat64(q.fd_uso), nat64(p.fd_uso), cap * 4)
+        copia_mem(nat64(q.fd_gen), nat64(p.fd_gen), cap * 4)
+        devolver cierto
+    fin
+
+    ; suelta las tablas de p y su sitio (cuando ya nadie las usa: al soltar el Proceso)
+    público función fds_suelta(p: puntero a Proceso)
+        variable base, cap, b: nat64
+        variable i: nat32
+        si p.fd_sitio = 0 entonces devolver fin
+        base := ZONA_FD + (p.fd_sitio - 1) * SITIO_FD
+        cap := p.fd_cap + TROZO_FD             ; (y lo de un crecer que no acabó)
+        si cap > FD_MÁX entonces cap := FD_MÁX fin
+        suelta_trozo_fd(base, cap * 4)
+        suelta_trozo_fd(base + DESP_OBJ, cap * 8)
+        suelta_trozo_fd(base + DESP_CLOEXEC, cap * 4)
+        suelta_trozo_fd(base + DESP_NOBLOQ, cap * 4)
+        suelta_trozo_fd(base + DESP_USO, cap * 4)
+        suelta_trozo_fd(base + DESP_GEN, cap * 4)
+        i := nat32(p.fd_sitio - 1)
+        p.fd_sitio := 0
+        p.fd_cap := 0
+        b := toma(dirección(sitios_cerrojo))
+        sitios_fd[i >> 6] := sitios_fd[i >> 6] yb (nob (nat64(1) << (i yb 63)))
+        fd_sitios := fd_sitios - 1
+        suelta(dirección(sitios_cerrojo), b)
+    fin
+
+    ; las páginas de [v, v + n), fuera de las tablas de todos y de las TLB, y
+    ; sus marcos a la memoria libre (de 64 en 64: un aviso por tanda)
+    función suelta_trozo_fd(v: nat64, n: nat64)
+        variable f: arreglo [64] de nat64
+        variable k, j, d: nat64
+        d := 0
+        mientras d < n hacer
+            j := 0
+            mientras j < 64 y d + j * 4096 < n hacer
+                f[j] := desmapea_aquí(v + d + j * 4096)
+                j := j + 1
+            fin
+            avisa_tlb(v + d, j)
+            k := 0
+            mientras k < j hacer
+                si f[k] <> nob nat64(0) entonces
+                    devuelve(f[k])
+                    suma_atómica(dirección(fd_páginas), nob nat64(0))
+                fin
+                k := k + 1
+            fin
+            d := d + j * 4096
+        fin
+    fin
+
+    ; [etapa 10 g] (con fd_cerrojo) que quepa el descriptor fd: falso si pasa
+    ; del límite (RLIMIT_NOFILE) o no hay memoria
+    público función fds_asegura(p: puntero a Proceso, fd: nat64): bool
+        si fd >= p.fd_lím entonces devolver falso fin
+        si fd < p.fd_cap entonces devolver cierto fin
+        devolver fds_crece(p, (fd + TROZO_FD) yb (nob (TROZO_FD - 1)))
+    fin
+
     ; ---- salir ----
     ; [etapa 5] cierra todos los archivos del proceso
     público función cierra_todos(p: puntero a Proceso)
@@ -725,7 +1046,7 @@ módulo Procesos
         ; [etapa 8] lo que tenía de los dispositivos (la pantalla de /dev/fb0: Disp64)
         si al_acabar_proc <> 0 entonces llama2_(al_acabar_proc, p.id, 0) fin
         i := 0
-        mientras i < MAX_FD hacer
+        mientras nat64(i) < p.fd_cap hacer
             si p.fd_clase[i] <> 0 entonces cierra_fd_obj(p.fd_clase[i], p.fd_obj[i]) fin
             p.fd_clase[i] := 0
             p.fd_obj[i] := 0
@@ -734,6 +1055,8 @@ módulo Procesos
             p.fd_uso[i] := 0
             i := i + 1
         fin
+        ; ([etapa 10 g] y lo de sus mmap de archivos)
+        suelta_mapas(p)
         ; ([etapa 10 c] lo aplazado de llamadas que ya no acabarán)
         mientras p.apl_n > 0 hacer
             p.apl_n := p.apl_n - 1
@@ -1009,10 +1332,10 @@ módulo Procesos
         ; (desde aquí, p no se toca: su padre puede recogerlo ya)
         i := 0
         mientras i < n hacer
-            libera(puntero(lista[i]))
+            libera_proceso(puntero(lista[i]))
             i := i + 1
         fin
-        si suelto_ entonces libera(puntero(nat64(p))) fin
+        si suelto_ entonces libera_proceso(p) fin
         despierta_todos(dirección(hijos_espera))
         termina()
     fin
@@ -2193,6 +2516,12 @@ módulo Procesos
     función suelta_proceso(p: puntero a Proceso)
         si p.espacio <> 0 y p.prestado = 0 entonces destruye_espacio(espacio_de(p)) fin
         si p.ini_fpu <> 0 entonces libera(puntero(p.ini_fpu)) fin
+        libera_proceso(p)
+    fin
+
+    ; [etapa 10 g] el Proceso y sus tablas de descriptores (cuando ya no las usa nadie)
+    público función libera_proceso(p: puntero a Proceso)
+        fds_suelta(p)
         libera(puntero(nat64(p)))
     fin
 
@@ -2304,6 +2633,13 @@ módulo Procesos
             devolver nulo
         fin
         ceros_mem(nat64(p), tamaño(Proceso))
+        ; [etapa 10 g] sus tablas de descriptores
+        si no fds_proceso(p) entonces
+            libera_proceso(p)
+            motivo := "no queda memoria"
+            si con_ruta entonces libera(puntero(buf)) fin
+            devolver nulo
+        fin
         p.id := suma_atómica(dirección(próximo_pid), 1) + 1
         ; el nombre, sin la extensión y en mayúsculas
         j := 0
@@ -2346,7 +2682,7 @@ módulo Procesos
         p.grupo := p.id
         e := crea_espacio()
         si e = nulo entonces
-            libera(puntero(nat64(p)))
+            libera_proceso(p)
             motivo := "no queda memoria"
             si con_ruta entonces libera(puntero(buf)) fin
             devolver nulo
@@ -2416,6 +2752,14 @@ módulo Procesos
         q := puntero(nat64(reserva(tamaño(Proceso))))
         si q = nulo entonces devolver -12 fin
         copia_mem(nat64(q), nat64(p), tamaño(Proceso))
+        ; [etapa 10 g] sus tablas de descriptores, una copia de las del padre
+        ; (antes de nada: las del padre no se tocan)
+        si no fds_copia(q, p) entonces
+            libera(puntero(nat64(q)))
+            devolver -12
+        fin
+        q.mapas := 0                    ; ([etapa 10 g] los registros de los mmap: los suyos, abajo)
+        q.mapas_cap := 0
         limpia_nuevo(q)
         q.id := suma_atómica(dirección(próximo_pid), 1) + 1
         q.padre := p.id
@@ -2440,29 +2784,30 @@ módulo Procesos
         sino
             e := crea_espacio()
             si e = nulo entonces
-                libera(puntero(nat64(q)))
+                libera_proceso(q)
                 devolver -12
             fin
             q.espacio := nat64(e)
             cierra_mem(p)
             bien := copia_espacio(espacio_de(p), e)
+            si bien entonces copia_mapas(q, p) fin          ; ([etapa 10 g] sin ellos, madvise deja lo que hay)
             abre_mem(p)
             si no bien entonces
                 destruye_espacio(e)
-                libera(puntero(nat64(q)))
+                libera_proceso(q)
                 devolver -12
             fin
         fin
         q.ini_fpu := nuevo_fpu(fpu)
         si q.ini_fpu = 0 entonces
             si q.prestado = 0 entonces destruye_espacio(espacio_de(q)) fin
-            libera(puntero(nat64(q)))
+            libera_proceso(q)
             devolver -12
         fin
         guarda_fpu(fpu)                 ; (los del padre, que son los que hay ahora: el núcleo no los usa)
         ; los descriptores: lo abierto, compartido
         i := 0
-        mientras i < MAX_FD hacer
+        mientras nat64(i) < q.fd_cap hacer
             ; ([etapa 10 b] lo que otro hilo del padre estaba abriendo, no)
             q.fd_uso[i] := 0                ; ([etapa 10 c] las llamadas en curso son del padre)
             si q.fd_clase[i] = F_APARTADO entonces
@@ -2535,19 +2880,21 @@ módulo Procesos
         variable b: nat64
         b := toma(dirección(p.fd_cerrojo))
         fd := mínimo_
-        mientras fd < MAX_FD y p.fd_clase[fd] <> 0 hacer fd := fd + 1 fin
-        si fd < MAX_FD entonces
-            p.fd_obj[fd] := 0
-            p.fd_clase[fd] := F_APARTADO
+        mientras nat64(fd) < p.fd_cap y p.fd_clase[fd] <> 0 hacer fd := fd + 1 fin
+        ; ([etapa 10 g] hasta el límite; las tablas crecen si hace falta)
+        si nat64(fd) >= p.fd_lím o no fds_asegura(p, nat64(fd)) entonces
+            suelta(dirección(p.fd_cerrojo), b)
+            devolver -1
         fin
+        p.fd_obj[fd] := 0
+        p.fd_clase[fd] := F_APARTADO
         suelta(dirección(p.fd_cerrojo), b)
-        si fd >= MAX_FD entonces devolver -1 fin
         devolver ent32(fd)
     fin
 
     ; [etapa 10 b] uno apartado que no se ha llegado a llenar, libre otra vez
     público función devuelve_fd(p: puntero a Proceso, fd: ent32)
-        si fd >= 0 y fd < ent32(MAX_FD) y p.fd_clase[nat32(fd)] = F_APARTADO entonces p.fd_clase[nat32(fd)] := 0 fin
+        si fd >= 0 y nat64(fd) < p.fd_cap y p.fd_clase[nat32(fd)] = F_APARTADO entonces p.fd_clase[nat32(fd)] := 0 fin
     fin
 
     ; [etapa 10 b] llena el apartado fd: el objeto antes que la clase (lo ve
@@ -2567,7 +2914,7 @@ módulo Procesos
     público función toma_fd(p: puntero a Proceso, fd: nat64, ref gen: nat32): bool
         variable b: nat64
         variable bien: bool
-        si fd >= MAX_FD entonces devolver falso fin
+        si fd >= p.fd_cap entonces devolver falso fin
         b := toma(dirección(p.fd_cerrojo))
         bien := p.fd_clase[nat32(fd)] <> 0 y p.fd_clase[nat32(fd)] <> F_APARTADO
         si bien entonces
@@ -2929,8 +3276,10 @@ módulo Procesos
             p.reg_prot[i] := q.reg_prot[i]
             p.reg_clase[i] := q.reg_clase[i]
             p.reg_ext[i] := q.reg_ext[i]
+            p.reg_arch[i] := 0
             i := i + 1
         fin
+        suelta_mapas(p)                 ; ([etapa 10 g] los mmap del programa de antes)
         p.mmap_próx := nat64(0x1000) << 32
         p.tid_dir := 0
         p.de_fork := 0
@@ -2999,7 +3348,7 @@ módulo Procesos
         libera(t)
         ; lo de O_CLOEXEC, cerrado; las señales atendidas, a SIG_DFL
         i := 0
-        mientras i < MAX_FD hacer
+        mientras nat64(i) < p.fd_cap hacer
             si p.fd_cloexec[i] <> 0 entonces
                 si p.fd_clase[i] <> 0 entonces cierra_fd_obj(p.fd_clase[i], p.fd_obj[i]) fin
                 p.fd_nobloq[i] := 0
@@ -3098,7 +3447,7 @@ módulo Procesos
         suma_atómica(dirección(p.hijos_s), z.cpu_s + z.hijos_s)
         ceros_mem(nat64(dirección(ru[0])), 144)
         pon_tiempo_ru(nat64(dirección(ru[0])), z.cpu_u, z.cpu_s)
-        libera(puntero(nat64(z)))
+        libera_proceso(z)
         suma_atómica(dirección(zombis_recogidos), 1)
         si v_est <> 0 entonces
             si no copia_a(p, v_est, nat64(dirección(est)), 4) entonces devolver -14 fin

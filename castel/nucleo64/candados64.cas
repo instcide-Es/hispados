@@ -13,9 +13,12 @@
 ;  dueños distintos, como en Linux). Poner uno quita antes lo que el mismo
 ;  dueño tuviera en ese trozo (partiendo los que se salen) y lo junta con los
 ;  suyos de al lado del mismo tipo; F_UNLCK solo quita. Con F_SETLK, si otro
-;  estorba, EAGAIN; con F_SETLKW se espera (una señal: EINTR). Sin buscar
-;  abrazos mortales (EDEADLK): sqlite no espera nunca (F_SETLK y vuelve a
-;  probar).
+;  estorba, EAGAIN; con F_SETLKW se espera (una señal: EINTR). [etapa 10 g]
+;  Y los abrazos mortales, como Linux (posix_locks_deadlock): antes de esperar
+;  por uno de POSIX de otro proceso, se sigue la cadena de quién espera a
+;  quién (cada proceso que espera, por el dueño del que le estorba); si
+;  vuelve a quien pide, EDEADLK. Solo entre los de POSIX (los OFD no lo
+;  miran, también como Linux).
 ;
 ;  Se sueltan: los de POSIX de un proceso en un archivo, al cerrar ese
 ;  proceso CUALQUIERA de sus descriptores de ese archivo (también al acabar:
@@ -45,6 +48,10 @@ módulo Candados64
 
     variable tabla: arreglo [MAX_CANDADOS] de Candado
     variable cerrojo: nat64
+    ; [etapa 10 g] quién espera (F_SETLKW de POSIX) y por quién (con el cerrojo; 0: libre)
+    constante MAX_ESPERAN = 256
+    variable esp_quién, esp_por: arreglo [MAX_ESPERAN] de nat64
+    público variable candados_abrazos: nat64
     variable espera: Espera
     público variable candados_puestos, candados_esperas, candados_estorbos: nat64
     público variable n_candados: nat32          ; los que hay ahora
@@ -55,6 +62,31 @@ módulo Candados64
         si tabla[i].ini >= b o a >= tabla[i].fin_ entonces devolver falso fin
         si tabla[i].tipo_ = F_RDLCK y t = F_RDLCK entonces devolver falso fin
         devolver tabla[i].dueño <> dueño o tabla[i].ofd <> ofd
+    fin
+
+    ; [etapa 10 g] (con el cerrojo) ¿haría un abrazo mortal que «quién»
+    ; esperase por «por»? (la cadena de los que esperan vuelve a él)
+    función abrazo(quién: nat64, por: nat64): bool
+        variable x: nat64
+        variable i, vueltas: nat32
+        variable sigue: bool
+        x := por
+        vueltas := 0
+        mientras vueltas < MAX_ESPERAN hacer
+            si x = quién entonces devolver cierto fin
+            sigue := falso
+            i := 0
+            mientras i < MAX_ESPERAN y no sigue hacer
+                si esp_quién[i] = x entonces
+                    x := esp_por[i]
+                    sigue := cierto
+                fin
+                i := i + 1
+            fin
+            si no sigue entonces devolver falso fin
+            vueltas := vueltas + 1
+        fin
+        devolver falso
     fin
 
     ; el primero que estorba, o -1 (con el cerrojo)
@@ -190,7 +222,8 @@ módulo Candados64
         variable t, ofd: nat32
         variable a, b, dueño, nodo, bf, acceso: nat64
         variable r: ent64
-        variable k: ent32
+        variable k, apuntado: ent32
+        variable i: nat32
         si orden < 36 entonces ofd := 0 sino ofd := 1 fin
         si no copia_de(p, nat64(dirección(fl[0])), v, 32) entonces devolver EFAULT fin
         r := trozo_de(p, ab, dirección(fl[0]), t, a, b)
@@ -221,8 +254,14 @@ módulo Candados64
         si t = F_RDLCK y acceso = 1 entonces devolver EBADF fin
         si t = F_WRLCK y acceso = 0 entonces devolver EBADF fin
         bf := sin_ints()
+        apuntado := -1
         mientras cierto hacer
             toma_sin(dirección(cerrojo))
+            ; ([etapa 10 g] la espera de la vuelta de antes, fuera)
+            si apuntado >= 0 entonces
+                esp_quién[nat32(apuntado)] := 0
+                apuntado := -1
+            fin
             si t = F_UNLCK entonces
                 quita_trozo(nodo, dueño, ofd, a, b)
                 suelta_sin(dirección(cerrojo))
@@ -240,6 +279,22 @@ módulo Candados64
                 suelta_sin(dirección(cerrojo))
                 si orden = 6 o orden = 37 entonces r := -11 sino r := ERESTARTSYS fin     ; EAGAIN, o repetir (EINTR)
                 romper
+            fin
+            ; [etapa 10 g] los de POSIX: ¿un abrazo mortal? Si no, apuntado
+            si ofd = 0 y tabla[nat32(k)].ofd = 0 entonces
+                si abrazo(dueño, tabla[nat32(k)].dueño) entonces
+                    candados_abrazos := candados_abrazos + 1
+                    suelta_sin(dirección(cerrojo))
+                    r := -35                                ; EDEADLK
+                    romper
+                fin
+                i := 0
+                mientras i < MAX_ESPERAN y esp_quién[i] <> 0 hacer i := i + 1 fin
+                si i < MAX_ESPERAN entonces
+                    esp_quién[i] := dueño
+                    esp_por[i] := tabla[nat32(k)].dueño
+                    apuntado := ent32(i)
+                fin
             fin
             ; (F_SETLKW: con el de la espera antes de soltar el de la tabla: quien
             ; suelte ahora, despierta_todos, espera a que este duerma)

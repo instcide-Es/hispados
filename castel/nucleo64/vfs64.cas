@@ -172,7 +172,8 @@ módulo Vfs64
     ; ---- las rutas ----
     ; la ruta absoluta y limpia (sin «.», «..», ni «//») de «ruta» vista desde
     ; la carpeta «base» (absoluta); en t (LARGO_RUTA); falso si es muy larga
-    público función normaliza(base: puntero a byte, ruta: puntero a byte, t: puntero a byte): bool
+    ; ([etapa 10 g] sin mirar los enlaces: normaliza y normaliza_e los siguen)
+    función normaliza_l(base: puntero a byte, ruta: puntero a byte, t: puntero a byte): bool
         variable n, i, j, k: nat32
         variable fuente: puntero a byte
         variable vez: nat32
@@ -305,6 +306,216 @@ módulo Vfs64
         devolver nulo
     fin
 
+    ; ---- [etapa 10 g] los enlaces simbólicos ----
+    ; FAT y exFAT no los tienen (en Linux, symlink en vfat da EPERM); /tmp, el
+    ; disco en memoria, hace aquí de tmpfs, que sí: sus enlaces se guardan en
+    ; esta tabla, en la memoria (la ruta absoluta del enlace, ya sin enlaces por
+    ; en medio, y lo que dice, tal cual). Los sigue todo lo que va por una ruta
+    ; (normaliza y normaliza_e, hasta 40 veces: después, ELOOP, como Linux), y
+    ; los ven getdents64 (DT_LNK), lstat (S_IFLNK), readlink, unlink, rename,
+    ; rmdir (ENOTEMPTY si la carpeta tiene alguno) y open con O_NOFOLLOW (ELOOP)
+    ; o con O_CREAT y O_EXCL (EEXIST). Lo único que no es como Linux: «..» se
+    ; resuelve antes que los enlaces (en la ruta, sin mirar el disco).
+    público constante MAX_ENLACES = 256
+    público constante ELOOP = -40
+    público constante O_NOFOLLOW = 0x20000
+    constante GALLETA_ENL = 0x4000000000000000         ; getdents64: de aquí en adelante, los enlaces
+    variable enl_ruta, enl_dest, enl_hora: arreglo [MAX_ENLACES] de nat64   ; (enl_ruta 0: libre)
+    público variable n_enlaces: nat32                   ; los que hay
+    variable enl_mutex: Mutex                          ; (se toma con el del VFS o sin él; nunca al revés)
+
+    función bajar(c: nat32): nat32
+        si c >= 'A' y c <= 'Z' entonces devolver c + 32 fin
+        devolver c
+    fin
+
+    ; si r (una ruta absoluta) es el principio de t, hasta un «/» o el final, su
+    ; largo; si no, 0 (sin mirar las mayúsculas, como FAT)
+    función prefijo_ruta(r: puntero a byte, t: puntero a byte): nat32
+        variable i: nat32
+        i := 0
+        mientras r[i] <> 0 y bajar(r[i]) = bajar(t[i]) hacer i := i + 1 fin
+        si r[i] <> 0 entonces devolver 0 fin
+        si t[i] = 0 o t[i] = '/' entonces devolver i fin
+        devolver 0
+    fin
+
+    ; (con enl_cerrojo) el enlace que es t, o MAX_ENLACES
+    función enlace_de(t: puntero a byte): nat32
+        variable i, l: nat32
+        si n_enlaces = 0 entonces devolver MAX_ENLACES fin
+        i := 0
+        mientras i < MAX_ENLACES hacer
+            si enl_ruta[i] <> 0 entonces
+                l := prefijo_ruta(puntero(enl_ruta[i]), t)
+                si l > 0 y t[l] = 0 entonces devolver i fin
+            fin
+            i := i + 1
+        fin
+        devolver MAX_ENLACES
+    fin
+
+    ; sigue los enlaces de t (absoluta y limpia, LARGO_RUTA): los de en medio
+    ; siempre; el último, si «último»; falso y el error si da más de 40 vueltas
+    ; (ELOOP) o sale muy larga (ENAMETOOLONG)
+    función sigue_enlaces(t: puntero a byte, último: bool, ref err: ent64): bool
+        variable i, mejor, l, ml, vueltas, j, k: nat32
+        variable b: nat64
+        variable bloque, padre, dest, nueva: puntero a byte
+        si n_enlaces = 0 entonces devolver cierto fin
+        bloque := nulo
+        vueltas := 0
+        mientras cierto hacer
+            si bloque = nulo entonces
+                bloque := reserva(3 * LARGO_RUTA)
+                si bloque = nulo entonces
+                    err := ENOMEM
+                    devolver falso
+                fin
+                padre := bloque
+                dest := dirección(bloque[LARGO_RUTA])
+                nueva := dirección(bloque[2 * LARGO_RUTA])
+            fin
+            cierra_mutex(dirección(enl_mutex))
+            mejor := MAX_ENLACES
+            ml := 0
+            i := 0
+            mientras i < MAX_ENLACES hacer
+                si enl_ruta[i] <> 0 entonces
+                    l := prefijo_ruta(puntero(enl_ruta[i]), t)
+                    si l > 0 y (t[l] = '/' o último) y (mejor = MAX_ENLACES o l < ml) entonces
+                        mejor := i
+                        ml := l
+                    fin
+                fin
+                i := i + 1
+            fin
+            si mejor < MAX_ENLACES entonces
+                ; su carpeta y lo que dice
+                copia_texto(padre, puntero(enl_ruta[mejor]), LARGO_RUTA)
+                copia_texto(dest, puntero(enl_dest[mejor]), LARGO_RUTA)
+            fin
+            abre_mutex(dirección(enl_mutex))
+            si mejor = MAX_ENLACES entonces
+                libera(bloque)
+                devolver cierto
+            fin
+            vueltas := vueltas + 1
+            si vueltas > 40 entonces
+                libera(bloque)
+                err := ELOOP
+                devolver falso
+            fin
+            j := ml
+            mientras j > 0 y padre[j] <> '/' hacer j := j - 1 fin
+            si j = 0 entonces padre[1] := 0 sino padre[j] := 0 fin
+            si no normaliza_l(padre, dest, nueva) entonces
+                libera(bloque)
+                err := ENAMETOOLONG
+                devolver falso
+            fin
+            ; y lo que seguía en t
+            k := largo(nueva)
+            si k = 1 y t[ml] = '/' entonces k := 0 fin            ; («/» y «/resto»: «/resto»)
+            j := ml
+            mientras t[j] <> 0 hacer
+                si k + 1 >= LARGO_RUTA entonces
+                    libera(bloque)
+                    err := ENAMETOOLONG
+                    devolver falso
+                fin
+                nueva[k] := t[j]
+                k := k + 1
+                j := j + 1
+            fin
+            nueva[k] := 0
+            copia_texto(t, nueva, LARGO_RUTA)
+        fin
+        devolver cierto
+    fin
+
+    ; normaliza_l y los enlaces (todos)
+    público función normaliza(base: puntero a byte, ruta: puntero a byte, t: puntero a byte): bool
+        variable err: ent64
+        devolver normaliza_e(base, ruta, t, cierto, err)
+    fin
+
+    ; normaliza_l y los enlaces: los de en medio, y el último si «último»;
+    ; falso y el error (ENAMETOOLONG, ELOOP, ENOMEM)
+    público función normaliza_e(base: puntero a byte, ruta: puntero a byte, t: puntero a byte, último: bool, ref err: ent64): bool
+        err := ENAMETOOLONG
+        si no normaliza_l(base, ruta, t) entonces devolver falso fin
+        err := 0
+        devolver sigue_enlaces(t, último, err)
+    fin
+
+    ; ¿es el montaje m el disco en memoria de /tmp (el que tiene enlaces)?
+    función de_memoria(m: nat32): bool
+        devolver mm(m).clase = FS_FAT y mm(m).disco <> 0xFFFFFFFF y clase_dk(mm(m).disco) = D_MEM
+    fin
+
+    ; ¿es t (absoluta, sin enlaces en medio) un enlace? Lo que dice, en d
+    ; (LARGO_RUTA, si no es nulo), y su largo; -1 si no lo es
+    público función vfs_enlace(t: puntero a byte, d: puntero a byte): ent64
+        variable i: nat32
+        variable b: nat64
+        variable r: ent64
+        si n_enlaces = 0 entonces devolver -1 fin
+        cierra_mutex(dirección(enl_mutex))
+        i := enlace_de(t)
+        r := -1
+        si i < MAX_ENLACES entonces
+            r := ent64(largo(puntero(enl_dest[i])))
+            si d <> nulo entonces copia_texto(d, puntero(enl_dest[i]), LARGO_RUTA) fin
+        fin
+        abre_mutex(dirección(enl_mutex))
+        devolver r
+    fin
+
+    ; quita el enlace t; falso si no lo es
+    función quita_enlace(t: puntero a byte): bool
+        variable i: nat32
+        variable b, r, d: nat64
+        r := 0
+        d := 0
+        cierra_mutex(dirección(enl_mutex))
+        i := enlace_de(t)
+        si i < MAX_ENLACES entonces
+            r := enl_ruta[i]
+            d := enl_dest[i]
+            enl_ruta[i] := 0
+            enl_dest[i] := 0
+            n_enlaces := n_enlaces - 1
+        fin
+        abre_mutex(dirección(enl_mutex))
+        si r = 0 entonces devolver falso fin
+        libera(puntero(r))
+        libera(puntero(d))
+        devolver cierto
+    fin
+
+    ; ¿hay algún enlace dentro de la carpeta t? (rmdir: ENOTEMPTY)
+    función enlaces_en(t: puntero a byte): bool
+        variable i, l: nat32
+        variable b: nat64
+        variable r: puntero a byte
+        variable hay: bool
+        si n_enlaces = 0 entonces devolver falso fin
+        hay := falso
+        cierra_mutex(dirección(enl_mutex))
+        i := 0
+        mientras i < MAX_ENLACES y no hay hacer
+            si enl_ruta[i] <> 0 entonces
+                r := puntero(enl_ruta[i])
+                l := prefijo_ruta(t, r)
+                si l > 0 y r[l] = '/' entonces hay := cierto fin
+            fin
+            i := i + 1
+        fin
+        abre_mutex(dirección(enl_mutex))
+        devolver hay
+    fin
+
     ; ---- abrir y cerrar ----
     función nuevo_abierto(n: puntero a Nodo, marcas: nat64, t: puntero a byte): puntero a Abierto
         variable a: puntero a Abierto
@@ -345,10 +556,22 @@ módulo Vfs64
             err := ENOMEM
             devolver nulo
         fin
-        si no normaliza(base, ruta, t) entonces
+        ; ([etapa 10 g] el último trozo, si es un enlace: con O_NOFOLLOW, ELOOP;
+        ; con O_CREAT y O_EXCL, EEXIST; si no, se sigue)
+        si no normaliza_e(base, ruta, t, falso, err) entonces
             libera(t)
-            err := ENAMETOOLONG
             devolver nulo
+        fin
+        si vfs_enlace(t, nulo) >= 0 entonces
+            si marcas yb O_NOFOLLOW <> 0 entonces err := ELOOP
+            sino si marcas yb (O_CREAT ob O_EXCL) = O_CREAT ob O_EXCL entonces err := EEXIST
+            sino si no sigue_enlaces(t, cierto, err) entonces
+                si err = 0 entonces err := ELOOP fin
+            fin
+            si err <> 0 entonces
+                libera(t)
+                devolver nulo
+            fin
         fin
         escribe := marcas yb O_ACCESO <> O_RDONLY
         cierra_vfs()
@@ -578,15 +801,44 @@ módulo Vfs64
     fin
 
     público función vfs_stat(base: puntero a byte, ruta: puntero a byte, k: nat64): ent64
+        devolver vfs_stat_e(base, ruta, k, cierto)
+    fin
+
+    ; [etapa 10 g] stat (sigue: cierto) y lstat (falso: de un enlace, lo suyo:
+    ; S_IFLNK, 0777, el largo de lo que dice)
+    público función vfs_stat_e(base: puntero a byte, ruta: puntero a byte, k: nat64, sigue: bool): ent64
         variable t: puntero a byte
         variable n: puntero a Nodo
         variable m: nat32
         variable r: ent64
+        variable i: nat32
+        variable b: nat64
         t := reserva(LARGO_RUTA)
         si t = nulo entonces devolver ENOMEM fin
-        si no normaliza(base, ruta, t) entonces
+        si no normaliza_e(base, ruta, t, sigue, r) entonces
             libera(t)
-            devolver ENAMETOOLONG
+            devolver r
+        fin
+        si no sigue y n_enlaces > 0 entonces
+            cierra_mutex(dirección(enl_mutex))
+            i := enlace_de(t)
+            si i < MAX_ENLACES entonces
+                ceros_k(k, 144)
+                p64(k, 0x7000)                          ; (st_dev: el de los enlaces)
+                p64(k + 8, 3000000 + nat64(i))
+                p64(k + 16, 1)
+                pon_m32(k + 24, 0xA000 ob 0x1FF)        ; S_IFLNK, 0777
+                p64(k + 48, nat64(largo(puntero(enl_dest[i]))))
+                p64(k + 56, 4096)
+                p64(k + 72, enl_hora[i])
+                p64(k + 88, enl_hora[i])
+                p64(k + 104, enl_hora[i])
+            fin
+            abre_mutex(dirección(enl_mutex))
+            si i < MAX_ENLACES entonces
+                libera(t)
+                devolver 0
+            fin
         fin
         cierra_vfs()
         fs_error := 0
@@ -599,6 +851,99 @@ módulo Vfs64
             r := 0
         fin
         abre_vfs()
+        libera(t)
+        devolver r
+    fin
+
+    ; [etapa 10 g] symlink: el enlace «ruta» (desde base) que dice «destino»;
+    ; solo en /tmp (en los demás: EPERM, como vfat; en «/», EROFS)
+    público función vfs_symlink(destino: puntero a byte, base: puntero a byte, ruta: puntero a byte): ent64
+        variable t, r, d: puntero a byte
+        variable último: arreglo [256] de byte
+        variable dn, n: puntero a Nodo
+        variable m, i: nat32
+        variable err: ent64
+        variable b: nat64
+        si destino[0] = 0 o ruta[0] = 0 entonces devolver ENOENT fin
+        si largo(destino) + 1 >= LARGO_RUTA entonces devolver ENAMETOOLONG fin
+        t := reserva(LARGO_RUTA)
+        si t = nulo entonces devolver ENOMEM fin
+        si no normaliza_e(base, ruta, t, falso, err) entonces
+            libera(t)
+            devolver err
+        fin
+        r := reserva(nat64(largo(t)) + 1)
+        d := reserva(nat64(largo(destino)) + 1)
+        si r = nulo o d = nulo entonces
+            si r <> nulo entonces libera(r) fin
+            si d <> nulo entonces libera(d) fin
+            libera(t)
+            devolver ENOMEM
+        fin
+        copia_texto(r, t, LARGO_RUTA)
+        copia_texto(d, destino, LARGO_RUTA)
+        cierra_vfs()
+        err := 0
+        dn := carpeta_de(t, dirección(último[0]), m, err)
+        si dn <> nulo entonces
+            si mm(m).solo_leer <> 0 entonces
+                err := EROFS
+            sino si no de_memoria(m) entonces
+                err := EPERM
+            sino
+                n := fs_busca(m, dn, dirección(último[0]))
+                si n <> nulo entonces
+                    err := EEXIST
+                    suelta(n)
+                sino si fs_error <> ENOENT entonces
+                    err := fs_error
+                fin
+            fin
+            suelta(dn)
+        sino si err = EBUSY entonces
+            err := EEXIST
+        fin
+        si err = 0 entonces
+            cierra_mutex(dirección(enl_mutex))
+            si enlace_de(t) < MAX_ENLACES entonces
+                err := EEXIST
+            sino
+                i := 0
+                mientras i < MAX_ENLACES y enl_ruta[i] <> 0 hacer i := i + 1 fin
+                si i >= MAX_ENLACES entonces
+                    err := ENOSPC
+                sino
+                    enl_ruta[i] := nat64(r)
+                    enl_dest[i] := nat64(d)
+                    enl_hora[i] := ahora_unix()
+                    n_enlaces := n_enlaces + 1
+                fin
+            fin
+            abre_mutex(dirección(enl_mutex))
+        fin
+        abre_vfs()
+        libera(t)
+        si err <> 0 entonces
+            libera(r)
+            libera(d)
+        fin
+        devolver err
+    fin
+
+    ; [etapa 10 g] readlink: lo que dice el enlace «ruta» (en d, LARGO_RUTA) y
+    ; su largo; -1 si no es un enlace (y lo demás, lo mira quien llama)
+    público función vfs_readlink(base: puntero a byte, ruta: puntero a byte, d: puntero a byte, ref err: ent64): ent64
+        variable t: puntero a byte
+        variable r: ent64
+        err := 0
+        si n_enlaces = 0 entonces devolver -1 fin
+        t := reserva(LARGO_RUTA)
+        si t = nulo entonces
+            err := ENOMEM
+            devolver -1
+        fin
+        r := -1
+        si normaliza_e(base, ruta, t, falso, err) entonces r := vfs_enlace(t, d) fin
         libera(t)
         devolver r
     fin
@@ -650,6 +995,42 @@ módulo Vfs64
         devolver falso
     fin
 
+    ; [etapa 10 g] el siguiente enlace de la carpeta c desde la galleta g
+    ; (GALLETA_ENL más su sitio en la tabla): su nombre, y g, al de después
+    función enlace_en_lista(c: puntero a byte, ref g: nat64, nombre: puntero a byte, ref ino: nat64): bool
+        variable i, l, j: nat32
+        variable b: nat64
+        variable r: puntero a byte
+        variable hay: bool
+        si n_enlaces = 0 entonces devolver falso fin
+        hay := falso
+        cierra_mutex(dirección(enl_mutex))
+        i := nat32(g - GALLETA_ENL)
+        mientras i < MAX_ENLACES y no hay hacer
+            si enl_ruta[i] <> 0 entonces
+                r := puntero(enl_ruta[i])
+                ; su carpeta: hasta el último «/»
+                l := largo(r)
+                mientras l > 0 y r[l] <> '/' hacer l := l - 1 fin
+                j := 0
+                si l = 0 entonces
+                    hay := c[0] = '/' y c[1] = 0
+                sino
+                    mientras j < l y bajar(r[j]) = bajar(c[j]) hacer j := j + 1 fin
+                    hay := j = l y c[l] = 0
+                fin
+                si hay entonces
+                    copia_texto(nombre, dirección(r[l + 1]), 256)
+                    ino := 3000000 + nat64(i)
+                fin
+            fin
+            i := i + 1
+        fin
+        abre_mutex(dirección(enl_mutex))
+        g := GALLETA_ENL + nat64(i)
+        devolver hay
+    fin
+
     ; llena k (n octetos) con entradas «linux_dirent64»: lo que ha llenado
     público función vfs_lista(a: puntero a Abierto, k: nat64, n: nat64): ent64
         variable nd: puntero a Nodo
@@ -658,13 +1039,26 @@ módulo Vfs64
         variable carpeta: bool
         variable l, rec: nat64
         variable hecho: nat64
+        variable tipo_: nat32
         nd := nodo(a.nodo)
         si nd.clase <> N_CARPETA entonces devolver ENOTDIR fin
         cierra_vfs()
         hecho := 0
         mientras cierto hacer
             g := a.pos
-            si no fs_lista(nd, g, dirección(nombre[0]), carpeta, ino) entonces romper fin
+            ; ([etapa 10 g] después de lo del disco, los enlaces de la carpeta: DT_LNK)
+            tipo_ := 8
+            si g < GALLETA_ENL entonces
+                si no fs_lista(nd, g, dirección(nombre[0]), carpeta, ino) entonces
+                    g := GALLETA_ENL
+                    a.pos := g
+                fin
+            fin
+            si g >= GALLETA_ENL entonces
+                si no enlace_en_lista(puntero(a.ruta), g, dirección(nombre[0]), ino) entonces romper fin
+                carpeta := falso
+                tipo_ := 10
+            fin
             l := largo(dirección(nombre[0]))
             rec := (19 + l + 1 + 7) yb (nob nat64(7))
             si hecho + rec > n entonces
@@ -676,7 +1070,7 @@ módulo Vfs64
             pon_m64(k + hecho, ino)
             pon_m64(k + hecho + 8, g)
             pon_m16(k + hecho + 16, nat32(rec))
-            si carpeta entonces pon_m8(k + hecho + 18, 4) sino pon_m8(k + hecho + 18, 8) fin
+            si carpeta entonces pon_m8(k + hecho + 18, 4) sino pon_m8(k + hecho + 18, tipo_) fin
             copia_k(k + hecho + 19, nat64(dirección(nombre[0])), l)
             hecho := hecho + rec
             a.pos := g
@@ -718,9 +1112,13 @@ módulo Vfs64
         variable err: ent64
         t := reserva(LARGO_RUTA)
         si t = nulo entonces devolver ENOMEM fin
-        si no normaliza(base, ruta, t) entonces
+        si no normaliza_e(base, ruta, t, falso, err) entonces
             libera(t)
-            devolver ENAMETOOLONG
+            devolver err
+        fin
+        si vfs_enlace(t, nulo) >= 0 entonces            ; ([etapa 10 g] un enlace)
+            libera(t)
+            devolver EEXIST
         fin
         cierra_vfs()
         err := 0
@@ -756,9 +1154,15 @@ módulo Vfs64
         variable err: ent64
         t := reserva(LARGO_RUTA)
         si t = nulo entonces devolver ENOMEM fin
-        si no normaliza(base, ruta, t) entonces
+        si no normaliza_e(base, ruta, t, falso, err) entonces
             libera(t)
-            devolver ENAMETOOLONG
+            devolver err
+        fin
+        ; ([etapa 10 g] un enlace: unlink lo quita; rmdir, ENOTDIR)
+        si vfs_enlace(t, nulo) >= 0 entonces
+            si carpeta entonces err := ENOTDIR sino si no quita_enlace(t) entonces err := ENOENT fin
+            libera(t)
+            devolver err
         fin
         cierra_vfs()
         err := 0
@@ -771,7 +1175,7 @@ módulo Vfs64
                 si mm(m).solo_leer <> 0 entonces err := EROFS
                 sino si carpeta y n.clase <> N_CARPETA entonces err := ENOTDIR
                 sino si no carpeta y n.clase = N_CARPETA entonces err := EISDIR
-                sino si carpeta y no fs_vacía_carpeta(m, n) entonces err := ENOTEMPTY
+                sino si carpeta y (no fs_vacía_carpeta(m, n) o enlaces_en(t)) entonces err := ENOTEMPTY
                 fin
                 si err = 0 entonces err := fs_borra(m, d, n) fin
                 suelta(n)
@@ -813,7 +1217,19 @@ módulo Vfs64
             devolver ENOMEM
         fin
         err := 0
-        si no normaliza(base1, ruta1, t1) o no normaliza(base2, ruta2, t2) entonces err := ENAMETOOLONG fin
+        si no normaliza_e(base1, ruta1, t1, falso, err) entonces hecho := falso
+        sino si no normaliza_e(base2, ruta2, t2, falso, err) entonces hecho := falso
+        fin
+        ; ([etapa 10 g] los enlaces: el que se mueve, en la tabla; el que se pisa, fuera)
+        si err = 0 y n_enlaces > 0 entonces
+            si vfs_enlace(t1, nulo) >= 0 entonces
+                err := renombra_enlace(t1, t2)
+                libera(t1)
+                libera(t2)
+                devolver err
+            fin
+            si vfs_enlace(t2, nulo) >= 0 entonces quita_enlace(t2) fin
+        fin
         cierra_vfs()
         d1 := nulo
         d2 := nulo
@@ -847,6 +1263,8 @@ módulo Vfs64
                 suelta(otro)
             fin
             si err = 0 y no hecho entonces err := fs_renombra(m1, d1, n, d2, dirección(ú2[0])) fin
+            ; ([etapa 10 g] una carpeta movida: los enlaces de dentro, con ella)
+            si err = 0 y n.clase = N_CARPETA y n_enlaces > 0 entonces mueve_enlaces(t1, t2) fin
         fin
         si n <> nulo entonces suelta(n) fin
         si d1 <> nulo entonces suelta(d1) fin
@@ -855,6 +1273,98 @@ módulo Vfs64
         libera(t1)
         libera(t2)
         devolver err
+    fin
+
+    ; [etapa 10 g] rename de un enlace (t1) a t2 (sin enlaces en medio): en la
+    ; misma carpeta de /tmp o en otra de /tmp; lo que haya en t2, fuera (un
+    ; archivo o un enlace; una carpeta, EISDIR)
+    función renombra_enlace(t1: puntero a byte, t2: puntero a byte): ent64
+        variable ú: arreglo [256] de byte
+        variable d, otro: puntero a Nodo
+        variable m: nat32
+        variable i: nat32
+        variable err: ent64
+        variable b, viejo, r: nat64
+        r := nat64(reserva(nat64(largo(t2)) + 1))
+        si r = 0 entonces devolver ENOMEM fin
+        copia_texto(puntero(r), t2, LARGO_RUTA)
+        cierra_vfs()
+        err := 0
+        d := carpeta_de(t2, dirección(ú[0]), m, err)
+        si d <> nulo entonces
+            si no de_memoria(m) entonces
+                err := EXDEV
+            sino
+                otro := fs_busca(m, d, dirección(ú[0]))
+                si otro <> nulo entonces
+                    si otro.clase = N_CARPETA entonces err := EISDIR sino err := fs_borra(m, d, otro) fin
+                    suelta(otro)
+                fin
+            fin
+            suelta(d)
+        fin
+        abre_vfs()
+        si err = 0 y vfs_enlace(t2, nulo) >= 0 y no mismo_sin_mayúsculas(t1, t2) entonces quita_enlace(t2) fin
+        viejo := 0
+        si err = 0 entonces
+            cierra_mutex(dirección(enl_mutex))
+            i := enlace_de(t1)
+            si i < MAX_ENLACES entonces
+                viejo := enl_ruta[i]
+                enl_ruta[i] := r
+                r := 0
+            sino
+                err := ENOENT
+            fin
+            abre_mutex(dirección(enl_mutex))
+        fin
+        si viejo <> 0 entonces libera(puntero(viejo)) fin
+        si r <> 0 entonces libera(puntero(r)) fin
+        devolver err
+    fin
+
+    función mismo_sin_mayúsculas(a: puntero a byte, b: puntero a byte): bool
+        variable l: nat32
+        l := prefijo_ruta(a, b)
+        devolver l > 0 y b[l] = 0
+    fin
+
+    ; [etapa 10 g] la carpeta t1 se ha movido a t2: los enlaces de dentro,
+    ; con ella (t2 y lo que seguía)
+    función mueve_enlaces(t1: puntero a byte, t2: puntero a byte)
+        variable i, l, l2, j: nat32
+        variable b, nuevo, viejo: nat64
+        variable r, x: puntero a byte
+        i := 0
+        mientras i < MAX_ENLACES hacer
+            nuevo := nat64(reserva(LARGO_RUTA))
+            si nuevo = 0 entonces devolver fin
+            viejo := 0
+            cierra_mutex(dirección(enl_mutex))
+            si enl_ruta[i] <> 0 entonces
+                r := puntero(enl_ruta[i])
+                l := prefijo_ruta(t1, r)
+                si l > 0 y r[l] = '/' y nat64(largo(t2)) + nat64(largo(r) - l) + 1 < LARGO_RUTA entonces
+                    x := puntero(nuevo)
+                    copia_texto(x, t2, LARGO_RUTA)
+                    l2 := largo(x)
+                    j := l
+                    mientras r[j] <> 0 hacer
+                        x[l2] := r[j]
+                        l2 := l2 + 1
+                        j := j + 1
+                    fin
+                    x[l2] := 0
+                    viejo := enl_ruta[i]
+                    enl_ruta[i] := nuevo
+                    nuevo := 0
+                fin
+            fin
+            abre_mutex(dirección(enl_mutex))
+            si viejo <> 0 entonces libera(puntero(viejo)) fin
+            si nuevo <> 0 entonces libera(puntero(nuevo)) fin
+            i := i + 1
+        fin
     fin
 
     ; ¿es «ruta» una carpeta? (chdir); su ruta absoluta, en t
