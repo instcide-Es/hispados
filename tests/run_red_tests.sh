@@ -64,6 +64,9 @@ printf '; a mano\r\nDHCP=NO\r\nIP=10.0.2.20\r\nMASCARA=255.255.255.0\r\nPUERTA=1
 mkimg() {   # mkimg destino
   cp "$IMG" $1
   mdel -i $1 ::HISPADOS/HISPA.WAV 2>/dev/null   # sitio para lo que se descarga
+  # (y para DESCARGAR /Y: el de antes solo se quita cuando el nuevo, que se
+  # baja al lado, ha llegado entero; hacen falta 2 x 150.000 octetos)
+  mdel -i $1 ::HISPADOS/VENTANAS.COM 2>/dev/null
   mcopy -o -i $1 $T/RED2.INI ::RED2.INI
   mcopy -o -i $1 $T/RED3.INI ::RED3.INI
 }
