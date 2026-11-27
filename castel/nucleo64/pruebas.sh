@@ -1552,7 +1552,21 @@ red9() {   # SALIDA NIC CPUS LÍNEA [dns]: arranca con RED.PRB y el cliente del 
   local nicq="-nic user,model=$nic,hostfwd=tcp:127.0.0.1:$((17000 + n))-:7000"
   [ "$nic" = usb-net ] && nicq="-device qemu-xhci,id=xhci -netdev user,id=u0,hostfwd=tcp:127.0.0.1:$((17000 + n))-:7000 -device usb-net,netdev=u0,bus=xhci.0"
   rm -f "$s" "$s.eco"
-  ( for i in $(seq 150); do python3 -I -c '
+  # [etapa 10 h] el cliente del eco, solo cuando el invitado ya escucha (su
+  # «ECO: escuchando» en el puerto serie). Antes se conectaba desde el
+  # principio y, sin respuesta en 30 s, lo dejaba y probaba otra vez: pero esa
+  # conexión no se pierde, la tiene QEMU (slirp acepta en el anfitrión y manda
+  # el SYN al invitado, que aún no tiene red, y lo repite hasta 75 s); si una
+  # de esas repeticiones llegaba justo después del listen, el invitado se
+  # quedaba con la conexión vieja (con sus 100 KB y su FIN, que slirp guarda)
+  # y la devolvía entera a un cliente que ya no estaba: «1 conexiones, 102400
+  # octetos devueltos» y ningún .eco. Con 8 procesadores el invitado llega al
+  # listen a los ~30 s, justo el plazo del primer intento: de ahí que fallara a
+  # veces desde que el arranque fue un poco más deprisa (etapa 10 g). Si el
+  # invitado se da cuenta (EPIPE), no la cuenta y espera otra; si slirp ya lo
+  # había aceptado todo, no se puede dar cuenta: igual en Linux.
+  ( for i in $(seq 300); do grep -aq 'ECO: escuchando' "$s" 2> /dev/null && break; sleep 1; done
+    for i in $(seq 20); do python3 -I -c '
 import socket, sys
 s = socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=30); d = bytes(range(256)) * 400; s.sendall(d); s.shutdown(1); r = b""
 while True:
