@@ -8,7 +8,5 @@ duro: INSTALAR, que lo hace paso a paso (borra lo que haya en el disco).
 BASIC es el BASIC: como GW-BASIC, y con las órdenes también en español
 (IMPRIMIR, SI... ENTONCES). La línea que se escribe se corrige con las
 flechas, Inicio, Fin, Supr e Insert; las de antes vuelven con arriba y abajo.
-Carga los controladores de DOS de otros (DEVICE= en CONFIG.SYS) y los
-«packet drivers» de las tarjetas de red, como MS-DOS.
 Aparte van el disquete de Oficina (PLUMA, textos; CUENTAS, hoja de
 cálculo) y el de Juegos (DERRIBO y MARCIANA; JUEGOS.TXT dice cómo).
