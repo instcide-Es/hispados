@@ -1448,6 +1448,10 @@ sys.exit(0 if r == d else 1)' "$((17000 + n))" 2> /dev/null && { echo bien > "$s
   kill $cli 2> /dev/null; wait $cli 2> /dev/null
   return $c
 }
+# ([etapa 10 d] el CMOS, de -1 a 2 s del reloj: se escribe redondeado al
+# segundo más cercano, y se lee y se compara truncando los dos; con el
+# servidor cargado, 2 sale en una de cada seis o siete: de 20 arranques de
+# la red en cuatro vueltas, 3)
 red9_bien() {   # SALIDA [dns]
   local s=$1 v; v=$(serie "$s")
   [ -n "$PH9" ] && [ -n "$PS9" ] && [ -n "$PN9" ] && [ -n "$PE9" ] \
@@ -1458,7 +1462,7 @@ red9_bien() {   # SALIDA [dns]
     && grep -q "certificado no válido: es de otro nombre" <<< "$v" \
     && { [ "${2:-}" != dns ] || { grep -q "^PING anfitrion.prueba (10.0.2.2): 56 octetos de datos" <<< "$v" && grep -q "^PING 10.0.2.2: 1 enviados, 1 recibidos" <<< "$v" && grep -q "^Programa «=2 DESCARGA\|^Programa «DESCARGA http://noexiste.zz/»: acaba con el código 2, como debe" <<< "$v" && [ "$(grep -c "^DESCARGA: 1048576 octetos en .*; sha256 = $SHA9$" <<< "$v")" -ge 4 ]; }; } \
     && grep -q "^NTP: 10.0.2.2:$PN9 dice .*; el reloj iba 36[0-9][0-9][0-9][0-9][0-9] ms atrasado .*; puesto en hora$" <<< "$v" \
-    && grep -qE "^  la hora, puesta [0-9]+ veces; el CMOS, escrito [0-9]+ veces: va (-1|0|1) s del reloj \(en (hora local|UTC)\)$" <<< "$v" \
+    && grep -qE "^  la hora, puesta [0-9]+ veces; el CMOS, escrito [0-9]+ veces: va (-1|0|1|2) s del reloj \(en (hora local|UTC)\)$" <<< "$v" \
     && grep -q "^ECO: 1000000 octetos de ida y vuelta, iguales" <<< "$v" && grep -q "^ECO: servidor: 1 conexiones, 102400 octetos devueltos$" <<< "$v" \
     && [ -f "$s.eco" ] \
     && ! grep -q "^Programa .*: acaba con el código [0-9]*$" <<< "$v" \
