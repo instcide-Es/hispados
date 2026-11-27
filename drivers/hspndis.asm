@@ -79,6 +79,7 @@ p_reqconf:
         xor ax, ax
         retf 12
 p_txconf:
+        mov byte [cs:tx_busy], 0    ; el búfer de envío vuelve a estar libre
         xor ax, ax
         retf 10
 p_indcomplete:
@@ -87,31 +88,491 @@ p_indcomplete:
 p_status:
         xor ax, ax
         retf 12
-p_rxchain:
-        inc word [cs:rx_tramas]
-        mov ax, 3                   ; FRAME_NOT_RECOGNIZED: no nos la quedamos
-        retf 16
+
 ; ReceiveLookahead(MACID, FrameSize, BytesAvail, Buffer, Indicate, ProtDS)
 ;   [bp+6] ProtDS, [bp+8] Indicate, [bp+12] Buffer, [bp+16] BytesAvail,
 ;   [bp+18] FrameSize, [bp+20] MACID
 p_lookahead:
         push bp
         mov bp, sp
+        pushad
+        push ds
         push es
-        push bx
-        inc word [cs:rx_tramas]
+        push fs
+        push cs
+        pop ds
+        inc word [rx_tramas]
+        mov cx, [bp+18]
+        cmp cx, 14
+        jb .no
+        cmp cx, 1514
+        ja .no
         cmp word [bp+16], 14
-        jb .r
-        les bx, [bp+12]
-        cmp word [es:bx+12], 0x0608 ; tipo 0806h: ARP
-        jne .r
-        inc word [cs:rx_arp]
-.r:
-        pop bx
+        jb .no
+        lfs si, [bp+12]
+        cmp word [fs:si+12], 0x0608
+        jne .na
+        inc word [rx_arp]
+.na:
+        call buscar_handle          ; -> BX = manejador (CF si nadie lo quiere)
+        jc .no
+        call pedir_sitio            ; receptor, AX=0 -> ES:DI
+        jc .no
+        mov cx, [bp+18]
+        cmp cx, [bp+16]
+        ja .transfer
+        push di
+        push cx
+.cp:                                ; todo está en el lookahead: se copia
+        mov al, [fs:si]
+        mov [es:di], al
+        inc si
+        inc di
+        loop .cp
+        pop cx
+        pop di
+        jmp .entregar
+.transfer:                          ; TransferData del resto, hasta ES:DI
+        mov word [tdd], 1
+        mov word [tdd+2], 0
+        mov [tdd+4], cx
+        mov [tdd+6], di
+        mov [tdd+8], es
+        push es
+        push di
+        push cx
+        push cs
+        push word copiados
+        push word 0
+        push cs
+        push word tdd
+        push word [mac_ds]
+        les bx, [mac_udisp]
+        call far [es:bx+12]
+        pop cx
+        pop di
         pop es
+        test ax, ax
+        jnz .no
+        mov bx, [h_actual]
+.entregar:
+        call entregar               ; receptor, AX=1
+        pop fs
+        pop es
+        pop ds
+        popad
+        pop bp
+        xor ax, ax
+        retf 14
+.no:
+        pop fs
+        pop es
+        pop ds
+        popad
+        pop bp
+        mov ax, 3                   ; FRAME_NOT_RECOGNIZED
+        retf 14
+
+; ReceiveChain(MACID, FrameSize, ReqHandle, RxBufDescr, Indicate, ProtDS)
+;   [bp+6] ProtDS, [bp+8] Indicate, [bp+12] RxBufDescr, [bp+16] ReqHandle,
+;   [bp+18] FrameSize, [bp+20] MACID. Se copia todo antes de volver.
+p_rxchain:
+        push bp
+        mov bp, sp
+        pushad
+        push ds
+        push es
+        push fs
+        push gs
+        push cs
+        pop ds
+        inc word [rx_tramas]
+        mov cx, [bp+18]
+        cmp cx, 14
+        jb .no
+        cmp cx, 1514
+        ja .no
+        lgs bx, [bp+12]             ; RxDataCount, y bloques de 6
+        cmp word [gs:bx], 0
+        je .no
+        cmp word [gs:bx+2], 14      ; la cabecera, en el primer bloque
+        jb .no
+        lfs si, [gs:bx+4]
+        push bx
+        call buscar_handle
+        mov [h_actual], bx
+        pop bx
+        jc .no
+        push bx
+        mov bx, [h_actual]
+        call pedir_sitio
+        pop bx
+        jc .no
+        push di
+        mov dx, [gs:bx]             ; cuántos bloques
+        add bx, 2
+        mov cx, [bp+18]             ; lo que queda por copiar
+.blq:
+        test dx, dx
+        jz .fin
+        jcxz .fin
+        push cx
+        mov ax, [gs:bx]             ; RxDataLen
+        lfs si, [gs:bx+2]           ; RxDataPtr
+        cmp ax, cx
+        jbe .l
+        mov ax, cx
+.l:
+        mov cx, ax
+.c:
+        jcxz .ce
+        mov al, [fs:si]
+        mov [es:di], al
+        inc si
+        inc di
+        dec cx
+        jmp .c
+.ce:
+        pop cx
+        sub cx, [gs:bx]             ; (si el bloque era mayor, CX pasa de 0:
+        jae .sg                     ;  ya está todo)
+        xor cx, cx
+.sg:
+        add bx, 6
+        dec dx
+        jmp .blq
+.fin:
+        pop di
+        mov cx, [bp+18]
+        mov bx, [h_actual]
+        call entregar
+        pop gs
+        pop fs
+        pop es
+        pop ds
+        popad
+        pop bp
+        xor ax, ax
+        retf 16
+.no:
+        pop gs
+        pop fs
+        pop es
+        pop ds
+        popad
         pop bp
         mov ax, 3
-        retf 14
+        retf 16
+
+; FS:SI = trama -> BX = manejador (1..NH) que quiere su tipo; CF si ninguno
+buscar_handle:
+        push cx
+        push di
+        mov bx, 1
+        mov di, handles
+.l:
+        cmp byte [di+H_USED], 0
+        je .sig
+        movzx cx, byte [di+H_TLEN]
+        push si
+        push di
+        add si, 12
+        add di, H_TIPO
+.c:
+        jcxz .igual
+        mov al, [fs:si]
+        cmp al, [di]
+        jne .dist
+        inc si
+        inc di
+        dec cx
+        jmp .c
+.igual:
+        pop di
+        pop si
+        mov [h_actual], bx
+        clc
+        jmp .r
+.dist:
+        pop di
+        pop si
+.sig:
+        add di, H_LEN
+        inc bx
+        cmp bx, NH
+        jbe .l
+        stc
+.r:
+        pop di
+        pop cx
+        ret
+
+; BX = manejador, CX = longitud: el receptor, AX=0 -> ES:DI (CF si 0:0)
+pedir_sitio:
+        push bx
+        push cx
+        push si
+        push bp
+        push ds
+        imul si, bx, H_LEN
+        add si, handles - H_LEN
+        xor ax, ax
+        call far [si+H_RECV]
+        pop ds
+        pop bp
+        pop si
+        pop cx
+        pop bx
+        mov ax, es
+        or ax, di
+        jnz .ok
+        stc
+        ret
+.ok:
+        clc
+        ret
+
+; BX = manejador, CX = longitud, ES:DI = la trama ya copiada: AX=1, DS:SI
+entregar:
+        push ds
+        push bp
+        imul si, bx, H_LEN
+        add si, handles - H_LEN
+        push word [si+H_RECV+2]
+        push word [si+H_RECV]
+        mov bp, sp
+        push es
+        pop ds
+        mov si, di
+        mov ax, 1
+        call far [ss:bp]
+        add sp, 4
+        pop bp
+        pop ds
+        ret
+
+; =============================================================================
+;  La interfaz de packet driver (FTP Software, 1.09/1.11), clase 1 (Ethernet):
+;  1 driver_info, 2 access_type, 3 release_type, 4 send_pkt, 5 terminate,
+;  6 get_address, 7 reset_interface. Errores: CF y DH = código.
+; =============================================================================
+pd_int:
+        jmp short pd_main
+        nop
+        db "PKT DRVR", 0
+pd_main:
+        sti
+        cld
+        cmp ah, 1
+        je pd_info
+        cmp ah, 2
+        je pd_access
+        cmp ah, 3
+        je pd_release
+        cmp ah, 4
+        je pd_send
+        cmp ah, 5
+        je pd_terminate
+        cmp ah, 6
+        je pd_address
+        cmp ah, 7
+        je pd_ok
+        mov dh, 11                  ; BAD_COMMAND
+pd_err:
+        stc
+        retf 2
+pd_ok:
+        clc
+        retf 2
+pd_terminate:
+        mov dh, 7                   ; CANT_TERMINATE
+        jmp pd_err
+pd_info:
+        mov bx, 1                   ; versión
+        mov cx, 0x0100              ; clase 1, número 0
+        mov dx, 1
+        push cs
+        pop ds
+        mov si, pd_nombre
+        mov al, 1                   ; funciones básicas
+        jmp pd_ok
+; AL = clase, BX = tipo, DL = número, DS:SI = plantilla, CX = su largo,
+; ES:DI = receptor -> AX = manejador
+pd_access:
+        cmp al, 1
+        je .cl
+        mov dh, 2                   ; NO_CLASS
+        jmp pd_err
+.cl:
+        cmp cx, 8
+        jbe .tl
+        mov dh, 5                   ; BAD_TYPE
+        jmp pd_err
+.tl:
+        push bx
+        push si
+        push di
+        push cx
+        mov bx, handles
+        mov ax, 1
+.b:
+        cmp byte [cs:bx+H_USED], 0
+        je .libre
+        add bx, H_LEN
+        inc ax
+        cmp ax, NH
+        jbe .b
+        pop cx
+        pop di
+        pop si
+        pop bx
+        mov dh, 9                   ; NO_SPACE
+        jmp pd_err
+.libre:
+        mov byte [cs:bx+H_USED], 1
+        mov [cs:bx+H_TLEN], cl
+        mov [cs:bx+H_RECV], di
+        mov [cs:bx+H_RECV+2], es
+        lea di, [bx+H_TIPO]
+.ct:
+        jcxz .ctf
+        push ax
+        lodsb
+        mov [cs:di], al
+        pop ax
+        inc di
+        dec cx
+        jmp .ct
+.ctf:
+        pop cx
+        pop di
+        pop si
+        pop bx
+        jmp pd_ok
+; BX = manejador
+pd_release:
+        call pd_handle
+        jc pd_err
+        mov byte [cs:si+H_USED], 0
+        jmp pd_ok
+; BX = manejador -> SI = su entrada; CF y DH = BAD_HANDLE
+pd_handle:
+        cmp bx, 1
+        jb .mal
+        cmp bx, NH
+        ja .mal
+        imul si, bx, H_LEN
+        add si, handles - H_LEN
+        cmp byte [cs:si+H_USED], 0
+        je .mal
+        clc
+        ret
+.mal:
+        mov dh, 1
+        stc
+        ret
+; BX = manejador, ES:DI = sitio, CX = su largo -> CX = 6
+pd_address:
+        push si
+        call pd_handle
+        pop si
+        jc pd_err
+        cmp cx, 6
+        jae .ok
+        mov dh, 9                   ; NO_SPACE
+        jmp pd_err
+.ok:
+        push si
+        push di
+        mov si, mi_mac
+        mov cx, 6
+.c:
+        mov al, [cs:si]
+        stosb
+        inc si
+        loop .c
+        pop di
+        pop si
+        mov cx, 6
+        jmp pd_ok
+; DS:SI = trama, CX = largo
+pd_send:
+        cmp cx, 1514
+        jbe .l
+        mov dh, 12                  ; CANT_SEND
+        jmp pd_err
+.l:
+        pushad
+        push es
+        ; esperar a que el MAC suelte el envío anterior (como mucho ~1 s)
+        mov edx, 0x00400000
+.esp:
+        cmp byte [cs:tx_busy], 0
+        je .libre
+        dec edx
+        jnz .esp
+        mov byte [cs:tx_busy], 0
+.libre:
+        push cs
+        pop es
+        mov di, txbuf
+        push cx
+        rep movsb
+        pop cx
+        cmp cx, 60
+        jae .tam
+        push cx
+        neg cx
+        add cx, 60
+        xor al, al
+        rep stosb
+        pop cx
+        mov cx, 60
+.tam:
+        mov word [cs:txd2], 0
+        mov dword [cs:txd2+2], 0
+        mov word [cs:txd2+6], 1
+        mov word [cs:txd2+8], 0
+        mov [cs:txd2+10], cx
+        mov word [cs:txd2+12], txbuf
+        mov [cs:txd2+14], cs
+        mov byte [cs:tx_busy], 1
+        push word [cs:cct_id]
+        push word 1                 ; ReqHandle 1: TransmitConfirm si va en cola
+        push cs
+        push word txd2
+        push word [cs:mac_ds]
+        les bx, [cs:mac_udisp]
+        call far [es:bx+8]
+        cmp ax, 2                   ; REQUEST_QUEUED: el confirm lo suelta
+        je .cola
+        mov byte [cs:tx_busy], 0
+        test ax, ax
+        jz .cola
+        pop es
+        popad
+        mov dh, 12
+        jmp pd_err
+.cola:
+        pop es
+        popad
+        jmp pd_ok
+
+NH          equ 4                   ; manejadores (tipos) a la vez
+H_USED      equ 0
+H_TLEN      equ 1
+H_TIPO      equ 2                   ; hasta 8 octetos
+H_RECV      equ 10                  ; el receptor (lejano)
+H_LEN       equ 14
+handles     times NH*H_LEN db 0
+h_actual    dw 0
+copiados    dw 0
+tdd         times 10 db 0
+txd2        times 16 db 0
+tx_busy     db 0
+mi_mac      times 6 db 0
+pd_nombre   db "HSPNDIS (NDIS 2)", 0
+txbuf       times 1514 db 0
 
 ; Peticiones del sistema (5.3): System(Param1 dd, Param2 dd, Param3 dw,
 ; Opcode dw, TargetDS dw): [bp+6] DS, [bp+8] opcode, [bp+10] Param3,
@@ -381,7 +842,28 @@ main:
         xor cx, cx
         xor edx, edx
         call mac_request
+        jmp residente2
 residente:
+        ; el packet driver en INT 60h (si no hay ya uno)
+        mov ax, 0x3560
+        int 0x21
+        lea di, [bx+3]
+        mov si, pd_int+3
+        mov cx, 8
+        repe cmpsb
+        push cs
+        pop es
+        jne .instala
+        mov dx, m_yahay
+        call puts
+        jmp salir1
+.instala:
+        mov dx, pd_int
+        mov ax, 0x2560
+        int 0x21
+        mov dx, m_int60
+        call puts
+residente2:
         mov dx, m_resid
         call puts
         mov dx, (fin_residente - start + 0x100 + 15) / 16
@@ -584,6 +1066,8 @@ m_filtro    db "Filtro de paquetes: $"
 m_tx        db "Envío (TransmitChain): $"
 m_rx        db "Tramas recibidas: $"
 m_rxarp     db ", de ellas ARP: $"
+m_yahay     db "Ya hay un packet driver en INT 60h: no se instala", 13, 10, "$"
+m_int60     db "Packet driver en INT 60h.", 13, 10, "$"
 m_resid     db "HSPNDIS queda residente.", 13, 10, "$"
 n_protman   db "PROTMAN$", 0
 n_bindings  db "BINDINGS", 0
@@ -596,7 +1080,6 @@ rb          times 14 db 0
 blist       dw 0
             times 4*16 db 0
 fallan      times 32 db 0
-mi_mac      times 6 db 0
 txd         times 16 db 0
 arp_trama:
             db 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF   ; a todos
