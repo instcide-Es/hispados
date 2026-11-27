@@ -19,7 +19,10 @@
  *   - sqlite con su VFS de Unix de verdad (el de los cerrojos de fcntl): dos
  *     procesos con la misma base; mientras uno la tiene en BEGIN EXCLUSIVE,
  *     el otro recibe SQLITE_BUSY; al acabar el primero, el otro escribe; al
- *     final, las filas de los dos e integrity_check bien.
+ *     final, las filas de los dos e integrity_check bien;
+ *   - [etapa 10 h] sqlite en modo WAL (como la base de datos de Ladybird):
+ *     el -shm, con mmap MAP_SHARED de escribir; dos procesos, uno lee
+ *     mientras el otro escribe (sin SQLITE_BUSY), checkpoint, integrity_check.
  * Al final, «MCANDADOS: todo bien (N pruebas)» y código 0. Corre igual en Linux. */
 #define _GNU_SOURCE
 #include <stdlib.h>
@@ -180,6 +183,76 @@ static int prueba_sqlite(void)
 	return 0;
 }
 
+/* [etapa 10 h] sqlite en modo WAL: el -shm va con mmap MAP_SHARED de escribir */
+#define BASEW "/tmp/mcandados-wal.db"
+static int prueba_wal(void)
+{
+	unlink(BASEW); unlink(BASEW "-wal"); unlink(BASEW "-shm");
+	sqlite3 *db;
+	sqlite3_stmt *s;
+	char modo[16] = "";
+	if (sqlite3_open_v2(BASEW, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, 0) != SQLITE_OK) return 1;
+	if (sqlite3_prepare_v2(db, "PRAGMA journal_mode=WAL", -1, &s, 0) == SQLITE_OK && sqlite3_step(s) == SQLITE_ROW)
+		snprintf(modo, sizeof modo, "%s", (const char *)sqlite3_column_text(s, 0));
+	sqlite3_finalize(s);
+	int bien = !strcmp(modo, "wal") && sql(db, "CREATE TABLE t(quién TEXT, n INTEGER); INSERT INTO t VALUES('padre', 0);") == SQLITE_OK;
+	int tubo[2], vuelta[2];
+	if (pipe(tubo) || pipe(vuelta)) return 3;
+	pid_t h = fork();
+	if (h == 0) {
+		/* el hijo: lee mientras el padre tiene una escritura a medias (en WAL no estorba) y luego escribe */
+		char c;
+		sqlite3 *d2;
+		sqlite3_stmt *q;
+		if (read(tubo[0], &c, 1) != 1) _exit(10);
+		if (sqlite3_open_v2(BASEW, &d2, SQLITE_OPEN_READWRITE, 0) != SQLITE_OK) _exit(11);
+		int n = -1;
+		if (sqlite3_prepare_v2(d2, "SELECT count(*) FROM t", -1, &q, 0) == SQLITE_OK && sqlite3_step(q) == SQLITE_ROW) n = sqlite3_column_int(q, 0);
+		sqlite3_finalize(q);
+		c = n == 1 ? 'L' : 'x';
+		if (write(vuelta[1], &c, 1) != 1) _exit(12);
+		if (read(tubo[0], &c, 1) != 1) _exit(13);
+		sqlite3_busy_timeout(d2, 5000);
+		int r = sql(d2, "BEGIN; INSERT INTO t VALUES('hijo', 1); INSERT INTO t VALUES('hijo', 2); COMMIT;");
+		sqlite3_close(d2);
+		_exit(r == SQLITE_OK ? 0 : 14);
+	}
+	char c = 0;
+	bien = bien && sql(db, "BEGIN IMMEDIATE; INSERT INTO t VALUES('padre', 1);") == SQLITE_OK;
+	if (write(tubo[1], "1", 1) != 1) bien = 0;
+	if (read(vuelta[0], &c, 1) != 1) bien = 0;
+	int lee = c == 'L';
+	bien = bien && sql(db, "INSERT INTO t VALUES('padre', 2); COMMIT;") == SQLITE_OK;
+	if (write(tubo[1], "2", 1) != 1) bien = 0;
+	int st = -1;
+	waitpid(h, &st, 0);
+	int hijo_bien = WIFEXITED(st) && WEXITSTATUS(st) == 0;
+	int filas = -1;
+	if (sqlite3_prepare_v2(db, "SELECT count(*) FROM t", -1, &s, 0) == SQLITE_OK && sqlite3_step(s) == SQLITE_ROW) filas = sqlite3_column_int(s, 0);
+	sqlite3_finalize(s);
+	int ck = sqlite3_wal_checkpoint_v2(db, 0, SQLITE_CHECKPOINT_TRUNCATE, 0, 0) == SQLITE_OK;
+	char integ[16] = "";
+	if (sqlite3_prepare_v2(db, "PRAGMA integrity_check", -1, &s, 0) == SQLITE_OK && sqlite3_step(s) == SQLITE_ROW)
+		snprintf(integ, sizeof integ, "%s", (const char *)sqlite3_column_text(s, 0));
+	sqlite3_finalize(s);
+	sqlite3_close(db);
+	/* y abierta otra vez desde cero: lo de los dos */
+	int filas2 = -1;
+	if (sqlite3_open_v2(BASEW, &db, SQLITE_OPEN_READONLY, 0) == SQLITE_OK) {
+		if (sqlite3_prepare_v2(db, "SELECT count(*) FROM t", -1, &s, 0) == SQLITE_OK && sqlite3_step(s) == SQLITE_ROW) filas2 = sqlite3_column_int(s, 0);
+		sqlite3_finalize(s);
+		sqlite3_close(db);
+	}
+	unlink(BASEW); unlink(BASEW "-wal"); unlink(BASEW "-shm");
+	MIRA(bien, "sqlite WAL: journal_mode=WAL y el padre escribe");
+	MIRA(lee, "sqlite WAL: el hijo lee mientras el padre escribe (sin SQLITE_BUSY)");
+	MIRA(hijo_bien, "sqlite WAL: el hijo escribe después");
+	MIRA(filas == 5 && ck && !strcmp(integ, "ok") && filas2 == 5, "sqlite WAL: las 5 filas, checkpoint, integrity_check y otra vez abierta");
+	printf("  sqlite en modo WAL (el -shm con mmap MAP_SHARED): dos procesos; el segundo lee mientras el primero escribe; luego escribe; %d filas, checkpoint %s, integrity_check: %s; abierta otra vez: %d filas\n",
+	       filas, ck ? "bien" : "mal", integ, filas2);
+	return 0;
+}
+
 int main(void)
 {
 	struct flock f;
@@ -282,5 +355,6 @@ int main(void)
 	close(fd);
 	unlink(RUTA);
 	prueba_sqlite();
+	prueba_wal();
 	return acaba("MCANDADOS");
 }

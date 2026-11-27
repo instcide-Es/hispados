@@ -22,7 +22,12 @@
  *   - F_SETLKW con un abrazo mortal entre dos procesos: EDEADLK;
  *   - sched_getcpu (en Hispa-64 y en Linux, por el vDSO: __vdso_getcpu);
  *   - flock, statfs y fstatfs, chmod y fchmod, /proc/self/status (lo que
- *     pidió después el navegador).
+ *     pidió después el navegador);
+ *   - [etapa 10 h] mmap MAP_SHARED de escribir de un archivo (lo que pide
+ *     sqlite en modo WAL): dos mmap del mismo archivo se ven, write y read
+ *     con lo mapeado, un hijo que escribe (lo ve el padre), msync (y sus
+ *     errores), lo de más allá del final, ftruncate (a cero al crecer), lo
+ *     escrito en el archivo al soltarlo, EACCES de solo leer.
  * Al final, «MPOSIX: todo bien (N pruebas)» y código 0. Corre igual en Linux. */
 #define _GNU_SOURCE
 #include <stdlib.h>
@@ -470,6 +475,68 @@ static void getcpu_(void)
 	printf("  sched_getcpu, y __vdso_getcpu en el vDSO: %s\n", vdso_tiene("__vdso_getcpu") ? "sí" : "no");
 }
 
+/* [etapa 10 h] mmap MAP_SHARED de escribir de un archivo */
+static void compartido_archivo(void)
+{
+	const char *r = "/tmp/mposix.comp";
+	char t[3 * 4096], u[3 * 4096];
+	for (int i = 0; i < (int)sizeof t; i++) t[i] = 'a' + i % 23;
+	unlink(r);
+	int fd = open(r, O_RDWR | O_CREAT | O_TRUNC, 0644);
+	MIRA(fd >= 0 && write(fd, t, 8292) == 8292, "el archivo para MAP_SHARED (8 KB y 100 octetos)");
+	char *m = mmap(NULL, 3 * 4096, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	char *m2 = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 4096);
+	MIRA(m != MAP_FAILED && m2 != MAP_FAILED, "mmap MAP_SHARED de escribir de un archivo (dos veces)");
+	if (m == MAP_FAILED || m2 == MAP_FAILED) { close(fd); return; }
+	int bien = !memcmp(m, t, 8292) && !memcmp(m2, t + 4096, 4096) && m[8292] == 0 && m[3 * 4096 - 1] == 0;
+	MIRA(bien, "lo del archivo; más allá del final (en la última página), ceros");
+	m[5000] = 'X';
+	MIRA(m2[5000 - 4096] == 'X', "lo escrito en un mmap, en el otro");
+	char c = 0;
+	MIRA(pread(fd, &c, 1, 5000) == 1 && c == 'X', "y con read");
+	MIRA(pwrite(fd, "QR", 2, 100) == 2 && m[100] == 'Q' && m[101] == 'R', "lo escrito con write, en el mmap");
+	pid_t h = fork();
+	if (h == 0) { m2[10] = 'H'; _exit(0); }
+	int st = -1;
+	waitpid(h, &st, 0);
+	MIRA(WIFEXITED(st) && m[4096 + 10] == 'H', "lo que escribe un hijo, el padre lo ve");
+	MIRA(msync(m, 3 * 4096, MS_SYNC) == 0 && msync(m, 4096, MS_ASYNC) == 0, "msync (MS_SYNC y MS_ASYNC)");
+	errno = 0;
+	MIRA(msync(m + 1, 4096, MS_SYNC) == -1 && errno == EINVAL, "msync mal alineado: EINVAL");
+	errno = 0;
+	MIRA(msync(m, 4096, MS_SYNC | MS_ASYNC) == -1 && errno == EINVAL, "msync con MS_SYNC y MS_ASYNC: EINVAL");
+	char *n = mmap(NULL, 4096, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	munmap(n, 4096);
+	errno = 0;
+	MIRA(msync(n, 4096, MS_SYNC) == -1 && errno == ENOMEM, "msync de lo que no está puesto: ENOMEM");
+	/* lo de más allá del final no va al archivo; ftruncate: lo de después, a cero */
+	m[8292 + 5] = 'F';
+	struct stat sb;
+	MIRA(fstat(fd, &sb) == 0 && sb.st_size == 8292, "el tamaño, el de antes (lo de más allá del final no cuenta)");
+	MIRA(ftruncate(fd, 4096) == 0 && ftruncate(fd, 8292) == 0 && m[4096 + 10] == 0 && m[5000] == 0 && m[8292 + 5] == 0 && m[0] == 'a', "ftruncate más corto y otra vez más largo: lo de después, a cero");
+	m[6000] = 'S';
+	munmap(m2, 4096);
+	munmap(m, 3 * 4096);
+	close(fd);
+	fd = open(r, O_RDONLY);
+	memcpy(u, t, 4096);
+	u[100] = 'Q'; u[101] = 'R';
+	memset(u + 4096, 0, 4096 + 100);
+	u[6000] = 'S';
+	memset(u + 8192, 0, 100);
+	char v[8292 + 10];
+	MIRA(fd >= 0 && read(fd, v, sizeof v) == 8292 && !memcmp(v, u, 8292), "al soltarlo, lo escrito en la memoria está en el archivo");
+	errno = 0;
+	char *ro = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	MIRA(ro == MAP_FAILED && errno == EACCES, "MAP_SHARED de escribir de uno abierto para leer: EACCES");
+	ro = mmap(NULL, 4096, PROT_READ, MAP_SHARED, fd, 0);
+	MIRA(ro != MAP_FAILED && ro[100] == 'Q', "MAP_SHARED de solo leer, sí");
+	if (ro != MAP_FAILED) munmap(ro, 4096);
+	close(fd);
+	unlink(r);
+	printf("  mmap MAP_SHARED de escribir de un archivo: dos mmap, read y write, un hijo, msync, ftruncate, al archivo al soltarlo: bien\n");
+}
+
 int main(void)
 {
 	setvbuf(stdout, NULL, _IOLBF, 0);
@@ -483,5 +550,6 @@ int main(void)
 	abrazo();
 	getcpu_();
 	mas_cosas();
+	compartido_archivo();
 	return acaba("MPOSIX");
 }

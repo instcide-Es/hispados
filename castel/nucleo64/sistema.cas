@@ -1217,7 +1217,7 @@ módulo Sistema
         ext := 0
         si anónima y compartida entonces ext := R_COMPARTIDA fin
         ; [etapa 7] de un archivo: una copia de lo que tiene (MAP_PRIVATE, y
-        ; MAP_SHARED de solo leer); MAP_SHARED de escribir, aún no
+        ; MAP_SHARED de solo leer); [etapa 10 h] MAP_SHARED de escribir, sus páginas compartidas (abajo)
         si no anónima entonces
             si fd < 0 entonces devolver EBADF fin
             si no fd_bien(p, nat64(fd)) entonces devolver EBADF fin
@@ -1240,11 +1240,15 @@ módulo Sistema
                 si vfs_es_carpeta(ab) entonces devolver ENODEV fin
                 si ab.marcas yb O_ACCESO = O_WRONLY entonces devolver EACCES fin
                 si desp yb 4095 <> 0 entonces devolver EINVAL fin
+                ext := R_ARCHIVO
+                ; [etapa 10 h] MAP_SHARED de escribir: las páginas compartidas
+                ; del archivo (Vfs64.Comp), puestas al tocarlas (Procesos.pon_página)
                 si compartida y prot yb 2 <> 0 entonces
                     si ab.marcas yb O_ACCESO <> O_RDWR entonces devolver EACCES fin
-                    devolver ENODEV
+                    si vfs_de_unidad(ab) <> 0 entonces devolver EACCES fin
+                    si (desp >> 12) + (arriba(largo) >> 12) > MÁX_COMP_PÁG o arriba(largo) < largo entonces devolver ENOMEM fin
+                    ext := R_COMPARCH
                 fin
-                ext := R_ARCHIVO
             fin
         fin
         l := arriba(largo)
@@ -1306,7 +1310,7 @@ módulo Sistema
                 devolver r
             fin
         fin
-        si ab <> nulo entonces
+        si ab <> nulo y ext = R_ARCHIVO entonces
             r := llena_de_archivo(p, a, l, ab, desp, nat32(prot))
             si r < 0 entonces
                 quita_de(p, a, a + l)
@@ -1435,6 +1439,62 @@ módulo Sistema
             i := i + 1
         fin
         abre_mem(p)
+        devolver r
+    fin
+
+    ; [etapa 10 h] msync: lo de las páginas compartidas de los archivos
+    ; (MAP_SHARED de escribir) en [dir_, dir_ + largo), a su archivo; con
+    ; MS_SYNC, también al disco. Los errores de Linux: mal alineado o MS_ASYNC
+    ; con MS_SYNC, EINVAL; algo sin poner en medio, ENOMEM (después de volcar
+    ; lo que sí estaba, como Linux).
+    función sincroniza_mem(p: puntero a Proceso, dir_: nat64, largo: nat64, marcas_: nat64): ent64
+        variable l, v, desp, ab: nat64
+        variable i: nat32
+        variable r: ent64
+        variable hueco_: bool
+        variable abs: arreglo [64] de nat64
+        variable n_abs, k: nat32
+        si dir_ yb 4095 <> 0 o marcas_ yb (nob nat64(7)) <> 0 o marcas_ yb 5 = 5 entonces devolver EINVAL fin
+        l := arriba(largo)
+        si l < largo o dir_ + l < dir_ entonces devolver ENOMEM fin
+        cierra_mem(p)
+        ; lo que hay puesto de [dir_, dir_ + l), seguido (si no, ENOMEM)
+        hueco_ := falso
+        v := dir_
+        mientras v < dir_ + l hacer
+            si región_de(p, v) < 0 entonces
+                hueco_ := cierto
+                romper
+            fin
+            v := p.reg_fin[nat32(región_de(p, v))]
+        fin
+        ; los abiertos de las regiones compartidas de archivo en el trozo (sin repetir)
+        n_abs := 0
+        i := 0
+        mientras nat64(i) < p.n_reg hacer
+            si p.reg_ini[i] < dir_ + l y p.reg_fin[i] > dir_ y p.reg_ext[i] = R_COMPARCH entonces
+                ab := mapa_de(p, i, p.reg_ini[i], desp)
+                si ab <> 0 y n_abs < 64 entonces
+                    k := 0
+                    mientras k < n_abs y abs[k] <> ab hacer k := k + 1 fin
+                    si k = n_abs entonces
+                        vfs_otro(puntero(ab))
+                        abs[n_abs] := ab
+                        n_abs := n_abs + 1
+                    fin
+                fin
+            fin
+            i := i + 1
+        fin
+        abre_mem(p)
+        r := 0
+        k := 0
+        mientras k < n_abs hacer
+            si r = 0 entonces r := vfs_comp_vuelca(puntero(abs[k]), marcas_ yb 4 <> 0) fin
+            vfs_cierra(puntero(abs[k]))
+            k := k + 1
+        fin
+        si r = 0 y hueco_ entonces r := ENOMEM fin
         devolver r
     fin
 
@@ -2484,6 +2544,7 @@ módulo Sistema
             caso 293: r := tubo_(p, a1, a2)
             caso 25: r := remapea(p, a1, a2, a3, a4)        ; [etapa 10 g] mremap (sin mover: musl copia)
             caso 28: r := aconseja(p, a1, a2, a3)
+            caso 26: r := sincroniza_mem(p, a1, a2, a3)      ; [etapa 10 h] msync
             caso 34:
                 duerme_hasta(p, nob nat64(0))
                 r := ERESTARTNOHAND

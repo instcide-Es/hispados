@@ -74,6 +74,7 @@ módulo Nodos64
         centésimas: nat32           ; exFAT: las centésimas de segundo de mtime (los «10 ms», de 0 a 199 con el segundo impar)
         padre: nat64                ; exFAT: el nodo de su carpeta (con una referencia: para escribir su grupo de entradas)
         n_cum: nat64                ; exFAT: cuántos cúmulos tiene (lo que dice DataLength, redondeado)
+        comp: nat64                 ; [etapa 10 h] sus páginas compartidas (Vfs64.Comp: mmap MAP_SHARED de escribir), o 0
     fin
 
     público tipo Montaje = estructura
@@ -116,7 +117,7 @@ módulo Nodos64
     público variable montajes: arreglo [MAX_MONTAJES] de Montaje
     público variable n_montajes: nat32
     público variable vfs_mutex: Mutex
-    variable nodos: nat64                       ; la lista de nodos en memoria
+    público variable nodos: nat64               ; la lista de nodos en memoria ([etapa 10 h] pública: Vfs64.vfs_sync)
     público variable n_nodos: nat64
 
     ; ---- la memoria ----

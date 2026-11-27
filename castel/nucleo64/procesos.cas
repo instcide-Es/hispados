@@ -76,6 +76,7 @@ módulo Procesos
     público constante R_VDSO = 5                ; [etapa 10 f] el vDSO (Vdso64): de solo leer, siempre
     público constante R_COMPARTIDA = 1          ; [etapa 7] (reg_ext) MAP_SHARED anónima
     público constante R_ARCHIVO = 2             ; [etapa 7] (reg_ext) de un archivo
+    público constante R_COMPARCH = 4            ; [etapa 10 h] (reg_ext) MAP_SHARED de escribir de un archivo: sus páginas compartidas (Vfs64.Comp)
     público constante F_CONSOLA = 1             ; las clases de archivo abierto
     público constante F_ARCHIVO = 2             ; [etapa 5] uno del VFS (Vfs64.Abierto)
     público constante MAX_APL = 32              ; [etapa 10 c] los cierres aplazados a la vez (toma_fd)
@@ -639,8 +640,26 @@ módulo Procesos
     ; ---- la memoria del programa, desde el núcleo ----
     ; una página a cero en v (que no está), con los permisos prot; falso si no hay memoria
     función pon_página(p: puntero a Proceso, v: nat64, prot: nat32): bool
-        variable f, fl: nat64
+        variable f, fl, ab, desp: nat64
         variable i: ent32
+        ; [etapa 10 h] de MAP_SHARED de escribir de un archivo: la página
+        ; compartida del archivo (Vfs64.Comp), la misma para todos
+        i := región_de(p, v)
+        si i >= 0 entonces
+            si p.reg_ext[nat32(i)] = R_COMPARCH entonces
+                ab := mapa_de(p, nat32(i), abajo(v), desp)
+                si ab = 0 entonces devolver falso fin
+                si vfs_comp_prepara(puntero(ab), (desp >> 12) + 1) < 0 entonces devolver falso fin
+                f := vfs_comp_marco(puntero(ab), desp >> 12)
+                si f = 0 entonces devolver falso fin
+                si no mapea_u(espacio_de(p), abajo(v), f, marcas(prot) ob COMPARTIDA) entonces
+                    suelta_marco_u(f)
+                    devolver pte(espacio_de(p), v) yb PRESENTE <> 0
+                fin
+                suma_atómica(dirección(páginas_al_tocar), 1)
+                devolver cierto
+            fin
+        fin
         f := pide()
         si f = 0 entonces devolver falso fin
         ceros_mem(virt(f), 4096)

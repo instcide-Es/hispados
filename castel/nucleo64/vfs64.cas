@@ -23,7 +23,7 @@
 ; =============================================================================
 módulo Vfs64
 
-    importar Cifras64, Es64, Monton64, Hilos64, Sinc64, Discos64, Unidad64, Nodos64, Fat64, Exfat64
+    importar Cifras64, Es64, Monton64, Hilos64, Sinc64, Discos64, Unidad64, Nodos64, Fat64, Exfat64, Fisica64, Espacios
 
     público constante O_ACCESO = 3
     público constante O_RDONLY = 0
@@ -119,6 +119,12 @@ módulo Vfs64
     función suelta(n: puntero a Nodo)
         variable p: nat64
         p := 0
+        ; [etapa 10 h] con la última referencia, lo de sus páginas compartidas,
+        ; al archivo (si aún tiene nombre), y las páginas, fuera
+        si n.refs = 1 y n.comp <> 0 entonces
+            si n.borrado = 0 entonces comp_vuelca_(n) fin
+            comp_suelta_(n)
+        fin
         si n.refs = 1 y n.borrado <> 0 y mm(n.montaje).clase = FS_FAT entonces fat_suelta(n.montaje, n) fin
         si n.refs = 1 y mm(n.montaje).clase = FS_EXFAT entonces p := ex_suelta(n.montaje, n) fin
         suelta_nodo(n)
@@ -668,21 +674,234 @@ módulo Vfs64
         devolver nodo(a.nodo).tamaño
     fin
 
+
+    ; ---- [etapa 10 h] las páginas compartidas de un archivo ----
+    ; mmap MAP_SHARED de escribir de un archivo: sus páginas (desde la 0 del
+    ; archivo, de 4 KB) son de verdad las mismas para todos los que lo mapean
+    ; (como la caché de páginas de Linux, pero solo para los archivos que se
+    ; mapean así). Mientras las tiene, ellas son lo que vale del archivo en su
+    ; trozo: read las lee de ahí (encima de lo del disco), write escribe en el
+    ; disco y en ellas, ftruncate pone a cero lo que pasa del final (si luego
+    ; crece, se ve a cero, como Linux), y lo de ellas va al archivo con msync,
+    ; fsync, sync y al soltar el nodo (la última referencia: los mmap tienen
+    ; la suya, con lo abierto). Lo que se escribe en la memoria más allá del
+    ; final del archivo, en la última página, no va al archivo (como Linux).
+    ; Todo con el mutex del VFS; sus marcos se comparten como los de /dev/shm
+    ; (Espacios.comparte_marco: el Comp tiene uno; cada página puesta, otro).
+    público constante MÁX_COMP_PÁG = 262144     ; 1 GB de un archivo así
+    público tipo Comp = estructura
+        n: nat64                    ; sus páginas (de la 0 a la n - 1)
+        cabe: nat64
+        marcos: nat64               ; (del montón) n nat64: el marco de cada una
+    fin
+    público variable comp_vivos, comp_páginas, comp_volcadas: nat64
+
+    función comp_(n: puntero a Nodo): puntero a Comp
+        devolver puntero(n.comp)
+    fin
+
+    función marco_comp(c: puntero a Comp, i: nat64): nat64
+        variable pm: puntero a nat64
+        pm := puntero(c.marcos + i * 8)
+        devolver valor(pm)
+    fin
+
+    ; (con el mutex) que tenga sus páginas hasta la «hasta» (sin ella): las
+    ; nuevas, con lo del archivo (lo que pase del final, a cero)
+    función comp_prepara_(nd: puntero a Nodo, tope_: nat64): ent64
+        variable c: puntero a Comp
+        variable nm, f, pos, k: nat64
+        variable r: ent64
+        variable pm: puntero a nat64
+        si tope_ > MÁX_COMP_PÁG entonces devolver ENOMEM fin
+        si nd.comp = 0 entonces
+            c := puntero(nat64(reserva(tamaño(Comp))))
+            si c = nulo entonces devolver ENOMEM fin
+            ceros_k(nat64(c), tamaño(Comp))
+            nd.comp := nat64(c)
+            comp_vivos := comp_vivos + 1
+        fin
+        c := comp_(nd)
+        si tope_ > c.cabe entonces
+            k := c.cabe * 2
+            si k < tope_ entonces k := tope_ fin
+            si k < 16 entonces k := 16 fin
+            si k > MÁX_COMP_PÁG entonces k := MÁX_COMP_PÁG fin
+            nm := nat64(reserva(k * 8))
+            si nm = 0 entonces devolver ENOMEM fin
+            si c.n > 0 entonces copia_k(nm, c.marcos, c.n * 8) fin
+            si c.marcos <> 0 entonces libera(puntero(c.marcos)) fin
+            c.marcos := nm
+            c.cabe := k
+        fin
+        mientras c.n < tope_ hacer
+            f := pide()
+            si f = 0 entonces devolver ENOMEM fin
+            ceros_k(virt(f), 4096)
+            pos := c.n * 4096
+            si pos < nd.tamaño entonces
+                k := nd.tamaño - pos
+                si k > 4096 entonces k := 4096 fin
+                r := fs_lee(nd, pos, virt(f), k)
+                si r < 0 entonces
+                    devuelve(f)
+                    devolver r
+                fin
+            fin
+            pm := puntero(c.marcos + c.n * 8)
+            valor(pm) := f
+            c.n := c.n + 1
+            comp_páginas := comp_páginas + 1
+        fin
+        devolver 0
+    fin
+
+    ; (con el mutex) las páginas, fuera (quien las tenga puestas, las tiene hasta quitarlas)
+    función comp_suelta_(nd: puntero a Nodo)
+        variable c: puntero a Comp
+        variable i: nat64
+        c := comp_(nd)
+        i := 0
+        mientras i < c.n hacer
+            Espacios.suelta_marco_u(marco_comp(c, i))
+            i := i + 1
+        fin
+        comp_páginas := comp_páginas - c.n
+        si c.marcos <> 0 entonces libera(puntero(c.marcos)) fin
+        libera(puntero(nat64(c)))
+        nd.comp := 0
+        comp_vivos := comp_vivos - 1
+    fin
+
+    ; (con el mutex) lo de las páginas, al archivo (hasta su final)
+    función comp_vuelca_(nd: puntero a Nodo): ent64
+        variable c: puntero a Comp
+        variable i, pos, k: nat64
+        variable r: ent64
+        c := comp_(nd)
+        si mm(nd.montaje).solo_leer <> 0 entonces devolver 0 fin
+        i := 0
+        mientras i < c.n y i * 4096 < nd.tamaño hacer
+            pos := i * 4096
+            k := nd.tamaño - pos
+            si k > 4096 entonces k := 4096 fin
+            r := fs_escribe(nd, pos, virt(marco_comp(c, i)), k)
+            si r < 0 entonces devolver r fin
+            comp_volcadas := comp_volcadas + 1
+            i := i + 1
+        fin
+        devolver 0
+    fin
+
+    ; (con el mutex) lo leído de [pos, pos + n) en k: lo de las páginas, encima
+    función comp_lee_(nd: puntero a Nodo, pos: nat64, k: nat64, n: nat64)
+        variable c: puntero a Comp
+        variable i, d, t: nat64
+        c := comp_(nd)
+        mientras n > 0 hacer
+            i := pos >> 12
+            si i >= c.n entonces devolver fin
+            d := pos yb 4095
+            t := 4096 - d
+            si t > n entonces t := n fin
+            copia_k(k, virt(marco_comp(c, i)) + d, t)
+            pos := pos + t
+            k := k + t
+            n := n - t
+        fin
+    fin
+
+    ; (con el mutex) lo escrito en [pos, pos + n) desde k, también en las páginas
+    función comp_escribe_(nd: puntero a Nodo, pos: nat64, k: nat64, n: nat64)
+        variable c: puntero a Comp
+        variable i, d, t: nat64
+        c := comp_(nd)
+        mientras n > 0 hacer
+            i := pos >> 12
+            si i >= c.n entonces devolver fin
+            d := pos yb 4095
+            t := 4096 - d
+            si t > n entonces t := n fin
+            copia_k(virt(marco_comp(c, i)) + d, k, t)
+            pos := pos + t
+            k := k + t
+            n := n - t
+        fin
+    fin
+
+    ; (con el mutex) truncado a t: lo de las páginas desde t, a cero
+    función comp_trunca_(nd: puntero a Nodo, t: nat64)
+        variable c: puntero a Comp
+        variable i, d: nat64
+        c := comp_(nd)
+        i := t >> 12
+        d := t yb 4095
+        mientras i < c.n hacer
+            ceros_k(virt(marco_comp(c, i)) + d, 4096 - d)
+            d := 0
+            i := i + 1
+        fin
+    fin
+
+    ; (Sistema.mapea_, con el mutex de la memoria) que «a» tenga sus páginas
+    ; compartidas hasta la «hasta» (sin ella)
+    público función vfs_comp_prepara(a: puntero a Abierto, tope_: nat64): ent64
+        variable r: ent64
+        cierra_vfs()
+        r := comp_prepara_(nodo(a.nodo), tope_)
+        abre_vfs()
+        devolver r
+    fin
+
+    ; el marco de la página i (ya preparada), con una cuenta más (para ponerlo)
+    público función vfs_comp_marco(a: puntero a Abierto, i: nat64): nat64
+        variable c: puntero a Comp
+        variable f: nat64
+        cierra_vfs()
+        f := 0
+        c := comp_(nodo(a.nodo))
+        si c <> nulo y i < c.n entonces
+            f := marco_comp(c, i)
+            Espacios.comparte_marco(f)
+        fin
+        abre_vfs()
+        devolver f
+    fin
+
+    ; msync: lo de las páginas, al archivo (con MS_SYNC, también al disco)
+    público función vfs_comp_vuelca(a: puntero a Abierto, al_disco: bool): ent64
+        variable r: ent64
+        variable nd: puntero a Nodo
+        nd := nodo(a.nodo)
+        cierra_vfs()
+        r := 0
+        si nd.comp <> 0 entonces r := comp_vuelca_(nd) fin
+        si r = 0 y al_disco y (mm(nd.montaje).clase = FS_FAT o mm(nd.montaje).clase = FS_EXFAT) y mm(nd.montaje).solo_leer = 0 entonces
+            si fs_vacía(nd.montaje) < 0 entonces r := EIO fin
+        fin
+        abre_vfs()
+        devolver r
+    fin
+
     ; ---- leer y escribir ----
     ; lee desde «pos» (o, si pos es -1, desde la suya, y la adelanta)
     público función vfs_lee(a: puntero a Abierto, pos: ent64, k: nat64, n: nat64): ent64
         variable r: ent64
         variable nd: puntero a Nodo
+        variable p: nat64
         si a.marcas yb O_ACCESO = O_WRONLY entonces devolver EBADF fin
         nd := nodo(a.nodo)
         si nd.clase = N_CARPETA entonces devolver EISDIR fin
         cierra_vfs()
         si pos < 0 entonces
-            r := fs_lee(nd, a.pos, k, n)
+            p := a.pos
+            r := fs_lee(nd, p, k, n)
             si r > 0 entonces a.pos := a.pos + nat64(r) fin
         sino
-            r := fs_lee(nd, nat64(pos), k, n)
+            p := nat64(pos)
+            r := fs_lee(nd, p, k, n)
         fin
+        si r > 0 y nd.comp <> 0 entonces comp_lee_(nd, p, k, nat64(r)) fin      ; [etapa 10 h]
         abre_vfs()
         devolver r
     fin
@@ -702,8 +921,10 @@ módulo Vfs64
             r := fs_escribe(nd, p, k, n)
             si r > 0 entonces a.pos := p + nat64(r) fin
         sino
-            r := fs_escribe(nd, nat64(pos), k, n)
+            p := nat64(pos)
+            r := fs_escribe(nd, p, k, n)
         fin
+        si r > 0 y nd.comp <> 0 entonces comp_escribe_(nd, p, k, nat64(r)) fin  ; [etapa 10 h]
         abre_vfs()
         devolver r
     fin
@@ -728,6 +949,7 @@ módulo Vfs64
         si mm(nd.montaje).solo_leer <> 0 entonces devolver EROFS fin
         cierra_vfs()
         r := fs_trunca(nd, t)
+        si r >= 0 y nd.comp <> 0 entonces comp_trunca_(nd, t) fin               ; [etapa 10 h]
         abre_vfs()
         devolver r
     fin
@@ -739,6 +961,8 @@ módulo Vfs64
         m := nodo(a.nodo).montaje
         si (mm(m).clase <> FS_FAT y mm(m).clase <> FS_EXFAT) o mm(m).solo_leer <> 0 entonces devolver 0 fin
         cierra_vfs()
+        ; [etapa 10 h] lo de sus páginas compartidas, antes
+        si nodo(a.nodo).comp <> 0 entonces comp_vuelca_(nodo(a.nodo)) fin
         r := fs_vacía(m)
         abre_vfs()
         si r < 0 entonces devolver EIO fin
@@ -749,8 +973,15 @@ módulo Vfs64
     público función vfs_sync(): ent64
         variable m: nat32
         variable r, t: ent64
+        variable x: nat64
         cierra_vfs()
         t := 0
+        ; [etapa 10 h] lo de las páginas compartidas de los archivos, antes
+        x := nodos
+        mientras x <> 0 hacer
+            si nodo(x).comp <> 0 y nodo(x).borrado = 0 entonces comp_vuelca_(nodo(x)) fin
+            x := nodo(x).sig
+        fin
         m := 0
         mientras m < n_montajes hacer
             si mm(m).en_uso <> 0 y (mm(m).clase = FS_FAT o mm(m).clase = FS_EXFAT) y mm(m).solo_leer = 0 entonces
