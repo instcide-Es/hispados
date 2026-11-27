@@ -4231,6 +4231,10 @@ primero mira en su memoria (la misma).
 - **preadv, pwritev, preadv2 y pwritev2** (295, 296, 327 y 328: sqlite los
   pide) y **fchown** (93: los discos de Hispa-64 no guardan dueños; vale sin
   cambiar nada, como en un FAT de Linux), con su prueba en MUNIX (85 pruebas, con las de `/proc/self/exe` y close_range: eran 77).
+- **ECO servidor** ya no se cae si un cliente se va sin leer lo suyo (SIGPIPE,
+  ignorada; esa conexión no cuenta y se espera otra): en la batería, con la
+  Realtek y 8 procesadores, uno de los intentos del cliente de prueba de antes
+  de escuchar le llegaba ya cerrado (código 141).
 - Hispa-64 **0.11.5** (uname: «etapa 10 e (Skia y las imágenes)»).
 
 ### Qué hace

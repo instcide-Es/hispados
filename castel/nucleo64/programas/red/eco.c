@@ -10,6 +10,7 @@
  *       todo lo que vuelve y mira que sea igual
  * Código 0 si bien. */
 #include <unistd.h>
+#include <signal.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <stdint.h>
@@ -31,6 +32,9 @@ static int servidor(int puerto, int veces)
 	long long todo = 0;
 	static unsigned char b[65536];
 
+	/* [etapa 10 e] un cliente que se va sin leer (EPIPE) no mata al servidor:
+	 * esa conexión no cuenta y se espera otra */
+	signal(SIGPIPE, SIG_IGN);
 	if (fd < 0) {
 		printf("ECO: no se abre el socket: %s\n", strerror(errno));
 		return 1;
@@ -52,6 +56,7 @@ static int servidor(int puerto, int veces)
 		socklen_t lo = sizeof o;
 		char ip[INET_ADDRSTRLEN];
 		long long n = 0;
+		int rota = 0;
 		int c = accept(fd, (struct sockaddr *)&o, &lo);
 		if (c < 0) {
 			if (errno == EINTR) {
@@ -87,7 +92,8 @@ static int servidor(int puerto, int veces)
 						w = 0;
 						continue;
 					}
-					printf("ECO: conexión %d: write: %s\n", k, strerror(errno));
+					printf("ECO: conexión %d: write: %s (cortada por el otro lado: no cuenta)\n", k, strerror(errno));
+					rota = 1;
 					goto fin;
 				}
 			}
@@ -95,6 +101,10 @@ static int servidor(int puerto, int veces)
 		}
 fin:
 		close(c);
+		if (rota) {
+			k--;
+			continue;
+		}
 		printf("ECO: conexión %d de %s:%d: %lld octetos devueltos\n", k, ip, ntohs(o.sin_port), n);
 		fflush(stdout);
 		todo += n;
@@ -117,6 +127,9 @@ static int cliente(const char *equipo, int puerto, long long octetos)
 		return 2;
 	inet_ntop(AF_INET, &sa.sin_addr, ip, sizeof ip);
 	fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	/* [etapa 10 e] un cliente que se va sin leer (EPIPE) no mata al servidor:
+	 * esa conexión no cuenta y se espera otra */
+	signal(SIGPIPE, SIG_IGN);
 	if (fd < 0) {
 		printf("ECO: no se abre el socket: %s\n", strerror(errno));
 		return 1;
