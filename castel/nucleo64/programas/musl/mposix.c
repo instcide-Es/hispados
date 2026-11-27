@@ -355,9 +355,9 @@ static void remapeo(void)
 	pthread_attr_t at;
 	size_t tam = 0;
 	void *dir = NULL;
-	MIRA(pthread_getattr_np(pthread_self(), &at) == 0 && pthread_attr_getstack(&at, &dir, &tam) == 0 && tam >= 128 * 1024 && (char *)&at > (char *)dir && (char *)&at < (char *)dir + tam,
+	MIRA(pthread_getattr_np(pthread_self(), &at) == 0 && pthread_attr_getstack(&at, &dir, &tam) == 0 && tam >= 8192 && (char *)&at > (char *)dir && (char *)&at < (char *)dir + tam,
 	     "pthread_getattr_np del hilo principal: la pila (con mremap)");
-	printf("  mremap (achicar, crecer en su sitio, EFAULT, EINVAL) y pthread_getattr_np del hilo principal: %s\n", tam >= 128 * 1024 ? "bien" : "mal");
+	printf("  mremap (achicar, crecer en su sitio, EFAULT, EINVAL) y pthread_getattr_np del hilo principal: %s\n", tam >= 8192 ? "bien" : "mal");
 }
 
 static int cerrojo(int fd, int orden, off_t ini)

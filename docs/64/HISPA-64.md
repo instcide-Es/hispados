@@ -4706,6 +4706,19 @@ está, y las llamadas que fallan, por el puerto serie):
 - **statfs y fstatfs** (137, 138): el tipo (la unidad, RAMFS; /tmp, TMPFS;
   FAT; exFAT), el bloque, los bloques, los libres si se saben, ST_RDONLY.
 - **chmod, fchmod, fchmodat**: en FAT no hay permisos: lo que está, 0.
+- **mmap de escribir privado, hasta 1 TB** (como antes; MEMORIA mira que 2 TB
+  den ENOMEM), salvo con MAP_NORESERVE; lo que solo reserva (PROT_NONE, de
+  solo leer), sin límite. (El «overcommit» heurístico de Linux, con el límite
+  en toda la memoria, no les deja a las pruebas de LibJS ni a RequestServer lo
+  que piden con 3 GB.)
+- **Sin memoria en un fallo de página**: antes de cerrar el programa, la
+  cuarentena del montón (hasta 8 MB de bloques grandes ya soltados, que
+  esperan para avisar a la TLB de todos de una vez) se devuelve y se vuelve a
+  probar. MMAPA (64 MB con 128 MB) se quedaba sin memoria por eso.
+- **Las tablas de un proceso** (descriptores y regiones) se sueltan al acabar,
+  no al recogerlo (un zombi puede tardar).
+- **«ladybird»** en la línea del núcleo: MJS y MWEB en el arranque (el de KVM
+  de pruebas.sh y una entrada del menú de la imagen con el navegador).
 - **HOME y XDG_RUNTIME_DIR**: en Hispa-64 no hay usuarios y «/» es de solo
   leer: MWEB los pone en /tmp/web (Ladybird crea ahí su perfil y sus
   sockets).
@@ -4764,6 +4777,16 @@ está, y las llamadas que fallan, por el puerto serie):
 - Con `--disable-sql-database`: la base de datos de Ladybird (sqlite en modo
   WAL) pone su `-shm` en memoria compartida con **mmap MAP_SHARED de escribir
   de un archivo**, que Hispa-64 aún no tiene («disk I/O error»).
+
+### Las imágenes
+
+- Las de siempre (`imagen.sh`: el disco de 128 MB, el .vdi y el CD), sin el
+  navegador (no cabe: 490 MB más en la unidad en memoria).
+- **Con el navegador**: `WEB=1 imagen.sh`: los programas de Ladybird en
+  `\boot\prog` (los carga GRUB), el disco de 1,25 GB (la partición EFI, de 1,1
+  GB), el .vdi y el CD; hacen falta 3 GB de memoria. Su menú lleva la entrada
+  «con las pruebas de Ladybird al arrancar» (`ladybird`); y desde el
+  intérprete, `MWEB https://hispados.es/` (con la red).
 
 ### Las licencias nuevas
 
