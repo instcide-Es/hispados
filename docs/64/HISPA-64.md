@@ -4821,10 +4821,24 @@ cargo resuelva el «workspace» van sin código: `terceros/rust-crates/resolver/
 - A mano, con la red de QEMU (e1000) y un disco FAT32: MWEB con el texto, el
   árbol, la captura (sacada del disco: la misma que en Linux) y
   https://hispados.es/.
-- **La batería**: 142 pruebas (eran 141: el arranque de LibJS y Ladybird).
+- **La batería**: 142 pruebas (eran 141: el arranque de LibJS y Ladybird),
+  en unos 60 minutos (eran 90: ensambla.py). Las dos últimas vueltas enteras:
+  **141 bien y 1 mal**, la misma: la de la Realtek con 8 procesadores (TCG),
+  y en ella solo el cliente del eco del anfitrión (el archivo `.eco`): el
+  invitado dice que ha devuelto la conexión entera («ECO: servidor: 1
+  conexiones, 102400 octetos devueltos») y todo lo demás de esa prueba sale.
+  Sola, la misma prueba sale bien 6 de 6 veces (3 con el servidor cargado);
+  en la vuelta de antes de los últimos cambios (las regiones en la zona), bien.
+  Por mirar (lo primero de la 10 h).
+- Las imágenes: la de siempre por UEFI (el .vdi) y por la BIOS (el CD), con 4
+  procesadores y KVM: todo en orden; la memoria USB por UEFI sin puerto serie:
+  ARRANQUE.TXT entero, fsck.fat bien; la del navegador por UEFI con la entrada
+  «ladybird» (MJS 8.449 bien, MWEB 7 de 7) y su CD por la BIOS: todo en orden.
 
 ### Lo que queda (y más adelante)
 
+- **La prueba de la Realtek con 8 procesadores dentro de la batería** (el eco
+  desde el anfitrión: arriba).
 - **mmap MAP_SHARED de escribir de un archivo** (las páginas del archivo,
   compartidas entre quienes lo mapean y lo que se lee y escribe): para la base
   de datos de Ladybird (sqlite en WAL) y para quitar `--disable-sql-database`.
