@@ -135,6 +135,9 @@ apaga
 p_drivers_srdisk() {
 echo "== Hispa-8086: SRDXMS.SYS y SRDISK.EXE (un disco en memoria XMS de FreeDOS, comprimido con UPX) =="
 hay_libres srdisk/BIN/SRDXMS.SYS srdisk/BIN/SRDISK.EXE || return 0
+# (SRDXMS pide memoria extendida, que un 8086 no tiene: con MODO=8086 no hay
+# gestor XMS y no se instala, como en un XT de verdad)
+if [ "${MODO:-}" = 8086 ]; then echo "  (se salta con MODO=8086: SRDXMS necesita memoria extendida)"; return 0; fi
 cp $IMG/hispa8086-1440.img $T/a.img
 printf 'DEVICE=\\SRDXMS.SYS\r\n' > $T/CONFIG.SYS
 mcopy -i $T/a.img $T/CONFIG.SYS $DRV_LIBRES/srdisk/BIN/SRDXMS.SYS $DRV_LIBRES/srdisk/BIN/SRDISK.EXE ::
@@ -147,11 +150,11 @@ esta s2 "XMS: Allocated 200 K" "SRDISK.EXE le da 200 K de la memoria XMS del nú
 esta s2 "Disk formatted" ""
 escribe "limpiar"; escribe "copiar leeme.txt d:"; sleep 2; escribe "dir d:"
 pantalla s3
-esta s3 "LEEME.TXT            751" "se copia en él: "
+esta s3 "LEEME.TXT            $(stat -c %s build/LEEME.TXT)" "se copia en él: "
 esta s3 "201728 octetos libres" ""
 escribe "limpiar"; escribe "srdisk 300"; sleep 3; escribe "limpiar"; escribe "dir d:"
 pantalla s4
-esta s4 "LEEME.TXT            751" "SRDISK le cambia el tamaño (otro disco: MEDIA CHECK y BUILD BPB) y el archivo sigue: "
+esta s4 "LEEME.TXT            $(stat -c %s build/LEEME.TXT)" "SRDISK le cambia el tamaño (otro disco: MEDIA CHECK y BUILD BPB) y el archivo sigue: "
 esta s4 "303616 octetos libres" "con las medidas nuevas: "
 apaga
 }
