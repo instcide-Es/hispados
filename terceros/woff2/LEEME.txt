@@ -1,0 +1,12 @@
+woff2 1.0.2 (https://github.com/google/woff2), de los autores de WOFF2
+(Google), licencia MIT: ver LICENSE.
+  woff2-1.0.2.tar.gz  (github.com/google/woff2, la etiqueta v1.0.2)
+  SHA-256: add272bb09e6384a4833ffca4896350fdb16e0ca22df68c0384773c67a175594
+
+Lo pide Ladybird (LibGfx: las letras web en WOFF2; solo libwoff2dec). Aquí va
+solo lo de descomprimir: include/woff2 y de src/ buffer.h, port.h, round.h,
+store_bytes.h, table_tags, variable_length, woff2_common, woff2_dec y
+woff2_out, sin cambiar nada (sin el compresor, las herramientas ni los
+«fuzzers»). Con el brotli de terceros/brotli (1.1.0; Ladybird pide la 1.2.1:
+para descomprimir, lo mismo). Se compila con
+castel/nucleo64/programas/libs/hazlibs.sh (Hispa-64, etapa 10 e).

@@ -1,0 +1,12 @@
+Zstandard 1.5.7 (https://github.com/facebook/zstd), de Meta Platforms y
+colaboradores, con doble licencia: BSD (LICENSE) o GPL-2.0 (COPYING), a
+elegir; las dos casan con la de Hispa (GPL-2.0 o posterior).
+  zstd-1.5.7.tar.gz  (github.com/facebook/zstd/releases/download/v1.5.7/)
+  SHA-256: eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3
+
+Lo pide Ladybird para curl («Content-Encoding: zstd», la función «zstd» de
+curl en vcpkg.json; y libtiff). Aquí va lib/common, lib/compress,
+lib/decompress, zstd.h, zstd_errors.h y zdict.h, sin cambiar nada (sin
+legacy/, dictBuilder/, deprecated/, los programas, las pruebas ni contrib/).
+Se compila con castel/nucleo64/programas/libs/hazlibs.sh (Hispa-64, etapa 10
+e), sin hilos, con el ensamblador de huf_decompress_amd64.S.

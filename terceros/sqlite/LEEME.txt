@@ -1,0 +1,15 @@
+SQLite 3.54.1 (https://sqlite.org/), de D. Richard Hipp y colaboradores, de
+DOMINIO PÚBLICO (lo dice al principio de sqlite3.c: «The author disclaims
+copyright to this source code»): se puede usar con la GPL-2.0 o posterior.
+  sqlite-amalgamation-3540100.zip  (www.sqlite.org/2026/)
+  SHA-256: 0a9c8e34352dad46006aa82836d5383bff9dc6bc9ce5a60553c05aa30e6ad1f9
+
+Lo pide Ladybird (LibDatabase: las cookies, la caché de HTTP, el almacén de
+las páginas). Aquí va la amalgamación (sqlite3.c, sqlite3.h y sqlite3ext.h)
+sin cambiar nada; sin shell.c. Se compila con
+castel/nucleo64/programas/libs/hazlibs.sh (Hispa-64, etapa 10 e) con
+SQLITE_THREADSAFE=1, FTS5, las funciones de matemáticas, sin cargar
+extensiones (estático) y SQLITE_DQS=0.
+Hispa-64 aún no tiene los cerrojos de fcntl (F_SETLK, F_GETLK, F_OFD_*): la
+base de datos en un archivo, con el VFS «unix-none» (sin cerrojos) hasta
+entonces (MLIBS lo hace así en /tmp).

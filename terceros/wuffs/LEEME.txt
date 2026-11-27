@@ -1,0 +1,20 @@
+Wuffs, el archivo de C de la versión 0.4 (release/c/wuffs-v0.4.c,
+«0.4.0-alpha.10+3966.20260623»), de los autores de Wuffs (Google), con
+doble licencia: Apache-2.0 o MIT, a elegir («SPDX-License-Identifier:
+Apache-2.0 OR MIT» en su cabecera; LICENSE, LICENSE-MIT y LICENSE-APACHE).
+Hispa la usa con la MIT, que casa con la GPL-2.0 o posterior.
+  wuffs-0.3.5.tar.gz  (github.com/google/wuffs-mirror-release-c, la etiqueta
+  v0.3.5, que lleva wuffs-v0.2.c, v0.3.c y v0.4.c)
+  SHA-256: bbf18c23f17f335ded7274e9fcfcf9b625226f1e6b3b2943992cf63033bbcda4
+
+Ladybird usa wuffs-v0.3.c (LibGfx: GIFLoader.cpp, el decodificador de GIF;
+su overlay-port instala solo ese). **Ese no va aquí**: su cabecera dice solo
+Apache-2.0 (el cambio a «Apache 2 o MIT» es de la 0.4: doc/changelog.md de
+Wuffs), y la Apache-2.0 sola no casa con la GPL-2.0 (sí con la GPL-3.0: es
+lo mismo que OpenSSL, sin decidir). La 0.4 tiene el GIF con las mismas
+funciones (wuffs_gif__decoder__decode_image_config, decode_frame_config,
+decode_frame...): para Ladybird, cambiar el #include de GIFLoader.cpp (en la
+capa propia, Platform/Hispa64) y mirar que compila.
+Aquí va solo release/c/wuffs-v0.4.c, sin cambiar nada. Se compila con
+castel/nucleo64/programas/libs/hazlibs.sh (Hispa-64, etapa 10 e) con
+WUFFS_IMPLEMENTATION, en libwuffs.a.

@@ -1,0 +1,12 @@
+simdjson 5.1.1 (https://github.com/simdjson/simdjson), de Daniel Lemire y
+colaboradores, con doble licencia: Apache-2.0 o MIT, a elegir (LICENSE y
+LICENSE-MIT; lo dice su README); Hispa la usa con la MIT, que casa con la
+GPL-2.0 o posterior.
+  simdjson-5.1.1.tar.gz  (github.com/simdjson/simdjson, la etiqueta v5.1.1)
+  SHA-256: d669fa399613c20bbf7705f057a72984331b223cd5e8d20666ef063dbf97f3e6
+
+Lo pide la configuración de Ladybird (find_package(simdjson REQUIRED) en
+check_for_dependencies.cmake; su LibJS de Rust lleva su propia copia de lo
+de simdjson que usa JSON.parse). Aquí va la versión de una pieza
+(singleheader/simdjson.cpp y simdjson.h) sin cambiar nada. Se compila con
+castel/nucleo64/programas/libs/hazlibs.sh (Hispa-64, etapa 10 e).

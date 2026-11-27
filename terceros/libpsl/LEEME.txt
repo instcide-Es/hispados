@@ -1,0 +1,21 @@
+libpsl 0.23.3 (https://github.com/rockdaboot/libpsl), de Tim Rühsen y
+colaboradores, licencia MIT (LICENSE y COPYING); psl-make-dafsa y
+lookup_string_in_fixed_set.c, de Chromium, BSD-3 (src/LICENSE.chromium).
+  libpsl-0.23.3.tar.gz  (github.com/rockdaboot/libpsl/releases/download/0.23.3/)
+  SHA-256: 93941f85a1e7bd593fa94f299233cb5dfc91cd144fd9a78a6ceb75001c5b03be
+La lista de sufijos públicos (list/public_suffix_list.dat), la misma que
+pone Ladybird (publicsuffix/list, la revisión
+bfd12e081959c7ae143c05eb99c95513686f90f4), con licencia MPL-2.0 (sin la
+nota de «Incompatible With Secondary Licenses»: casa con la GPL-2.0 o
+posterior por su sección 3.3):
+  SHA-256: fec2c726dc5f1fe42e863e41299e58954565ddf85eec7681abade762274c236d
+
+Lo pide Ladybird (LibURL: PublicSuffixData.cpp, psl_builtin y
+psl_is_public_suffix2: qué dominios son «sitios» para las cookies). Aquí va
+src/psl.c, src/lookup_string_in_fixed_set.c, src/psl-make-dafsa e
+include/libpsl.h sin cambiar nada, y src/suffixes_dafsa.h hecho desde la
+lista con:
+  python3 src/psl-make-dafsa --output-format=cxx+ list/public_suffix_list.dat src/suffixes_dafsa.h
+hispa64/config.h es nuestro (lo de configure: la lista dentro y sin IDNA en
+marcha; Ladybird le pasa los nombres ya en ASCII). Se compila con
+castel/nucleo64/programas/libs/hazlibs.sh (Hispa-64, etapa 10 e).

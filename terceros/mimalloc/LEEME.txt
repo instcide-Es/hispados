@@ -1,0 +1,12 @@
+mimalloc 2.2.7 (https://github.com/microsoft/mimalloc), de Microsoft y Daan
+Leijen, licencia MIT: ver LICENSE.
+  mimalloc-2.2.7.tar.gz  (github.com/microsoft/mimalloc, la etiqueta v2.2.7)
+  SHA-256: 8e0ed89907a681276bff2e49e9a048b47ba51254ab60daf6b3c220acac456a95
+
+Lo pide Ladybird (AK y LibCore: kmalloc va por mimalloc). Aquí va src/ e
+include/ sin cambiar nada (sin bin/, las pruebas, los proyectos de Visual
+Studio ni la documentación). Se compila como lo pide Ladybird (su
+overlay-port): src/static.c entero, como C++ (MI_USE_CXX), con MI_SECURE=4
+(la función «secure») y sin el relleno tras cada bloque (MI_NO_PADDING, en
+la versión sin depurar), sin sustituir a malloc (sin «override»):
+castel/nucleo64/programas/libs/hazlibs.sh (Hispa-64, etapa 10 e).

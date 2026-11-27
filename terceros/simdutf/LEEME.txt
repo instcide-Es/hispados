@@ -1,0 +1,14 @@
+simdutf 9.5.0 (https://github.com/simdutf/simdutf), de Daniel Lemire y
+colaboradores, con doble licencia: Apache-2.0 o MIT, a elegir; Hispa la usa
+con la MIT (LICENSE-MIT), que casa con la GPL-2.0 o posterior (va también
+LICENSE-APACHE, como pide el proyecto).
+  singleheader.zip  (github.com/simdutf/simdutf/releases/download/v9.5.0/)
+  SHA-256: 8f18779b5605ab3ce2f8e4a1abb409c64253f22403207732365e305d0d6e8025
+  (las licencias, de simdutf-9.5.0.tar.gz, la etiqueta v9.5.0:
+  SHA-256: 833a71de6224a3370e7116af1a2c2e666a6a9efe63c41198e6197f7e047674b3)
+
+Lo pide Ladybird (AK: pasar de UTF-8 a UTF-16 y al revés, base64). Aquí va
+solo la versión de una pieza (simdutf.cpp y simdutf.h; simdutf_c.h y los
+ejemplos, no), sin cambiar nada. Elige al arrancar lo que tiene el
+procesador (SSE, AVX2, AVX-512). Se compila con
+castel/nucleo64/programas/libs/hazlibs.sh (Hispa-64, etapa 10 e).

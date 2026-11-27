@@ -1,0 +1,15 @@
+LibTIFF 4.7.2 (https://libtiff.gitlab.io/libtiff/), de Sam Leffler, Silicon
+Graphics y colaboradores, con su licencia (BSD, de las de «haz lo que
+quieras con el aviso»: ver LICENSE.md), que casa con la GPL-2.0 o posterior.
+  tiff-4.7.2.tar.xz  (download.osgeo.org/libtiff/)
+  SHA-256: 4996f0c4f93094719b1ca5c6279b20e588773ba8a247533e486416fb662ddb88
+
+Está en el vcpkg.json de Ladybird («tiff», con zstd), aunque su LibGfx lee el
+TIFF con un decodificador propio (TIFFLoader y TIFFGenerator.py): aquí, por
+si hace falta. Va libtiff/*.c y *.h sin cambiar nada (sin tif_win32.c,
+tif_stream.cxx, las herramientas, las pruebas, contrib ni la
+documentación). hispa64/tif_config.h, tiffconf.h y tiffvers.h son los que
+saca su CMake con el compilador cruzado (programas/cxx/hispa64.cmake) sin
+zlib, libdeflate, JPEG, JBIG, LERC, LZMA, zstd ni WebP (LZW, PackBits,
+CCITT, LogLuv, NeXT y ThunderScan, sí). Se compila con
+castel/nucleo64/programas/libs/hazlibs.sh (Hispa-64, etapa 10 e).

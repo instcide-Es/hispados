@@ -1,0 +1,13 @@
+dav1d 1.5.4 (https://code.videolan.org/videolan/dav1d), de VideoLAN y los
+autores de dav1d, licencia BSD-2: ver COPYING.
+  dav1d-1.5.4.tar.xz  (downloads.videolan.org/pub/videolan/dav1d/1.5.4/)
+  SHA-256: 686616b7c69eb88d44459391ab25cac13b6647a3b288835c5784e71c1514a5c5
+
+Lo pide Ladybird para libavif (AVIF: «libavif» con «dav1d» en vcpkg.json).
+Aquí va src/*.c y *.h (lo común, sin las carpetas de cada procesador salvo
+src/x86/cpu.h, que incluye cpu.h) e include/ (sin compat/), sin cambiar
+nada: **sin ensamblador**, todo en C (más lento; el ensamblador de x86 es
+de NASM, para más adelante). hispa64/config.h y vcs_version.h son nuestros:
+lo que saca su meson con -Denable_asm=false y las dos profundidades (8 y
+16 bits). Los «_tmpl.c» se compilan dos veces (BITDEPTH=8 y 16), como hace
+meson: castel/nucleo64/programas/libs/hazlibs.sh (Hispa-64, etapa 10 e).
