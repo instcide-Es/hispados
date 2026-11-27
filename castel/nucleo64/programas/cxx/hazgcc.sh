@@ -9,7 +9,13 @@
 # estáticos (corren en cualquier Linux x86-64: se hace en el PC de Albinyana
 # y se usa en el servidor) y la carpeta se puede mover (todo relativo).
 #
+# [etapa 10 f] Y las cabeceras de Linux («UAPI»: linux/, asm/, asm-generic/...,
+# de «make headers_install» de Linux 6.18.65, la LTS) en su include, como
+# musl-cross-make: las piden Ladybird (<linux/fs.h>...) y las crates de Rust.
+#
 # Uso: hazgcc.sh [PREFIJO]      (por omisión, build/cruzado)
+#      hazgcc.sh --cabeceras [PREFIJO]   solo las cabeceras de Linux, en un
+#                               compilador ya hecho (y PREFIJO.tar.xz otra vez)
 #   HILOS=12 hazgcc.sh ...      make -jHILOS (por omisión, 1)
 #   FUENTES=carpeta             donde están (o se bajan) los tar de GNU
 #   TRABAJO=carpeta             donde se compila (por omisión, build/gcc-obj)
@@ -17,6 +23,8 @@
 # con gnu-keyring.gpg el 26/11/2026). Sin red, que estén ya en FUENTES.
 # Al acabar deja PREFIJO/LEEME.txt con las versiones y PREFIJO.tar.xz.
 set -e
+SOLO_CAB=0
+[ "${1:-}" = --cabeceras ] && { SOLO_CAB=1; shift; }
 AQUI=$(cd "$(dirname "$0")" && pwd)
 R=$(cd "$AQUI/../../../.." && pwd)
 T=x86_64-hispa64-linux-musl
@@ -33,16 +41,41 @@ declare -A SUMA=(
   [mpfr-4.2.2.tar.xz]=b67ba0383ef7e8a8563734e2e889ef5ec3c3b898a01d00fa0a6869ad81c6ce01
   [mpc-1.3.1.tar.gz]=ab642492f5cf882b74aa0cb730cd410a81edcdbec895183ce930e706c1c759b8
   [m4-1.4.19.tar.xz]=63aede5c6d33b6d9b13511cd0be2cac046f2e70fd0a07aa9573a04a82783af96
+  [linux-6.18.65.tar.xz]=c92606f956f09dc50b5a0e2af9e86763fce27ada1647de97f8d1ac8cfc95801d
 )
 declare -A DONDE=(
   [binutils-2.44.tar.xz]=binutils [gcc-14.3.0.tar.xz]=gcc/gcc-14.3.0 [gmp-6.3.0.tar.xz]=gmp
   [mpfr-4.2.2.tar.xz]=mpfr [mpc-1.3.1.tar.gz]=mpc [m4-1.4.19.tar.xz]=m4
 )
+LINUX=linux-6.18.65
 mkdir -p "$F" "$W"
 for a in "${!SUMA[@]}"; do
-  [ -f "$F/$a" ] || curl -sSfL -o "$F/$a" "https://ftp.gnu.org/gnu/${DONDE[$a]}/$a"
+  if [ ! -f "$F/$a" ]; then
+    if [ "$a" = $LINUX.tar.xz ]; then curl -sSfL -o "$F/$a" "https://cdn.kernel.org/pub/linux/kernel/v6.x/$a"
+    elif [ $SOLO_CAB = 0 ]; then curl -sSfL -o "$F/$a" "https://ftp.gnu.org/gnu/${DONDE[$a]}/$a"; else continue; fi
+  fi
   echo "${SUMA[$a]}  $F/$a" | sha256sum -c --quiet - || { echo "hazgcc.sh: $a no es el que debe" >&2; exit 2; }
 done
+# [etapa 10 f] las cabeceras de Linux en DESTINO/$T/include (de una carpeta
+# aparte, sin tocar las de musl: headers_install solo pone .h de linux/, asm/...)
+cabeceras_linux() {   # DESTINO
+  local o=$W/o-linux
+  rm -rf "$o" && mkdir -p "$o"
+  tar -C "$o" -xf "$F/$LINUX.tar.xz"
+  make -C "$o/$LINUX" ARCH=x86_64 HOSTCC="gcc" INSTALL_HDR_PATH="$o/inst" headers_install > "$o/h.log" 2>&1
+  [ -f "$o/inst/include/linux/fs.h" ] || { echo "hazgcc.sh: headers_install no ha dejado linux/fs.h ($o/h.log)" >&2; exit 2; }
+  cp -a "$o/inst/include/." "$1/$T/include/"
+  echo "$LINUX" > "$1/$T/include/.linux"
+  rm -rf "$o"
+}
+if [ $SOLO_CAB = 1 ]; then
+  [ -x "$P/bin/$C-gcc" ] || { echo "hazgcc.sh: no hay compilador en $P" >&2; exit 2; }
+  cabeceras_linux "$P"
+  grep -q "^Las cabeceras de Linux" "$P/LEEME.txt" || echo "Las cabeceras de Linux (UAPI) de $LINUX (make headers_install), en $T/include: GPL-2.0 con la excepción de las llamadas al sistema (Linux-syscall-note)." >> "$P/LEEME.txt"
+  tar -C "$(dirname "$P")" -cJf "$P.tar.xz" "$(basename "$P")"
+  echo "hazgcc.sh: las cabeceras de $LINUX, en $P"
+  exit 0
+fi
 # GCC 14 compilado con un GCC de anfitrión nuevo (el 15 del PC: C23 por omisión)
 HCC="gcc -std=gnu17"
 HCXX="g++ -std=gnu++17"
@@ -112,6 +145,7 @@ fi
 # 6. musl en la raíz del destino; los nombres cortos; a PREFIJO
 make -C o-musl install DESTDIR="$D/$T" AR="$D/bin/$T-ar" RANLIB="$D/bin/$T-ranlib" > o-musl/i2.log 2>&1
 ln -sf libc.so "$D/$T/lib/ld-musl-x86_64.so.1"
+cabeceras_linux "$D"
 (cd "$D/bin" && for h in "$T"-*; do ln -sf "$h" "$C${h#$T}"; done)
 rm -rf "$D/share/info" "$D/share/man"
 cat > "$D/LEEME.txt" << FIN
@@ -121,6 +155,7 @@ binutils 2.44, GCC 14.3.0 (C y C++), musl $(cat "$MUSL/VERSION") (terceros/musl)
 Los programas del anfitrión son estáticos: corren en cualquier Linux x86-64.
 Licencias: GPL-3.0 o posterior con la excepción de las bibliotecas de GCC
 (libgcc, libstdc++: se pueden enlazar con programas GPL-2.0), y MIT (musl).
+Las cabeceras de Linux (UAPI) de $LINUX (make headers_install), en $T/include: GPL-2.0 con la excepción de las llamadas al sistema (Linux-syscall-note).
 FIN
 rm -rf "$P" && mkdir -p "$(dirname "$P")" && cp -a "$D" "$P"
 tar -C "$(dirname "$P")" -cJf "$P.tar.xz" "$(basename "$P")"

@@ -11,7 +11,7 @@
 # archivos). Y, en SALIDA, MSKIA (mskia.cpp: su prueba).
 # Pide antes libs/hazimg.sh (zlib, libpng, libjpeg-turbo y libwebp) y lo de
 # hazcxx.sh (libfreetype.a, libharfbuzz.a y libicu.a), y en SALIDA,
-# DEJAVU.TTF, icudt77l.dat y PNGTEST.PNG.
+# DEJAVU.TTF, icudt78l.dat y PNGTEST.PNG.
 # Uso: hazskia.sh SALIDA   (HILOS=N: N a la vez; si no, de uno en uno: con
 # uno, en el servidor, cerca de una hora la primera vez; con 10 en el PC de
 # Albinyana, unos 8 minutos). La última línea dice lo que ha hecho.
@@ -35,7 +35,9 @@ done
 # las cabeceras de las bibliotecas (lo que en compila.txt es $INC)
 INC="-I$T/zlib -I$T/libpng -I$T/libjpeg-turbo/src -I$T/libjpeg-turbo/config -I$T/libwebp/src"
 O=$B/skia-obj
-if [ "$(cat "$O/.compilador" 2> /dev/null)" != "$ID" ] || [ "$K/LEEME.txt" -nt "$O/libskia.a" ]; then rm -rf "$O"; fi
+# ([etapa 10 f] y con otra ICU: sus funciones llevan la versión en el nombre, ubrk_clone_78)
+IV=$(sed -n 's/^#define U_ICU_VERSION "\(.*\)"$/\1/p' "$T/icu/source/common/unicode/uvernum.h")
+if [ "$(cat "$O/.compilador" 2> /dev/null)" != "$ID" ] || [ "$K/LEEME.txt" -nt "$O/libskia.a" ] || [ "$(cat "$O/.icu" 2> /dev/null)" != "$IV" ]; then rm -rf "$O"; fi
 mkdir -p "$O"
 L=$O/.lista
 : > "$L"
@@ -62,6 +64,7 @@ if [ -s "$L" ]; then
 fi
 if [ $cambio = 1 ] || [ ! -f "$O/libskia.a" ]; then rm -f "$O/libskia.a"; "$CR/bin/x86_64-hispa64-musl-ar" rcs "$O/libskia.a" "$O"/*.o; fi
 echo "$ID" > "$O/.compilador"
+echo "$IV" > "$O/.icu"
 mkdir -p "$S"
 # MSKIA, con las mismas definiciones públicas que Skia
 PUB="-DNDEBUG -DSK_R32_SHIFT=16 -DSK_GANESH -DSK_DISABLE_TRACING -DSK_GAMMA_APPLY_TO_A8 -DSK_TYPEFACE_FACTORY_FREETYPE \

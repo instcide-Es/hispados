@@ -8,7 +8,7 @@
 //     unión de dos caminos (SkPathOps) y un sombreador de SkSL
 //     (SkRuntimeEffect: lo compila Skia en marcha);
 //   - texto con eñes y acentos en DejaVu Sans (DEJAVU.TTF), colocado con
-//     HarfBuzz (SkShaper, con SkUnicode sobre ICU: icudt77l.dat) y con
+//     HarfBuzz (SkShaper, con SkUnicode sobre ICU: icudt78l.dat) y con
 //     SkFont a secas;
 //   - PNGTEST.PNG (el de libpng) leído con SkPngDecoder y dibujado a 1,5 veces
 //     con filtro lineal;
@@ -20,7 +20,7 @@
 // —«ML4»—, que elige al arrancar según el procesador), y una «huella» (la
 // media de cada cuadro de 16 x 16, en RGB) que debe ser casi la misma
 // (como mucho 2 de diferencia) aunque el camino sea otro.
-// Uso: MSKIA [CARPETA]  (la de DEJAVU.TTF, PNGTEST.PNG e icudt77l.dat; si
+// Uso: MSKIA [CARPETA]  (la de DEJAVU.TTF, PNGTEST.PNG e icudt78l.dat; si
 // no, la del programa). Al final, «MSKIA: todo bien (N pruebas)» y código 0.
 #include <cstdio>
 #include <cstdlib>

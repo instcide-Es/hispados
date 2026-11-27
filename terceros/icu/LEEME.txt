@@ -1,26 +1,30 @@
-ICU 77.1 (https://icu.unicode.org/), licencia de Unicode (la «Unicode
+ICU 78.3 (https://icu.unicode.org/), licencia de Unicode (la «Unicode
 License v3», permisiva y compatible con la GPL; con las de terceros que
 lleva dentro): ver LICENSE.
-  icu4c-77_1-src.tgz   (github.com/unicode-org/icu/releases, release-77-1)
-  SHA-256: 588e431f77327c39031ffbb8843c0e3bc122c211374485fa87dc5f3faff24061
-  icu4c-77_1-data.zip  (lo mismo: las fuentes de los datos)
-  SHA-256: 1e08bfafa442260ccabf9a872d4eab12de813d42b90769df056bab032b37e1d3
+  icu4c-78.3-sources.tgz  (github.com/unicode-org/icu/releases, release-78.3)
+  SHA-256: 3a2e7a47604ba702f345878308e6fefeca612ee895cf4a5f222e7955fabfe0c0
+  (MD5 a7b736b570ef0e180c96a31715a00c78, el de icu4c-78.3-sources.md5)
+  icu4c-78.3-data.zip     (lo mismo: las fuentes de los datos)
+  SHA-256: 9d8b3899096aeb83e4e21ef8a40fec9e03b28db18c48452efac882ce25a91e27
+  (MD5 01fdb27bb59ffb07343ebb1b5b941cca)
 
-Lo usa Hispa-64 desde la etapa 10 b (docs/64/HISPA-64.md, sección 19): el
-texto de hoy para el navegador (normalizar, mayúsculas, ordenar, cortar las
-líneas y las palabras, los números, las fechas, las zonas, IDNA, BiDi).
+Lo usa Hispa-64 desde la etapa 10 b (docs/64/HISPA-64.md, sección 19; la
+77.1 hasta la 10 e): el texto de hoy para el navegador (normalizar,
+mayúsculas, ordenar, cortar las líneas y las palabras, los números, las
+fechas, las zonas, IDNA, BiDi). Desde la etapa 10 f, la 78.3: la que pide
+Ladybird (LibUnicode: find_package(ICU 78.3 EXACT)), con Unicode 17.0.
 Aquí va, sin cambiar nada, source/common, source/i18n y source/stubdata (sin
-los proyectos de Visual Studio, los Makefile.in ni los BUILD.bazel). Se
-compila con cxx.sh (C++ con musl), un archivo cada vez, en build/icu-obj
-(castel/nucleo64/programas/cxx/hazcxx.sh: libicu.a).
+los proyectos de Visual Studio, los Makefile.in, los CMakeLists.txt ni los
+BUILD.bazel). Se compila con cxx.sh (C++ con musl), un archivo cada vez, en
+build/icu-obj (castel/nucleo64/programas/cxx/hazcxx.sh: libicu.a).
 
-data/icudt77l.dat son los datos, hechos con las herramientas de ICU desde
-icu4c-77_1-data.zip con el filtro de filtro.json (ICU_DATA_FILTER_FILE: los
+data/icudt78l.dat son los datos, hechos con las herramientas de ICU desde
+icu4c-78.3-data.zip con el filtro de filtro.json (ICU_DATA_FILTER_FILE: los
 idiomas español, catalán, gallego, euskera e inglés; sin transliteración,
 sin los diccionarios de cortar el tailandés, el chino o el japonés, sin
 RBNF, sin los nombres de los caracteres; de las conversiones, solo
 windows-1252): 4 MB en vez de 31. Para rehacerlo (en un Linux con g++ y
 python3):
-  tar xzf icu4c-77_1-src.tgz && cd icu/source && rm -rf data && unzip ../../icu4c-77_1-data.zip
+  tar xzf icu4c-78.3-sources.tgz && cd icu/source && rm -rf data && unzip ../../icu4c-78.3-data.zip
   ICU_DATA_FILTER_FILE=.../terceros/icu/filtro.json ./configure --disable-tests --disable-samples --disable-extras
-  make     ->  data/out/tmp/icudt77l.dat
+  make     ->  data/out/tmp/icudt78l.dat

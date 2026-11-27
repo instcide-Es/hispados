@@ -46,7 +46,7 @@ sed 's/@LADYBIRD_BROWSER_VERSION@/1.0/; s/@CMAKE_BUILD_TYPE@/Release/; s/@browse
   "$L/Libraries/LibCore/BrowserVersion.h.in" > "$G/LibCore/BrowserVersion.h"
 # las opciones de Ladybird para GCC (Meta/CMake/compile_options.cmake), sin -Werror
 CF="-std=c++23 -O2 -fno-exceptions -fsigned-char -ffp-contract=off -fno-semantic-interposition -fstack-protector-strong -fstrict-flex-arrays=2 \
- -ftrivial-auto-var-init=zero -fvisibility-inlines-hidden -w -I$L -I$L/Libraries -I$G -I$AQUI/compat -I$T/fast_float/include -I$T/simdutf -I$T/zmij -I$T/mimalloc/include"
+ -ftrivial-auto-var-init=zero -fvisibility-inlines-hidden -w -I$L -I$L/Libraries -I$G -I$T/fast_float/include -I$T/simdutf -I$T/zmij -I$T/mimalloc/include"
 AKF="Assertions Base64 ByteString ByteStringImpl CircularBuffer CountingStream Demangle Error FFIHelpers FlyString Format GenericLexer Hex JsonArray
  JsonObject JsonParser JsonValue MathFunctions MemoryStream NumberFormat OptionParser Random StackInfo Stream String StringBase StringBuilder
  StringConversions StringUtils StringView ThreadID Time Utf16FlyString Utf16String Utf16StringBuilder Utf16StringData Utf16View Utf8View kmalloc

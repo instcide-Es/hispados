@@ -107,7 +107,7 @@ módulo PrMusl64
         ; cortes de MSONIDO después de MCURL eran las conexiones de MCURL que se
         ; soltaban (TIME_WAIT) mientras sonaba, un aviso de vaciar la TLB por
         ; cada página de sus búferes (la cuarentena de Monton64 lo arregla)
-        si busca_archivo("MICU") >= 0 entonces corre("MICU", 0) fin            ; ICU (con icudt77l.dat)
+        si busca_archivo("MICU") >= 0 entonces corre("MICU", 0) fin            ; ICU (con icudt78l.dat)
         si busca_archivo("MIMG") >= 0 entonces corre("MIMG", 0) fin            ; [etapa 10 e] zlib, libpng, libjpeg-turbo y libwebp
         si busca_archivo("MLIBS") >= 0 entonces corre("MLIBS", 0) fin          ; [etapa 10 e] las demás bibliotecas que pide Ladybird
         si busca_archivo("MSKIA") >= 0 entonces corre("MSKIA", 0) fin          ; [etapa 10 e] Skia, con el procesador

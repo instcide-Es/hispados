@@ -1,11 +1,11 @@
 // Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 // nucleo64/programas/cxx/micu.cpp - Hispa-64, etapa 10 b (docs/64/HISPA-64.md,
-// sección 19): la prueba de ICU 77.1 (terceros/icu), compilada con cxx.sh (la
+// sección 19): la prueba de ICU 78.3 (terceros/icu; [etapa 10 f] antes, la 77.1), compilada con cxx.sh (la
 // libstdc++ con musl), lo que pedirá el navegador para el texto: normalizar,
 // mayúsculas y minúsculas, ordenar a la española (y a la tradicional), cortar
 // líneas, palabras y letras (grafemas), los números, las fechas y las zonas,
 // los plurales, IDNA (los nombres con eñe), BiDi, windows-1252 y las
-// expresiones regulares. Los datos, en icudt77l.dat (los de terceros/icu/data:
+// expresiones regulares. Los datos, en icudt78l.dat (los de terceros/icu/data:
 // español, catalán, gallego, euskera e inglés; ICU_DATA, o la carpeta del
 // programa). Dice «MICU: todo bien (N pruebas)» y unas líneas con lo que da,
 // que son las mismas en Linux (pruebas.sh lo corre también allí).
@@ -96,12 +96,12 @@ int main(int argc, char **argv)
 	u_getUnicodeVersion(uv);
 	u_versionToString(uv, ut);
 	printf("MICU: ICU %s (Unicode %s), con musl y la libstdc++ (cxx.sh)\n", vt, ut);
-	MIRA(!strcmp(vt, "77.1") && !strncmp(ut, "16.0", 4), "la versión de ICU y de Unicode");
+	MIRA(!strcmp(vt, "78.3") && !strncmp(ut, "17.0", 4), "la versión de ICU y de Unicode");
 	// los datos, abiertos
 	{
 		UErrorCode e2 = U_ZERO_ERROR;
 		UDataMemory *m = udata_open(nullptr, "res", "root", &e2);
-		MIRA(U_SUCCESS(e2), "los datos (icudt77l.dat)");
+		MIRA(U_SUCCESS(e2), "los datos (icudt78l.dat)");
 		if (m) udata_close(m);
 		if (U_FAILURE(e2)) { printf("  sin los datos en «%s»: %s\n", u_getDataDirectory(), u_errorName(e2)); return acaba("MICU"); }
 	}
