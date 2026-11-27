@@ -27,7 +27,9 @@ UPX); los de discos de quitar y poner saben cuándo se cambia el disco;
 INT 21h 44h (IOCTL) les pasa lo que entienden; un ANSI.SYS puede ser la
 consola; y la red va con el *packet driver* de la tarjeta (probado con el
 NE2000 de Crynwr, NANSI.SYS, SRDISK y CuteMouse de FreeDOS, que no van en
-Hispa-8086). El núcleo sigue por debajo de 16 K (16.334 octetos).
+Hispa-8086). El núcleo sigue por debajo de 16 K (16.334 octetos). La batería
+de la 0.15: 957 comprobaciones en 61 partes, todas bien (y las de v86 y de
+los controladores con el núcleo arriba, también bien).
 
 **Lo de la 0.14**, para quien lo usa:
 
