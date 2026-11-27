@@ -1,0 +1,34 @@
+Skia m148 (https://skia.org/), con la licencia BSD de 3 cláusulas
+(compatible con la GPL): ver LICENSE.
+  La versión, la que usa Ladybird (Meta/CMake/vcpkg/overlay-ports/skia, la
+  «148»): el commit e7c90ecca9444fe09598f1630ab7cee2c0ee027a de
+  github.com/google/skia,
+  github.com/google/skia/archive/e7c90ecca9444fe09598f1630ab7cee2c0ee027a.tar.gz
+  SHA-256: 7b5158952ebc4e2ce8de19f036b7613e266705003469579d9e98070ead62fc3b
+
+Lo usa Hispa-64 desde la etapa 10 e (docs/64/HISPA-64.md, sección 22): lo que
+dibuja Ladybird (en el Ladybird de hoy, solo el proceso Compositor), con el
+procesador (sin GPU: ni GL ni Vulkan; con Ganesh, sin sus motores, para que
+estén las funciones que llama Ladybird), con FreeType, HarfBuzz e ICU de
+terceros/ y las bibliotecas de las imágenes de terceros/ (zlib, libpng,
+libjpeg-turbo, libwebp). Sin fontconfig por ahora (las letras, por su ruta:
+SkFontMgr_New_Custom_Directory o _Empty), sin PDF, SVG, Skottie, XPS,
+skparagraph, wuffs (el GIF), DNG ni piex.
+
+Aquí van, sin cambiar nada, solo los archivos que se compilan (804) y las
+cabeceras que usan (las que dice el gn de Skia con «ninja -t deps»): 22 MB de
+los 74 de src, include y modules. Con el cambio de Ladybird
+010-always-build-pathops.patch (que pathops entre en libskia: lo usa
+Ladybird), que solo toca BUILD.gn: aquí, que esos archivos están en la lista.
+
+compila.txt es la lista de lo que se compila y con qué opciones, sacada del
+gn de Skia (gn 2175, el de bin/fetch-gn) con args.gn (las opciones; CRUZADO,
+TERCEROS e INC son las carpetas del compilador cruzado, de terceros/ y de las
+cabeceras de zlib, libpng, libjpeg-turbo y libwebp): cada «@X opciones» y
+debajo sus archivos ($K es esta carpeta, $T terceros/ e $INC las cabeceras).
+Para rehacerla (en el PC de Albinyana; el gn y el ninja se bajan aparte): en
+el tar de Skia, con el parche, «bin/fetch-gn», «bin/gn gen out/h64» con
+args.gn en out/h64 y el guion skia-lista.py de la etapa (docs/64, sección 22).
+Se compila con castel/nucleo64/programas/cxx/hazskia.sh (build/skia-obj/
+libskia.a): con 10 hilos, unos 8 minutos; con uno, en el servidor, más de una
+hora.
