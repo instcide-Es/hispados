@@ -1,0 +1,15 @@
+Ladybird (https://ladybird.org/, github.com/LadybirdBrowser/ladybird), con la
+licencia BSD de 2 cláusulas (compatible con la GPL): ver LICENSE.
+  El commit 830fbef69775299be78de87a2fe9dc99faed0442 (26/11/2026), de
+  «git clone --depth 1» de github.com/LadybirdBrowser/ladybird.
+
+Lo usa Hispa-64 desde la etapa 10 e (docs/64/HISPA-64.md, sección 22): las
+bibliotecas de base de Ladybird, el primer paso para el navegador. Aquí van,
+sin cambiar nada, AK/, Libraries/LibCore, Libraries/LibFileSystem,
+Libraries/LibThreading, Libraries/LibTest, Libraries/LibMain (solo su cabecera) y Tests/AK (con sus CMakeLists.txt,
+que no se usan: los archivos y las opciones, en castel/nucleo64/programas/
+ladybird/hazak.sh, que hace lo que haría su CMake). Lo que pide AK de fuera:
+fast_float, simdutf, zmij y mimalloc (terceros/, libs/hazlibs.sh) y las
+cabeceras de las matemáticas de llvm-libc (terceros/llvm-libc).
+Sin LibUnicode (pide ICU 78.3 y un «crate» de Rust: más adelante); por eso,
+sin LibCore/TimeZone.cpp ni las pruebas TestString y TestUtf16String.

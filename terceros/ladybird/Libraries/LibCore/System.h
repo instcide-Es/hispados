@@ -1,0 +1,218 @@
+/*
+ * Copyright (c) 2021, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2021-2022, Kenneth Myhra <kennethmyhra@serenityos.org>
+ * Copyright (c) 2021-2024, Sam Atkins <atkinssj@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Error.h>
+#include <AK/StringView.h>
+#include <LibCore/AddressInfoVector.h>
+#include <LibCore/Export.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <sys/stat.h>
+#include <time.h>
+
+#if !defined(AK_OS_WINDOWS)
+#    include <netdb.h>
+#    include <poll.h>
+#    include <pwd.h>
+#    include <spawn.h>
+#    include <sys/ioctl.h>
+#    include <sys/resource.h>
+#    include <sys/socket.h>
+#    include <sys/time.h>
+#    include <sys/wait.h>
+#    include <termios.h>
+#    include <utime.h>
+#else
+#    include <io.h>
+
+#    define O_CLOEXEC O_NOINHERIT
+#    define STDIN_FILENO to_fd(reinterpret_cast<void*>(_get_osfhandle(_fileno(stdin))))
+#    define STDOUT_FILENO to_fd(reinterpret_cast<void*>(_get_osfhandle(_fileno(stdout))))
+#    define STDERR_FILENO to_fd(reinterpret_cast<void*>(_get_osfhandle(_fileno(stderr))))
+#    define S_ISDIR(mode) (((mode) & S_IFMT) == S_IFDIR)
+#    define S_ISREG(mode) (((mode) & S_IFMT) == S_IFREG)
+
+using sighandler_t = void (*)(int);
+using socklen_t = int;
+
+struct addrinfo;
+struct sockaddr;
+#endif
+
+#if !defined(AK_OS_BSD_GENERIC) && !defined(AK_OS_ANDROID) && !defined(AK_OS_WINDOWS)
+#    include <shadow.h>
+#endif
+
+#ifdef AK_OS_FREEBSD
+#    include <sys/ucred.h>
+#endif
+
+#if defined(AK_OS_LINUX)
+#    include <sys/vfs.h>
+#elif defined(AK_OS_MACOS)
+#    include <sys/mount.h>
+#endif
+
+#ifdef AK_OS_SOLARIS
+#    include <sys/filio.h>
+#    include <ucred.h>
+#endif
+
+namespace Core::System {
+
+#if !defined(AK_OS_WINDOWS)
+
+#    if !defined(AK_OS_MACOS) && !defined(AK_OS_HAIKU)
+ErrorOr<int> accept4(int sockfd, struct sockaddr*, socklen_t*, int flags);
+#    endif
+
+ErrorOr<void> sigaction(int signal, struct sigaction const* action, struct sigaction* old_action);
+#    if defined(AK_OS_SOLARIS)
+CORE_API ErrorOr<SIG_TYP> signal(int signal, SIG_TYP handler);
+#    elif defined(AK_OS_BSD_GENERIC)
+CORE_API ErrorOr<sig_t> signal(int signal, sig_t handler);
+#    else
+CORE_API ErrorOr<sighandler_t> signal(int signal, sighandler_t handler);
+#    endif
+CORE_API ErrorOr<struct stat> fstat(int fd);
+CORE_API ErrorOr<struct stat> fstatat(int fd, StringView path, int flags);
+#    if defined(AK_OS_LINUX) || defined(AK_OS_MACOS)
+CORE_API ErrorOr<struct statfs> statfs(StringView path);
+CORE_API ErrorOr<struct statfs> fstatfs(int fd);
+#    endif
+ErrorOr<int> openat(int fd, StringView path, int options, mode_t mode = 0);
+CORE_API ErrorOr<int> fcntl(int fd, int command, ...);
+ErrorOr<void*> mmap(void* address, size_t, int protection, int flags, int fd, off_t, size_t alignment = 0, StringView name = {});
+ErrorOr<void> munmap(void* address, size_t);
+enum class AllowSealing {
+    No,
+    Yes,
+};
+CORE_API ErrorOr<int> anon_create(size_t size, int options, AllowSealing = AllowSealing::No);
+CORE_API ErrorOr<int> open(StringView path, int options, mode_t mode = 0);
+ErrorOr<void> ftruncate(int fd, off_t length);
+CORE_API ErrorOr<struct stat> stat(StringView path);
+CORE_API ErrorOr<struct stat> lstat(StringView path);
+CORE_API ErrorOr<size_t> read(int fd, Bytes buffer);
+CORE_API ErrorOr<size_t> write(int fd, ReadonlyBytes buffer);
+ErrorOr<int> dup2(int source_fd, int destination_fd);
+CORE_API ErrorOr<void> ioctl(int fd, unsigned request, ...);
+ErrorOr<struct termios> tcgetattr(int fd);
+ErrorOr<void> tcsetattr(int fd, int optional_actions, struct termios const&);
+CORE_API ErrorOr<void> chmod(StringView pathname, mode_t mode);
+ErrorOr<off_t> lseek(int fd, off_t, int whence);
+CORE_API ErrorOr<void> link(StringView old_path, StringView new_path);
+CORE_API ErrorOr<void> symlink(StringView target, StringView link_path);
+CORE_API ErrorOr<void> mkdir(StringView path, mode_t);
+CORE_API ErrorOr<void> rmdir(StringView path);
+CORE_API ErrorOr<int> mkstemp(Span<char> pattern);
+CORE_API ErrorOr<void> fchmod(int fd, mode_t mode);
+CORE_API ErrorOr<void> rename(StringView old_path, StringView new_path);
+CORE_API ErrorOr<void> renameat(int old_directory_fd, StringView old_path, int new_directory_fd, StringView new_path);
+CORE_API ErrorOr<void> unlink(StringView path);
+CORE_API ErrorOr<void> utimensat(int fd, StringView path, struct timespec const times[2], int flag);
+CORE_API ErrorOr<void> access(StringView pathname, int mode, int flags = 0);
+ErrorOr<ByteString> readlink(StringView pathname);
+CORE_API ErrorOr<int> poll(Span<struct pollfd>, int timeout);
+// Use Core::Process::terminate_process() in portable code.
+CORE_API ErrorOr<void> kill(pid_t, int signal);
+CORE_API ErrorOr<void> chown(StringView pathname, uid_t uid, gid_t gid);
+ErrorOr<pid_t> posix_spawn(StringView path, posix_spawn_file_actions_t const* file_actions, posix_spawnattr_t const* attr, char* const arguments[], char* const envp[]);
+ErrorOr<pid_t> posix_spawnp(StringView path, posix_spawn_file_actions_t* const file_actions, posix_spawnattr_t* const attr, char* const arguments[], char* const envp[]);
+
+struct WaitPidResult {
+    pid_t pid;
+    int status;
+};
+CORE_API ErrorOr<WaitPidResult> waitpid(pid_t waitee, int options = 0);
+CORE_API ErrorOr<void> fchown(int fd, uid_t, gid_t);
+
+ErrorOr<rlimit> get_resource_limits(int resource);
+CORE_API ErrorOr<void> set_resource_limits(int resource, rlim_t limit);
+
+#endif
+
+// Memory tags identify allocations in macOS VM diagnostics and are ignored on other platforms.
+enum class MemoryTag {
+    None,
+    GarbageCollector,
+};
+
+CORE_API ErrorOr<void*> reserve_address_space(size_t size, MemoryTag = MemoryTag::None);
+CORE_API ErrorOr<void*> allocate_anonymous_memory(size_t size, MemoryTag = MemoryTag::None);
+CORE_API ErrorOr<void> commit_memory(void* address, size_t size, MemoryTag = MemoryTag::None);
+CORE_API ErrorOr<void> protect_memory_readonly(void* address, size_t size);
+CORE_API ErrorOr<void> decommit_memory(void* address, size_t size, MemoryTag = MemoryTag::None);
+CORE_API ErrorOr<void> release_address_space(void* address, size_t size);
+
+// Used for placing a SharedArrayBuffer's cross-process shared memory inside the primitive storage cage.
+
+CORE_API ErrorOr<void> close(int fd);
+CORE_API ErrorOr<int> dup(int source_fd);
+// Whether a pipe's read end is read by this process's own code, or by another process's, such as a child that is given
+// it as its standard input. On Windows, a Notifier can only watch a read end that is read internally, and only one that
+// is read externally can be read by code that does not use overlapped I/O.
+enum class PipeReadEnd : u8 {
+    ReadInternally,
+    ReadExternally,
+};
+CORE_API ErrorOr<Array<int, 2>> pipe2(int flags, PipeReadEnd = PipeReadEnd::ReadInternally);
+#if defined(AK_OS_WINDOWS)
+// Two connected ends of a named pipe, each read and written, as socketpair() gives elsewhere.
+CORE_API ErrorOr<Array<int, 2>> duplex_pipe();
+#endif
+CORE_API ErrorOr<void> set_close_on_exec(int fd, bool enabled);
+CORE_API bool is_socket(int fd);
+
+// The socket section is portable: Winsock *is* the BSD socket API.
+CORE_API ErrorOr<int> socket(int domain, int type, int protocol);
+CORE_API ErrorOr<void> bind(int sockfd, struct sockaddr const*, socklen_t);
+CORE_API ErrorOr<void> listen(int sockfd, int backlog);
+ErrorOr<int> accept(int sockfd, struct sockaddr*, socklen_t*);
+ErrorOr<void> connect(int sockfd, struct sockaddr const*, socklen_t);
+CORE_API ErrorOr<size_t> send(int sockfd, ReadonlyBytes, int flags);
+ErrorOr<size_t> sendmsg(int sockfd, const struct msghdr*, int flags);
+ErrorOr<size_t> sendto(int sockfd, ReadonlyBytes, int flags, struct sockaddr const*, socklen_t);
+CORE_API ErrorOr<size_t> recv(int sockfd, Bytes, int flags);
+ErrorOr<size_t> recvmsg(int sockfd, struct msghdr*, int flags);
+ErrorOr<size_t> recvfrom(int sockfd, Bytes, int flags, struct sockaddr*, socklen_t*);
+ErrorOr<void> getsockopt(int sockfd, int level, int option, void* value, socklen_t* value_size);
+CORE_API ErrorOr<void> setsockopt(int sockfd, int level, int option, void const* value, socklen_t value_size);
+ErrorOr<void> getsockname(int sockfd, struct sockaddr*, socklen_t*);
+ErrorOr<void> getpeername(int sockfd, struct sockaddr*, socklen_t*);
+CORE_API ErrorOr<void> socketpair(int domain, int type, int protocol, int sv[2]);
+CORE_API ErrorOr<void> set_socket_blocking(int socket, bool enabled);
+ErrorOr<AddressInfoVector> getaddrinfo(char const* nodename, char const* servname, struct addrinfo const& hints);
+
+// Process and miscellaneous helpers; operation-named, native on all platforms.
+CORE_API ErrorOr<ByteString> getcwd();
+CORE_API ErrorOr<void> chdir(StringView path);
+CORE_API ErrorOr<bool> isatty(int fd);
+
+struct TerminalSize {
+    size_t columns { 0 };
+    size_t rows { 0 };
+};
+
+// Queries the size of the terminal the given fd refers to.
+CORE_API ErrorOr<TerminalSize> terminal_size(int fd);
+
+// Makes the terminal the given fd refers to interpret ANSI escape sequences. This is a no-op on POSIX, where
+// terminals interpret escape sequences natively; on Windows it must be called before writing them to a console.
+CORE_API ErrorOr<void> enable_ansi_escape_sequence_processing(int fd);
+CORE_API unsigned hardware_concurrency();
+CORE_API u64 physical_memory_bytes();
+CORE_API ErrorOr<ByteString> current_executable_path();
+CORE_API int getpid();
+CORE_API ErrorOr<void> sleep_ms(u32 milliseconds);
+
+CORE_API ErrorOr<size_t> transfer_file_through_socket(int source_fd, int target_fd, size_t source_offset, size_t source_length);
+
+}

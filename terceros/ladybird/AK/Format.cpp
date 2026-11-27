@@ -1,0 +1,1208 @@
+/*
+ * Copyright (c) 2020, the SerenityOS developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/Assertions.h>
+#include <AK/ByteBuffer.h>
+#include <AK/ByteString.h>
+#include <AK/CharacterTypes.h>
+#include <AK/Error.h>
+#include <AK/Format.h>
+#include <AK/GenericLexer.h>
+#include <AK/HashMap.h>
+#include <AK/IntegralMath.h>
+#include <AK/LexicalPath.h>
+#include <AK/String.h>
+#include <AK/StringBuilder.h>
+#include <AK/ThreadID.h>
+#include <AK/Time.h>
+#include <AK/Utf16String.h>
+#include <AK/Utf16StringBuilder.h>
+#include <math.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
+
+#include <zmij-to-chars.h>
+
+#if defined(AK_OS_SERENITY)
+#    include <serenity.h>
+#endif
+
+#if defined(AK_OS_ANDROID)
+#    include <android/log.h>
+#endif
+
+#if defined(AK_OS_WINDOWS)
+#    include <AK/Windows.h>
+#endif
+
+#if defined(AK_OS_FREEBSD)
+#    include <pthread_np.h>
+#endif
+
+namespace AK {
+
+class FormatParser : public GenericLexer {
+public:
+    struct FormatSpecifier {
+        StringView flags;
+        size_t index;
+    };
+
+    explicit FormatParser(StringView input);
+
+    StringView consume_literal();
+    bool consume_number(size_t& value);
+    bool consume_specifier(FormatSpecifier& specifier);
+    bool consume_replacement_field(size_t& index);
+};
+
+namespace {
+
+static constexpr size_t use_next_index = NumericLimits<size_t>::max();
+
+// The worst case is that we have the largest 64-bit value formatted as binary number, this would take
+// 65 bytes (85 bytes with separators). Choosing a larger power of two won't hurt and is a bit of mitigation against out-of-bounds accesses.
+static constexpr size_t convert_unsigned_to_string(u64 value, Array<u8, 128>& buffer, u8 base, bool upper_case, bool use_separator)
+{
+    VERIFY(base >= 2 && base <= 16);
+
+    constexpr char const* lowercase_lookup = "0123456789abcdef";
+    constexpr char const* uppercase_lookup = "0123456789ABCDEF";
+
+    if (value == 0) {
+        buffer[0] = '0';
+        return 1;
+    }
+
+    size_t used = 0;
+    size_t digit_count = 0;
+    while (value > 0) {
+        if (upper_case)
+            buffer[used++] = uppercase_lookup[value % base];
+        else
+            buffer[used++] = lowercase_lookup[value % base];
+
+        digit_count++;
+        value /= base;
+
+        if (use_separator && value > 0 && digit_count % 3 == 0)
+            buffer[used++] = ',';
+    }
+
+    for (size_t i = 0; i < used / 2; ++i)
+        swap(buffer[i], buffer[used - i - 1]);
+
+    return used;
+}
+
+ErrorOr<void> vformat_impl(TypeErasedFormatParams& params, FormatBuilder& builder, FormatParser& parser)
+{
+    auto const literal = parser.consume_literal();
+    TRY(builder.put_literal(literal));
+
+    FormatParser::FormatSpecifier specifier;
+    if (!parser.consume_specifier(specifier)) {
+        VERIFY(parser.is_eof());
+        return {};
+    }
+
+    if (specifier.index == use_next_index)
+        specifier.index = params.take_next_index();
+
+    auto& parameter = params.parameters().at(specifier.index);
+
+    FormatParser argparser { specifier.flags };
+    TRY(parameter.visit([&]<typename T>(T const& value) {
+        if constexpr (IsSame<T, TypeErasedParameter::CustomType>) {
+            return value.formatter(params, builder, argparser, value.value);
+        } else {
+            return __format_value<T>(params, builder, argparser, &value);
+        }
+    }));
+    TRY(vformat_impl(params, builder, parser));
+    return {};
+}
+
+} // namespace AK::{anonymous}
+
+FormatParser::FormatParser(StringView input)
+    : GenericLexer(input)
+{
+}
+StringView FormatParser::consume_literal()
+{
+    auto const begin = tell();
+
+    while (!is_eof()) {
+        if (consume_specific("{{"sv))
+            continue;
+
+        if (consume_specific("}}"sv))
+            continue;
+
+        if (next_is(is_any_of("{}"sv)))
+            return m_input.substring_view(begin, tell() - begin);
+
+        consume();
+    }
+
+    return m_input.substring_view(begin);
+}
+bool FormatParser::consume_number(size_t& value)
+{
+    value = 0;
+
+    bool consumed_at_least_one = false;
+    while (next_is(is_ascii_digit)) {
+        value *= 10;
+        value += parse_ascii_digit(consume());
+        consumed_at_least_one = true;
+    }
+
+    return consumed_at_least_one;
+}
+bool FormatParser::consume_specifier(FormatSpecifier& specifier)
+{
+    VERIFY(!next_is('}'));
+
+    if (!consume_specific('{'))
+        return false;
+
+    if (!consume_number(specifier.index))
+        specifier.index = use_next_index;
+
+    if (consume_specific(':')) {
+        auto const begin = tell();
+
+        size_t level = 1;
+        while (level > 0) {
+            VERIFY(!is_eof());
+
+            if (consume_specific('{')) {
+                ++level;
+                continue;
+            }
+
+            if (consume_specific('}')) {
+                --level;
+                continue;
+            }
+
+            consume();
+        }
+
+        specifier.flags = m_input.substring_view(begin, tell() - begin - 1);
+    } else {
+        if (!consume_specific('}'))
+            VERIFY_NOT_REACHED();
+
+        specifier.flags = ""sv;
+    }
+
+    return true;
+}
+bool FormatParser::consume_replacement_field(size_t& index)
+{
+    if (!consume_specific('{'))
+        return false;
+
+    if (!consume_number(index))
+        index = use_next_index;
+
+    if (!consume_specific('}'))
+        VERIFY_NOT_REACHED();
+
+    return true;
+}
+
+ErrorOr<void> FormatBuilder::append(char ch)
+{
+    if (m_string_builder)
+        return m_string_builder->try_append(ch);
+    m_utf16_builder->append_ascii(ch);
+    return {};
+}
+
+ErrorOr<void> FormatBuilder::append(StringView string)
+{
+    if (m_string_builder)
+        return m_string_builder->try_append(string);
+    m_utf16_builder->append(Utf16String::from_utf8_without_validation(string));
+    return {};
+}
+
+ErrorOr<void> FormatBuilder::append(Utf16View const& string)
+{
+    if (m_string_builder)
+        return m_string_builder->try_append(string);
+    m_utf16_builder->append(string);
+    return {};
+}
+
+ErrorOr<void> FormatBuilder::put_padding(char fill, size_t amount)
+{
+    for (size_t i = 0; i < amount; ++i)
+        TRY(append(fill));
+    return {};
+}
+ErrorOr<void> FormatBuilder::put_literal(StringView value)
+{
+    for (size_t i = 0; i < value.length(); ++i) {
+        TRY(append(value[i]));
+        if (value[i] == '{' || value[i] == '}')
+            ++i;
+    }
+    return {};
+}
+
+ErrorOr<void> FormatBuilder::put_string(
+    StringView value,
+    Align align,
+    size_t min_width,
+    size_t max_width,
+    char fill)
+{
+    auto const used_by_string = min(max_width, value.length());
+    auto const used_by_padding = max(min_width, used_by_string) - used_by_string;
+
+    if (used_by_string < value.length())
+        value = value.substring_view(0, used_by_string);
+
+    if (align == Align::Left || align == Align::Default) {
+        TRY(append(value));
+        TRY(put_padding(fill, used_by_padding));
+    } else if (align == Align::Center) {
+        auto const used_by_left_padding = used_by_padding / 2;
+        auto const used_by_right_padding = ceil_div<size_t, size_t>(used_by_padding, 2);
+
+        TRY(put_padding(fill, used_by_left_padding));
+        TRY(append(value));
+        TRY(put_padding(fill, used_by_right_padding));
+    } else if (align == Align::Right) {
+        TRY(put_padding(fill, used_by_padding));
+        TRY(append(value));
+    }
+    return {};
+}
+
+ErrorOr<void> FormatBuilder::put_string(Utf16View const& value)
+{
+    TRY(append(value));
+    return {};
+}
+
+ErrorOr<void> FormatBuilder::put_u64(
+    u64 value,
+    u8 base,
+    bool prefix,
+    bool upper_case,
+    bool zero_pad,
+    bool use_separator,
+    Align align,
+    size_t min_width,
+    char fill,
+    SignMode sign_mode,
+    bool is_negative)
+{
+    if (align == Align::Default)
+        align = Align::Right;
+
+    Array<u8, 128> buffer;
+
+    auto const used_by_digits = convert_unsigned_to_string(value, buffer, base, upper_case, use_separator);
+
+    size_t used_by_prefix = 0;
+    if (align == Align::Right && zero_pad) {
+        // We want ByteString::formatted("{:#08x}", 32) to produce '0x00000020' instead of '0x000020'. This
+        // behavior differs from both fmtlib and printf, but is more intuitive.
+        used_by_prefix = 0;
+    } else {
+        if (is_negative || sign_mode != SignMode::OnlyIfNeeded)
+            used_by_prefix += 1;
+
+        if (prefix) {
+            if (base == 8)
+                used_by_prefix += 1;
+            else if (base == 16)
+                used_by_prefix += 2;
+            else if (base == 2)
+                used_by_prefix += 2;
+        }
+    }
+
+    auto const used_by_field = used_by_prefix + used_by_digits;
+    auto const used_by_padding = max(used_by_field, min_width) - used_by_field;
+
+    auto const put_prefix = [&]() -> ErrorOr<void> {
+        if (is_negative)
+            TRY(append('-'));
+        else if (sign_mode == SignMode::Always)
+            TRY(append('+'));
+        else if (sign_mode == SignMode::Reserved)
+            TRY(append(' '));
+
+        if (prefix) {
+            if (base == 2) {
+                if (upper_case)
+                    TRY(append("0B"sv));
+                else
+                    TRY(append("0b"sv));
+            } else if (base == 8) {
+                TRY(append("0"sv));
+            } else if (base == 16) {
+                if (upper_case)
+                    TRY(append("0X"sv));
+                else
+                    TRY(append("0x"sv));
+            }
+        }
+        return {};
+    };
+
+    auto const put_digits = [&]() -> ErrorOr<void> {
+        for (size_t i = 0; i < used_by_digits; ++i)
+            TRY(append(buffer[i]));
+        return {};
+    };
+
+    if (align == Align::Left) {
+        auto const used_by_right_padding = used_by_padding;
+
+        TRY(put_prefix());
+        TRY(put_digits());
+        TRY(put_padding(fill, used_by_right_padding));
+    } else if (align == Align::Center) {
+        auto const used_by_left_padding = used_by_padding / 2;
+        auto const used_by_right_padding = used_by_padding - used_by_left_padding;
+
+        TRY(put_padding(fill, used_by_left_padding));
+        TRY(put_prefix());
+        TRY(put_digits());
+        TRY(put_padding(fill, used_by_right_padding));
+    } else if (align == Align::Right) {
+        auto const used_by_left_padding = used_by_padding;
+
+        if (zero_pad) {
+            TRY(put_prefix());
+            TRY(put_padding('0', used_by_left_padding));
+            TRY(put_digits());
+        } else {
+            TRY(put_padding(fill, used_by_left_padding));
+            TRY(put_prefix());
+            TRY(put_digits());
+        }
+    }
+    return {};
+}
+
+ErrorOr<void> FormatBuilder::put_i64(
+    i64 value,
+    u8 base,
+    bool prefix,
+    bool upper_case,
+    bool zero_pad,
+    bool use_separator,
+    Align align,
+    size_t min_width,
+    char fill,
+    SignMode sign_mode)
+{
+    auto const is_negative = value < 0;
+    u64 positive_value;
+    if (value == NumericLimits<i64>::min()) {
+        positive_value = static_cast<u64>(NumericLimits<i64>::max()) + 1;
+    } else {
+        positive_value = is_negative ? -value : value;
+    }
+
+    TRY(put_u64(positive_value, base, prefix, upper_case, zero_pad, use_separator, align, min_width, fill, sign_mode, is_negative));
+    return {};
+}
+
+template<OneOf<float, double, long double> T>
+ErrorOr<void> FormatBuilder::put_floating_point(
+    T value,
+    u8 base,
+    bool upper_case,
+    bool use_separator,
+    Align align,
+    size_t min_width,
+    Optional<size_t> precision,
+    char fill,
+    SignMode sign_mode,
+    RealNumberDisplayMode display_mode)
+{
+    StringBuilder builder;
+    if (value < 0)
+        TRY(builder.try_append('-'));
+    else if (sign_mode == SignMode::Always)
+        TRY(builder.try_append('+'));
+    else if (sign_mode == SignMode::Reserved)
+        TRY(builder.try_append(' '));
+
+    // AK formats negative zero as zero and does not print NaN's sign bit.
+    auto magnitude = value < 0 ? -value : value;
+    if (value == 0)
+        magnitude = 0;
+    else if (isnan(value))
+        magnitude = static_cast<T>(NAN);
+
+    auto const is_finite = isfinite(value);
+
+    Array<char, zmij::buffer_sizes<T>::shortest> shortest_buffer;
+    StringView shortest;
+
+    if (!is_finite || (base == 10 && display_mode != RealNumberDisplayMode::FixedPoint)) {
+        auto* shortest_end = zmij::write(shortest_buffer.data(), shortest_buffer.size(), magnitude);
+        if (shortest_end == shortest_buffer.data())
+            return Error::from_errno(ENOMEM);
+        shortest = { shortest_buffer.data(), static_cast<size_t>(shortest_end - shortest_buffer.data()) };
+    }
+
+    auto append_with_precision = [&](zmij::chars_format format, Optional<size_t> precision) -> ErrorOr<void> {
+        if (precision.value_or(0) > static_cast<size_t>(NumericLimits<int>::max()))
+            return Error::from_errno(EOVERFLOW);
+
+        Array<char, zmij::buffer_sizes<double>::fixed> buffer;
+        ByteBuffer allocated_buffer;
+
+        auto* begin = buffer.data();
+        auto size = buffer.size();
+
+        auto write = [&] {
+            if (precision.has_value())
+                return zmij::to_chars(begin, begin + size, magnitude, format, static_cast<int>(*precision));
+            return zmij::to_chars(begin, begin + size, magnitude, format);
+        };
+
+        auto result = write();
+
+        if (result.ec == std::errc::value_too_large) {
+            // Include space for the largest integral part, a rounding carry, and the decimal point.
+            size = NumericLimits<T>::max_exponent10() + precision.value_or(0) + 3;
+
+            allocated_buffer = TRY(ByteBuffer::create_uninitialized(size));
+            begin = reinterpret_cast<char*>(allocated_buffer.data());
+
+            result = write();
+        }
+
+        if (result.ec == std::errc::not_enough_memory || result.ptr == begin)
+            return Error::from_errno(ENOMEM);
+        if (result.ec != std::errc {})
+            return Error::from_errno(EOVERFLOW);
+
+        StringView text { begin, static_cast<size_t>(result.ptr - begin) };
+        if (format == zmij::chars_format::fixed && display_mode != RealNumberDisplayMode::FixedPoint && text.contains('.'))
+            text = text.trim("0"sv, TrimMode::Right).trim("."sv, TrimMode::Right);
+        if (format == zmij::chars_format::hex)
+            TRY(builder.try_append("0x"sv));
+
+        return builder.try_append(text);
+    };
+
+    auto const first_digit = builder.length();
+
+    if (!is_finite) {
+        TRY(builder.try_append(shortest));
+    } else if (base == 16) {
+        TRY(append_with_precision(zmij::chars_format::hex, precision));
+    } else if (display_mode == RealNumberDisplayMode::FixedPoint) {
+        TRY(append_with_precision(zmij::chars_format::fixed, precision.value_or(6)));
+    } else {
+        auto exponent_index = shortest.find('e');
+        auto mantissa = exponent_index.has_value() ? shortest.substring_view(0, *exponent_index) : shortest;
+        auto decimal_exponent = exponent_index.has_value()
+            ? shortest.substring_view(*exponent_index + 1).to_number<int>().value()
+            : static_cast<int>(mantissa.find('.').value_or(mantissa.length())) - 1;
+
+        // Keep AK's ECMA-262 notation thresholds, rather than zmij's printf-style defaults.
+        if (decimal_exponent < -6 || decimal_exponent > 20) {
+            Array<char, zmij::long_double_buffer_size> mantissa_buffer;
+            if (!exponent_index.has_value()) {
+                size_t length = 0;
+                for (auto digit : mantissa) {
+                    if (digit != '.')
+                        mantissa_buffer[length++] = digit;
+                }
+                auto digits = StringView { mantissa_buffer.data(), length }.trim("0"sv, TrimMode::Right);
+                // Make room for the decimal point after the leading digit.
+                for (size_t i = digits.length(); i > 1; --i)
+                    mantissa_buffer[i] = mantissa_buffer[i - 1];
+                if (digits.length() > 1)
+                    mantissa_buffer[1] = '.';
+                mantissa = StringView { mantissa_buffer.data(), digits.length() + (digits.length() > 1) };
+            }
+            if (precision.has_value() && mantissa.contains('.')) {
+                // AK's general precision truncates the shortest scientific mantissa.
+                mantissa = mantissa.substring_view(0, 2 + min(*precision, mantissa.length() - 2));
+                mantissa = mantissa.trim("0"sv, TrimMode::Right).trim("."sv, TrimMode::Right);
+            }
+            TRY(builder.try_append(mantissa));
+            TRY(builder.try_append('e'));
+            if (exponent_index.has_value()) {
+                auto exponent = shortest.substring_view(*exponent_index + 1);
+                TRY(builder.try_append(exponent[0]));
+                TRY(builder.try_append(exponent.substring_view(1).trim("0"sv, TrimMode::Left)));
+            } else {
+                FormatBuilder exponent_builder { builder };
+                TRY(exponent_builder.put_i64(decimal_exponent, 10, false, false, false, false, Align::Right, 0, ' ', SignMode::Always));
+            }
+        } else if (precision.has_value()) {
+            // General formatting removes fractional zeroes. A shortest integer within the exact
+            // integer range already has the requested representation, regardless of precision.
+            constexpr auto max_exact_integer = static_cast<T>(1ULL << min(std::numeric_limits<T>::digits, 53));
+            if (!exponent_index.has_value() && !mantissa.contains('.') && magnitude <= max_exact_integer)
+                TRY(builder.try_append(shortest));
+            else
+                TRY(append_with_precision(zmij::chars_format::fixed, precision));
+        } else if (!exponent_index.has_value()) {
+            if (first_digit == 0 && !upper_case && !use_separator)
+                return put_string(shortest, align, min_width, NumericLimits<size_t>::max(), fill);
+            TRY(builder.try_append(shortest));
+        } else {
+            // Expand a shortest scientific representation into AK's fixed notation range.
+            Array<char, zmij::long_double_buffer_size> digits_buffer;
+            size_t length = 0;
+            for (auto digit : mantissa) {
+                if (digit != '.')
+                    digits_buffer[length++] = digit;
+            }
+            StringView digits { digits_buffer.data(), length };
+            auto point = decimal_exponent + 1;
+            if (point <= 0) {
+                TRY(builder.try_append("0."sv));
+                TRY(builder.try_append_repeated('0', -point));
+                TRY(builder.try_append(digits));
+            } else if (static_cast<size_t>(point) >= digits.length()) {
+                TRY(builder.try_append(digits));
+                TRY(builder.try_append_repeated('0', point - digits.length()));
+            } else {
+                TRY(builder.try_append(digits.substring_view(0, point)));
+                TRY(builder.try_append('.'));
+                TRY(builder.try_append(digits.substring_view(point)));
+            }
+        }
+    }
+
+    if (!upper_case && !use_separator)
+        return put_string(builder.string_view(), align, min_width, NumericLimits<size_t>::max(), fill);
+
+    StringBuilder decorated_builder;
+    auto text = builder.string_view();
+    auto integral_end = text.find('.').value_or(text.find('e').value_or(text.find('p').value_or(text.length())));
+    for (size_t i = 0; i < text.length(); ++i) {
+        if (use_separator && base == 10 && i > first_digit && i < integral_end && (integral_end - i) % 3 == 0)
+            TRY(decorated_builder.try_append(','));
+        TRY(decorated_builder.try_append(upper_case ? to_ascii_uppercase(text[i]) : text[i]));
+    }
+    return put_string(decorated_builder.string_view(), align, min_width, NumericLimits<size_t>::max(), fill);
+}
+
+template ErrorOr<void> FormatBuilder::put_floating_point<float>(float, u8, bool, bool, Align, size_t, Optional<size_t>, char, SignMode, RealNumberDisplayMode);
+template ErrorOr<void> FormatBuilder::put_floating_point<double>(double, u8, bool, bool, Align, size_t, Optional<size_t>, char, SignMode, RealNumberDisplayMode);
+template ErrorOr<void> FormatBuilder::put_floating_point<long double>(long double, u8, bool, bool, Align, size_t, Optional<size_t>, char, SignMode, RealNumberDisplayMode);
+
+ErrorOr<void> FormatBuilder::put_hexdump(ReadonlyBytes bytes, size_t width, char fill)
+{
+    auto put_char_view = [&](auto i) -> ErrorOr<void> {
+        TRY(put_padding(fill, 4));
+        for (size_t j = i - min(i, width); j < i; ++j) {
+            auto ch = bytes[j];
+            TRY(append(ch >= 32 && ch <= 127 ? ch : '.')); // silly hack
+        }
+        return {};
+    };
+
+    for (size_t i = 0; i < bytes.size(); ++i) {
+        if (width > 0) {
+            if (i % width == 0 && i) {
+                TRY(put_char_view(i));
+                TRY(put_literal("\n"sv));
+            }
+        }
+        TRY(put_u64(bytes[i], 16, false, false, true, false, Align::Right, 2));
+    }
+
+    if (width > 0)
+        TRY(put_char_view(bytes.size()));
+
+    return {};
+}
+
+ErrorOr<void> vformat(StringBuilder& builder, StringView fmtstr, TypeErasedFormatParams& params)
+{
+    FormatBuilder fmtbuilder { builder };
+    FormatParser parser { fmtstr };
+
+    TRY(vformat_impl(params, fmtbuilder, parser));
+    return {};
+}
+
+ErrorOr<void> vformat(Utf16StringBuilder& builder, StringView fmtstr, TypeErasedFormatParams& params)
+{
+    FormatBuilder fmtbuilder { builder };
+    FormatParser parser { fmtstr };
+
+    TRY(vformat_impl(params, fmtbuilder, parser));
+    return {};
+}
+
+void StandardFormatter::parse(TypeErasedFormatParams& params, FormatParser& parser)
+{
+    if ("<^>"sv.contains(parser.peek(1))) {
+        VERIFY(!parser.next_is(is_any_of("{}"sv)));
+        m_fill = parser.consume();
+    }
+
+    if (parser.consume_specific('<'))
+        m_align = FormatBuilder::Align::Left;
+    else if (parser.consume_specific('^'))
+        m_align = FormatBuilder::Align::Center;
+    else if (parser.consume_specific('>'))
+        m_align = FormatBuilder::Align::Right;
+
+    if (parser.consume_specific('-'))
+        m_sign_mode = FormatBuilder::SignMode::OnlyIfNeeded;
+    else if (parser.consume_specific('+'))
+        m_sign_mode = FormatBuilder::SignMode::Always;
+    else if (parser.consume_specific(' '))
+        m_sign_mode = FormatBuilder::SignMode::Reserved;
+
+    if (parser.consume_specific('#'))
+        m_alternative_form = true;
+
+    if (parser.consume_specific('\''))
+        m_use_separator = true;
+
+    if (parser.consume_specific('0'))
+        m_zero_pad = true;
+
+    if (size_t index = 0; parser.consume_replacement_field(index)) {
+        if (index == use_next_index)
+            index = params.take_next_index();
+
+        m_width = params.parameters().at(index).to_size();
+    } else if (size_t width = 0; parser.consume_number(width)) {
+        m_width = width;
+    }
+
+    if (parser.consume_specific('.')) {
+        if (size_t index = 0; parser.consume_replacement_field(index)) {
+            if (index == use_next_index)
+                index = params.take_next_index();
+
+            m_precision = params.parameters().at(index).to_size();
+        } else if (size_t precision = 0; parser.consume_number(precision)) {
+            m_precision = precision;
+        }
+    }
+
+    if (parser.consume_specific('b'))
+        m_mode = Mode::Binary;
+    else if (parser.consume_specific('B'))
+        m_mode = Mode::BinaryUppercase;
+    else if (parser.consume_specific('d'))
+        m_mode = Mode::Decimal;
+    else if (parser.consume_specific('o'))
+        m_mode = Mode::Octal;
+    else if (parser.consume_specific('x'))
+        m_mode = Mode::Hexadecimal;
+    else if (parser.consume_specific('X'))
+        m_mode = Mode::HexadecimalUppercase;
+    else if (parser.consume_specific('c'))
+        m_mode = Mode::Character;
+    else if (parser.consume_specific('s'))
+        m_mode = Mode::String;
+    else if (parser.consume_specific('p'))
+        m_mode = Mode::Pointer;
+    else if (parser.consume_specific('f'))
+        m_mode = Mode::FixedPoint;
+    else if (parser.consume_specific('a'))
+        m_mode = Mode::Hexfloat;
+    else if (parser.consume_specific('A'))
+        m_mode = Mode::HexfloatUppercase;
+    else if (parser.consume_specific("hex-dump"sv))
+        m_mode = Mode::HexDump;
+
+    if (!parser.is_eof())
+        dbgln("{} did not consume '{}'", __PRETTY_FUNCTION__, parser.remaining());
+
+    VERIFY(parser.is_eof());
+}
+
+ErrorOr<void> Formatter<StringView>::format(FormatBuilder& builder, StringView value)
+{
+    if (m_sign_mode != FormatBuilder::SignMode::Default)
+        VERIFY_NOT_REACHED();
+    if (m_zero_pad)
+        VERIFY_NOT_REACHED();
+    if (m_mode != Mode::Default && m_mode != Mode::String && m_mode != Mode::Character && m_mode != Mode::HexDump)
+        VERIFY_NOT_REACHED();
+
+    m_width = m_width.value_or(0);
+    m_precision = m_precision.value_or(NumericLimits<size_t>::max());
+
+    if (m_mode == Mode::HexDump)
+        return builder.put_hexdump(value.bytes(), m_width.value(), m_fill);
+    return builder.put_string(value, m_align, m_width.value(), m_precision.value(), m_fill);
+}
+
+ErrorOr<void> Formatter<FormatString>::vformat(FormatBuilder& builder, StringView fmtstr, TypeErasedFormatParams& params)
+{
+    StringBuilder string_builder;
+    TRY(AK::vformat(string_builder, fmtstr, params));
+    TRY(Formatter<StringView>::format(builder, string_builder.string_view()));
+    return {};
+}
+
+template<Integral T>
+ErrorOr<void> Formatter<T>::format(FormatBuilder& builder, T value)
+{
+    if (m_mode == Mode::Character) {
+        // FIXME: We just support ASCII for now, in the future maybe unicode?
+        //        VERIFY(value >= 0 && value <= 127);
+
+        m_mode = Mode::String;
+
+        Formatter<StringView> formatter { *this };
+
+        // convert value to single byte, important for big-endian because the LSB is the last byte.
+        VERIFY(value >= 0 && value <= 127);
+        char const c = (value & 0x7f);
+
+        return formatter.format(builder, StringView { &c, 1 });
+    }
+
+    if (m_precision.has_value())
+        VERIFY_NOT_REACHED();
+
+    if (m_mode == Mode::Pointer) {
+        if (m_sign_mode != FormatBuilder::SignMode::Default)
+            VERIFY_NOT_REACHED();
+        if (m_align != FormatBuilder::Align::Default)
+            VERIFY_NOT_REACHED();
+        if (m_alternative_form)
+            VERIFY_NOT_REACHED();
+        if (m_width.has_value())
+            VERIFY_NOT_REACHED();
+
+        m_mode = Mode::Hexadecimal;
+        m_alternative_form = true;
+        m_width = 2 * sizeof(void*);
+        m_zero_pad = true;
+    }
+
+    u8 base = 0;
+    bool upper_case = false;
+    if (m_mode == Mode::Binary) {
+        base = 2;
+    } else if (m_mode == Mode::BinaryUppercase) {
+        base = 2;
+        upper_case = true;
+    } else if (m_mode == Mode::Octal) {
+        base = 8;
+    } else if (m_mode == Mode::Decimal || m_mode == Mode::Default) {
+        base = 10;
+    } else if (m_mode == Mode::Hexadecimal) {
+        base = 16;
+    } else if (m_mode == Mode::HexadecimalUppercase) {
+        base = 16;
+        upper_case = true;
+    } else if (m_mode == Mode::HexDump) {
+        m_width = m_width.value_or(32);
+        return builder.put_hexdump({ &value, sizeof(value) }, m_width.value(), m_fill);
+    } else {
+        VERIFY_NOT_REACHED();
+    }
+
+    m_width = m_width.value_or(0);
+
+    if constexpr (IsSame<MakeUnsigned<T>, T>)
+        return builder.put_u64(value, base, m_alternative_form, upper_case, m_zero_pad, m_use_separator, m_align, m_width.value(), m_fill, m_sign_mode);
+    else
+        return builder.put_i64(value, base, m_alternative_form, upper_case, m_zero_pad, m_use_separator, m_align, m_width.value(), m_fill, m_sign_mode);
+}
+
+ErrorOr<void> Formatter<char>::format(FormatBuilder& builder, char value)
+{
+    if (m_mode == Mode::Binary || m_mode == Mode::BinaryUppercase || m_mode == Mode::Decimal || m_mode == Mode::Octal || m_mode == Mode::Hexadecimal || m_mode == Mode::HexadecimalUppercase) {
+        // Trick: signed char != char. (Sometimes weird features are actually helpful.)
+        Formatter<signed char> formatter { *this };
+        return formatter.format(builder, static_cast<signed char>(value));
+    } else {
+        Formatter<StringView> formatter { *this };
+        return formatter.format(builder, { &value, 1 });
+    }
+}
+
+ErrorOr<void> Formatter<char16_t>::format(FormatBuilder& builder, char16_t value)
+{
+    if (m_mode == Mode::Binary || m_mode == Mode::BinaryUppercase || m_mode == Mode::Decimal || m_mode == Mode::Octal || m_mode == Mode::Hexadecimal || m_mode == Mode::HexadecimalUppercase) {
+        Formatter<u16> formatter { *this };
+        return formatter.format(builder, value);
+    } else {
+        StringBuilder codepoint;
+        codepoint.append_code_point(value);
+
+        Formatter<StringView> formatter { *this };
+        return formatter.format(builder, codepoint.string_view());
+    }
+}
+
+ErrorOr<void> Formatter<char32_t>::format(FormatBuilder& builder, char32_t value)
+{
+    if (m_mode == Mode::Binary || m_mode == Mode::BinaryUppercase || m_mode == Mode::Decimal || m_mode == Mode::Octal || m_mode == Mode::Hexadecimal || m_mode == Mode::HexadecimalUppercase) {
+        Formatter<u32> formatter { *this };
+        return formatter.format(builder, value);
+    } else {
+        StringBuilder codepoint;
+        codepoint.append_code_point(value);
+
+        Formatter<StringView> formatter { *this };
+        return formatter.format(builder, codepoint.string_view());
+    }
+}
+
+ErrorOr<void> Formatter<bool>::format(FormatBuilder& builder, bool value)
+{
+    if (m_mode == Mode::Binary || m_mode == Mode::BinaryUppercase || m_mode == Mode::Decimal || m_mode == Mode::Octal || m_mode == Mode::Hexadecimal || m_mode == Mode::HexadecimalUppercase) {
+        Formatter<u8> formatter { *this };
+        return formatter.format(builder, static_cast<u8>(value));
+    } else if (m_mode == Mode::HexDump) {
+        return builder.put_hexdump({ &value, sizeof(value) }, m_width.value_or(32), m_fill);
+    } else {
+        Formatter<StringView> formatter { *this };
+        return formatter.format(builder, value ? "true"sv : "false"sv);
+    }
+}
+
+template<OneOf<float, double, long double> T>
+static ErrorOr<void> format_floating_point(FormatBuilder& builder, StandardFormatter const& formatter, T value)
+{
+    u8 base = 0;
+    bool upper_case = false;
+    auto display_mode = FormatBuilder::RealNumberDisplayMode::General;
+
+    if (formatter.m_mode == StandardFormatter::Mode::Default || formatter.m_mode == StandardFormatter::Mode::FixedPoint) {
+        base = 10;
+        upper_case = false;
+        if (formatter.m_mode == StandardFormatter::Mode::FixedPoint)
+            display_mode = FormatBuilder::RealNumberDisplayMode::FixedPoint;
+    } else if (formatter.m_mode == StandardFormatter::Mode::Hexfloat || formatter.m_mode == StandardFormatter::Mode::HexfloatUppercase) {
+        base = 16;
+        upper_case = formatter.m_mode == StandardFormatter::Mode::HexfloatUppercase;
+    } else {
+        VERIFY_NOT_REACHED();
+    }
+
+    auto precision = formatter.m_precision;
+    if constexpr (IsSame<T, long double>)
+        precision = precision.value_or(6);
+
+    return builder.put_floating_point(value, base, upper_case, formatter.m_use_separator, formatter.m_align, formatter.m_width.value_or(0), precision, formatter.m_fill, formatter.m_sign_mode, display_mode);
+}
+
+ErrorOr<void> Formatter<long double>::format(FormatBuilder& builder, long double value)
+{
+    return format_floating_point(builder, *this, value);
+}
+
+ErrorOr<void> Formatter<f16>::format(FormatBuilder& builder, f16 value)
+{
+    // FIXME: Create a proper put_f16() implementation
+    Formatter<double> formatter { *this };
+    return TRY(formatter.format(builder, static_cast<double>(value)));
+}
+
+ErrorOr<void> Formatter<double>::format(FormatBuilder& builder, double value)
+{
+    return format_floating_point(builder, *this, value);
+}
+
+ErrorOr<void> Formatter<float>::format(FormatBuilder& builder, float value)
+{
+    return format_floating_point(builder, *this, value);
+}
+
+void vout(FILE* file, StringView fmtstr, TypeErasedFormatParams& params, bool newline)
+{
+    StringBuilder builder;
+    MUST(vformat(builder, fmtstr, params));
+
+    if (newline)
+        builder.append('\n');
+
+    auto const string = builder.string_view();
+    auto const retval = ::fwrite(string.characters_without_null_termination(), 1, string.length(), file);
+    if (static_cast<size_t>(retval) != string.length()) {
+        auto error = ferror(file);
+        dbgln("vout() failed ({} written out of {}), error was {} ({})", retval, string.length(), error, strerror(error));
+    }
+}
+#if defined(AK_OS_WINDOWS)
+ErrorOr<void> Formatter<Error>::format_windows_error(FormatBuilder& builder, Error const& error)
+{
+    static thread_local HashMap<u32, ByteString> windows_errors;
+
+    u32 code = error.code();
+    Optional<ByteString&> string = windows_errors.get(code);
+    if (string.has_value()) {
+        return Formatter<StringView>::format(builder, string->view());
+    }
+
+    TCHAR message[256] = {};
+    u32 size = FormatMessage(
+        FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+        nullptr,
+        code,
+        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+        message,
+        256,
+        nullptr);
+    if (size == 0) {
+        auto format_error = GetLastError();
+        return Formatter<FormatString>::format(builder, "Error {:08x} when formatting code {:08x}"sv, format_error, code);
+    }
+
+    auto& string_in_map = windows_errors.ensure(code, [message, size] { return ByteString { message, size }; });
+    return Formatter<FormatString>::format(builder, "Error {:x}: {}"sv, code, string_in_map.view());
+}
+#else
+ErrorOr<void> Formatter<Error>::format_windows_error(FormatBuilder&, Error const&)
+{
+    VERIFY_NOT_REACHED();
+}
+#endif
+
+ErrorOr<void> Formatter<Error>::format(FormatBuilder& builder, Error const& error)
+{
+    switch (error.kind()) {
+    case Error::Kind::Syscall:
+        return Formatter<FormatString>::format(builder, "{}: {} (errno={})"sv, error.string_literal(), strerror(error.code()), error.code());
+    case Error::Kind::Errno:
+        return Formatter<FormatString>::format(builder, "{} (errno={})"sv, strerror(error.code()), error.code());
+    case Error::Kind::Windows:
+        return Formatter<Error>::format_windows_error(builder, error);
+    case Error::Kind::StringLiteral:
+        return Formatter<FormatString>::format(builder, "{}"sv, error.string_literal());
+    }
+    VERIFY_NOT_REACHED();
+}
+
+#ifdef AK_OS_ANDROID
+static char const* s_log_tag_name = "Serenity";
+void set_log_tag_name(char const* tag_name)
+{
+    static String s_log_tag_storage;
+    // NOTE: Make sure to copy the null terminator
+    s_log_tag_storage = MUST(String::from_utf8({ tag_name, strlen(tag_name) + 1 }));
+    s_log_tag_name = s_log_tag_storage.bytes_as_string_view().characters_without_null_termination();
+}
+
+void vout(LogLevel log_level, StringView fmtstr, TypeErasedFormatParams& params, bool newline)
+{
+    StringBuilder builder;
+    MUST(vformat(builder, fmtstr, params));
+
+    if (newline)
+        builder.append('\n');
+    builder.append('\0');
+
+    auto const string = builder.string_view();
+
+    auto ndk_log_level = ANDROID_LOG_UNKNOWN;
+    switch (log_level) {
+    case LogLevel ::Debug:
+        ndk_log_level = ANDROID_LOG_DEBUG;
+        break;
+    case LogLevel ::Info:
+        ndk_log_level = ANDROID_LOG_INFO;
+        break;
+    case LogLevel::Warning:
+        ndk_log_level = ANDROID_LOG_WARN;
+        break;
+    }
+
+    __android_log_write(ndk_log_level, s_log_tag_name, string.characters_without_null_termination());
+}
+
+#endif
+
+// FIXME: Deduplicate with Core::Process:get_name()
+[[gnu::used]] static ByteString process_name_helper()
+{
+#if defined(AK_OS_SERENITY)
+    char buffer[BUFSIZ] = {};
+    int rc = get_process_name(buffer, BUFSIZ);
+    if (rc != 0)
+        return ByteString {};
+    return StringView { buffer, strlen(buffer) };
+#elif defined(AK_LIBC_GLIBC) || (defined(AK_OS_LINUX) && !defined(AK_OS_ANDROID))
+    return StringView { program_invocation_name, strlen(program_invocation_name) };
+#elif defined(AK_OS_BSD_GENERIC) || defined(AK_OS_HAIKU)
+    auto const* progname = getprogname();
+    return StringView { progname, strlen(progname) };
+#elif defined AK_OS_WINDOWS
+    char path[MAX_PATH] = {};
+    auto length = GetModuleFileName(NULL, path, MAX_PATH);
+    return { path, length };
+#else
+    // FIXME: Implement process_name_helper() for other platforms.
+    return StringView {};
+#endif
+}
+
+static StringView process_name_for_logging()
+{
+    // Go to extraordinary lengths here to avoid strlen() on the process name every call to dbgln
+    static char process_name_buf[256] = {};
+    static StringView const process_name = [] {
+        auto path = LexicalPath(process_name_helper());
+        (void)path.title().copy_characters_to_buffer(process_name_buf, sizeof(process_name_buf));
+        return StringView { process_name_buf, strlen(process_name_buf) };
+    }();
+    return process_name;
+}
+
+static bool is_debug_enabled = true;
+
+void set_debug_enabled(bool value)
+{
+    is_debug_enabled = value;
+}
+
+// On Serenity, dbgln goes to a non-stderr output
+static bool is_rich_debug_enabled =
+#if defined(AK_OS_SERENITY)
+    true;
+#else
+    false;
+#endif
+
+void set_rich_debug_enabled(bool value)
+{
+    is_rich_debug_enabled = value;
+}
+
+#define DEFAULT_FORMAT "\033[0m"
+#define BOLD_YELLOW_FORMAT "\033[33;1m"
+
+static auto current_process_id()
+{
+#if defined(AK_OS_WINDOWS)
+    return GetCurrentProcessId();
+#else
+    return getpid();
+#endif
+}
+
+static auto s_main_thread_id = ThreadID::current();
+
+#ifdef AK_OS_WINDOWS
+
+static int initialize_console_settings()
+{
+    HANDLE console_handle = CreateFile("CONOUT$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+    if (console_handle == INVALID_HANDLE_VALUE) {
+        dbgln("Unable to get console handle");
+        return 0;
+    }
+
+    ScopeGuard guard = [&] { CloseHandle(console_handle); };
+
+    DWORD mode = 0;
+    if (!GetConsoleMode(console_handle, &mode)) {
+        dbgln("Unable to get console mode");
+        return 0;
+    }
+
+    // Enable Virtual Terminal Processing to allow ANSI escape codes
+    mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+    mode |= ENABLE_PROCESSED_OUTPUT;
+    if (!SetConsoleMode(console_handle, mode)) {
+        dbgln("Unable to set console mode");
+        return 0;
+    }
+
+    // Switch the output code page to UTF-8 to support Emoji and other Unicode characters. The shared helper
+    // saves the console's original code page so windows_shutdown() can restore it; this static initializer
+    // runs before windows_init(), so the save must happen here.
+    use_utf8_console_output();
+
+    return 0;
+}
+
+static int dummy = initialize_console_settings();
+
+#endif
+
+void vdbg(StringView fmtstr, TypeErasedFormatParams& params, bool newline)
+{
+    if (!is_debug_enabled)
+        return;
+
+    StringBuilder builder;
+
+    if (is_rich_debug_enabled) {
+        auto process_name = process_name_for_logging();
+        if (!process_name.is_empty()) {
+            bool const colorize = ak_colorize_output();
+            auto time = MonotonicTime::now_coarse();
+            builder.appendff("{}.{:03} ", time.seconds(), time.nanoseconds_within_second() / 1000000);
+            if (colorize)
+                builder.append(BOLD_YELLOW_FORMAT ""sv);
+            builder.append(process_name);
+            auto process_id = current_process_id();
+            builder.appendff("({})", process_id);
+            auto thread_id = ThreadID::current();
+
+            if (thread_id.is_valid() && thread_id != s_main_thread_id) {
+                char thread_name[16];
+                auto thread_name_result = pthread_getname_np(pthread_self(), thread_name, sizeof(thread_name));
+                if (thread_name_result == 0 && strlen(thread_name) > 0)
+                    builder.appendff(" {}", thread_name);
+                else
+                    builder.append(" Thread"sv);
+                builder.appendff("({})", thread_id);
+            }
+            if (colorize)
+                builder.append(DEFAULT_FORMAT ""sv);
+            builder.append(": "sv);
+        }
+    }
+
+    MUST(vformat(builder, fmtstr, params));
+    if (newline)
+        builder.append('\n');
+#ifdef AK_OS_ANDROID
+    builder.append('\0');
+#endif
+    auto const string = builder.string_view();
+
+#ifdef AK_OS_ANDROID
+    __android_log_write(ANDROID_LOG_DEBUG, s_log_tag_name, string.characters_without_null_termination());
+#elif defined(AK_OS_WINDOWS)
+    [[maybe_unused]] auto rc = _write(_fileno(stderr), string.characters_without_null_termination(), string.length());
+#else
+    [[maybe_unused]] auto rc = write(STDERR_FILENO, string.characters_without_null_termination(), string.length());
+#endif
+}
+
+template struct Formatter<unsigned char, void>;
+template struct Formatter<unsigned short, void>;
+template struct Formatter<unsigned int, void>;
+template struct Formatter<unsigned long, void>;
+template struct Formatter<unsigned long long, void>;
+template struct Formatter<short, void>;
+template struct Formatter<int, void>;
+template struct Formatter<long, void>;
+template struct Formatter<long long, void>;
+template struct Formatter<signed char, void>;
+
+} // namespace AK

@@ -1,0 +1,63 @@
+/*
+ * Copyright (c) 2023, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/NonnullRefPtr.h>
+#include <AK/OwnPtr.h>
+#include <AK/kmalloc.h>
+#include <LibCore/Event.h>
+#include <LibCore/Export.h>
+#include <LibCore/Forward.h>
+
+namespace Core {
+
+// Per-thread global event queue. This is where events are queued for the EventLoop to process.
+// There is only one ThreadEventQueue per thread, and it is accessed via ThreadEventQueue::current().
+// It is allowed to post events to other threads' event queues.
+class CORE_API ThreadEventQueue {
+    AK_MAKE_NONCOPYABLE(ThreadEventQueue);
+    AK_MAKE_NONMOVABLE(ThreadEventQueue);
+
+public:
+    AK_ALLOC_WITH_KMALLOC;
+
+    static ThreadEventQueue* current_or_null();
+    static ThreadEventQueue& current();
+
+    // Destroys the current thread's queue, with the events still in it. An event loop implementation calls this before
+    // destroying its own per-thread state, which those events' receivers can still use as they are freed. The queue is
+    // otherwise destroyed when the thread exits.
+    static void destroy_current();
+
+    // Process all queued events. Returns the number of events that were processed.
+    size_t process();
+
+    // Posts an event to the event queue.
+    void post_event(EventReceiver*, Core::Event::Type);
+
+    // Posts a Timer event for the timer of the given generation to the event queue.
+    void post_timer_event(EventReceiver*, u64 timer_generation);
+
+    // Post a deferred invocation to the event queue.
+    void deferred_invoke(Function<void()>&&);
+
+    // Returns true if there are events waiting to be flushed.
+    bool has_pending_events() const;
+
+    // Returns true while process() runs inside an event that an outer process() dispatched, as it does when that event
+    // spins a nested event loop.
+    bool is_processing_nested() const;
+
+private:
+    ThreadEventQueue();
+    ~ThreadEventQueue();
+
+    struct Private;
+    OwnPtr<Private> m_private;
+};
+
+}

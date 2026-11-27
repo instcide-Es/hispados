@@ -17,6 +17,10 @@
 #   MCXXD       [etapa 10 c] MCXX dinámico, con libstdc++.so.6 y libgcc_s.so.1
 #   MIPC        [etapa 10 d] dos procesos que se hablan como los de Ladybird
 #               (C++23: AF_UNIX, SCM_RIGHTS, memfd, posix_spawn, poll)
+#   MIMG, MLIBS y MSKIA  [etapa 10 e] las bibliotecas que pide Ladybird y
+#               Skia (libs/hazimg.sh, libs/hazlibs.sh y hazskia.sh)
+#   TestAK y MAK [etapa 10 e] AK, LibCore... de Ladybird y sus pruebas
+#               (ladybird/hazak.sh)
 # Uso: hazcxx.sh SALIDA   (dice en la última línea los que ha hecho; [etapa
 # 10 c] sin el compilador cruzado, build/cruzado de hazgcc.sh, ninguno)
 set -e
@@ -97,4 +101,13 @@ if [ $cambio = 1 ] || [ ! -f "$OI/libicu.a" ]; then rm -f "$OI/libicu.a"; ar rcs
 nice "$AQUI/cxx.sh" -std=c++17 -O2 -Wall -Wno-unused-function -DU_STATIC_IMPLEMENTATION -DU_USING_ICU_NAMESPACE=0 -I"$IC/common" -I"$IC/i18n" -o "$S/MICU" "$AQUI/micu.cpp" "$OI/libicu.a"
 $TIRA --strip-unneeded "$S/MICU"
 cp "$R/terceros/icu/data/icudt77l.dat" "$S/icudt77l.dat"
-echo "hechos: MCXX MIPC${DIN:-} MTEXTO DEJAVU.TTF MICU icudt77l.dat"
+# [etapa 10 e] las bibliotecas de las imágenes (libs/hazimg.sh: zlib, libpng,
+# libjpeg-turbo y libwebp; MIMG y PNGTEST.PNG), las demás que pide Ladybird
+# (libs/hazlibs.sh: MLIBS) y Skia (hazskia.sh: MSKIA)
+IMG=$("$AQUI/../libs/hazimg.sh" "$S"); IMG=${IMG##*hechos: }
+LIBS=""
+if [ -x "$AQUI/../libs/hazlibs.sh" ]; then LIBS=$("$AQUI/../libs/hazlibs.sh" "$S"); LIBS=" ${LIBS##*hechos: }"; fi
+SK=$("$AQUI/hazskia.sh" "$S"); SK=${SK##*hechos: }
+# [etapa 10 e] las bibliotecas de base de Ladybird y sus pruebas de AK (TestAK y MAK)
+AK=$("$AQUI/../ladybird/hazak.sh" "$S"); AK=${AK##*hechos: }
+echo "hechos: MCXX MIPC${DIN:-} MTEXTO DEJAVU.TTF MICU icudt77l.dat $IMG$LIBS $SK $AK"

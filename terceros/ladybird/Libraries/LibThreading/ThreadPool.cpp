@@ -1,0 +1,85 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/Time.h>
+#include <AK/kmalloc.h>
+#include <LibThreading/ThreadPool.h>
+
+static constexpr size_t THREAD_COUNT = 4;
+static constexpr size_t NAME_RESOLUTION_THREAD_COUNT = 4;
+static constexpr size_t THREAD_STACK_SIZE = 8 * MiB;
+static constexpr auto THREAD_IDLE_MEMORY_COLLECTION_DELAY = AK::Duration::from_seconds(1);
+
+namespace Threading {
+
+ThreadPool& ThreadPool::the()
+{
+    static ThreadPool* instance = new ThreadPool(THREAD_COUNT, "Pool"sv);
+    return *instance;
+}
+
+ThreadPool& ThreadPool::for_name_resolution()
+{
+    static ThreadPool* instance = new ThreadPool(NAME_RESOLUTION_THREAD_COUNT, "DNS"sv);
+    return *instance;
+}
+
+ThreadPool::ThreadPool(size_t worker_count, StringView name)
+{
+    for (size_t i = 0; i < worker_count; ++i) {
+        auto thread_name = ByteString::formatted("{}/{}", name, i);
+        auto thread = Thread::construct(thread_name, [this]() -> intptr_t {
+            return worker_thread_func();
+        });
+        thread->set_stack_size(THREAD_STACK_SIZE);
+        thread->start();
+        m_threads.append(move(thread));
+    }
+}
+
+intptr_t ThreadPool::worker_thread_func()
+{
+    bool collected_since_last_work = false;
+
+    while (true) {
+        Function<void()> work;
+        bool should_collect = false;
+        {
+            MutexLocker locker(m_mutex);
+
+            while (m_work_queue.is_empty()) {
+                if (collected_since_last_work) {
+                    m_condition.wait();
+                } else if (!m_condition.wait_for(THREAD_IDLE_MEMORY_COLLECTION_DELAY) && m_work_queue.is_empty()) {
+                    should_collect = true;
+                    break;
+                }
+            }
+
+            if (!should_collect)
+                work = m_work_queue.dequeue();
+        }
+
+        if (should_collect) {
+            ak_release_idle_thread_memory();
+            ak_kmalloc_collect();
+            collected_since_last_work = true;
+            continue;
+        }
+
+        collected_since_last_work = false;
+        work();
+    }
+}
+
+void ThreadPool::submit(Function<void()> work)
+{
+    MutexLocker locker(m_mutex);
+    m_work_queue.enqueue(move(work));
+    m_condition.signal();
+}
+
+}

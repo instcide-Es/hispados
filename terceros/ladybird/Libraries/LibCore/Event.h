@@ -1,0 +1,66 @@
+/*
+ * Copyright (c) 2018-2023, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2022, the SerenityOS developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/EnumBits.h>
+#include <AK/Function.h>
+#include <AK/Types.h>
+#include <AK/WeakPtr.h>
+#include <LibCore/Forward.h>
+
+namespace Core {
+
+class Event {
+public:
+    enum Type : u8 {
+        Invalid = 0,
+        Timer,
+        NotifierActivation,
+        DeferredInvoke,
+    };
+
+    Event() = default;
+    explicit Event(unsigned type)
+        : m_type(type)
+    {
+    }
+    virtual ~Event() = default;
+
+    unsigned type() const { return m_type; }
+
+private:
+    unsigned m_type { Type::Invalid };
+};
+
+class TimerEvent final : public Event {
+public:
+    explicit TimerEvent(u64 timer_generation)
+        : Event(Event::Timer)
+        , m_timer_generation(timer_generation)
+    {
+    }
+
+    ~TimerEvent() = default;
+
+    u64 timer_generation() const { return m_timer_generation; }
+
+private:
+    u64 m_timer_generation { 0 };
+};
+
+class NotifierActivationEvent final : public Event {
+public:
+    explicit NotifierActivationEvent()
+        : Event(Event::NotifierActivation)
+    {
+    }
+
+    ~NotifierActivationEvent() = default;
+};
+
+}

@@ -1,0 +1,79 @@
+/*
+ * Copyright (c) 2022-2023, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Atomic.h>
+#include <AK/Function.h>
+#include <AK/Optional.h>
+#include <LibCore/Export.h>
+#include <LibCore/Forward.h>
+
+namespace Core {
+
+class EventLoopImplementation;
+class ThreadEventQueue;
+
+class CORE_API EventLoopManager {
+public:
+    static EventLoopManager& the();
+    static void install(EventLoopManager&);
+
+    virtual ~EventLoopManager();
+
+    virtual NonnullOwnPtr<EventLoopImplementation> make_implementation() = 0;
+
+    virtual intptr_t register_timer(EventReceiver&, AK::Duration interval, bool should_reload) = 0;
+    virtual void unregister_timer(intptr_t timer_id) = 0;
+
+    virtual void register_notifier(Notifier&) = 0;
+    virtual void unregister_notifier(Notifier&) = 0;
+
+    virtual void did_post_event() = 0;
+
+    // FIXME: These APIs only exist for obscure use-cases inside SerenityOS. Try to get rid of them.
+    virtual int register_signal(int signal_number, Function<void(int)> handler) = 0;
+    virtual void unregister_signal(int handler_id) = 0;
+
+    virtual void register_process([[maybe_unused]] pid_t pid, [[maybe_unused]] ESCAPING Function<void(pid_t)> exit_handler) { VERIFY_NOT_REACHED(); }
+    virtual void unregister_process([[maybe_unused]] pid_t pid) { VERIFY_NOT_REACHED(); }
+
+protected:
+    EventLoopManager();
+};
+
+class CORE_API EventLoopImplementation {
+public:
+    AK_ALLOC_WITH_KMALLOC;
+
+    virtual ~EventLoopImplementation();
+
+    enum class PumpMode {
+        WaitForEvents,
+        DontWaitForEvents,
+    };
+
+    virtual int exec() = 0;
+    virtual size_t pump(PumpMode) = 0;
+    virtual void quit(int) = 0;
+    virtual void wake() = 0;
+    virtual bool was_exit_requested() const;
+
+    virtual void deferred_invoke(Function<void()>&&);
+
+protected:
+    EventLoopImplementation();
+    void request_exit(int);
+    Optional<int> exit_code_if_requested() const;
+
+    ThreadEventQueue& m_thread_event_queue;
+
+private:
+    Atomic<int> m_exit_code { 0 };
+    Atomic<bool> m_exit_requested { false };
+};
+
+}

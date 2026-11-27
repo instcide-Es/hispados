@@ -1,0 +1,205 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/Utf16String.h>
+#include <AK/Utf16StringBuilder.h>
+#include <LibTest/TestCase.h>
+
+TEST_CASE(build_ascii_string)
+{
+    Utf16StringBuilder builder;
+    builder.append_ascii("hello"sv);
+    builder.append_ascii('!');
+
+    EXPECT_EQ(builder.view(), "hello!"sv);
+
+    auto string = builder.to_string();
+    EXPECT_EQ(string, "hello!"sv);
+    EXPECT(string.has_short_ascii_storage());
+}
+
+TEST_CASE(widen_to_utf16_storage)
+{
+    Utf16StringBuilder builder;
+    builder.append_ascii("hello "sv);
+    builder.append_code_unit(0x263A);
+
+    EXPECT_EQ(builder.view(), u"hello \u263A"sv);
+
+    auto string = builder.to_string();
+    EXPECT_EQ(string, u"hello \u263A"sv);
+    EXPECT(!string.is_ascii());
+}
+
+TEST_CASE(build_latin1_string)
+{
+    Utf16StringBuilder builder;
+    builder.append_ascii("caf"sv);
+    builder.append_code_point(0xE9);
+    builder.append(u" cr\u00E8me"sv);
+
+    EXPECT(builder.view().has_latin1_storage());
+    EXPECT_EQ(builder.view(), u"caf\u00E9 cr\u00E8me"sv);
+
+    auto string = builder.to_string();
+    EXPECT_EQ(string, u"caf\u00E9 cr\u00E8me"sv);
+    EXPECT(string.utf16_view().has_latin1_storage());
+    EXPECT(!string.has_ascii_storage());
+}
+
+TEST_CASE(widen_latin1_to_utf16_storage)
+{
+    Utf16StringBuilder builder;
+    builder.append_code_unit(0xE9);
+    builder.append_code_unit(0x263A);
+
+    EXPECT_EQ(builder.view(), u"\u00E9\u263A"sv);
+    EXPECT(builder.to_string().has_long_utf16_storage());
+}
+
+TEST_CASE(append_quoted_escaped_for_json)
+{
+    Utf16StringBuilder ascii_builder;
+    ascii_builder.append_quoted_escaped_for_json("ascii"sv);
+    EXPECT_EQ(ascii_builder.view(), "\"ascii\""sv);
+
+    Utf16StringBuilder escaped_builder;
+    escaped_builder.append_quoted_escaped_for_json(u"quoted \" string\n"sv);
+    EXPECT_EQ(escaped_builder.view(), "\"quoted \\\" string\\n\""sv);
+
+    Utf16StringBuilder widened_builder;
+    widened_builder.append_code_unit(0x263A);
+    widened_builder.append_quoted_escaped_for_json("ascii"sv);
+    EXPECT_EQ(widened_builder.view(), u"\u263A\"ascii\""sv);
+
+    Utf16StringBuilder utf8_builder;
+    utf8_builder.append_quoted_escaped_for_json("caf\xc3\xa9 \xe2\x98\xba"sv);
+    EXPECT_EQ(utf8_builder.view(), u"\"caf\u00e9 \u263A\""sv);
+
+    // A lone surrogate in WTF-8 is decoded as a single replacement character.
+    Utf16StringBuilder wtf8_surrogate_builder;
+    wtf8_surrogate_builder.append_quoted_escaped_for_json("\xed\xa0\x80"sv);
+    EXPECT_EQ(wtf8_surrogate_builder.view(), u"\"\ufffd\""sv);
+
+    Utf16StringBuilder unquoted_utf8_builder;
+    unquoted_utf8_builder.append_escaped_for_json("caf\xc3\xa9\n"sv);
+    EXPECT_EQ(unquoted_utf8_builder.view(), u"caf\u00e9\\n"sv);
+
+    char16_t lone_surrogate = 0xd800;
+    Utf16StringBuilder surrogate_builder;
+    surrogate_builder.append_quoted_escaped_for_json(Utf16View { &lone_surrogate, 1 });
+    EXPECT_EQ(surrogate_builder.view(), "\"\\ud800\""sv);
+}
+
+TEST_CASE(append_code_point)
+{
+    Utf16StringBuilder builder;
+    builder.append_ascii("wave "sv);
+    builder.append_code_point(0x1F44B);
+
+    auto string = builder.to_string();
+    EXPECT_EQ(string, u"wave \U0001F44B"sv);
+    EXPECT_EQ(string.length_in_code_units(), 7uz);
+    EXPECT_EQ(string.length_in_code_points(), 6uz);
+}
+
+TEST_CASE(trim_ascii_storage)
+{
+    Utf16StringBuilder builder;
+    builder.append_ascii("abc"sv);
+
+    builder.trim(1);
+
+    EXPECT_EQ(builder.view(), "ab"sv);
+    EXPECT_EQ(builder.to_string(), "ab"sv);
+}
+
+TEST_CASE(trim_latin1_storage)
+{
+    Utf16StringBuilder builder;
+    builder.append(u"ab\u00E9"sv);
+
+    builder.trim(1);
+
+    auto string = builder.to_string();
+    EXPECT_EQ(string, "ab"sv);
+    EXPECT(string.has_short_ascii_storage());
+}
+
+TEST_CASE(trim_utf16_storage)
+{
+    Utf16StringBuilder builder;
+    builder.append(u"ab\u0100"sv);
+
+    builder.trim(1);
+
+    EXPECT_EQ(builder.view(), "ab"sv);
+    EXPECT_EQ(builder.to_string(), "ab"sv);
+}
+
+TEST_CASE(long_ascii_string)
+{
+    Utf16StringBuilder builder;
+    builder.append_repeated_ascii('x', 300);
+
+    auto string = builder.to_string();
+    EXPECT_EQ(string.length_in_code_units(), 300uz);
+    EXPECT(string.has_long_ascii_storage());
+    EXPECT_EQ(string.utf16_view().code_unit_at(0), 'x');
+    EXPECT_EQ(string.utf16_view().code_unit_at(299), 'x');
+}
+
+TEST_CASE(long_utf16_string)
+{
+    Utf16StringBuilder builder;
+    builder.append_repeated(u"\u0100"sv, 300);
+
+    auto string = builder.to_string();
+    EXPECT_EQ(string.length_in_code_units(), 300uz);
+    EXPECT(!string.is_ascii());
+    EXPECT_EQ(string.utf16_view().code_unit_at(0), 0x0100);
+    EXPECT_EQ(string.utf16_view().code_unit_at(299), 0x0100);
+}
+
+TEST_CASE(long_latin1_string)
+{
+    Utf16StringBuilder builder;
+    builder.append_repeated(u"\u00E9"sv, 300);
+
+    auto string = builder.to_string();
+    EXPECT_EQ(string.length_in_code_units(), 300uz);
+    EXPECT(string.utf16_view().has_latin1_storage());
+    EXPECT(!string.has_ascii_storage());
+    EXPECT_EQ(string.utf16_view().code_unit_at(299), 0xE9);
+}
+
+TEST_CASE(reuse_after_creating_long_utf16_string)
+{
+    Utf16StringBuilder builder;
+    builder.append_repeated(u"\u0100"sv, 300);
+
+    auto string = builder.to_string();
+    EXPECT_EQ(string.length_in_code_units(), 300uz);
+    EXPECT(!string.is_ascii());
+
+    EXPECT(builder.is_empty());
+
+    builder.append_ascii("ok"sv);
+
+    EXPECT_EQ(builder.view(), "ok"sv);
+    EXPECT_EQ(builder.to_string(), "ok"sv);
+}
+
+TEST_CASE(formatted_append)
+{
+    Utf16StringBuilder builder;
+    builder.appendff("{} {} {}", "hello"sv, Utf16View { u"\u263A"sv }, 42);
+    MUST(builder.try_appendff(" {}", Utf16String::formatted("{}", 3.14)));
+
+    auto string = builder.to_string();
+    EXPECT_EQ(string, u"hello \u263A 42 3.14"sv);
+    EXPECT(!string.is_ascii());
+}

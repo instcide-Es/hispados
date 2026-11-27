@@ -1,0 +1,64 @@
+/*
+ * Copyright (c) 2023, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/NonnullOwnPtr.h>
+#include <AK/Time.h>
+#include <AK/kmalloc.h>
+#include <LibCore/EventLoopImplementation.h>
+
+namespace Core {
+
+class EventLoopManagerUnix final : public EventLoopManager {
+public:
+    AK_ALLOC_WITH_KMALLOC;
+
+    virtual ~EventLoopManagerUnix() override;
+
+    virtual NonnullOwnPtr<EventLoopImplementation> make_implementation() override;
+
+    virtual intptr_t register_timer(EventReceiver&, AK::Duration interval, bool should_reload) override;
+    virtual void unregister_timer(intptr_t timer_id) override;
+
+    virtual void register_notifier(Notifier&) override;
+    virtual void unregister_notifier(Notifier&) override;
+
+    virtual void did_post_event() override;
+
+    virtual int register_signal(int signal_number, Function<void(int)> handler) override;
+    virtual void unregister_signal(int handler_id) override;
+
+    void wait_for_events(EventLoopImplementation::PumpMode);
+
+private:
+    void dispatch_signal(int signal_number);
+    void dispatch_pending_signals();
+    static void handle_signal(int signal_number);
+};
+
+class EventLoopImplementationUnix final : public EventLoopImplementation {
+public:
+    static NonnullOwnPtr<EventLoopImplementationUnix> create() { return make<EventLoopImplementationUnix>(); }
+
+    EventLoopImplementationUnix();
+    virtual ~EventLoopImplementationUnix();
+
+    virtual int exec() override;
+    virtual size_t pump(PumpMode) override;
+    virtual void quit(int) override;
+
+    virtual void wake() override;
+
+private:
+    // The write end of the wake pipe, copied by value so it remains valid even
+    // if ThreadData is destroyed before this event loop (e.g. during exit()).
+    int m_wake_pipe_write_fd;
+};
+
+using EventLoopManagerPlatform = EventLoopManagerUnix;
+
+}

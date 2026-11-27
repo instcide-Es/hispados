@@ -1,0 +1,62 @@
+/*
+ * Copyright (c) 2018-2021, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2023, Cameron Youell <cameronyouell@gmail.com>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/ByteString.h>
+#include <AK/Error.h>
+#include <AK/LexicalPath.h>
+#include <AK/StringView.h>
+#include <LibCore/File.h>
+
+namespace FileSystem {
+
+ErrorOr<ByteString> current_working_directory();
+ErrorOr<ByteString> absolute_path(StringView path);
+ErrorOr<ByteString> real_path(StringView path);
+
+bool exists(StringView path);
+bool exists(int fd);
+
+bool is_regular_file(StringView path);
+bool is_regular_file(int fd);
+
+bool is_directory(StringView path);
+bool is_directory(int fd);
+
+bool is_link(StringView path);
+bool is_link(int fd);
+
+enum class RecursionMode {
+    Allowed,
+    Disallowed
+};
+
+enum class PreserveMode {
+    Nothing = 0,
+    Permissions = (1 << 0),
+    Ownership = (1 << 1),
+    Timestamps = (1 << 2),
+};
+AK_ENUM_BITWISE_OPERATORS(PreserveMode);
+
+ErrorOr<void> copy_file(StringView destination_path, StringView source_path, struct stat const& source_stat, Core::File& source, PreserveMode = PreserveMode::Nothing);
+ErrorOr<void> move_file(StringView destination_path, StringView source_path, PreserveMode = PreserveMode::Nothing);
+// Renames a file within one file system, failing with EEXIST instead of replacing an existing destination. A file system
+// that cannot do that atomically gets a copy in a destination file created only if none exists. The file is at its
+// destination when this succeeds, even if a source the copy could not remove is left behind.
+ErrorOr<void> rename_without_replacing(StringView destination_path, StringView source_path);
+ErrorOr<void> remove(StringView path, RecursionMode);
+ErrorOr<off_t> size_from_stat(StringView path);
+
+struct DiskSpace {
+    u64 free_bytes { 0 };
+    u64 total_bytes { 0 };
+};
+ErrorOr<DiskSpace> compute_disk_space(LexicalPath const&);
+
+}

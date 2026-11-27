@@ -1,0 +1,662 @@
+/*
+ * Copyright (c) 2023, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/GenericShorthands.h>
+#include <AK/HashMap.h>
+#include <AK/Mutex.h>
+#include <AK/NeverDestroyed.h>
+#include <AK/Once.h>
+#include <AK/RWLock.h>
+#include <AK/Singleton.h>
+#include <AK/TemporaryChange.h>
+#include <AK/ThreadID.h>
+#include <AK/Time.h>
+#include <AK/WeakPtr.h>
+#include <AK/kmalloc.h>
+#include <LibCore/Event.h>
+#include <LibCore/EventLoopImplementationUnix.h>
+#include <LibCore/EventReceiver.h>
+#include <LibCore/Notifier.h>
+#include <LibCore/Platform/ScopedAutoreleasePool.h>
+#include <LibCore/System.h>
+#include <LibCore/ThreadEventQueue.h>
+#include <LibCore/TimeoutSet.h>
+#include <pthread.h>
+#include <signal.h>
+#include <sys/select.h>
+#include <unistd.h>
+
+namespace Core {
+
+// Signals remain bound to the first event loop that registers a handler.
+static Atomic<int> s_signal_wake_pipe_write_fd { -1 };
+static Atomic<pid_t> s_signal_wake_pipe_pid { 0 };
+static Atomic<unsigned> s_pending_signal_counts[NSIG];
+
+namespace {
+
+struct ThreadData;
+
+thread_local ThreadData* s_this_thread_data;
+static pthread_key_t s_this_thread_data_key;
+
+static void destroy_thread_data(void*);
+
+static auto& thread_data()
+{
+    static NeverDestroyed<HashMap<AK::ThreadID, ThreadData*>> thread_data;
+    return *thread_data;
+}
+
+static auto& thread_data_lock()
+{
+    static NeverDestroyed<RWLock> lock;
+    return *lock;
+}
+
+static auto& thread_data_key_once()
+{
+    static NeverDestroyed<OnceFlag> once;
+    return *once;
+}
+
+static void ensure_thread_data_key()
+{
+    call_once(thread_data_key_once(), [] {
+        VERIFY(pthread_key_create(&s_this_thread_data_key, destroy_thread_data) == 0);
+    });
+}
+
+short notification_type_to_poll_events(NotificationType type)
+{
+    short events = 0;
+    if (has_flag(type, NotificationType::Read))
+        events |= POLLIN;
+    if (has_flag(type, NotificationType::Write))
+        events |= POLLOUT;
+    return events;
+}
+
+bool has_flag(int value, int flag)
+{
+    return (value & flag) == flag;
+}
+
+class EventLoopTimer final : public EventLoopTimeout {
+public:
+    AK_ALLOC_WITH_KMALLOC;
+
+    EventLoopTimer() = default;
+
+    void reload(MonotonicTime const& now) { m_fire_time = now + interval; }
+
+    virtual void fire(TimeoutSet& timeout_set, MonotonicTime current_time) override
+    {
+        auto strong_owner = owner.strong_ref();
+
+        if (!strong_owner)
+            return;
+
+        if (should_reload) {
+            MonotonicTime next_fire_time = m_fire_time + interval;
+            if (next_fire_time <= current_time) {
+                next_fire_time = current_time + interval;
+            }
+            m_fire_time = next_fire_time;
+            if (next_fire_time != current_time) {
+                timeout_set.schedule_absolute(this);
+            } else {
+                // NOTE: Unfortunately we need to treat timeouts with the zero interval in a
+                //       special way. TimeoutSet::schedule_absolute for them will result in an
+                //       infinite loop. TimeoutSet::schedule_relative, on the other hand, will do a
+                //       correct thing of scheduling them for the next iteration of the loop.
+                m_duration = {};
+                timeout_set.schedule_relative(this);
+            }
+        }
+
+        ThreadEventQueue::current().post_timer_event(strong_owner, generation);
+    }
+
+    AK::Duration interval;
+    bool should_reload { false };
+    WeakPtr<EventReceiver> owner;
+    u64 generation { 0 };
+    AK::ThreadID owner_thread;
+    Atomic<bool> is_being_deleted { false };
+};
+
+struct ThreadData {
+    AK_ALLOC_WITH_KMALLOC;
+
+    static ThreadData& the()
+    {
+        ensure_thread_data_key();
+        ThreadData* data = nullptr;
+        if (!s_this_thread_data) {
+            data = new ThreadData;
+            s_this_thread_data = data;
+            VERIFY(pthread_setspecific(s_this_thread_data_key, s_this_thread_data) == 0);
+
+            RWLockLocker<RWLock::Mode::Write> locker(thread_data_lock());
+            thread_data().set(s_this_thread_data->thread_id, s_this_thread_data);
+        } else {
+            data = s_this_thread_data;
+        }
+        return *data;
+    }
+
+    static ThreadData* for_thread(AK::ThreadID thread_id)
+    {
+        // NOTE: thread_data_lock() is supposed to be held by the caller.
+        return thread_data().get(thread_id).value_or(nullptr);
+    }
+
+    ThreadData()
+    {
+        thread_id = AK::ThreadID::current();
+
+        auto result = Core::System::pipe2(O_CLOEXEC | O_NONBLOCK);
+        if (result.is_error()) {
+            warnln("\033[31;1mFailed to create event loop pipe:\033[0m {}", result.error());
+            VERIFY_NOT_REACHED();
+        }
+
+        wake_pipe_fds = result.release_value();
+
+        // The wake pipe informs us of POSIX signals as well as manual calls to wake()
+        poll_fds.append({ .fd = wake_pipe_fds[0], .events = POLLIN, .revents = 0 });
+        notifiers.append(nullptr);
+    }
+
+    ~ThreadData()
+    {
+        // Keep signal pipes open so an in-flight handler cannot write to a reused descriptor.
+        if (!wake_pipe_is_signal_target) {
+            close(wake_pipe_fds[0]);
+            close(wake_pipe_fds[1]);
+        }
+
+        RWLockLocker<RWLock::Mode::Write> locker(thread_data_lock());
+        thread_data().remove(thread_id);
+    }
+
+    RecursiveMutex mutex;
+
+    // Each thread has its own timers, notifiers and a wake pipe.
+    TimeoutSet timeouts;
+
+    HashMap<Notifier*, size_t> notifier_to_index;
+    Vector<Notifier*, 32> notifiers;
+    Vector<pollfd, 32> poll_fds;
+
+    // The wake pipe is used to notify another event loop that someone has called wake(), or a signal has been received.
+    Array<int, 2> wake_pipe_fds { -1, -1 };
+    bool wake_pipe_is_signal_target { false };
+
+    AK::ThreadID thread_id;
+};
+
+static void destroy_thread_data(void* value)
+{
+    ThreadEventQueue::destroy_current();
+    s_this_thread_data = nullptr;
+    delete static_cast<ThreadData*>(value);
+}
+
+}
+
+EventLoopImplementationUnix::EventLoopImplementationUnix()
+    : m_wake_pipe_write_fd(ThreadData::the().wake_pipe_fds[1])
+{
+    VERIFY(m_wake_pipe_write_fd >= 0);
+}
+
+EventLoopImplementationUnix::~EventLoopImplementationUnix() = default;
+
+int EventLoopImplementationUnix::exec()
+{
+    for (;;) {
+        if (auto exit_code = exit_code_if_requested(); exit_code.has_value())
+            return exit_code.release_value();
+        pump(PumpMode::WaitForEvents);
+    }
+    VERIFY_NOT_REACHED();
+}
+
+size_t EventLoopImplementationUnix::pump(PumpMode mode)
+{
+    ScopedAutoreleasePool autorelease_pool;
+    static_cast<EventLoopManagerUnix&>(EventLoopManager::the()).wait_for_events(mode);
+    return ThreadEventQueue::current().process();
+}
+
+void EventLoopImplementationUnix::quit(int code)
+{
+    request_exit(code);
+}
+
+void EventLoopImplementationUnix::wake()
+{
+    int wake_event = 0;
+    auto result = Core::System::write(m_wake_pipe_write_fd, { &wake_event, sizeof(wake_event) });
+    if (result.is_error()) {
+        // EBADF means the thread data is gone. EAGAIN means a pending event already fills the pipe.
+        if (first_is_one_of(result.error().code(), EBADF, EAGAIN))
+            return;
+    }
+    MUST(move(result));
+}
+
+// Waits until a file descriptor is ready or `timeout` has passed, whichever comes first.
+static ErrorOr<int> wait_for_file_descriptors(Span<pollfd> poll_fds, Optional<AK::Duration> timeout)
+{
+#ifdef AK_OS_LINUX
+    // NB: A timer that poll() rounds up to the next whole millisecond fires up to a millisecond late.
+    for (auto& poll_fd : poll_fds)
+        poll_fd.revents = 0;
+    timespec timeout_spec {};
+    if (timeout.has_value())
+        timeout_spec = timeout->to_timespec();
+    int marked_fd_count = ::ppoll(poll_fds.data(), poll_fds.size(), timeout.has_value() ? &timeout_spec : nullptr, nullptr);
+    if (marked_fd_count < 0)
+        return Error::from_syscall("ppoll"sv, errno);
+    return marked_fd_count;
+#else
+    if (!timeout.has_value())
+        return System::poll(poll_fds, -1);
+    return System::poll(poll_fds, static_cast<i32>(min<i64>(AK::NumericLimits<i32>::max(), timeout->to_ceiled_milliseconds())));
+#endif
+}
+
+void EventLoopManagerUnix::wait_for_events(EventLoopImplementation::PumpMode mode)
+{
+    auto& thread_data = ThreadData::the();
+    MutexLocker locker(thread_data.mutex);
+
+    bool has_pending_events = ThreadEventQueue::current().has_pending_events();
+
+    auto time_at_iteration_start = MonotonicTime::now();
+    thread_data.timeouts.absolutize_relative_timeouts(time_at_iteration_start);
+
+    // Figure out how long to wait at maximum.
+    // This mainly depends on the PumpMode and whether we have pending events, but also the next expiring timer.
+    auto timeout = AK::Duration::zero();
+    bool should_wait_forever = false;
+    if (mode == EventLoopImplementation::PumpMode::WaitForEvents && !has_pending_events) {
+        auto next_timer_expiration = thread_data.timeouts.next_timer_expiration();
+        if (next_timer_expiration.has_value()) {
+            timeout = next_timer_expiration.value() - time_at_iteration_start;
+            if (timeout.is_negative())
+                timeout = AK::Duration::zero();
+        } else {
+            should_wait_forever = true;
+        }
+    }
+
+try_select_again:
+    // select() and wait for file system events, calls to wake(), POSIX signals, or timer expirations.
+    auto error_or_marked_fd_count = wait_for_file_descriptors(thread_data.poll_fds, should_wait_forever ? Optional<AK::Duration> {} : timeout);
+    auto time_after_poll = MonotonicTime::now();
+    // Because POSIX, we might spuriously return from select() with EINTR; just select again.
+    if (error_or_marked_fd_count.is_error()) {
+        if (error_or_marked_fd_count.error().code() == EINTR)
+            goto try_select_again;
+        dbgln("EventLoopImplementationUnix::wait_for_events: {}", error_or_marked_fd_count.error());
+        VERIFY_NOT_REACHED();
+    }
+
+    // We woke up due to a call to wake() or a POSIX signal.
+    // Handle signals and see whether we need to handle events as well.
+    if (has_flag(thread_data.poll_fds[0].revents, POLLIN)) {
+        int wake_events[8];
+        ssize_t nread;
+        // We might receive another signal while read()ing here. The signal will go to the handle_signal properly,
+        // but we get interrupted. Therefore, just retry while we were interrupted.
+        do {
+            errno = 0;
+            nread = read(thread_data.wake_pipe_fds[0], wake_events, sizeof(wake_events));
+            if (nread == 0)
+                break;
+        } while (nread < 0 && errno == EINTR);
+        if (nread < 0) {
+            perror("EventLoopImplementationUnix::wait_for_events: read from wake pipe");
+            VERIFY_NOT_REACHED();
+        }
+        VERIFY(nread > 0);
+        if (thread_data.wake_pipe_fds[1] == s_signal_wake_pipe_write_fd.load(AK::MemoryOrder::memory_order_acquire))
+            dispatch_pending_signals();
+    }
+
+    if (error_or_marked_fd_count.value() != 0) {
+        // Handle file system notifiers by making them normal events.
+        for (size_t i = 1; i < thread_data.poll_fds.size(); ++i) {
+            auto& notifier = *thread_data.notifiers[i];
+
+#ifdef AK_OS_ANDROID
+            // FIXME: Make the check work under Android, perhaps use ALooper.
+            ThreadEventQueue::current().post_event(notifier, Core::Event::Type::NotifierActivation);
+#else
+            auto revents = thread_data.poll_fds[i].revents;
+
+            NotificationType type = NotificationType::None;
+            if (has_flag(revents, POLLIN))
+                type |= NotificationType::Read;
+            if (has_flag(revents, POLLOUT))
+                type |= NotificationType::Write;
+            if (has_flag(revents, POLLHUP))
+                type |= NotificationType::Read | NotificationType::Write | NotificationType::HangUp;
+            if (has_flag(revents, POLLERR))
+                type |= NotificationType::Read | NotificationType::Write | NotificationType::Error;
+
+            type &= notifier.type();
+
+            if (type != NotificationType::None)
+                ThreadEventQueue::current().post_event(&notifier, Core::Event::Type::NotifierActivation);
+#endif
+        }
+    }
+
+    // Handle expired timers.
+    thread_data.timeouts.fire_expired(time_after_poll);
+}
+
+class SignalHandlers : public RefCounted<SignalHandlers> {
+    AK_MAKE_NONCOPYABLE(SignalHandlers);
+    AK_MAKE_NONMOVABLE(SignalHandlers);
+
+public:
+    SignalHandlers(int signal_number, void (*handle_signal)(int));
+    ~SignalHandlers();
+
+    void dispatch();
+    int add(Function<void(int)>&& handler);
+    bool remove(int handler_id);
+
+    bool is_empty() const
+    {
+        if (m_calling_handlers) {
+            for (auto& handler : m_handlers_pending) {
+                if (handler.value)
+                    return false; // an add is pending
+            }
+        }
+        return m_handlers.is_empty();
+    }
+
+    bool have(int handler_id) const
+    {
+        if (m_calling_handlers) {
+            auto it = m_handlers_pending.find(handler_id);
+            if (it != m_handlers_pending.end()) {
+                if (!it->value)
+                    return false; // a deletion is pending
+            }
+        }
+        return m_handlers.contains(handler_id);
+    }
+
+    int m_signal_number;
+    void (*m_original_handler)(int); // TODO: can't use sighandler_t?
+    HashMap<int, Function<void(int)>> m_handlers;
+    HashMap<int, Function<void(int)>> m_handlers_pending;
+    bool m_calling_handlers { false };
+};
+
+struct SignalHandlersInfo {
+    AK_ALLOC_WITH_KMALLOC;
+
+    HashMap<int, NonnullRefPtr<SignalHandlers>> signal_handlers;
+    int next_signal_id { 0 };
+};
+
+static Singleton<SignalHandlersInfo> s_signals;
+template<bool create_if_null = true>
+inline SignalHandlersInfo* signals_info()
+{
+    return s_signals.ptr();
+}
+
+void EventLoopManagerUnix::dispatch_signal(int signal_number)
+{
+    auto& info = *signals_info();
+    auto handlers = info.signal_handlers.find(signal_number);
+    if (handlers != info.signal_handlers.end()) {
+        // Make sure we bump the ref count while dispatching the handlers!
+        // This allows a handler to unregister/register while the handlers
+        // are being called!
+        auto handler = handlers->value;
+        handler->dispatch();
+    }
+}
+
+void EventLoopManagerUnix::dispatch_pending_signals()
+{
+    for (int signal_number = 1; signal_number < NSIG; ++signal_number) {
+        auto pending_count = s_pending_signal_counts[signal_number].exchange(0, AK::MemoryOrder::memory_order_acq_rel);
+        for (unsigned i = 0; i < pending_count; ++i)
+            dispatch_signal(signal_number);
+    }
+}
+
+SignalHandlers::SignalHandlers(int signal_number, void (*handle_signal)(int))
+    : m_signal_number(signal_number)
+    , m_original_handler(signal(signal_number, handle_signal))
+{
+}
+
+SignalHandlers::~SignalHandlers()
+{
+    signal(m_signal_number, m_original_handler);
+}
+
+void SignalHandlers::dispatch()
+{
+    TemporaryChange change(m_calling_handlers, true);
+    for (auto& handler : m_handlers)
+        handler.value(m_signal_number);
+    if (!m_handlers_pending.is_empty()) {
+        // Apply pending adds/removes
+        for (auto& handler : m_handlers_pending) {
+            if (handler.value) {
+                auto result = m_handlers.set(handler.key, move(handler.value));
+                VERIFY(result == AK::HashSetResult::InsertedNewEntry);
+            } else {
+                m_handlers.remove(handler.key);
+            }
+        }
+        m_handlers_pending.clear();
+    }
+}
+
+int SignalHandlers::add(Function<void(int)>&& handler)
+{
+    int id = ++signals_info()->next_signal_id; // TODO: worry about wrapping and duplicates?
+    if (m_calling_handlers)
+        m_handlers_pending.set(id, move(handler));
+    else
+        m_handlers.set(id, move(handler));
+    return id;
+}
+
+bool SignalHandlers::remove(int handler_id)
+{
+    VERIFY(handler_id != 0);
+    if (m_calling_handlers) {
+        auto it = m_handlers.find(handler_id);
+        if (it != m_handlers.end()) {
+            // Mark pending remove
+            m_handlers_pending.set(handler_id, {});
+            return true;
+        }
+        it = m_handlers_pending.find(handler_id);
+        if (it != m_handlers_pending.end()) {
+            if (!it->value)
+                return false; // already was marked as deleted
+            it->value = nullptr;
+            return true;
+        }
+        return false;
+    }
+    return m_handlers.remove(handler_id);
+}
+
+void EventLoopManagerUnix::handle_signal(int signal_number)
+{
+    VERIFY(signal_number > 0 && signal_number < NSIG);
+
+    auto saved_errno = errno;
+
+    auto current_pid = getpid();
+    if (current_pid != s_signal_wake_pipe_pid.load(AK::MemoryOrder::memory_order_acquire)) {
+        // Do not forward a signal to the parent process's pipe between fork() and exec().
+        errno = saved_errno;
+        return;
+    }
+
+    s_pending_signal_counts[signal_number].fetch_add(1, AK::MemoryOrder::memory_order_release);
+
+    auto wake_pipe_write_fd = s_signal_wake_pipe_write_fd.load(AK::MemoryOrder::memory_order_acquire);
+    if (wake_pipe_write_fd >= 0) {
+        int wake_event = 0;
+        while (write(wake_pipe_write_fd, &wake_event, sizeof(wake_event)) < 0 && errno == EINTR) {
+        }
+    }
+
+    errno = saved_errno;
+}
+
+int EventLoopManagerUnix::register_signal(int signal_number, Function<void(int)> handler)
+{
+    VERIFY(signal_number > 0 && signal_number < NSIG);
+
+    auto& thread_data = ThreadData::the();
+    auto current_pid = getpid();
+    if (s_signal_wake_pipe_pid.load(AK::MemoryOrder::memory_order_acquire) != current_pid) {
+        s_signal_wake_pipe_write_fd.store(-1, AK::MemoryOrder::memory_order_release);
+        for (auto& pending_signal_count : s_pending_signal_counts)
+            pending_signal_count.store(0, AK::MemoryOrder::memory_order_relaxed);
+        thread_data.wake_pipe_is_signal_target = true;
+        s_signal_wake_pipe_write_fd.store(thread_data.wake_pipe_fds[1], AK::MemoryOrder::memory_order_release);
+        s_signal_wake_pipe_pid.store(current_pid, AK::MemoryOrder::memory_order_release);
+    } else {
+        // Signal handlers are process-wide, so they must share one event loop.
+        VERIFY(s_signal_wake_pipe_write_fd.load(AK::MemoryOrder::memory_order_acquire) == thread_data.wake_pipe_fds[1]);
+    }
+
+    auto& info = *signals_info();
+    auto handlers = info.signal_handlers.find(signal_number);
+    if (handlers == info.signal_handlers.end()) {
+        auto signal_handlers = adopt_ref(*new SignalHandlers(signal_number, EventLoopManagerUnix::handle_signal));
+        auto handler_id = signal_handlers->add(move(handler));
+        info.signal_handlers.set(signal_number, move(signal_handlers));
+        return handler_id;
+    } else {
+        return handlers->value->add(move(handler));
+    }
+}
+
+void EventLoopManagerUnix::unregister_signal(int handler_id)
+{
+    VERIFY(handler_id != 0);
+    int remove_signal_number = 0;
+    auto& info = *signals_info();
+    for (auto& h : info.signal_handlers) {
+        auto& handlers = *h.value;
+        if (handlers.remove(handler_id)) {
+            if (handlers.is_empty())
+                remove_signal_number = handlers.m_signal_number;
+            break;
+        }
+    }
+    if (remove_signal_number != 0)
+        info.signal_handlers.remove(remove_signal_number);
+}
+
+intptr_t EventLoopManagerUnix::register_timer(EventReceiver& object, AK::Duration interval, bool should_reload)
+{
+    VERIFY(!interval.is_negative());
+    auto& thread_data = ThreadData::the();
+    MutexLocker locker(thread_data.mutex);
+    auto timer = new EventLoopTimer;
+    timer->owner_thread = thread_data.thread_id;
+    timer->owner = object;
+    timer->generation = object.timer_generation();
+    timer->interval = interval;
+    // NB: The timer is armed and expired on the precise clock. CLOCK_MONOTONIC_COARSE lags it by up to a scheduler
+    //     tick on Linux, so a timer armed against the coarse clock could fire that much before its deadline on the
+    //     clock everything else measures with, performance.now() included.
+    timer->reload(MonotonicTime::now());
+    timer->should_reload = should_reload;
+    thread_data.timeouts.schedule_absolute(timer);
+    return bit_cast<intptr_t>(timer);
+}
+
+void EventLoopManagerUnix::unregister_timer(intptr_t timer_id)
+{
+    auto* timer = bit_cast<EventLoopTimer*>(timer_id);
+    RWLockLocker<RWLock::Mode::Read> locker(thread_data_lock());
+    auto* thread_data_ptr = ThreadData::for_thread(timer->owner_thread);
+    if (!thread_data_ptr)
+        return;
+    MutexLocker thread_data_content_locker(thread_data_ptr->mutex);
+    auto& thread_data = *thread_data_ptr;
+    auto expected = false;
+    if (timer->is_being_deleted.compare_exchange_strong(expected, true, AK::MemoryOrder::memory_order_acq_rel)) {
+        if (timer->is_scheduled())
+            thread_data.timeouts.unschedule(timer);
+        delete timer;
+    }
+}
+
+void EventLoopManagerUnix::register_notifier(Notifier& notifier)
+{
+    auto& thread_data = ThreadData::the();
+    MutexLocker locker(thread_data.mutex);
+
+    thread_data.notifier_to_index.set(&notifier, thread_data.poll_fds.size());
+    thread_data.notifiers.append(&notifier);
+
+    auto events = notification_type_to_poll_events(notifier.type());
+    thread_data.poll_fds.append({ .fd = notifier.fd(), .events = events, .revents = 0 });
+
+    notifier.set_owner_thread(thread_data.thread_id);
+}
+
+void EventLoopManagerUnix::unregister_notifier(Notifier& notifier)
+{
+    RWLockLocker<RWLock::Mode::Read> locker(thread_data_lock());
+    auto* thread_data = ThreadData::for_thread(notifier.owner_thread());
+    if (!thread_data)
+        return;
+    MutexLocker thread_data_content_locker(thread_data->mutex);
+
+    auto notifier_index = thread_data->notifier_to_index.take(&notifier).release_value();
+
+    if (notifier_index + 1 < thread_data->poll_fds.size()) {
+        swap(thread_data->notifiers[notifier_index], thread_data->notifiers.last());
+        swap(thread_data->poll_fds[notifier_index], thread_data->poll_fds.last());
+
+        auto* swapped_notifier = thread_data->notifiers[notifier_index];
+        thread_data->notifier_to_index.set(swapped_notifier, notifier_index);
+    }
+
+    thread_data->notifiers.take_last();
+    thread_data->poll_fds.take_last();
+}
+
+void EventLoopManagerUnix::did_post_event()
+{
+}
+
+EventLoopManagerUnix::~EventLoopManagerUnix() = default;
+
+NonnullOwnPtr<EventLoopImplementation> EventLoopManagerUnix::make_implementation()
+{
+    return adopt_own(*new EventLoopImplementationUnix);
+}
+
+}

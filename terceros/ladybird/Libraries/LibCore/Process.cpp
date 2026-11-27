@@ -1,0 +1,692 @@
+/*
+ * Copyright (c) 2021, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2022-2023, MacDue <macdue@dueutil.tech>
+ * Copyright (c) 2023-2024, Sam Atkins <atkinssj@serenityos.org>
+ * Copyright (c) 2024, Tim Flynn <trflynn89@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/AnyOf.h>
+#include <AK/Assertions.h>
+#include <AK/ByteString.h>
+#include <AK/Checked.h>
+#include <AK/ScopeGuard.h>
+#include <AK/String.h>
+#include <AK/Vector.h>
+#include <LibCore/Environment.h>
+#include <LibCore/File.h>
+#include <LibCore/Process.h>
+#include <LibCore/System.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <spawn.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#if defined(AK_OS_SERENITY)
+#    include <serenity.h>
+#    include <sys/prctl.h>
+#    include <syscall.h>
+#elif defined(AK_OS_BSD_GENERIC) && !defined(AK_OS_SOLARIS)
+#    include <sys/sysctl.h>
+#elif defined(AK_OS_GNU_HURD)
+extern "C" {
+#    include <hurd.h>
+}
+#endif
+#if defined(AK_OS_LINUX)
+#    include <AK/QuickSort.h>
+#    include <pthread.h>
+#    include <sched.h>
+#    include <sys/mman.h>
+#    include <sys/prctl.h>
+#    include <sys/syscall.h>
+#endif
+#if defined(AK_OS_FREEBSD)
+#    include <sys/user.h>
+#endif
+
+namespace Core {
+
+struct ArgvList {
+    ByteString m_path;
+    Vector<char const*, 10> m_argv;
+
+    ArgvList(ByteString path, size_t size)
+        : m_path { path }
+    {
+        m_argv.ensure_capacity(size + 2);
+        m_argv.append(m_path.characters());
+    }
+
+    void append(char const* arg)
+    {
+        m_argv.append(arg);
+    }
+
+    Span<char const*> get()
+    {
+        if (m_argv.is_empty() || m_argv.last() != nullptr)
+            m_argv.append(nullptr);
+        return m_argv;
+    }
+};
+
+static Vector<char const*> environment_for_child(ProcessSpawnOptions const& options)
+{
+    Vector<char const*> environment;
+    if (!options.environment.has_value())
+        return environment;
+    environment.ensure_capacity(options.environment->size() + 1);
+    for (auto const& variable : *options.environment)
+        environment.append(variable.characters());
+    environment.append(nullptr);
+    return environment;
+}
+
+static char** environment_pointer(Vector<char const*>& environment)
+{
+    if (environment.is_empty())
+        return Environment::raw_environ();
+    return const_cast<char**>(environment.data());
+}
+
+Process::Process(Process&& other)
+    : m_pid(exchange(other.m_pid, 0))
+{
+}
+
+Process& Process::operator=(Process&& other)
+{
+    m_pid = exchange(other.m_pid, 0);
+    return *this;
+}
+
+Process::~Process()
+{
+}
+
+#if defined(AK_OS_LINUX)
+static Optional<int> run_file_actions_in_child(Vector<ProcessSpawnOptions::FileActionType> const& file_actions)
+{
+    for (auto const& file_action : file_actions) {
+        auto error = file_action.visit(
+            [&](FileAction::OpenFile const& action) {
+                auto fd = open(
+                    action.path.characters(),
+                    File::open_mode_to_options(action.mode | Core::File::OpenMode::KeepOnExec),
+                    action.permissions);
+                if (fd < 0)
+                    return Optional<int> { errno };
+
+                if (fd != action.fd) {
+                    if (dup2(fd, action.fd) < 0) {
+                        auto saved_errno = errno;
+                        close(fd);
+                        return Optional<int> { saved_errno };
+                    }
+                    close(fd);
+                }
+                return Optional<int> {};
+            },
+            [&](FileAction::CloseFile const& action) {
+                close(action.fd);
+                return Optional<int> {};
+            },
+            [&](FileAction::DupFd const& action) {
+                // NB: Like posix_spawn(), a descriptor duplicated onto itself is one that the child keeps.
+                if (action.write_fd == action.fd) {
+                    auto flags = fcntl(action.fd, F_GETFD);
+                    if (flags < 0 || fcntl(action.fd, F_SETFD, flags & ~FD_CLOEXEC) < 0)
+                        return Optional<int> { errno };
+                    return Optional<int> {};
+                }
+                if (dup2(action.write_fd, action.fd) < 0)
+                    return Optional<int> { errno };
+                return Optional<int> {};
+            });
+        if (error.has_value())
+            return error;
+    }
+    return {};
+}
+
+static int file_action_target(ProcessSpawnOptions::FileActionType const& file_action)
+{
+    return file_action.visit(
+        [](FileAction::OpenFile const& action) { return action.fd; },
+        [](FileAction::CloseFile const& action) { return action.fd; },
+        [](FileAction::DupFd const& action) { return action.fd; });
+}
+
+// The descriptors above stderr that the child gets on purpose, in ascending order.
+static Vector<int> declared_descriptors(Vector<ProcessSpawnOptions::FileActionType> const& file_actions)
+{
+    Vector<int> descriptors;
+    for (auto const& file_action : file_actions) {
+        if (file_action.has<FileAction::CloseFile>())
+            continue;
+        auto fd = file_action_target(file_action);
+        if (fd > STDERR_FILENO && !descriptors.contains_slow(fd))
+            descriptors.append(fd);
+    }
+    quick_sort(descriptors);
+    return descriptors;
+}
+
+static bool is_declared(ReadonlySpan<int> declared_descriptors, int fd)
+{
+    for (auto declared_fd : declared_descriptors) {
+        if (declared_fd == fd)
+            return true;
+    }
+    return false;
+}
+
+// Linux before 5.9 has no close_range(), and some container seccomp profiles refuse it, so walk /proc/self/fd there.
+// This runs between fork() and exec(), so it reads the directory with getdents64() into the stack instead of
+// allocating.
+static Optional<int> close_undeclared_descriptors_one_by_one(ReadonlySpan<int> declared_descriptors)
+{
+    struct LinuxDirectoryEntry {
+        u64 inode;
+        i64 offset;
+        u16 record_length;
+        u8 type;
+        char name[];
+    };
+
+    auto directory_fd = open("/proc/self/fd", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (directory_fd < 0)
+        return errno;
+
+    alignas(LinuxDirectoryEntry) char buffer[4096];
+    while (true) {
+        auto bytes_read = syscall(SYS_getdents64, directory_fd, buffer, sizeof(buffer));
+        if (bytes_read < 0) {
+            auto saved_errno = errno;
+            close(directory_fd);
+            return saved_errno;
+        }
+        if (bytes_read == 0)
+            break;
+
+        // NB: The offsets in this directory are descriptor numbers, so closing one does not make us skip another.
+        for (long position = 0; position < bytes_read;) {
+            auto const* entry = reinterpret_cast<LinuxDirectoryEntry const*>(buffer + position);
+            position += entry->record_length;
+
+            int fd = 0;
+            bool is_number = entry->name[0] != '\0';
+            for (auto const* character = entry->name; *character != '\0'; ++character) {
+                if (*character < '0' || *character > '9') {
+                    is_number = false;
+                    break;
+                }
+                fd = fd * 10 + (*character - '0');
+            }
+            if (is_number && fd > STDERR_FILENO && fd != directory_fd && !is_declared(declared_descriptors, fd))
+                close(fd);
+        }
+    }
+    close(directory_fd);
+    return {};
+}
+
+// Closes every descriptor above stderr that was not declared. Anything the parent forgot to mark close-on-exec would
+// otherwise reach the child, including descriptors that other threads opened while we were spawning.
+static Optional<int> close_undeclared_descriptors(ReadonlySpan<int> declared_descriptors)
+{
+    auto close_range = [](unsigned first, unsigned last) -> Optional<int> {
+        if (first <= last && syscall(__NR_close_range, first, last, 0) < 0)
+            return errno;
+        return {};
+    };
+
+    unsigned next = STDERR_FILENO + 1;
+    for (auto fd : declared_descriptors) {
+        if (static_cast<unsigned>(fd) > next) {
+            if (auto error = close_range(next, fd - 1); error.has_value()) {
+                if (error.value() == ENOSYS || error.value() == EPERM)
+                    return close_undeclared_descriptors_one_by_one(declared_descriptors);
+                return error;
+            }
+        }
+        next = fd + 1;
+    }
+    if (auto error = close_range(next, ~0U); error.has_value()) {
+        if (error.value() == ENOSYS || error.value() == EPERM)
+            return close_undeclared_descriptors_one_by_one(declared_descriptors);
+        return error;
+    }
+    return {};
+}
+
+struct SpawnedChildContext {
+    ProcessSpawnOptions const& options;
+    Span<char const*> arguments;
+    char** environment { nullptr };
+    ReadonlySpan<int> descriptors_to_keep;
+    pid_t parent_pid { 0 };
+    sigset_t parent_signal_mask;
+    sigset_t child_signal_mask;
+
+    // Written by the child, which shares our memory until it calls exec().
+    int child_errno { 0 };
+};
+
+[[noreturn]] NO_SANITIZE_ADDRESS static void report_errno_and_exit(SpawnedChildContext& context, int error)
+{
+    context.child_errno = error;
+    _exit(127);
+}
+
+// The child shares our memory but has its own stack until exec(), while the spawning thread waits.
+// Like a vfork() child, it may only make system calls: allocating could corrupt our heap.
+NO_SANITIZE_ADDRESS static int spawned_child_main(void* argument)
+{
+    auto& context = *static_cast<SpawnedChildContext*>(argument);
+
+    // Reset handlers before unblocking signals so they cannot touch our shared state.
+    // Use raw syscalls to avoid sanitizer wrappers modifying bookkeeping in our memory.
+    struct KernelSignalAction {
+        void* handler;
+        unsigned long words[3];
+    };
+    static constexpr size_t kernel_signal_set_size = 8;
+    for (int signal_number = 1; signal_number < NSIG; ++signal_number) {
+        KernelSignalAction action {};
+        if (syscall(SYS_rt_sigaction, signal_number, nullptr, &action, kernel_signal_set_size) < 0)
+            continue;
+        if (action.handler == reinterpret_cast<void*>(SIG_IGN) || action.handler == reinterpret_cast<void*>(SIG_DFL))
+            continue;
+        KernelSignalAction default_action {};
+        default_action.handler = reinterpret_cast<void*>(SIG_DFL);
+        (void)syscall(SYS_rt_sigaction, signal_number, &default_action, nullptr, kernel_signal_set_size);
+    }
+
+    if (context.options.die_with_parent) {
+        if (prctl(PR_SET_PDEATHSIG, SIGKILL) < 0)
+            report_errno_and_exit(context, errno);
+        if (getppid() != context.parent_pid)
+            _exit(127);
+    }
+
+    if (context.options.new_process_group && setpgid(0, 0) < 0)
+        report_errno_and_exit(context, errno);
+
+    if (auto error = run_file_actions_in_child(context.options.file_actions); error.has_value())
+        report_errno_and_exit(context, error.value());
+    if (auto error = close_undeclared_descriptors(context.descriptors_to_keep); error.has_value())
+        report_errno_and_exit(context, error.value());
+
+    if (syscall(SYS_rt_sigprocmask, SIG_SETMASK, &context.child_signal_mask, nullptr, kernel_signal_set_size) < 0)
+        report_errno_and_exit(context, errno);
+
+    if (context.options.search_for_executable_in_path)
+        execvpe(context.options.executable.characters(), const_cast<char* const*>(context.arguments.data()), context.environment);
+    else
+        execve(context.options.executable.characters(), const_cast<char* const*>(context.arguments.data()), context.environment);
+
+    report_errno_and_exit(context, errno);
+}
+
+// Share memory until exec(), as posix_spawn() does, to avoid fork()'s page-table copying and copy-on-write setup.
+static ErrorOr<pid_t> fork_and_exec(ProcessSpawnOptions const& options, Span<char const*> arguments)
+{
+    auto environment = environment_for_child(options);
+    auto descriptors_to_keep = declared_descriptors(options.file_actions);
+    quick_sort(descriptors_to_keep);
+
+    SpawnedChildContext context {
+        .options = options,
+        .arguments = arguments,
+        .environment = environment_pointer(environment),
+        .descriptors_to_keep = descriptors_to_keep,
+        .parent_pid = getpid(),
+        .parent_signal_mask = {},
+        .child_signal_mask = {},
+    };
+
+    // execvpe() builds another argv array on the stack when falling back to /bin/sh after ENOEXEC.
+    Checked<size_t> stack_size = arguments.size();
+    stack_size += 1;
+    stack_size *= sizeof(char*);
+    stack_size += 256 * KiB;
+    size_t page_size = PAGE_SIZE;
+    stack_size += page_size - 1;
+    stack_size += page_size;
+    if (stack_size.has_overflow())
+        return Error::from_errno(E2BIG);
+    size_t mapping_size = stack_size.value() / page_size * page_size;
+    auto* child_stack = mmap(nullptr, mapping_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK, -1, 0);
+    if (child_stack == MAP_FAILED)
+        return Error::from_syscall("mmap"sv, errno);
+    ScopeGuard unmap_child_stack = [&] { munmap(child_stack, mapping_size); };
+    // Leave a guard page below the downward-growing stack to protect the parent's shared memory.
+    if (mprotect(static_cast<u8*>(child_stack) + page_size, mapping_size - page_size, PROT_READ | PROT_WRITE) < 0)
+        return Error::from_syscall("mprotect"sv, errno);
+
+    // No signal handler may run in the child while it shares our memory.
+    sigset_t all_signals;
+    sigfillset(&all_signals);
+    if (auto result = pthread_sigmask(SIG_SETMASK, &all_signals, &context.parent_signal_mask); result != 0)
+        return Error::from_syscall("pthread_sigmask"sv, result);
+
+    context.child_signal_mask = context.parent_signal_mask;
+    if (options.new_process_group)
+        sigaddset(&context.child_signal_mask, SIGTTOU);
+
+    // CLONE_VFORK suspends this thread until the child calls exec() or exits.
+    auto* child_stack_top = static_cast<u8*>(child_stack) + mapping_size;
+#    ifdef HAS_THREAD_SANITIZER
+    // NB: ThreadSanitizer handles clone() as a fork, and a child that shares our memory breaks its state. With a fork the
+    //     child cannot hand us an errno, so a failed exec only shows as the exit status of the child.
+    (void)child_stack_top;
+    auto pid = fork();
+    if (pid == 0)
+        _exit(spawned_child_main(&context));
+#    else
+    auto pid = clone(spawned_child_main, child_stack_top, CLONE_VM | CLONE_VFORK | SIGCHLD, &context);
+#    endif
+    auto saved_errno = errno;
+
+    (void)pthread_sigmask(SIG_SETMASK, &context.parent_signal_mask, nullptr);
+
+    if (pid < 0)
+        return Error::from_syscall("clone"sv, saved_errno);
+
+    if (context.child_errno != 0) {
+        int status = 0;
+        (void)waitpid(pid, &status, 0);
+        return Error::from_errno(context.child_errno);
+    }
+
+    return pid;
+}
+#endif
+
+ErrorOr<Process> Process::spawn(ProcessSpawnOptions const& options)
+{
+    ArgvList argv_list(options.executable, options.arguments.size());
+    for (auto const& argument : options.arguments)
+        argv_list.append(argument.characters());
+
+#if defined(AK_OS_LINUX)
+    // NB: posix_spawn() cannot ask for the parent death signal, and it cannot close the descriptors that nobody declared.
+    return Process { TRY(fork_and_exec(options, argv_list.get())) };
+#endif
+
+#define CHECK(invocation)                  \
+    if (int returned_errno = (invocation)) \
+        return Error::from_errno(returned_errno);
+
+    posix_spawn_file_actions_t spawn_actions;
+    CHECK(posix_spawn_file_actions_init(&spawn_actions));
+    ScopeGuard cleanup_spawn_actions = [&] {
+        posix_spawn_file_actions_destroy(&spawn_actions);
+    };
+
+    posix_spawnattr_t spawn_attributes;
+    CHECK(posix_spawnattr_init(&spawn_attributes));
+    ScopeGuard cleanup_spawn_attributes = [&] {
+        posix_spawnattr_destroy(&spawn_attributes);
+    };
+    short spawn_flags = 0;
+
+    // The process group defaults to 0, which makes a new one, named after the child.
+    if (options.new_process_group) {
+        spawn_flags |= POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK;
+        sigset_t signal_mask;
+        CHECK(pthread_sigmask(SIG_SETMASK, nullptr, &signal_mask));
+        sigaddset(&signal_mask, SIGTTOU);
+        CHECK(posix_spawnattr_setsigmask(&spawn_attributes, &signal_mask));
+    }
+
+#if defined(AK_OS_MACOS)
+    // A descriptor that is not close-on-exec at the moment of the spawn would otherwise reach the child, including one
+    // that another thread has just received or duplicated. Only pass the standard streams and the descriptors that the
+    // file actions name.
+    spawn_flags |= POSIX_SPAWN_CLOEXEC_DEFAULT;
+
+    // The inherit actions must come before the file actions, which may replace the same descriptors.
+    for (int fd : { STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO }) {
+        // Inheriting a closed descriptor would make the spawn fail.
+        if (fcntl(fd, F_GETFD) != -1)
+            CHECK(posix_spawn_file_actions_addinherit_np(&spawn_actions, fd));
+    }
+#endif
+
+    CHECK(posix_spawnattr_setflags(&spawn_attributes, spawn_flags));
+
+    for (auto const& file_action : options.file_actions) {
+        TRY(file_action.visit(
+            [&](FileAction::OpenFile const& action) -> ErrorOr<void> {
+                CHECK(posix_spawn_file_actions_addopen(
+                    &spawn_actions,
+                    action.fd,
+                    action.path.characters(),
+                    File::open_mode_to_options(action.mode | Core::File::OpenMode::KeepOnExec),
+                    action.permissions));
+                return {};
+            },
+            [&](FileAction::CloseFile const& action) -> ErrorOr<void> {
+                CHECK(posix_spawn_file_actions_addclose(&spawn_actions, action.fd));
+                return {};
+            },
+            [&](FileAction::DupFd const& action) -> ErrorOr<void> {
+#if defined(AK_OS_MACOS)
+                // NB: macOS does not clear close-on-exec for a descriptor duplicated onto itself, so it is inherited
+                //     instead.
+                if (action.write_fd == action.fd) {
+                    CHECK(posix_spawn_file_actions_addinherit_np(&spawn_actions, action.fd));
+                    return {};
+                }
+#endif
+                CHECK(posix_spawn_file_actions_adddup2(&spawn_actions, action.write_fd, action.fd));
+                return {};
+            }));
+    }
+
+#undef CHECK
+
+    auto environment = environment_for_child(options);
+    pid_t pid;
+    if (options.search_for_executable_in_path) {
+        pid = TRY(System::posix_spawnp(options.executable.view(), &spawn_actions, &spawn_attributes, const_cast<char**>(argv_list.get().data()), environment_pointer(environment)));
+    } else {
+        pid = TRY(System::posix_spawn(options.executable.view(), &spawn_actions, &spawn_attributes, const_cast<char**>(argv_list.get().data()), environment_pointer(environment)));
+    }
+    return Process { pid };
+}
+
+ErrorOr<Process> Process::spawn(StringView path, ReadonlySpan<ByteString> arguments)
+{
+    auto process = TRY(spawn({
+        .executable = path,
+        .arguments = arguments,
+    }));
+
+    return process;
+}
+
+ErrorOr<Process> Process::spawn(StringView path, ReadonlySpan<StringView> arguments)
+{
+    Vector<ByteString> backing_strings;
+    backing_strings.ensure_capacity(arguments.size());
+    for (auto const& argument : arguments)
+        backing_strings.append(argument);
+
+    auto process = TRY(spawn({
+        .executable = path,
+        .arguments = backing_strings,
+    }));
+
+    return process;
+}
+
+void Process::terminate_immediately(int status)
+{
+    _exit(status);
+    VERIFY_NOT_REACHED();
+}
+
+ErrorOr<void> Process::terminate_process(pid_t pid, TerminationMode mode)
+{
+    return System::kill(pid, mode == TerminationMode::Graceful ? SIGTERM : SIGKILL);
+}
+
+ErrorOr<String> Process::get_name()
+{
+#if defined(AK_OS_SERENITY)
+    char buffer[BUFSIZ];
+    int rc = get_process_name(buffer, BUFSIZ);
+    if (rc != 0)
+        return Error::from_syscall("get_process_name"sv, rc);
+    return String::from_utf8(StringView { buffer, strlen(buffer) });
+#elif defined(AK_LIBC_GLIBC) || (defined(AK_OS_LINUX) && !defined(AK_OS_ANDROID))
+    return String::from_utf8(StringView { program_invocation_name, strlen(program_invocation_name) });
+#elif defined(AK_OS_BSD_GENERIC) || defined(AK_OS_HAIKU)
+    auto const* progname = getprogname();
+    return String::from_utf8(StringView { progname, strlen(progname) });
+#else
+    // FIXME: Implement Process::get_name() for other platforms.
+    return "???"_string;
+#endif
+}
+
+ErrorOr<bool> Process::is_being_debugged()
+{
+#if defined(AK_OS_LINUX)
+    auto unbuffered_status_file = TRY(Core::File::open("/proc/self/status"sv, Core::File::OpenMode::Read));
+    auto status_file = TRY(Core::InputBufferedFile::create(move(unbuffered_status_file)));
+    auto buffer = TRY(ByteBuffer::create_uninitialized(4096));
+    while (TRY(status_file->can_read_line())) {
+        auto line = TRY(status_file->read_line(buffer));
+        auto const parts = line.split_view(':');
+        if (parts.size() < 2 || parts[0] != "TracerPid"sv)
+            continue;
+        auto tracer_pid = parts[1].to_number<u32>();
+        return (tracer_pid != 0UL);
+    }
+    return false;
+#elif defined(AK_OS_GNU_HURD)
+    process_t proc = getproc();
+    if (!MACH_PORT_VALID(proc))
+        return Error::from_syscall("getproc"sv, errno);
+
+    int flags = PI_FETCH_TASKINFO;
+    // We're going to ask the proc server for the info about our process,
+    // and it is going to reply, placing the info into a buffer. It can
+    // either fill in (overwrite) the buffer we provide to it (called pi_buffer
+    // below), or allocate (as if with mmap or vm_allocate) a new buffer.
+    // The buffer is really of type struct procinfo[], but it's transferred
+    // over IPC as int[]. We pass in a double pointer (int** pi_array) that
+    // initially points to our pi_buffer, but the call will update it to
+    // point to the newly allocated buffer if it ends up making one.
+    struct procinfo pi_buffer = {};
+    int* pi_array = reinterpret_cast<int*>(&pi_buffer);
+    mach_msg_type_number_t pi_array_len = sizeof(pi_buffer) / sizeof(int);
+    data_t waits = nullptr;
+    mach_msg_type_number_t waits_len = 0;
+
+    kern_return_t err = proc_getprocinfo(proc, getpid(), &flags, &pi_array, &pi_array_len, &waits, &waits_len);
+    mach_port_deallocate(mach_task_self(), proc);
+    if (err) {
+        __hurd_fail(static_cast<error_t>(err));
+        return Error::from_syscall("proc_getprocinfo"sv, errno);
+    }
+
+    // Now cast the returned buffer pointer back to struct procinfo, and
+    // read the info we're interested in (the PI_TRACED flag) from there.
+    VERIFY(pi_array_len >= sizeof(struct procinfo));
+    struct procinfo* procinfo = reinterpret_cast<struct procinfo*>(pi_array);
+    bool traced = procinfo->state & PI_TRACED;
+
+    // If the returned buffer is not the one we allocated on the stack,
+    // we should unmap it.
+    if (procinfo != &pi_buffer)
+        (void)System::munmap(pi_array, pi_array_len * sizeof(int));
+    if (waits)
+        (void)System::munmap(waits, waits_len);
+
+    return traced;
+#elif defined(AK_OS_MACOS) || defined(AK_OS_FREEBSD)
+    // https://developer.apple.com/library/archive/qa/qa1361/_index.html
+    int mib[4] = {};
+    struct kinfo_proc info = {};
+    size_t size = sizeof(info);
+
+    // Initialize mib, which tells sysctl the info we want, in this case
+    // we're looking for information about a specific process ID.
+    mib[0] = CTL_KERN;
+    mib[1] = KERN_PROC;
+    mib[2] = KERN_PROC_PID;
+    mib[3] = getpid();
+
+    if (sysctl(mib, sizeof(mib) / sizeof(*mib), &info, &size, NULL, 0) < 0)
+        return Error::from_syscall("sysctl"sv, errno);
+
+    // We're being debugged if the P_TRACED flag is set.
+#    if defined(AK_OS_MACOS)
+    return ((info.kp_proc.p_flag & P_TRACED) != 0);
+#    elif defined(AK_OS_FREEBSD)
+    return ((info.ki_flag & P_TRACED) != 0);
+#    endif
+#else
+    // FIXME: Implement this for more platforms.
+    return Error::from_string_literal("Platform does not support checking for debugger");
+#endif
+}
+
+// Forces the process to sleep until a debugger is attached, then breaks.
+void Process::wait_for_debugger_and_break()
+{
+    bool should_print_process_info { true };
+    for (;;) {
+        auto check = Process::is_being_debugged();
+        if (check.is_error()) {
+            dbgln("Cannot wait for debugger: {}. Continuing.", check.release_error());
+            return;
+        }
+        if (check.value())
+            return;
+        if (should_print_process_info) {
+            dbgln("Process {} with pid {} is sleeping, waiting for debugger.", Process::get_name(), getpid());
+            should_print_process_info = false;
+        }
+        ::usleep(100 * 1000);
+    }
+}
+
+pid_t Process::pid() const
+{
+    return m_pid;
+}
+
+ErrorOr<int> Process::wait_for_termination() const
+{
+    VERIFY(m_pid > 0);
+
+    int exit_code = -1;
+    int status;
+    if (waitpid(m_pid, &status, 0) == -1)
+        return Error::from_syscall("waitpid"sv, errno);
+
+    if (WIFEXITED(status)) {
+        exit_code = WEXITSTATUS(status);
+    } else if (WIFSIGNALED(status)) {
+        exit_code = 128 + WTERMSIG(status);
+    } else if (WIFSTOPPED(status)) {
+        // This is only possible if the child process is being traced by us.
+        VERIFY_NOT_REACHED();
+    } else {
+        VERIFY_NOT_REACHED();
+    }
+
+    return exit_code;
+}
+
+}

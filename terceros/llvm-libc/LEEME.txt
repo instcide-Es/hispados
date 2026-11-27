@@ -1,0 +1,14 @@
+llvm-libc, de llvm-project (https://github.com/llvm/llvm-project), con la
+licencia Apache 2.0 con las excepciones de LLVM, que la hacen compatible con
+la GPL-2.0 (la excepción de LLVM lo dice: el código que se compila con él no
+queda atado a las condiciones de la Apache 2.0): ver LICENSE.TXT.
+  El commit e54169423e7ee5d8b41c2f1b6f7a59000c901ee0 (el que fija el
+  overlay-port llvm-libc de Ladybird), de
+  github.com/llvm/llvm-project/archive/e54169423e7ee5d8b41c2f1b6f7a59000c901ee0.tar.gz
+
+Lo usa Hispa-64 desde la etapa 10 e (docs/64/HISPA-64.md, sección 22): AK de
+Ladybird (MathFunctions.cpp) saca de aquí sus funciones de matemáticas
+(«shared/math.h», solo cabeceras: las mismas cifras en todos los sistemas).
+Aquí van, sin cambiar nada, solo las 1.238 cabeceras de libc/ que incluye
+MathFunctions.cpp (las que dice «g++ -M»), de hdr, include, shared,
+src/__support y src/string/memory_utils: 2,8 MB de los 18.

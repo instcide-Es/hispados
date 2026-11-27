@@ -1,0 +1,106 @@
+/*
+ * Copyright (c) 2021, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2024-2025, stasoid <stasoid@yahoo.com>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibCore/AnonymousBuffer.h>
+#include <LibCore/System.h>
+
+#include <AK/Windows.h>
+
+namespace Core {
+
+AnonymousBufferImpl::AnonymousBufferImpl(int fd, size_t size, void* data)
+    : m_fd(fd)
+    , m_size(size)
+    , m_data(data)
+{
+}
+
+AnonymousBufferImpl::~AnonymousBufferImpl()
+{
+    if (m_data)
+        VERIFY(UnmapViewOfFile(m_data));
+
+    if (m_fd != -1)
+        MUST(System::close(m_fd));
+}
+
+ErrorOr<NonnullRefPtr<AnonymousBufferImpl>> AnonymousBufferImpl::create(size_t size)
+{
+    // CreateFileMapping rejects a zero-size mapping backed by INVALID_HANDLE_VALUE, so allocate at least one byte and
+    // track the logical size separately.
+    auto map_size = max(size, 1uz);
+    HANDLE map_handle = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, map_size >> 32, map_size & 0xFFFFFFFF, NULL);
+    if (!map_handle)
+        return Error::from_windows_error();
+
+    return create(to_fd(map_handle), size);
+}
+
+ErrorOr<NonnullRefPtr<AnonymousBufferImpl>> AnonymousBufferImpl::create(int fd, size_t size)
+{
+    void* ptr = nullptr;
+    if (size > 0) {
+        ptr = MapViewOfFile(to_handle(fd), FILE_MAP_ALL_ACCESS, 0, 0, size);
+        if (!ptr) {
+            auto error = Error::from_windows_error();
+            CloseHandle(to_handle(fd));
+            return error;
+        }
+    }
+
+    return adopt_ref(*new AnonymousBufferImpl(fd, size, ptr));
+}
+
+ErrorOr<AnonymousBuffer> AnonymousBuffer::create_with_size(size_t size)
+{
+    auto impl = TRY(AnonymousBufferImpl::create(size));
+    return AnonymousBuffer(move(impl));
+}
+
+ErrorOr<AnonymousBuffer> AnonymousBuffer::create_from_anon_fd(int fd, size_t size)
+{
+    auto impl = TRY(AnonymousBufferImpl::create(fd, size));
+    return AnonymousBuffer(move(impl));
+}
+
+ErrorOr<AnonymousBuffer> AnonymousBuffer::snapshot() const
+{
+    return snapshot(0, size());
+}
+
+ErrorOr<AnonymousBuffer> AnonymousBuffer::snapshot(size_t offset, size_t size) const
+{
+    if (!is_valid())
+        return Error::from_string_literal("Cannot snapshot an invalid anonymous buffer");
+
+    if (offset > this->size() || size > this->size() - offset)
+        return Error::from_string_literal("Anonymous buffer snapshot range is out of bounds");
+
+    auto copy = TRY(create_with_size(size));
+    bytes().slice(offset, size).copy_to({ copy.data<u8>(), copy.size() });
+    return copy;
+}
+
+ErrorOr<void> AnonymousBuffer::validate_backing_size() const
+{
+    if (!is_valid())
+        return Error::from_string_literal("Cannot validate the backing store of an invalid anonymous buffer");
+
+    // MapViewOfFile refuses a view that extends past the section, so the mapping AnonymousBufferImpl::create made
+    // already proved the section covers the size.
+    return {};
+}
+
+void AnonymousBuffer::populate_for_reading() const
+{
+    if (!is_valid() || size() == 0)
+        return;
+    WIN32_MEMORY_RANGE_ENTRY range { const_cast<void*>(m_impl->data()), size() };
+    (void)PrefetchVirtualMemory(GetCurrentProcess(), 1, &range, 0);
+}
+
+}
