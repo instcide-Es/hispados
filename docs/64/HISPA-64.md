@@ -10,7 +10,7 @@ cueste un año.
 
 Este documento es el plan: lo que se quiere, las decisiones de arquitectura con su
 porqué, y las etapas, cada una con lo que se verá funcionar y cómo se prueba. Las
-**etapas 0 a 9 están hechas** (secciones 6 a 15), y la **10** y la **11**, en su base (secciones 16 a 21: la 10 d, la última, con los sockets de Unix y la memoria compartida por descriptor, lo primero que pide el navegador).
+**etapas 0 a 9 están hechas** (secciones 6 a 15), y la **10** y la **11**, en su base (secciones 16 a 23: la 10 f, la última, con Rust, ICU 78.3 y las bibliotecas de Ladybird, el reloj del núcleo con el TSC y el vDSO, y los cerrojos de fcntl).
 
 ---
 
@@ -267,7 +267,7 @@ y la Wi-Fi son lo que más puede alargarlo.
 | 7 | musl, POSIX, herramientas de compilar cruzado | **hecha (24/11)** | — |
 | 8 | Gráficos: compositor, ventanas, ratón, oficina | **hecha (24/11)** | — |
 | 9 | Red por cable, TCP/IP, TLS; Wi-Fi en paralelo | **hecha (25/11)** (la Wi-Fi, en paralelo: 3–5 meses) | — |
-| 10 | Navegador moderno (Ladybird o WebKit) | **la base, hecha (25/11)**: C++, la letra (FreeType y HarfBuzz), TCP de hoy; y lo que quedaba de la 9 (sección 16). **La base de la 10 b, hecha (25/11)**: curl 8.14.1 con BearSSL (la orden y libcurl, con «multi») e ICU 77.1 (con sus datos filtrados), readlink (sección 19). **La 10 c, hecha (26/11)**: una referencia al descriptor durante cada llamada, la causa de fondo de lo lento con varios procesadores (la TLB: la cuarentena del montón) y de los cortes del sonido, el compilador cruzado (GCC 14.3 con la libstdc++ para musl; C++ dinámico), **IPv6** (SLAAC, ND, ICMPv6, AF_INET6) y lo de la auditoría (sección 20). **La 10 d, hecha (26/11)**: los sockets de Unix (AF_UNIX, con SCM_RIGHTS y SCM_CREDENTIALS), `memfd_create` con sus sellos, un programa de C++23 que se habla con otro como los de Ladybird, el vigilante, el HPET de 32 bits y H4 y H11 de la auditoría (sección 21). **La 10 e, hecha (27/11)**: Skia m148 (la de Ladybird) con el procesador, las bibliotecas que pide Ladybird (17 en `terceros/`, con su prueba), AK, LibCore, LibFileSystem, LibThreading y LibTest de Ladybird con sus pruebas de AK (970 casos) dentro de Hispa-64, preadv y pwritev (sección 22). Queda el navegador mismo: lo que pide, en la sección 22 | (8–12 sem.) |
+| 10 | Navegador moderno (Ladybird o WebKit) | **la base, hecha (25/11)**: C++, la letra (FreeType y HarfBuzz), TCP de hoy; y lo que quedaba de la 9 (sección 16). **La base de la 10 b, hecha (25/11)**: curl 8.14.1 con BearSSL (la orden y libcurl, con «multi») e ICU 77.1 (con sus datos filtrados), readlink (sección 19). **La 10 c, hecha (26/11)**: una referencia al descriptor durante cada llamada, la causa de fondo de lo lento con varios procesadores (la TLB: la cuarentena del montón) y de los cortes del sonido, el compilador cruzado (GCC 14.3 con la libstdc++ para musl; C++ dinámico), **IPv6** (SLAAC, ND, ICMPv6, AF_INET6) y lo de la auditoría (sección 20). **La 10 d, hecha (26/11)**: los sockets de Unix (AF_UNIX, con SCM_RIGHTS y SCM_CREDENTIALS), `memfd_create` con sus sellos, un programa de C++23 que se habla con otro como los de Ladybird, el vigilante, el HPET de 32 bits y H4 y H11 de la auditoría (sección 21). **La 10 e, hecha (27/11)**: Skia m148 (la de Ladybird) con el procesador, las bibliotecas que pide Ladybird (17 en `terceros/`, con su prueba), AK, LibCore, LibFileSystem, LibThreading y LibTest de Ladybird con sus pruebas de AK (970 casos) dentro de Hispa-64, preadv y pwritev (sección 22). **La 10 f, hecha (27/11)**: Rust con nuestra musl, ICU 78.3, LibUnicode, LibURL, LibIPC, LibGfx (y LibRegex, LibCompress, LibTextCodec, LibImageDecoders, LibCrypto propia) con sus pruebas dentro de Hispa-64; el reloj del núcleo con el TSC, el vDSO, getrandom rápido y los programas de la unidad sin copiar (TestAK, de 25 s a 3 s con KVM), los cerrojos de fcntl y ARRANQUE.TXT al pararse (sección 23). Queda el navegador mismo: lo que pide, en la sección 23 | (8–12 sem.) |
 | 11 | Impresión IPP, sonido HDA, energía (suspender, batería) | **la base, hecha (25/11)**: el planificador, TCP con congestión, la INTx, el tiempo de procesador y **el sonido (HD Audio, /dev/dsp)** (sección 17). **La 11 b, hecha (25/11)**: el tic estable (la calibración del APIC), **ACPICA en el núcleo** (la batería, el cable, el EC, apagar por `_S5`, el `_CRS` de los enlaces de los `_PRT`), el brillo y HWP (sección 18). Quedan suspender, los P-states sin HWP, IPP y la mezcla del sonido | (en paralelo) |
 | 12 | Instalar en el disco, actualizar, cuentas | 3–4 sem. | (en paralelo) |
 | 13 | (opcional) Cargador UEFI propio, Secure Boot; UEFI de 32 bits | 3–4 sem. | — |
@@ -4335,3 +4335,242 @@ sobre ICU), y lo guarda en `/tmp/mskia.png`, que lee otra vez.
   Ladybird los pedirá).
 - Lo de antes (sección 21): los sockets de Unix en el disco, el recolector
   de ciclos, H12 y H13, VirtualBox, ensambla.py frente a NASM.
+
+## 23. La etapa 10 f, hecha (27/11/2026): Rust, ICU 78.3, las bibliotecas de Ladybird, el reloj y el vDSO, los cerrojos de fcntl
+
+### Las decisiones
+
+- **Por qué la 10 f**: lo siguiente de la lista de la sección 22 hacia
+  Ladybird sin ventana: Rust (Ladybird ya no es solo C++), ICU 78.3 (la pide
+  exacta), LibUnicode, LibURL, LibIPC y LibGfx; y lo que la 10 e dejó medido
+  en el núcleo (TestAK, 23 s con KVM frente a 1,7 s en Linux; `clock_gettime`,
+  de 50 a 90 µs), los cerrojos de fcntl (sqlite) y ARRANQUE.TXT al pararse.
+
+### Lo de los programas (Rust, ICU, Ladybird)
+
+- **Rust 1.98.0** (la de `rust-toolchain.toml` de Ladybird), con rustup en el
+  PC de Albinyana (en el servidor no se instala nada), para
+  `x86_64-unknown-linux-musl` con **nuestro cruzado de enlazador y nuestra
+  musl** (`-C link-self-contained=no`, estático; el desenrollador, el
+  `libgcc_eh` de GCC: uno solo para C++ y Rust). `programas/rust/hazrust.sh`:
+  con cargo, lo compila; sin él (el servidor), usa `build/rust-obj/MRUST`,
+  copiado del PC (como los objetos de Skia). **MRUST** (26 pruebas: hilos,
+  Mutex, RwLock, canales, `scope`, archivos, TCP y UDP, el tiempo, el
+  entorno, un pánico recogido, un hijo con `Command`), igual en Linux y en
+  Hispa-64, en cada arranque con musl. Le hizo falta al núcleo el ioctl
+  FIONBIO de cualquier descriptor (Rust lo usa con las tuberías) y
+  FIOCLEX/FIONCLEX.
+- **ICU 78.3** en vez de la 77.1 (`terceros/icu`, el MD5 comprobado con el
+  oficial), con los datos de siempre (`icudt78l.dat`: es, ca, gl, eu, en; 4,1
+  MB); MICU, 28 de 28, igual que en Linux. Ladybird pide todos los idiomas y
+  la transliteración: 27,5 MB (`terceros/icu/filtro-ladybird.json`; van dentro
+  de TestLB). `hazcxx.sh` y `hazskia.sh` recompilan si cambia la versión (las
+  funciones de ICU la llevan en el nombre).
+- **Las cabeceras de Linux** 6.18.65 (UAPI, `make headers_install`) en el
+  cruzado: un paso más de `hazgcc.sh` (y `hazgcc.sh --cabeceras` en uno ya
+  hecho, sin recompilar GCC); fuera `ladybird/compat`.
+- **Las bibliotecas de Ladybird** (830fbef6): LibUnicode, LibRegex, LibURL,
+  LibTextCodec, LibCompress, LibIPC, LibGfx y LibImageDecoders, con sus crates
+  de Rust (`programas/ladybird/hazlb.sh` hace a mano lo que hace su CMake: un
+  workspace recortado, cada crate con `cargo rustc --lib`, su `RustFFI.h`, los
+  `.ipc` con su generador). Las de crates.io, los 133 `.crate` tal cual en
+  `terceros/rust-crates`, comprobados con el SHA-256 del `Cargo.lock`
+  (`crates.py`). La capa propia, `programas/ladybird/hispa64/`: wuffs 0.4 (MIT)
+  para el GIF en vez de la 0.3; lo del `consteval` de Utf16View que GCC no
+  emite; y **LibCrypto propia** con la interfaz de Ladybird sobre BearSSL
+  (SHA-1/2, RSA PKCS#1, ECDSA P-256/384/521) y monocypher (Ed25519), con SHA-3 y
+  HMAC nuestros: **nada de OpenSSL**.
+- **TestLB y MLB**: las pruebas de esas bibliotecas en un programa (46,5 MB,
+  con los datos de ICU dentro; 35 grupos, 431 casos, con TimeZone de LibCore y
+  TestString/TestUtf16String de AK) y MLB, que lo corre grupo a grupo con
+  plazo (con los `test-inputs`, 8,5 MB, en `/tmp/lb`). En Linux, 430 bien y 1
+  «conocido» (un píxel de una AVIF de 10 bits, con 2 de diferencia: Ladybird
+  lo espera de la libyuv entera, aquí va el trozo de libavif). En Hispa-64 (KVM,
+  4 procesadores, 512 MB): **31 grupos, 387 bien y 1 conocido**, y 4
+  **pendientes** (se corren y se dicen, no cuentan): symlink (88), más
+  descriptores (EMFILE con 256), el par cerrado de LibIPC
+  (`sync_wait_on_a_closed_peer...`) y TestURLPattern, que se cuelga (LibRegex
+  en Rust). TestLB y MLB van en la unidad solo en el arranque de KVM.
+
+### Lo del núcleo
+
+- **El reloj del núcleo, con el TSC** (`reloj64.cas`, `smp64.cas`): era la
+  causa de fondo de lo lento con KVM (y también con TCG). `ahora_ns()` leía el
+  HPET, un registro de un dispositivo: en una máquina virtual, cada lectura sale
+  al anfitrión (con KVM anidado, el del servidor, de 50 a 90 µs; con TCG, el
+  registro se lee con el cerrojo grande de QEMU, el de todos sus procesadores).
+  Y `ahora_ns()` se llama en 206 sitios: el planificador, los plazos, `poll`,
+  los futex, `clock_gettime`... Ahora, como Linux, el reloj del núcleo es el TSC
+  (`rdtsc`, sin salir) si vale: **invariante** (los equipos de 2008 en adelante:
+  los del taller), el de **KVM con su reloj estable** (pvclock con
+  `PVCLOCK_TSC_STABLE_BIT`) o el de **QEMU sin KVM** (TCG: lo saca del reloj del
+  anfitrión, el mismo para todos; CPUID 0x40000000, «TCGTCGTCGTCG»), y si **no
+  va hacia atrás de un procesador a otro**: al encender cada uno, los dos (el
+  que enciende y el encendido) leen 4.000 veces el TSC con un cerrojo y lo
+  comparan con lo último que ha leído cualquiera (el «tsc warp test» de Linux);
+  si alguno va hacia atrás, el de siempre. La cuenta: `ns0 + ((tsc - tsc0) ·
+  mult) >> 32`, con el producto de 128 bits (la misma que hace el vDSO). Con
+  **KVM sin el TSC estable** (KVM dentro de otra máquina virtual: el servidor de
+  las pruebas va con kvm-clock, y la prueba ve el TSC ir hacia atrás 56 veces),
+  el reloj de KVM: el pvclock de cada procesador (lo escribe el anfitrión en la
+  memoria; se lee con el TSC, sin salir), con un `cmpxchg` que no deja dar
+  nunca menos que lo último dado (como `pvclock_clocksource_read` de Linux).
+  El HPET (o el de ACPI) sigue para medir y para el tic. Con `reloj=hpet`, el
+  de antes; con `reloj=tsc`, el TSC aunque no se sepa si vale (las pruebas).
+  Lo dice al arrancar: «el reloj del núcleo: el TSC (invariante, sin ir hacia
+  atrás de un procesador a otro: 3 pruebas de 4000 vueltas por cada uno)».
+- **El vDSO** (`vdso64.asm`, `vdso64.cas`): la página de código que cada
+  programa tiene (AT_SYSINFO_EHDR), con `__vdso_clock_gettime`,
+  `__vdso_gettimeofday` y `__vdso_time`: musl la busca y, si está,
+  `clock_gettime` va por ella sin llamar al sistema. Es un ELF de posición
+  libre de una página, hecho a mano en NASM (la cabecera, PT_LOAD y
+  PT_DYNAMIC, DT_HASH, DT_SYMTAB, DT_STRTAB: lo que miran `__vdsosym` de musl y
+  su cargador dinámico, que la toma como una biblioteca más); sus 708 octetos
+  van en `vdso64.cas` y la batería mira que sean los de NASM. La página de
+  después, de solo leer, con los datos (tsc0, ns0, mult y el desfase de
+  REALTIME, con un número de secuencia); con un reloj que no es el TSC (el
+  HPET, el de KVM), el vDSO llama al sistema. Los dos marcos son de todos: con
+  la marca DISPOSITIVO (no se sueltan, al bifurcar se comparten) y
+  `mprotect` no los deja escribir (EACCES).
+- **`clock_gettime`**: con KVM anidado, de 50-90 µs a **0,5 µs** por la
+  llamada al sistema (el reloj de KVM); con TCG y el vDSO, de unos 90 µs a
+  **0,2-0,4 µs** (por la llamada, 9-15 µs: lo que cuesta entrar en el núcleo
+  con TCG).
+- **getrandom**: TestAK lo llama 332.000 veces (10 µs cada una: 3,6 s). El
+  bloque de ChaCha20, en ensamblador (con el de Castel, unos 20.000 ciclos por
+  pedido), y lo del procesador (RDSEED y RDRAND, que en una máquina virtual o
+  con muchos a la vez cuesta miles de ciclos) se mezcla en la clave cada 50 ms
+  o cada 4.096 pedidos, no en cada uno (Linux lo hace cada minuto): cada pedido
+  sigue con su clave nueva («fast key erasure») y el TSC. Ahora, de 2 a 3 µs
+  con KVM. Al arrancar, el bloque se compara con el vector del RFC 8439 (2.3.2).
+- **Arrancar programas grandes** (`procesos.cas`, `espacios.cas`): execve
+  copiaba el programa entero a la memoria del proceso, página a página, y antes
+  ponía cada una a cero; con TCG, `rep movsb` y `rep stosb` van octeto a octeto:
+  casi 1 s por programa de 5 MB. Ahora las páginas de los segmentos que no se
+  escriben (el código, lo de solo leer) de un programa de la unidad en memoria
+  **no se copian: se prestan** (la marca PRESTADA, el bit 52 de la entrada, con
+  COPIAR: el marco es el de la unidad, de solo leer; si alguien lo escribe
+  —`mprotect`, el núcleo—, `rompe_copia` le da una copia suya, siempre; al
+  quitarlas no se suelta el marco, y al bifurcar no se cuenta), salvo la que
+  tenga que acabar en ceros o se salga del archivo; también el cargador
+  dinámico (ld-musl). Y copiar y poner a cero, de 8 en 8 octetos. Con KVM, de
+  1,7 ms a 0,23 ms por execve; con TCG, de 921 ms a 1,5 ms.
+- **Las medidas** (`medidas` en la línea del núcleo): lo que llevan execve,
+  los fallos de página, deshacer los espacios y las 12 llamadas al sistema que
+  más tiempo llevan (cuántas y cuánto, con lo que esperan). Así se ha visto lo
+  de arriba.
+- **Las cifras de TestAK entero** (`MAK todas`, 85 grupos y 970 casos): con
+  KVM (anidado, 4 procesadores), de **25 s a 2,3-3,8 s** (en Linux, en el
+  servidor sin anidar: 1,7 s); con TCG y 4 procesadores, de más de 20 minutos
+  (no acababa en el plazo de la prueba) a 30 s. El arranque entero de las
+  pruebas por multiboot con TCG (q35, 4 procesadores, sin «ak=todas»), de 4 min
+  8 s a 57 s; MAK (12 grupos), de 49 s a 6 s.
+- **Los cerrojos de fcntl** (`candados64.cas`): F_GETLK, F_SETLK y F_SETLKW
+  (los de POSIX, del proceso) y F_OFD_GETLK, F_OFD_SETLK y F_OFD_SETLKW (los de
+  lo abierto), los que usan sqlite con su VFS de Unix y la LibDatabase de
+  Ladybird. Trozos de leer (compartidos) y de escribir; el mismo dueño cambia
+  el tipo de un trozo (se parte) y se junta con los suyos de al lado; SEEK_SET,
+  SEEK_CUR, SEEK_END, largo 0 y negativo; F_SETLKW espera (una señal la corta:
+  EINTR, o se repite con SA_RESTART); los de POSIX se sueltan al cerrar
+  cualquier descriptor del archivo (y al acabar); los OFD, con el último
+  descriptor de lo abierto. Sin buscar abrazos mortales (EDEADLK): sqlite no
+  espera nunca. Con su prueba, **MCANDADOS** (44, igual que en Linux, con
+  sqlite de dos procesos: SQLITE_BUSY mientras el otro está en BEGIN
+  EXCLUSIVE).
+- **ARRANQUE.TXT también al pararse** (`registro64.cas`, `excep64.cas`): una
+  excepción del núcleo, una parada (`detén_ini`), el vigilante. Antes de su
+  última línea, con los demás procesadores ya parados, se guarda otra vez,
+  **si es seguro escribir**: si ya se guardó en ese arranque (se sabe dónde,
+  sin buscarlo), si no se estaba guardando ya, si la parada no es del montón
+  (estropeado: lo que se escribiera podría estarlo) y si **nadie tiene tomado
+  nada de lo que hace falta para escribir** (el montón, los marcos, el VFS, la
+  caché de los discos, los mutex de AHCI y NVMe, los de xHCI, los de los
+  aparatos USB y sus memorias: cada módulo dice si lo suyo está libre); como
+  los demás procesadores ya no corren, nadie más lo puede tomar. Entonces, sin
+  cambiar de hilo (`Hilos64.en_parada`) y sin interrupciones: los
+  controladores miran sus anillos y sus registros dando vueltas (lo hacían ya
+  antes de que hubiera planificador). La última línea dice por qué se paró
+  («(parado: un hilo abre un mutex que no ha cerrado él)»). Su prueba: un disco
+  de pruebas con `/boot/HISPA64.BIN` y la marca, `prueba=parada` (una parada
+  en otro procesador) y `prueba=paradafallo` (un fallo de página del núcleo),
+  con 4 procesadores: lo mismo que el puerto serie hasta «Guardando el
+  registro...», el motivo al final y fsck.fat bien.
+- Hispa-64 **0.11.6** (uname: «etapa 10 f (Rust, el vDSO y los cerrojos)»).
+
+
+### Qué hace
+
+| Archivo | Qué |
+|---|---|
+| `reloj64.cas`, `smp64.cas` | el reloj del núcleo con el TSC (y el de KVM, pvclock); la prueba del TSC entre procesadores |
+| `vdso64.asm`, `vdso64.cas`, `hora64.cas`, `procesos.cas` | el vDSO: el ELF, sus datos y ponerlo en cada programa (AT_SYSINFO_EHDR) |
+| `chacha64.cas` | ChaCha20 en ensamblador, la mezcla cada 50 ms; el vector del RFC 8439 |
+| `procesos.cas`, `espacios.cas`, `sistema.cas`, `vfs64.cas` | las páginas prestadas de la unidad (execve y mmap), copiar y poner a cero de 8 en 8; las medidas |
+| `candados64.cas`, `sistema.cas`, `procesos.cas` | los cerrojos de fcntl |
+| `registro64.cas`, `excep64.cas`, `hilos64.cas` y los controladores | ARRANQUE.TXT al pararse |
+| `unidad64.cas`, `hispa64.cas`, `fisica64.cas` | hasta 128 archivos en la unidad (eran 64: con los de la 10 f, el último se perdía) |
+| `programas/musl/mreloj.c`, `mcandados.c` | MRELOJ y MRELOJD (20 pruebas), MCANDADOS (44) |
+| `programas/rust/` | Rust, MRUST |
+| `programas/ladybird/hazlb.sh`, `crates.py`, `mlb.c`, `hispa64/` | las bibliotecas de Ladybird, TestLB y MLB |
+| `terceros/icu`, `terceros/rust-crates`, `terceros/ladybird` | ICU 78.3, las crates, lo nuevo de Ladybird |
+
+### Las licencias nuevas
+
+Todas compatibles con la GPL-2.0 o posterior. **Solo Apache-2.0:
+calendrical_calculations 0.2.4** (el calendario de LibUnicode, dentro de
+TestLB): compatible con la GPL-3, no con la 2; el conjunto queda en «GPL-2.0
+o posterior» por la vía de la GPLv3. cbindgen (MPL-2.0) solo sirve para
+compilar. Las crates que dan a elegir con Apache-2.0 se toman por MIT, BSD,
+Zlib o Unicode-3.0. jxl, BSD-3; ICU4X e ICU 78.3, Unicode-3.0; las cabeceras de
+Linux, GPL-2.0 con la Linux-syscall-note; la biblioteca de Rust, MIT o
+Apache-2.0 (se elige la MIT).
+
+### Cómo se ha probado
+
+- MRELOJ, MRELOJD, MCANDADOS y MRUST, los mismos programas en Linux y en
+  Hispa-64 (las líneas de Linux, tal cual, en `pruebas.sh`); MLB, en el
+  arranque de KVM (con TestLB en la unidad), frente a lo que dice en Linux.
+- El reloj: con TCG (q35, 4 procesadores) «el TSC (de QEMU sin KVM...)» y el
+  vDSO sin llamar al sistema (unos 180 ns por lectura frente a 11 µs por la
+  llamada); con KVM anidado (el servidor), el de KVM (pvclock: 0,5-0,6 µs por
+  la llamada); con `reloj=hpet`, el de antes (la vuelta de KVM con «pc»). Con
+  `reloj=tsc` y KVM anidado, la prueba entre procesadores ve el TSC ir hacia
+  atrás (56 veces, hasta 41 cuentas) y se queda el de siempre: la prueba
+  sirve.
+- Los octetos del vDSO, los de NASM (y readelf: un ELF de posición libre);
+  ensambla.py, los mismos octetos que NASM (no sabía `shrd` ni `lfence`: van
+  sin `shrd` y con `db`).
+- ARRANQUE.TXT al pararse: `prueba=parada` y `prueba=paradafallo`, con 4
+  procesadores (arriba).
+- Las imágenes: el .vdi por UEFI y el CD por la BIOS, con 4 procesadores y
+  KVM: todo en orden y el escritorio; la memoria USB (xHCI, usb-storage) por
+  UEFI sin puerto serie: ARRANQUE.TXT en /usb0p2, entero, fsck.fat bien.
+- **La batería** (`castel/nucleo64/pruebas.sh`): **141 pruebas** (eran 137:
+  el vDSO, el reloj con el TSC, las dos de ARRANQUE.TXT al pararse; MRUST,
+  MRELOJ, MCANDADOS y MLB, dentro de las de la etapa 7 y la de KVM). Tres
+  vueltas: la primera, parada (con los programas de la 10 f la unidad pasaba
+  de 64 archivos: el último, libstdc++.so.6, se perdía; ahora, hasta 128); la
+  segunda, 140 bien y 1 mal (el número de archivos de la unidad, fijo en la
+  prueba: ahora, al menos los programas); **la tercera, entera: 141 bien y 0
+  mal** (90 minutos, de 15:12 a 16:42 del 27; casi media hora es
+  ensambla.py).
+
+### Lo que queda (y más adelante)
+
+- Los 4 pendientes de MLB: **symlink** (en FAT no hay: un enlace en memoria,
+  o en /tmp), **más descriptores** (MAX_FD, 256: van dentro de cada Proceso),
+  **el par cerrado de LibIPC** y **TestURLPattern colgado**.
+- **LibJS, LibWeb, RequestServer, WebContent** y `headless-browser`; ANGLE (el
+  Compositor) o el dibujo de Skia por el procesador; fontconfig o su capa.
+- El **vDSO con el reloj de KVM** (pvclock en el vDSO, como Linux, cuando el
+  TSC no es estable: hoy llama al sistema, 0,5 µs), y `__vdso_getcpu`.
+- **madvise(MADV_DONTNEED)** en lo de un programa (no anónimo): hoy lo deja a
+  cero (Linux lo vuelve a leer del archivo).
+- Los abrazos mortales de F_SETLKW (EDEADLK); MLIBS sigue con «unix-none»
+  (MCANDADOS ya prueba sqlite con el VFS de Unix).
+- ARRANQUE.TXT al pararse antes de haber visto los discos (hoy, solo si ya se
+  guardó una vez).
+- Lo de antes: HarfBuzz 10.2.0 y brotli 1.2.1 (las de Ladybird),
+  `-march=x86-64-v2`, el SIMD de libjpeg-turbo y dav1d, la memoria mínima por
+  UEFI, los sockets de Unix en el disco, el recolector de ciclos, H12 y H13,
+  VirtualBox, ensambla.py frente a NASM.
