@@ -265,7 +265,7 @@ int main(int argc, char **argv)
 				SkColor k = en(bx * 16 + x, by * 16 + y);
 				s[0] += SkColorGetR(k); s[1] += SkColorGetG(k); s[2] += SkColorGetB(k);
 			}
-			char t[8];
+			char t[24];
 			std::snprintf(t, sizeof t, "%02x%02x%02x", s[0] / 256, s[1] / 256, s[2] / 256);
 			hu += t;
 		}
