@@ -1,0 +1,289 @@
+; =============================================================================
+;  candados64.cas - Hispa-64, etapa 10 f (docs/64/HISPA-64.md, sección 23):
+;  los cerrojos de fcntl («record locks»), los que usan sqlite (su VFS de
+;  Unix) y la LibDatabase de Ladybird: F_GETLK, F_SETLK y F_SETLKW (los de
+;  POSIX, del proceso) y F_OFD_GETLK, F_OFD_SETLK y F_OFD_SETLKW (los de lo
+;  abierto, «open file description»).
+;
+;  Cada candado es un trozo [ini, fin) de un archivo (su nodo: hay uno por
+;  archivo, Nodos64), de leer (compartido, F_RDLCK) o de escribir (para uno
+;  solo, F_WRLCK), y de un dueño: el proceso (los de POSIX) o lo abierto (los
+;  OFD). Dos se estorban si son del mismo archivo, se pisan, alguno es de
+;  escribir y no son del mismo dueño (uno de POSIX y uno OFD, siempre son de
+;  dueños distintos, como en Linux). Poner uno quita antes lo que el mismo
+;  dueño tuviera en ese trozo (partiendo los que se salen) y lo junta con los
+;  suyos de al lado del mismo tipo; F_UNLCK solo quita. Con F_SETLK, si otro
+;  estorba, EAGAIN; con F_SETLKW se espera (una señal: EINTR). Sin buscar
+;  abrazos mortales (EDEADLK): sqlite no espera nunca (F_SETLK y vuelve a
+;  probar).
+;
+;  Se sueltan: los de POSIX de un proceso en un archivo, al cerrar ese
+;  proceso CUALQUIERA de sus descriptores de ese archivo (también al acabar:
+;  se cierran todos), como manda POSIX; los OFD, al cerrar el último
+;  descriptor de lo abierto (los dup y los de fork lo comparten).
+;  (Procesos.cierra_fd_obj llama a al_cierra, que pone aquí prepara_candados.)
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Candados64
+
+    importar Es64, Cerrojo, Monton64, Hilos64, Nodos64, Vfs64, Procesos
+
+    público constante MAX_CANDADOS = 1024
+    constante SIN_FIN = 0x7FFFFFFFFFFFFFFF      ; (hasta el final, y lo que crezca)
+    constante F_RDLCK = 0
+    constante F_WRLCK = 1
+    constante F_UNLCK = 2
+
+    tipo Candado = estructura
+        nodo: nat64                 ; el archivo (0: libre)
+        dueño: nat64                ; el id del proceso (POSIX) o lo abierto (OFD)
+        ofd: nat32
+        tipo_: nat32                ; F_RDLCK o F_WRLCK
+        ini: nat64
+        fin_: nat64                 ; (sin él: SIN_FIN)
+    fin
+
+    variable tabla: arreglo [MAX_CANDADOS] de Candado
+    variable cerrojo: nat64
+    variable espera: Espera
+    público variable candados_puestos, candados_esperas, candados_estorbos: nat64
+    público variable n_candados: nat32          ; los que hay ahora
+
+    ; ¿estorba el candado i a uno de tipo t en [a, b) de ese dueño?
+    función estorba(i: nat32, nodo: nat64, dueño: nat64, ofd: nat32, t: nat32, a: nat64, b: nat64): bool
+        si tabla[i].nodo <> nodo entonces devolver falso fin
+        si tabla[i].ini >= b o a >= tabla[i].fin_ entonces devolver falso fin
+        si tabla[i].tipo_ = F_RDLCK y t = F_RDLCK entonces devolver falso fin
+        devolver tabla[i].dueño <> dueño o tabla[i].ofd <> ofd
+    fin
+
+    ; el primero que estorba, o -1 (con el cerrojo)
+    función el_que_estorba(nodo: nat64, dueño: nat64, ofd: nat32, t: nat32, a: nat64, b: nat64): ent32
+        variable i: nat32
+        i := 0
+        mientras i < MAX_CANDADOS hacer
+            si estorba(i, nodo, dueño, ofd, t, a, b) entonces devolver ent32(i) fin
+            i := i + 1
+        fin
+        devolver -1
+    fin
+
+    función libre(): ent32
+        variable i: nat32
+        i := 0
+        mientras i < MAX_CANDADOS hacer
+            si tabla[i].nodo = 0 entonces devolver ent32(i) fin
+            i := i + 1
+        fin
+        devolver -1
+    fin
+
+    función libres(): nat32
+        devolver MAX_CANDADOS - n_candados
+    fin
+
+    función pon_en(i: nat32, nodo: nat64, dueño: nat64, ofd: nat32, t: nat32, a: nat64, b: nat64)
+        tabla[i].nodo := nodo
+        tabla[i].dueño := dueño
+        tabla[i].ofd := ofd
+        tabla[i].tipo_ := t
+        tabla[i].ini := a
+        tabla[i].fin_ := b
+        n_candados := n_candados + 1
+    fin
+
+    función quita_en(i: nat32)
+        tabla[i].nodo := 0
+        n_candados := n_candados - 1
+    fin
+
+    ; (con el cerrojo) lo del dueño en [a, b), fuera (partiendo lo que se sale)
+    función quita_trozo(nodo: nat64, dueño: nat64, ofd: nat32, a: nat64, b: nat64)
+        variable i: nat32
+        variable k: ent32
+        variable li, lf: nat64
+        i := 0
+        mientras i < MAX_CANDADOS hacer
+            si tabla[i].nodo = nodo y tabla[i].dueño = dueño y tabla[i].ofd = ofd y tabla[i].ini < b y a < tabla[i].fin_ entonces
+                li := tabla[i].ini
+                lf := tabla[i].fin_
+                si li < a y lf > b entonces
+                    ; (en medio: queda [li, a) aquí y [b, lf) en otro)
+                    tabla[i].fin_ := a
+                    k := libre()
+                    si k >= 0 entonces pon_en(nat32(k), nodo, dueño, ofd, tabla[i].tipo_, b, lf) fin
+                sino si li < a entonces
+                    tabla[i].fin_ := a
+                sino si lf > b entonces
+                    tabla[i].ini := b
+                sino
+                    quita_en(i)
+                fin
+            fin
+            i := i + 1
+        fin
+    fin
+
+    ; (con el cerrojo) pone [a, b) de tipo t, ya sin estorbos; falso si no cabe (ENOLCK)
+    función pon_trozo(nodo: nat64, dueño: nat64, ofd: nat32, t: nat32, a: nat64, b: nat64): bool
+        variable i: nat32
+        variable k: ent32
+        ; (hacen falta dos libres como mucho: uno al partir y el nuevo)
+        si libres() < 2 entonces devolver falso fin
+        quita_trozo(nodo, dueño, ofd, a, b)
+        ; los suyos del mismo tipo justo al lado, juntos con este
+        i := 0
+        mientras i < MAX_CANDADOS hacer
+            si tabla[i].nodo = nodo y tabla[i].dueño = dueño y tabla[i].ofd = ofd y tabla[i].tipo_ = t y (tabla[i].fin_ = a o tabla[i].ini = b) entonces
+                si tabla[i].ini < a entonces a := tabla[i].ini fin
+                si tabla[i].fin_ > b entonces b := tabla[i].fin_ fin
+                quita_en(i)
+            fin
+            i := i + 1
+        fin
+        k := libre()
+        si k < 0 entonces devolver falso fin
+        pon_en(nat32(k), nodo, dueño, ofd, t, a, b)
+        candados_puestos := candados_puestos + 1
+        devolver cierto
+    fin
+
+    ; ---- lo que llama fcntl ----
+    ; la struct flock (32 octetos): l_type (16 bits), l_whence (16), l_start,
+    ; l_len (64) y l_pid (32); de [v] a [a, b) de lo abierto ab; o el error
+    función trozo_de(p: puntero a Proceso, ab: puntero a Abierto, fl: puntero a nat64, ref t: nat32, ref a: nat64, ref b: nat64): ent64
+        variable dónde, ini, largo, base: nat64
+        t := nat32(fl[0] yb 0xFFFF)
+        dónde := (fl[0] >> 16) yb 0xFFFF
+        ini := fl[1]
+        largo := fl[2]
+        si t > F_UNLCK entonces devolver EINVAL fin
+        base := 0
+        si dónde = 1 entonces base := ab.pos
+        sino si dónde = 2 entonces base := vfs_tamaño(ab)
+        sino si dónde <> 0 entonces devolver EINVAL
+        fin
+        ini := base + ini
+        si ent64(ini) < 0 entonces devolver EINVAL fin
+        si largo = 0 entonces
+            a := ini
+            b := SIN_FIN
+        sino si ent64(largo) > 0 entonces
+            a := ini
+            b := ini + largo
+            si ent64(b) < 0 entonces b := SIN_FIN fin
+        sino
+            ; (largo negativo: [ini + largo, ini))
+            si ent64(ini + largo) < 0 entonces devolver EINVAL fin
+            a := ini + largo
+            b := ini
+        fin
+        si a >= b entonces devolver EINVAL fin
+        devolver 0
+    fin
+
+    ; fcntl(fd, orden, v) con orden F_GETLK (5), F_SETLK (6), F_SETLKW (7),
+    ; F_OFD_GETLK (36), F_OFD_SETLK (37) o F_OFD_SETLKW (38), en lo abierto ab
+    ; (un archivo del VFS) de p
+    público función candado(p: puntero a Proceso, ab: puntero a Abierto, orden: nat64, v: nat64): ent64
+        variable fl: arreglo [4] de nat64
+        variable t, ofd: nat32
+        variable a, b, dueño, nodo, bf, acceso: nat64
+        variable r: ent64
+        variable k: ent32
+        si orden < 36 entonces ofd := 0 sino ofd := 1 fin
+        si no copia_de(p, nat64(dirección(fl[0])), v, 32) entonces devolver EFAULT fin
+        r := trozo_de(p, ab, dirección(fl[0]), t, a, b)
+        si r < 0 entonces devolver r fin
+        si ofd = 1 y nat32(fl[3] yb 0xFFFFFFFF) <> 0 entonces devolver EINVAL fin     ; (l_pid, a 0)
+        si ofd = 1 entonces dueño := nat64(ab) sino dueño := p.id fin
+        nodo := ab.nodo
+        ; ---- F_GETLK: el primero que estorbaría (o F_UNLCK) ----
+        si orden = 5 o orden = 36 entonces
+            si t = F_UNLCK entonces devolver EINVAL fin
+            bf := toma(dirección(cerrojo))
+            k := el_que_estorba(nodo, dueño, ofd, t, a, b)
+            si k < 0 entonces
+                fl[0] := (fl[0] yb (nob nat64(0xFFFF))) ob F_UNLCK
+            sino
+                fl[0] := nat64(tabla[nat32(k)].tipo_)           ; (l_whence, SEEK_SET)
+                fl[1] := tabla[nat32(k)].ini
+                si tabla[nat32(k)].fin_ = SIN_FIN entonces fl[2] := 0 sino fl[2] := tabla[nat32(k)].fin_ - tabla[nat32(k)].ini fin
+                si tabla[nat32(k)].ofd <> 0 entonces fl[3] := 0xFFFFFFFF sino fl[3] := tabla[nat32(k)].dueño yb 0xFFFFFFFF fin
+            fin
+            suelta(dirección(cerrojo), bf)
+            si no copia_a(p, v, nat64(dirección(fl[0])), 32) entonces devolver EFAULT fin
+            devolver 0
+        fin
+        ; ---- F_SETLK y F_SETLKW ----
+        ; (de leer, abierto para leer; de escribir, abierto para escribir)
+        acceso := ab.marcas yb 3
+        si t = F_RDLCK y acceso = 1 entonces devolver EBADF fin
+        si t = F_WRLCK y acceso = 0 entonces devolver EBADF fin
+        bf := sin_ints()
+        mientras cierto hacer
+            toma_sin(dirección(cerrojo))
+            si t = F_UNLCK entonces
+                quita_trozo(nodo, dueño, ofd, a, b)
+                suelta_sin(dirección(cerrojo))
+                r := 0
+                romper
+            fin
+            k := el_que_estorba(nodo, dueño, ofd, t, a, b)
+            si k < 0 entonces
+                si pon_trozo(nodo, dueño, ofd, t, a, b) entonces r := 0 sino r := -37 fin       ; ENOLCK
+                suelta_sin(dirección(cerrojo))
+                romper
+            fin
+            candados_estorbos := candados_estorbos + 1
+            si orden = 6 o orden = 37 o interrumpido(p) entonces
+                suelta_sin(dirección(cerrojo))
+                si orden = 6 o orden = 37 entonces r := -11 sino r := ERESTARTSYS fin     ; EAGAIN, o repetir (EINTR)
+                romper
+            fin
+            ; (F_SETLKW: con el de la espera antes de soltar el de la tabla: quien
+            ; suelte ahora, despierta_todos, espera a que este duerma)
+            candados_esperas := candados_esperas + 1
+            toma_sin(dirección(espera.cerrojo))
+            suelta_sin(dirección(cerrojo))
+            espera_interrumpible(dirección(espera))
+            duerme_en(dirección(espera))
+            toma_sin(dirección(espera.cerrojo))
+            fin_interrumpible()
+            sal_de(dirección(espera))
+            suelta_sin(dirección(espera.cerrojo))
+        fin
+        restaura(bf)
+        si t = F_UNLCK entonces despierta_todos(dirección(espera)) fin
+        devolver r
+    fin
+
+    ; al cerrar un descriptor de lo abierto ab en el proceso de id «pid»: sus
+    ; candados de POSIX en ese archivo, fuera; y, si es el último descriptor
+    ; de ab, los OFD de ab
+    función al_cierra(pid: nat64, abv: nat64)
+        variable ab: puntero a Abierto
+        variable i: nat32
+        variable b: nat64
+        variable quitado: bool
+        ab := puntero(abv)
+        si n_candados = 0 entonces devolver fin
+        quitado := falso
+        b := toma(dirección(cerrojo))
+        i := 0
+        mientras i < MAX_CANDADOS hacer
+            si tabla[i].nodo = ab.nodo y ((tabla[i].ofd = 0 y tabla[i].dueño = pid) o (tabla[i].ofd = 1 y tabla[i].dueño = abv y ab.refs <= 1)) entonces
+                quita_en(i)
+                quitado := cierto
+            fin
+            i := i + 1
+        fin
+        suelta(dirección(cerrojo), b)
+        si quitado entonces despierta_todos(dirección(espera)) fin
+    fin
+
+    público función prepara_candados()
+        al_cierra_archivo := nat64(dirección(al_cierra))
+    fin
+
+fin Candados64.

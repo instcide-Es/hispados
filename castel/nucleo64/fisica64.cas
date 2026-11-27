@@ -23,7 +23,7 @@ módulo Fisica64
 
     público constante PÁGINA = 4096
     constante MAX_RAM = 256
-    constante MAX_RES = 96                      ; [etapa 8] (eran 32: con 30 módulos del cargador, los últimos no se apartaban y se daban como memoria libre)
+    constante MAX_RES = 192                     ; [etapa 10 f: eran 96] [etapa 8] (eran 32: con 30 módulos del cargador, los últimos no se apartaban y se daban como memoria libre)
 
     público variable ram_ini, ram_fin: arreglo [MAX_RAM] de nat64    ; lo disponible, en páginas enteras
     público variable n_ram: nat32
@@ -337,6 +337,11 @@ módulo Fisica64
             fin
         fin
         devolver n
+    fin
+
+    ; [etapa 10 f] ¿nadie tiene su cerrojo? (ARRANQUE.TXT al pararse)
+    público función marcos_libres_ya(): bool
+        devolver cerrojo = 0
     fin
 
 fin Fisica64.

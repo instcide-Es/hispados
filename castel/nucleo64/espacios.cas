@@ -53,7 +53,13 @@ módulo Espacios
     ; al quitarla no se suelta el marco, y al bifurcar no se cuenta; lleva
     ; también COMPARTIDA, y sus marcas de caché (la PAT) se respetan
     público constante DISPOSITIVO = 0x800
-    constante GUARDA = 0xE98                            ; lo que se guarda al cambiar los permisos: COPIAR, COMPARTIDA, DISPOSITIVO, PWT, PCD y PAT
+    ; [etapa 10 f] la página es de un programa de la unidad en memoria, prestada
+    ; (sin copiarla: Procesos.copia_trozo): de solo leer, con COPIAR (si
+    ; alguien la escribe, rompe_copia le da una copia suya, siempre); al
+    ; quitarla no se suelta su marco (es de la unidad) y al bifurcar no se
+    ; cuenta. El bit 52 de la entrada: libre para el sistema
+    público constante PRESTADA = 0x0010000000000000
+    constante GUARDA = 0x0010000000000E98               ; lo que se guarda al cambiar los permisos: PRESTADA, COPIAR, COMPARTIDA, DISPOSITIVO, PWT, PCD y PAT
     constante N_PCID = 64
     constante MÁSCARA = 0x000FFFFFFFFFF000
 
@@ -354,7 +360,7 @@ módulo Espacios
                 derriba_u(e, ini, (v - ini) >> 12)
                 i := 0
                 mientras i < n hacer
-                    si lista[i] yb DISPOSITIVO = 0 entonces suelta_marco_u(lista[i] yb MÁSCARA) fin
+                    si lista[i] yb (DISPOSITIVO ob PRESTADA) = 0 entonces suelta_marco_u(lista[i] yb MÁSCARA) fin
                     i := i + 1
                 fin
                 total := total + n
@@ -448,7 +454,7 @@ módulo Espacios
             x := t[i]
             si x yb PRESENTE <> 0 entonces
                 si nivel = 1 entonces
-                    si x yb DISPOSITIVO = 0 entonces suelta_marco_u(x yb MÁSCARA) fin
+                    si x yb (DISPOSITIVO ob PRESTADA) = 0 entonces suelta_marco_u(x yb MÁSCARA) fin
                     pág := pág + 1
                 sino
                     suelta_nivel(x yb MÁSCARA, nivel - 1, pág, tab)
@@ -535,7 +541,7 @@ módulo Espacios
         variable p: puntero a nat64
         variable c: puntero a nat32
         variable x, f, nuevo, b, bc: nat64
-        variable sola: bool
+        variable sola, prestada: bool
         nuevo := 0
         mientras cierto hacer
             b := toma(dirección(e.cerrojo))
@@ -553,11 +559,17 @@ módulo Espacios
                 devolver cierto
             fin
             f := x yb MÁSCARA
+            prestada := x yb PRESTADA <> 0
             bc := toma(dirección(comp_cerrojo))
-            sola := f >> 12 >= n_compartidos
-            si no sola entonces
-                c := cuenta_de(f)
-                sola := valor(c) = 0
+            ; ([etapa 10 f] una prestada, siempre con copia: el marco es de la unidad)
+            si prestada entonces
+                sola := falso
+            sino
+                sola := f >> 12 >= n_compartidos
+                si no sola entonces
+                    c := cuenta_de(f)
+                    sola := valor(c) = 0
+                fin
             fin
             si sola entonces
                 suelta(dirección(comp_cerrojo), bc)
@@ -570,7 +582,7 @@ módulo Espacios
             fin
             si nuevo <> 0 entonces
                 ; (la copia ya está hecha: el marco viejo, uno menos)
-                valor(c) := valor(c) - 1
+                si no prestada entonces valor(c) := valor(c) - 1 fin
                 suelta(dirección(comp_cerrojo), bc)
                 valor(p) := nuevo ob fl ob ESCRIBIR ob PRESENTE ob USUARIO
                 suelta(dirección(e.cerrojo), b)
@@ -610,9 +622,9 @@ módulo Espacios
                         suelta(dirección(de.cerrojo), b)
                     fin
                     fy := x yb MÁSCARA
-                    si x yb DISPOSITIVO = 0 entonces comparte_marco(fy) fin
+                    si x yb (DISPOSITIVO ob PRESTADA) = 0 entonces comparte_marco(fy) fin
                     si no mapea_u_tal(a, v, x) entonces
-                        si x yb DISPOSITIVO = 0 entonces suelta_marco_u(fy) fin
+                        si x yb (DISPOSITIVO ob PRESTADA) = 0 entonces suelta_marco_u(fy) fin
                         devolver falso
                     fin
                     páginas_compartidas := páginas_compartidas + 1

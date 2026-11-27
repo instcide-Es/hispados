@@ -10,11 +10,31 @@
 ;    - el TSC (su frecuencia, medida con el reloj; si es invariante);
 ;    - la hora del CMOS (el reloj de tiempo real, con el siglo de la FADT).
 ;  ahora_ns() es el tiempo desde que se preparó, en nanosegundos.
+;  [etapa 10 f] Con el TSC, si se puede: leer el HPET es leer un registro de un
+;  dispositivo, y en una máquina virtual cada lectura sale al anfitrión (con
+;  KVM anidado, de 50 a 90 µs: clock_gettime, el planificador, los plazos...,
+;  todo iba así de lento). El TSC se lee sin salir (rdtsc). Vale si es
+;  invariante (no cambia con la frecuencia ni se para al dormir: los equipos
+;  de 2008 en adelante) o si es el de KVM con su reloj estable (pvclock con
+;  PVCLOCK_TSC_STABLE_BIT: el anfitrión lo tiene igual en todos) o el de QEMU
+;  sin KVM (TCG: lo saca del reloj del anfitrión; leer el HPET ahí toma el
+;  cerrojo grande de QEMU, el de todos sus procesadores), y si entre
+;  los procesadores no va hacia atrás (Smp64 lo prueba al encender cada uno,
+;  como el «tsc warp test» de Linux). Desde que se pasa (pasa_a_tsc), la hora
+;  es ns0 + (Δtsc · mult) >> 32, la misma cuenta que hace el vDSO (Vdso64) de
+;  los programas; el HPET (o el de ACPI) sigue para medir y para el tic.
+;  Con KVM sin el TSC estable (KVM dentro de otra máquina virtual, como el
+;  servidor de las pruebas: su anfitrión va con kvm-clock), el TSC puede
+;  saltar al mover el anfitrión sus procesadores: ahí, el reloj de KVM
+;  (pvclock, uno por procesador: lo escribe el anfitrión en la memoria;
+;  se lee con el TSC, sin salir), con lo que no deja ir hacia atrás de un
+;  procesador a otro (el último dado, con cmpxchg), como hace Linux.
+;  «reloj=hpet» en la línea de órdenes: sin el TSC, como antes.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Reloj64
 
-    importar Cifras64, Pagina64, Es64, Acpi64, Cpu64, Cerrojo
+    importar Cifras64, Pagina64, Es64, Acpi64, Cpu64, Cerrojo, PorCpu64
 
     público constante NINGUNO = 0
     público constante HPET = 1
@@ -34,6 +54,26 @@ módulo Reloj64
     variable pm_suma: nat64
     variable cuenta0: nat64
     variable cerrojo: nat64                 ; [etapa 3] el reloj de ACPI se suma en pm_suma: de uno en uno
+    ; [etapa 10 f] el reloj del núcleo con el TSC
+    público constante TSC_NO = 0
+    público constante TSC_INVARIANTE = 1
+    público constante TSC_KVM = 2
+    público variable tsc_vale: nat32            ; ¿se puede usar? (TSC_NO, TSC_INVARIANTE o TSC_KVM)
+    público variable tsc_prohibido: bool        ; «reloj=hpet»
+    público variable tsc_forzado: bool          ; «reloj=tsc»: con el TSC aunque no se sepa si vale (las pruebas)
+    público constante TSC_FORZADO = 3
+    público variable con_tsc: bool              ; ahora_ns() ya va con el TSC
+    público variable tsc0, ns0, tsc_mult: nat64 ; ns = ns0 + ((tsc - tsc0) · tsc_mult) >> 32
+    público variable kvm_hay, kvm_estable: bool ; ¿es KVM? ¿con el TSC estable (pvclock)?
+    público variable tcg_hay: bool              ; ¿es QEMU sin KVM (TCG: «TCGTCGTCGTCG»)?
+    público constante TSC_TCG = 5               ; el de QEMU sin KVM
+    público constante TSC_PV = 4                ; KVM sin el TSC estable: su reloj (pvclock)
+    variable pv_msr: nat32                      ; el MSR del reloj de KVM (0 si no lo hay)
+    público variable con_pv: bool               ; ahora_ns() ya va con el reloj de KVM
+    variable pv_desfase, pv_último: nat64
+    ; (lo que escribe KVM, pvclock_vcpu_time_info, 32 octetos: uno por procesador, cada 64)
+    variable pvc: arreglo [520] de nat64
+    público variable pv_atrás: nat64            ; las veces que uno lo ha leído por detrás del último dado
 
     ; la frecuencia de la fuente, en Hz
     público función hz(): nat64
@@ -83,8 +123,94 @@ módulo Reloj64
         devolver 0
     fin
 
+    ; [etapa 10 f] (Δtsc · tsc_mult) >> 32, con el producto en 128 bits
+    público función tsc_a_ns(d: nat64): nat64
+        variable m: nat64
+        m := tsc_mult
+        ensamblador
+            mov rax, {d}
+            mul qword {m}
+            shr rax, 32
+            shl rdx, 32
+            or rax, rdx
+        fin
+    fin
+
+    ; [etapa 10 f] el pvclock del procesador k (alineado a 64)
+    función pv_de(k: nat32): nat64
+        devolver ((nat64(dirección(pvc[0])) + 63) yb (nob nat64(63))) + nat64(k yb 63) * 64
+    fin
+
+    ; [etapa 10 f] (en cada procesador, al encenderlo) que KVM le escriba su pvclock
+    público función pv_este(k: nat32)
+        si pv_msr = 0 entonces devolver fin
+        pon_msr(pv_msr, (pv_de(k) - base_núcleo()) ob 1)
+    fin
+
+    ; [etapa 10 f] el reloj de KVM de este procesador, en ns (como
+    ; pvclock_clocksource_read de Linux: la versión, par; el TSC; lo escrito;
+    ; y la versión otra vez igual)
+    función lee_pv(): nat64
+        variable s, r, b: nat64
+        variable c: puntero a Cpu
+        b := sin_ints()
+        c := yo()
+        s := pv_de(c.número)
+        ensamblador
+            mov r8, {s}
+        .otra:
+            mov r10d, [r8]
+            test r10d, 1
+            jnz .otra
+            db 0x0F, 0xAE, 0xE8         ; lfence
+            rdtsc
+            shl rdx, 32
+            or rax, rdx
+            sub rax, [r8 + 8]
+            movsx ecx, byte [r8 + 28]
+            test ecx, ecx
+            js .neg
+            shl rax, cl
+            jmp .escala
+        .neg:
+            neg ecx
+            shr rax, cl
+        .escala:
+            mov edx, [r8 + 24]
+            mul rdx
+            shr rax, 32
+            shl rdx, 32
+            or rax, rdx
+            add rax, [r8 + 16]
+            db 0x0F, 0xAE, 0xE8         ; lfence
+            cmp r10d, [r8]
+            jne .otra
+            mov {r}, rax
+        fin
+        restaura(b)
+        devolver r
+    fin
+
     público función ahora_ns(): nat64
-        variable c: nat64
+        variable c, t, u: nat64
+        si con_pv entonces
+            t := lee_pv() + pv_desfase
+            mientras cierto hacer
+                u := pv_último
+                si t <= u entonces
+                    si t < u entonces pv_atrás := pv_atrás + 1 fin
+                    devolver u
+                fin
+                si cambia_si(dirección(pv_último), u, t) entonces devolver t fin
+            fin
+        fin
+        si con_tsc entonces
+            t := tsc()
+            ; (un procesador que lo lea un poco por detrás del que lo puso: el
+            ; mismo instante; la prueba de Smp64 dice que no pasa)
+            si t <= tsc0 entonces devolver ns0 fin
+            devolver ns0 + tsc_a_ns(t - tsc0)
+        fin
         c := cuenta() - cuenta0
         si fuente = HPET entonces devolver muldiv(c, hpet_periodo, 1000000) fin
         si fuente = PM entonces devolver muldiv(c, 1000000000, 3579545) fin
@@ -154,6 +280,71 @@ módulo Reloj64
         devolver mc
     fin
 
+    ; [etapa 10 f] ¿es KVM, y su reloj (pvclock) dice que el TSC es estable?
+    ; (CPUID 0x40000000: «KVMKVMKVM»; 0x40000001, el bit 3 o el 0: el reloj de
+    ; KVM; se le pide una vez con su MSR, se mira PVCLOCK_TSC_STABLE_BIT y se
+    ; le dice que pare)
+    función mira_kvm()
+        variable msr: nat32
+        variable f: nat64
+        variable i: nat32
+        variable c: puntero a Cpu
+        cpuid(1, 0)
+        si rc yb 0x80000000 = 0 entonces devolver fin
+        cpuid(0x40000000, 0)
+        ; (QEMU sin KVM: su TSC lo saca del reloj del anfitrión, el mismo para todos)
+        si rb = 0x54474354 y rc = 0x43544743 y rd = 0x47435447 entonces
+            tcg_hay := cierto
+            devolver
+        fin
+        si rb <> 0x4B4D564B o rc <> 0x564B4D56 o rd <> 0x4D entonces devolver fin
+        kvm_hay := cierto
+        cpuid(0x40000001, 0)
+        si ra yb 8 <> 0 entonces msr := 0x4B564D01 sino si ra yb 1 <> 0 entonces msr := 0x12 sino devolver fin
+        pv_msr := msr
+        c := yo()
+        f := pv_de(c.número)
+        pv_este(c.número)
+        i := 0
+        mientras i < 1000000 y m32(f) = 0 hacer
+            pausa()
+            i := i + 1
+        fin
+        si m32(f) = 0 entonces
+            pon_msr(msr, 0)
+            pv_msr := 0
+            devolver
+        fin
+        ; flags, el octeto 29: el bit 0, PVCLOCK_TSC_STABLE_BIT
+        kvm_estable := (m32(f + 28) >> 8) yb 1 <> 0
+    fin
+
+    ; [etapa 10 f] desde ahora, ahora_ns() con el TSC (lo llama el arranque
+    ; con todos los procesadores ya encendidos y probados)
+    público función pasa_a_tsc()
+        variable b: nat64
+        si tsc_vale = TSC_NO o tsc_hz = 0 o con_tsc o con_pv entonces devolver fin
+        b := sin_ints()
+        si tsc_vale = TSC_PV entonces
+            pv_desfase := ahora_ns() - lee_pv()
+            pv_último := 0
+            ensamblador
+                db 0x0F, 0xAE, 0xF0         ; mfence
+            fin
+            con_pv := cierto
+            restaura(b)
+            devolver
+        fin
+        tsc_mult := muldiv(1000000000, nat64(1) << 32, tsc_hz)
+        ns0 := ahora_ns()
+        tsc0 := tsc()
+        ensamblador
+            db 0x0F, 0xAE, 0xF0         ; mfence
+        fin
+        con_tsc := cierto
+        restaura(b)
+    fin
+
     público función prepara_reloj()
         variable t0, c0, c1: nat64
         si pon_hpet() entonces
@@ -177,6 +368,17 @@ módulo Reloj64
             mientras ahora_ns() - t0 < 50000000 hacer pausa() fin
             c1 := muestra_tsc()
             tsc_hz := muldiv(c1 - c0, 1000000000, muestra_ns - t0)
+        fin
+        ; [etapa 10 f] ¿vale el TSC para el reloj del núcleo?
+        mira_kvm()
+        tsc_vale := TSC_NO
+        si tsc_hz > 0 y no tsc_prohibido entonces
+            si tsc_invariante entonces tsc_vale := TSC_INVARIANTE
+            sino si kvm_estable entonces tsc_vale := TSC_KVM
+            sino si tcg_hay entonces tsc_vale := TSC_TCG
+            sino si tsc_forzado entonces tsc_vale := TSC_FORZADO
+            sino si pv_msr <> 0 entonces tsc_vale := TSC_PV
+            fin
         fin
     fin
 

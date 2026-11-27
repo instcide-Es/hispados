@@ -78,10 +78,10 @@ módulo Hispa64
     importar Registro64
     importar Sondeo64, Chacha64, Hora64, Objet64, Redcom64, Prt64, Intel64, Rtl64, Virtio64, Usbred64, Ip64, Tcp64, Red64, PrRed64
 
-    constante VERSIÓN = "0.11.5"
+    constante VERSIÓN = "0.11.6"
     constante MB1 = 0x2BADB002
     constante MB2 = 0x36D76289
-    constante MAX_MÓDULOS = 64                  ; (16 hasta la etapa 6)
+    constante MAX_MÓDULOS = 128                 ; (16 hasta la etapa 6; 64 hasta la 10 e: con los de la 10 f ya eran 65)
 
     variable magia, info: nat32
     variable info_largo: nat64
@@ -538,6 +538,10 @@ módulo Hispa64
         escribe_montajes()
         ; [etapa 10 e] el registro, ya (si se queda después, queda esto)
         registro("(sigue: guardado con los discos ya vistos)")
+        ; [etapa 10 f] prueba=parada: una parada del núcleo en otro procesador,
+        ; con el registro ya guardado una vez: ARRANQUE.TXT, otra vez al pararse
+        si tiene("prueba=parada") entonces provoca_smp(2) fin
+        si tiene("prueba=paradafallo") entonces provoca_smp(1) fin     ; (un fallo de página del núcleo)
     fin
 
     ; [etapa 10 e] guarda el registro del arranque (ARRANQUE.TXT: Registro64)
@@ -816,6 +820,8 @@ módulo Hispa64
             arranca_aps()
         fin
         n := nat32(n_en_marcha)
+        ; [etapa 10 f] el reloj del núcleo, con el TSC si vale y no va hacia atrás entre ellos
+        si tsc_vale <> TSC_NO y (tsc_saltos = 0 o tsc_vale = TSC_PV) entonces pasa_a_tsc() fin
         pon_color(14, 0)
         escribir("Procesadores: ", n)
         si n = 1 entonces escribir(" en marcha (APIC") sino escribir(" en marcha (APIC") fin
@@ -832,6 +838,27 @@ módulo Hispa64
             escribir(") y ", n_e, " eficientes (E: APIC")
             lista_apic(0x20)
             escribir(")\n")
+        fin
+        ; [etapa 10 f]
+        escribir("  el reloj del núcleo: ")
+        si con_pv entonces
+            escribir("el de KVM (pvclock, con el TSC; sin dejarlo ir hacia atrás de un procesador a otro)\n")
+        sino si con_tsc entonces
+            escribir("el TSC (")
+            si tsc_vale = TSC_INVARIANTE entonces escribir("invariante")
+            sino si tsc_vale = TSC_KVM entonces escribir("de KVM, estable")
+            sino si tsc_vale = TSC_TCG entonces escribir("de QEMU sin KVM")
+            sino escribir("reloj=tsc")
+            fin
+            escribir(", sin ir hacia atrás de un procesador a otro: ", tsc_pruebas, " pruebas de ", VUELTAS_TSC, " vueltas por cada uno)\n")
+        sino si tsc_prohibido entonces
+            escribir("el de siempre (reloj=hpet)\n")
+        sino si tsc_vale <> TSC_NO entonces
+            escribir("el de siempre: el TSC va hacia atrás de un procesador a otro (", tsc_saltos, " veces; hasta ", tsc_peor, " cuentas)\n")
+        sino
+            escribir("el de siempre: el TSC no es invariante")
+            si kvm_hay entonces escribir(" (ni el de KVM estable)") fin
+            escribir("\n")
         fin
         si trampolín <> 0 entonces
             escribir("  con INIT-SIPI-SIPI y el trampolín en ")
@@ -1006,6 +1033,11 @@ módulo Hispa64
         fin
         escribir("\n  TSC: ", tsc_hz div 1000000, " MHz; invariante: ")
         si tsc_invariante entonces escribir("sí") sino escribir("no") fin
+        si tcg_hay entonces escribir("; QEMU sin KVM (TCG)") fin
+        si kvm_hay entonces
+            escribir("; KVM, ")
+            si kvm_estable entonces escribir("con el TSC estable (pvclock)") sino escribir("sin el TSC estable") fin
+        fin
         escribir("\n")
     fin
 
@@ -1097,6 +1129,8 @@ módulo Hispa64
         prepara_apic()
         cuenta_acpi()
         hpet_32_forzado := tiene("hpet32")
+        tsc_prohibido := tiene("reloj=hpet")              ; [etapa 10 f]
+        tsc_forzado := tiene("reloj=tsc")
         prepara_reloj()
         cuenta_reloj()
         c := yo()
@@ -1515,6 +1549,7 @@ módulo Hispa64
         etapa6()
         ; [etapa 7] musl: los programas de C de hoy
         ak_todas := tiene("ak=todas")
+        medidas := tiene("medidas")             ; [etapa 10 f]
         si no tiene("sinpruebas") y no tiene("sinmusl") y tic_va entonces pruebas_musl() fin
         ; [etapa 9] la red
         si no tiene("sinpruebas") y no tiene("sinred") y tic_va entonces pruebas_red() fin

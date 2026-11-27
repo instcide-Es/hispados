@@ -354,6 +354,7 @@ módulo Smp64
         monta(c.gdt, c.tss, c.ist1, c.ist2, c.ist3)
         carga_idt()
         prepara_cpu()                   ; [etapa 4] syscall, SMEP, SMAP, PCID
+        pv_este(c.número)               ; [etapa 10 f] el reloj de KVM, si lo hay
         c.tipo_núcleo := tipo_de_este()
         pon_lapic()
         si tic_va entonces pon_tic() fin
@@ -365,7 +366,71 @@ módulo Smp64
         suma_atómica(dirección(n_en_marcha), 1)
         c.en_marcha := 1
         pon_atómico(dirección(ap_llegó), 1)
+        ; [etapa 10 f] el TSC, frente al del que lo ha encendido
+        si tsc_vale <> TSC_NO y tsc_vale <> TSC_PV entonces
+            pon_atómico(dirección(tsc_listo), 1)
+            mientras tsc_ya = 0 hacer pausa() fin
+            prueba_tsc()
+            pon_atómico(dirección(tsc_probado), 1)
+        fin
         ocioso()
+    fin
+
+    ; ---- [etapa 10 f] ¿va el TSC hacia atrás de un procesador a otro? ----
+    ; Como el «tsc warp test» de Linux: los dos (el que enciende y el
+    ; encendido), a la vez, VUELTAS_TSC veces cada uno: con un cerrojo, leen el
+    ; TSC (con lfence delante: que no se adelante la lectura) y lo comparan con
+    ; el último leído por cualquiera de los dos; si es menor, ha ido hacia
+    ; atrás (tsc_saltos, y lo más que ha ido: tsc_peor). Con alguno, el reloj
+    ; del núcleo sigue con el HPET (Reloj64.pasa_a_tsc no se llama).
+    público constante VUELTAS_TSC = 4000
+    variable tsc_cerrojo, tsc_último: nat64
+    variable tsc_listo, tsc_ya, tsc_probado: nat64
+    público variable tsc_saltos, tsc_peor, tsc_pruebas: nat64
+
+    función tsc_en_orden(): nat64
+        ensamblador
+            db 0x0F, 0xAE, 0xE8         ; lfence
+            rdtsc
+            shl rdx, 32
+            or rax, rdx
+        fin
+    fin
+
+    función prueba_tsc()
+        variable i: nat32
+        variable b, t: nat64
+        i := 0
+        mientras i < VUELTAS_TSC hacer
+            b := toma(dirección(tsc_cerrojo))
+            t := tsc_en_orden()
+            si t < tsc_último entonces
+                tsc_saltos := tsc_saltos + 1
+                si tsc_último - t > tsc_peor entonces tsc_peor := tsc_último - t fin
+            sino
+                tsc_último := t
+            fin
+            suelta(dirección(tsc_cerrojo), b)
+            i := i + 1
+        fin
+    fin
+
+    ; (el que enciende, con el que acaba de llegar)
+    función prueba_tsc_con_otro()
+        variable t0: nat64
+        t0 := tsc()
+        mientras tsc_listo = 0 y tsc() - t0 < tsc_hz hacer pausa() fin
+        si tsc_listo = 0 entonces
+            tsc_saltos := tsc_saltos + 1
+            devolver
+        fin
+        pon_atómico(dirección(tsc_ya), 1)
+        prueba_tsc()
+        mientras tsc_probado = 0 hacer pausa() fin
+        tsc_listo := 0
+        tsc_probado := 0
+        pon_atómico(dirección(tsc_ya), 0)
+        tsc_pruebas := tsc_pruebas + 1
     fin
 
     ; las tablas del trampolín: la identidad de los 2 primeros MB (con una
@@ -473,6 +538,7 @@ módulo Smp64
                         de_más := de_más + 1
                     sino si enciende_uno(c, cpu_apic[i]) entonces
                         mientras c.en_marcha = 0 hacer pausa() fin
+                        si tsc_vale <> TSC_NO y tsc_vale <> TSC_PV entonces prueba_tsc_con_otro() fin
                         si c.tipo_núcleo = 0x40 entonces n_p := n_p + 1 fin
                         si c.tipo_núcleo = 0x20 entonces n_e := n_e + 1 fin
                     sino

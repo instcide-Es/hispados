@@ -47,7 +47,7 @@
 ; =============================================================================
 módulo Sistema
 
-    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Vfs64, Tty64, Futex64, Tubos64, Disp64, Sondeo64, Chacha64, Hora64, Objet64, Redcom64, Red64, Unix64
+    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Vfs64, Tty64, Futex64, Tubos64, Disp64, Sondeo64, Chacha64, Hora64, Objet64, Redcom64, Red64, Unix64, Candados64
 
     constante EPERM = -1
     constante ENOENT = -2
@@ -604,6 +604,11 @@ módulo Sistema
             si es_tubo(p.fd_clase[nat32(fd)]) o es_de_disp(p.fd_clase[nat32(fd)]) o es_nueva(p.fd_clase[nat32(fd)]) entonces p.fd_nobloq[nat32(fd)] := nat32((arg >> 11) yb 1) fin
             devolver 0
         fin
+        ; [etapa 10 f] los cerrojos (Candados64): F_GETLK, F_SETLK, F_SETLKW y los OFD
+        si orden = 5 o orden = 6 o orden = 7 o orden = 36 o orden = 37 o orden = 38 entonces
+            si p.fd_clase[nat32(fd)] <> F_ARCHIVO entonces devolver EINVAL fin
+            devolver candado(p, abierto(p, fd), orden, arg)
+        fin
         si orden = 1033 o orden = 1034 entonces                                          ; [etapa 10 d] F_ADD_SEALS y F_GET_SEALS
             si p.fd_clase[nat32(fd)] <> F_SHM entonces devolver EINVAL fin
             devolver sellos_shm(p.fd_obj[nat32(fd)], orden, arg)
@@ -1115,15 +1120,27 @@ módulo Sistema
 
     ; [etapa 7] (con el mutex de la memoria) las páginas de [a, a + l) con lo
     ; del archivo desde «desp» (lo que pase del final, a cero al tocarlo)
+    ; ([etapa 10 f] de un archivo de la unidad en memoria, sus páginas enteras
+    ; no se copian: se prestan, como al cargar un programa, Procesos.copia_trozo;
+    ; también las de escribir de MAP_PRIVATE: con COPIAR, la copia al escribir;
+    ; así ld-musl ya no copia libstdc++.so.6 en cada programa)
     función llena_de_archivo(p: puntero a Proceso, a: nat64, l: nat64, ab: puntero a Abierto, desp: nat64, prot: nat32): ent64
-        variable tam, v, pos, f, n: nat64
+        variable tam, v, pos, f, n, u: nat64
         variable r: ent64
         variable e: puntero a Espacio
         e := puntero(p.espacio)
         tam := vfs_tamaño(ab)
+        u := vfs_de_unidad(ab)
+        si u yb 4095 <> 0 o u < dm() entonces u := 0 fin
         v := a
         mientras v < a + l y desp + (v - a) < tam hacer
             pos := desp + (v - a)
+            si u <> 0 y pos + 4096 <= tam entonces
+                si no mapea_u(e, v, u - dm() + pos, (marcas_de_prot(prot) yb (nob nat64(ESCRIBIR))) ob PRESTADA ob COPIAR) entonces devolver ENOMEM fin
+                suma_atómica(dirección(páginas_prestadas), 1)
+                v := v + 4096
+                seguir
+            fin
             f := pide()
             si f = 0 entonces devolver ENOMEM fin
             ceros_mem(virt(f), 4096)
@@ -1351,8 +1368,8 @@ módulo Sistema
         fin
         pon_texto(dirección(t[0]), 0, "Hispa-64")
         pon_texto(dirección(t[0]), 65, "hispa64")
-        pon_texto(dirección(t[0]), 130, "0.11.5")
-        pon_texto(dirección(t[0]), 195, "etapa 10 e (Skia y las imágenes)")
+        pon_texto(dirección(t[0]), 130, "0.11.6")
+        pon_texto(dirección(t[0]), 195, "etapa 10 f (Rust, el vDSO y los cerrojos)")
         pon_texto(dirección(t[0]), 260, "x86_64")
         pon_texto(dirección(t[0]), 325, "(none)")
         si no copia_a(p, v, nat64(dirección(t[0])), 390) entonces devolver EFAULT fin
@@ -1983,10 +2000,14 @@ módulo Sistema
 
     ; la llamada del marco m (Entradas): el resultado, en su RAX. [etapa 7]
     ; Devuelve 1 si hay que volver con iretq (rt_sigreturn: también RCX y R11)
+    ; [etapa 10 f] las medidas de las llamadas: cuántas de cada número y el
+    ; tiempo que llevan, con lo que esperan (cuentas del TSC)
+    público variable llam_n, llam_tsc: arreglo [512] de nat64
+
     función atiende(m: nat64): nat64
         variable p: puntero a Proceso
         variable h: puntero a Hilo
-        variable n, a1, a2, a3, a4, a5, a6, lím, iret: nat64
+        variable n, a1, a2, a3, a4, a5, a6, lím, iret, t0: nat64
         variable r: ent64
         variable usa: bool
         variable gen: nat32
@@ -2001,6 +2022,7 @@ módulo Sistema
         a6 := l64(m + 48)
         iret := 0
         suma_atómica(dirección(llamadas), 1)
+        t0 := tsc()                         ; [etapa 10 f] (las medidas: «medidas»)
         ; [etapa 10 c] el descriptor, tomado mientras dura (si lo es: si no,
         ; la llamada da su error como siempre)
         usa := falso
@@ -2258,6 +2280,11 @@ módulo Sistema
             si no: r := desconocida(p, n)
         fin
         si usa entonces deja_fd(p, a1, gen) fin
+        ; [etapa 10 f] cuántas de cada una y cuánto llevan (en cuentas del TSC)
+        si n < 512 entonces
+            suma_atómica(dirección(llam_n[nat32(n)]), 1)
+            suma_atómica(dirección(llam_tsc[nat32(n)]), tsc() - t0)
+        fin
         p64(m + 112, nat64(r))
         ; (las marcas_ que puede devolver sysret: las de las cuentas, con IF)
         p64(m + 136, (l64(m + 136) yb 0xCD5) ob 0x202)
@@ -2552,6 +2579,7 @@ módulo Sistema
         prepara_tubos()
         al_otro_fd := nat64(dirección(otro_obj))
         al_cierra_fd := nat64(dirección(cierra_obj))
+        prepara_candados()                              ; [etapa 10 f]
         al_sistema := nat64(dirección(atiende))
     fin
 

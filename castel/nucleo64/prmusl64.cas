@@ -28,6 +28,7 @@ módulo PrMusl64
     importar Cifras64, Pant64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Sistema, Futex64, Tubos64, Disp64, Redcom64, Hda64, Unix64, Discos64
 
     público variable fallos7: nat32
+    público variable medidas: bool              ; [etapa 10 f] «medidas»: lo que llevan execve, los fallos de página y las llamadas
     público variable ak_todas: bool             ; [etapa 10 e] «ak=todas»: MAK con los 85 grupos de TestAK (si no, 12)
 
     función mal(qué: puntero a byte)
@@ -99,6 +100,9 @@ módulo PrMusl64
         si busca_archivo("MRED") >= 0 entonces corre("MRED", 0) fin            ; [etapa 9] los sockets por 127.0.0.1, eventfd, timerfd, el azar
         si busca_archivo("MRED6") >= 0 entonces corre("MRED6", 0) fin          ; [etapa 10 c] IPv6 por ::1
         si busca_archivo("MUNIX") >= 0 entonces corre("MUNIX", 0) fin          ; [etapa 10 d] AF_UNIX, SCM_RIGHTS y memfd
+        si busca_archivo("MRELOJ") >= 0 entonces corre("MRELOJ", 0) fin        ; [etapa 10 f] el vDSO y la hora
+        si busca_archivo("MRELOJD") >= 0 entonces corre("MRELOJD", 0) fin      ; [etapa 10 f] lo mismo, dinámico (el vDSO, una biblioteca más)
+        si busca_archivo("MCANDADOS") >= 0 entonces corre("MCANDADOS", 0) fin  ; [etapa 10 f] los cerrojos de fcntl (y sqlite)
         si busca_archivo("MIPC") >= 0 entonces corre("MIPC", 0) fin            ; [etapa 10 d] IPC entre dos procesos, como Ladybird (C++)
         si busca_archivo("MCXX") >= 0 entonces corre("MCXX", 0) fin            ; [etapa 10] C++ (la libstdc++ con musl)
         si busca_archivo("MCXXD") >= 0 entonces corre("MCXXD", 0) fin          ; [etapa 10 c] C++ dinámico (libstdc++.so.6)
@@ -117,14 +121,14 @@ módulo PrMusl64
             si ak_todas entonces corre("MAK todas", 0) sino corre("MAK", 0) fin
         fin
         si busca_archivo("MRUST") >= 0 entonces corre("MRUST uno dos", 0) fin  ; [etapa 10 f] Rust (con nuestra musl)
-        si busca_archivo("MCURL") >= 0 entonces corre("MCURL", 0) fin          ; libcurl por 127.0.0.1
-        si busca_archivo("MSONIDO") >= 0 entonces
-            corre("MSONIDO", 0)                                                 ; [etapa 11] el sonido (/dev/dsp)
-            si hay_hda entonces escribir("  el sonido: ", hda_octetos, " octetos al anillo, ", hda_sin_datos, " veces sin datos, ", hda_lpib_atrás, " veces LPIB hacia atrás\n") fin
         ; [etapa 10 f] las pruebas de LibUnicode, LibURL, LibIPC y LibGfx de
         ; Ladybird (TestLB, de 46 MB, con los datos de ICU dentro: solo en el
         ; arranque de KVM, que las lleva en la unidad)
         si busca_archivo("MLB") >= 0 entonces corre("MLB", 0) fin
+        si busca_archivo("MCURL") >= 0 entonces corre("MCURL", 0) fin          ; libcurl por 127.0.0.1
+        si busca_archivo("MSONIDO") >= 0 entonces
+            corre("MSONIDO", 0)                                                 ; [etapa 11] el sonido (/dev/dsp)
+            si hay_hda entonces escribir("  el sonido: ", hda_octetos, " octetos al anillo, ", hda_sin_datos, " veces sin datos, ", hda_lpib_atrás, " veces LPIB hacia atrás\n") fin
         fin
         si busca_archivo("LUA") >= 0 y busca_archivo("PRUEBA.LUA") >= 0 entonces corre("LUA /PRUEBA.LUA uno dos", 0) fin
         ; (los que quedasen sueltos acaban solos)
@@ -141,7 +145,8 @@ módulo PrMusl64
         fin
         escribir("Después de musl: ", vivos, " procesos, ", en_tabla, " en la tabla, ", n_espacios, " espacios, ", tablas_usuario, " tablas de programas, ", Tubos64.tubos, " tuberías; ")
         escribir(hilos_creados, " hilos creados, ", señales_entregadas, " señales entregadas, ", Futex64.esperas, " esperas de futex, ")
-        escribir(páginas_compartidas, " páginas compartidas al bifurcar (", copias_rotas, " copiadas al escribir, ", copias_propias, " sin copiar)\n")
+        escribir(páginas_compartidas, " páginas compartidas al bifurcar (", copias_rotas, " copiadas al escribir, ", copias_propias, " sin copiar); ")
+        escribir(páginas_prestadas, " páginas de la unidad prestadas a los programas, sin copiarlas\n")       ; [etapa 10 f]
         escribir("  la memoria: ")
         si memoria_ahora() = mem0 entonces escribir("la de antes") sino escribir("¡distinta! (", mem0, " -> ", memoria_ahora(), " marcos)") fin
         escribir("; el montón: ", en_uso, " bloques")
@@ -149,12 +154,52 @@ módulo PrMusl64
         escribir("; las pilas: ", n_pilas)
         si nat64(n_pilas) = pilas0 entonces escribir(" (las de antes)") sino escribir(" (antes, ", pilas0, ")") fin
         escribir("\n")
+        si medidas entonces cuenta_medidas() fin
         si vivos <> 0 o en_tabla <> 0 o n_espacios <> 0 o tablas_usuario <> 0 o Tubos64.tubos <> 0 entonces mal("quedan procesos, espacios o tuberías") fin
         si memoria_ahora() <> mem0 entonces mal("se ha perdido memoria") fin
         si en_uso <> montón0 entonces mal("se han perdido bloques del montón") fin
         si shm_vivos <> 0 o shm_páginas <> 0 entonces mal("queda memoria compartida (/dev/shm)") fin
         si unix_vivos <> 0 entonces mal("quedan sockets de Unix") fin
         si nat64(n_pilas) <> pilas0 entonces mal("se han perdido pilas") fin
+    fin
+
+
+    ; [etapa 10 f] las medidas («medidas»), en µs (con el TSC)
+    función us(c: nat64): nat64
+        si tsc_hz = 0 entonces devolver 0 fin
+        devolver muldiv(c, 1000000, tsc_hz)
+    fin
+
+    función cuenta_medidas()
+        variable i, k, mejor: nat32
+        variable hecho: arreglo [512] de bool
+        variable m: nat64
+        escribir("  medidas: ", execs, " execve, ", us(tsc_exec) div (execs + 1), " µs de media (cargar el programa: ", us(tsc_carga) div (execs + 1), "); ")
+        escribir(n_fallos, " fallos de página que ponen una, ", muldiv(us(tsc_fallos), 1000, n_fallos + 1), " ns de media; deshacer los espacios al acabar, ", us(tsc_salidas) div 1000, " ms en total\n")
+        escribir("  las llamadas que más llevan (con lo que esperan):")
+        i := 0
+        mientras i < 512 hacer
+            hecho[i] := falso
+            i := i + 1
+        fin
+        k := 0
+        mientras k < 12 hacer
+            m := 0
+            mejor := 0
+            i := 0
+            mientras i < 512 hacer
+                si no hecho[i] y llam_tsc[i] > m entonces
+                    m := llam_tsc[i]
+                    mejor := i
+                fin
+                i := i + 1
+            fin
+            si m = 0 entonces romper fin
+            hecho[mejor] := cierto
+            escribir(" ", mejor, ": ", llam_n[mejor], " en ", us(llam_tsc[mejor]) div 1000, " ms (", us(llam_tsc[mejor]) div llam_n[mejor], " µs);")
+            k := k + 1
+        fin
+        escribir("\n")
     fin
 
 fin PrMusl64.

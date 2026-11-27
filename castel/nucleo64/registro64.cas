@@ -16,11 +16,24 @@
 ;  algo) y al acabar las pruebas (lo entero). Si hay puerto serie (QEMU,
 ;  VirtualBox con él puesto), no hace falta y no se guarda, salvo con
 ;  «registro» en la línea de órdenes; con «sinregistro», nunca.
+;  [etapa 10 f] También cuando el sistema se para (una excepción del núcleo,
+;  una parada, el vigilante): Excep64 llama a guarda_al_pararse antes de su
+;  última línea, con los demás procesadores ya parados. Solo si es seguro
+;  escribir: si ya se guardó antes en ese arranque (se sabe dónde, sin
+;  buscarlo: buscar abre carpetas), si no se estaba guardando ya, si la
+;  parada no es del montón (estropeado: lo que se escribiera podría estarlo
+;  también) y si nadie tiene tomado nada de lo que hace falta para escribir
+;  (el montón, los marcos, el VFS, la caché de los discos, los controladores
+;  de AHCI, NVMe y xHCI, los aparatos USB y sus memorias): como los demás
+;  procesadores ya no corren, nadie más lo puede tomar. Entonces, sin cambiar
+;  de hilo (Hilos64.en_parada) y sin interrupciones: los controladores miran
+;  sus anillos y registros dando vueltas, como antes de que hubiera
+;  planificador. La última línea dice por qué se paró.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Registro64
 
-    importar Es64, Cerrojo, Monton64, Pant64, Nodos64, Discos64, Vfs64, Cifras64
+    importar Es64, Cerrojo, Monton64, Pant64, Nodos64, Discos64, Vfs64, Cifras64, Fisica64, Hilos64, Apic64, Excep64, Ahci64, Nvme64, Xhci64, Usb64, Usbalm64
 
     ; hasta que esté el montón, en «temprano» (32 KB); después, en 1 MB del
     ; montón (un arranque entero con todas las pruebas: unos 120 KB)
@@ -32,6 +45,10 @@ módulo Registro64
     variable reg_largo: nat64
     público variable en_pantalla: bool         ; ¿se pasa también a la consola de la pantalla?
     público variable reg_guardado: puntero a byte   ; dónde se guardó la última vez (o nulo)
+    ; [etapa 10 f] al pararse
+    variable destino_m: nat32                   ; el montaje de la última vez (o 0xFFFFFFFF)
+    variable guardando, parada_vista: bool
+    público variable parada_guardada: bool      ; (para las pruebas)
 
     ; de la página 437 de casa (0x80 a 0xFF) a Unicode
     variable c437: arreglo [128] de nat16 = (
@@ -71,7 +88,8 @@ módulo Registro64
     fin
 
     ; con el montón ya: el registro pasa a 1 MB (con lo de antes). Antes de
-    ; encender los demás procesadores (nadie escribe a la vez)
+    ; encender los demás procesadores (nadie escribe a la vez). [etapa 10 f]
+    ; Y lo de pararse (Excep64.al_pararse)
     público función agranda_registro()
         variable g: puntero a byte
         variable i: nat64
@@ -88,6 +106,8 @@ módulo Registro64
         fin
         reg := g
         reg_cabe := CABE_REG
+        destino_m := 0xFFFFFFFF
+        al_pararse := nat64(dirección(guarda_al_pararse))
     fin
 
     ; ¿hay un puerto serie en 0x3F8? (su registro de prueba, el 7: se lee lo que se escribe)
@@ -146,7 +166,58 @@ módulo Registro64
 
     ; guárdalo (con «por qué», que va en la última línea); cierto si se ha guardado
     público función guarda_registro(forzado: bool, por_qué: puntero a byte): bool
-        variable m, d: nat32
+        variable m: nat32
+        variable r: bool
+        si no forzado y hay_serie() entonces devolver falso fin
+        m := destino()
+        si m = 0xFFFFFFFF entonces devolver falso fin
+        si guardando entonces devolver falso fin
+        guardando := cierto
+        destino_m := m
+        r := guarda_en(m, por_qué)
+        guardando := falso
+        devolver r
+    fin
+
+    ; [etapa 10 f] (Excep64.al_pararse) el sistema se para: lo de arriba, si
+    ; es seguro escribir (ver arriba); dice en la pantalla si se ha guardado
+    función guarda_al_pararse()
+        variable por_qué: arreglo [240] de byte
+        si parada_vista o destino_m = 0xFFFFFFFF entonces devolver fin
+        parada_vista := cierto
+        si guardando entonces
+            escribir("(El registro no se guarda: se estaba guardando cuando se ha parado.)\n")
+            devolver
+        fin
+        si parada_del_montón entonces
+            escribir("(El registro no se guarda: el montón del núcleo está estropeado y lo que se escribiera podría estarlo también.)\n")
+            devolver
+        fin
+        si no montón_libre() o no marcos_libres_ya() o no vfs_libre() o no discos_libres() o no ahci_libre() o no nvme_libre() o no xhci_libre() o no usb_libre() o no alm_libre() entonces
+            escribir("(El registro no se guarda: algo de lo que hace falta para escribir estaba tomado al pararse.)\n")
+            devolver
+        fin
+        ; (un solo hilo, sin interrupciones: los controladores, mirando sin dormir)
+        en_parada := cierto
+        va := falso
+        tic_va := falso
+        guardando := cierto
+        copia_t(dirección(por_qué[0]), "(parado: ", 240)
+        si parada_qué <> nulo entonces añade_t(dirección(por_qué[0]), parada_qué, 230) fin
+        añade_t(dirección(por_qué[0]), ")", 240)
+        escribir("Guardando el registro en ARRANQUE.TXT de ", dirección(montajes[destino_m].ruta[0]), "...\n")
+        si guarda_en(destino_m, dirección(por_qué[0])) entonces
+            parada_guardada := cierto
+            escribir("Registro: guardado (hasta la línea de arriba), en ARRANQUE.TXT de ", reg_guardado, "\n")
+        sino
+            escribir("(El registro no se ha podido guardar.)\n")
+        fin
+        guardando := falso
+    fin
+
+    ; (con el destino ya sabido) a UTF-8 y al archivo; cierto si se ha guardado
+    función guarda_en(m: nat32, por_qué: puntero a byte): bool
+        variable d: nat32
         variable ruta: arreglo [96] de byte
         variable a: puntero a Abierto
         variable err, r: ent64
@@ -154,14 +225,11 @@ módulo Registro64
         variable n, i, j, l, x: nat64
         variable antes_sl: nat32
         variable antes_esc: bool
-        si no forzado y hay_serie() entonces devolver falso fin
-        m := destino()
-        si m = 0xFFFFFFFF entonces devolver falso fin
         si reg = nulo entonces devolver falso fin
         l := reg_largo
         si l > reg_cabe entonces l := reg_cabe fin
         ; a UTF-8 (cada letra, como mucho 3 octetos), con su marca delante y la línea del final
-        u := reserva(l * 3 + 256)
+        u := reserva(l * 3 + 768)
         si u = nulo entonces devolver falso fin
         u[0] := 0xEF
         u[1] := 0xBB
@@ -186,10 +254,24 @@ módulo Registro64
             fin
             i := i + 1
         fin
+        ; ([etapa 10 f] también a UTF-8: lo del núcleo va en la página 437)
         j := 0
-        mientras por_qué[nat32(j)] <> 0 y j < 200 hacer
-            u[n] := por_qué[nat32(j)]
-            n := n + 1
+        mientras por_qué[nat32(j)] <> 0 y j < 230 hacer
+            x := nat64(por_qué[nat32(j)])
+            si x >= 0x80 entonces x := nat64(c437[nat32(x - 0x80)]) fin
+            si x < 0x80 entonces
+                u[n] := byte(x)
+                n := n + 1
+            sino si x < 0x800 entonces
+                u[n] := byte(0xC0 ob (x >> 6))
+                u[n + 1] := byte(0x80 ob (x yb 0x3F))
+                n := n + 2
+            sino
+                u[n] := byte(0xE0 ob (x >> 12))
+                u[n + 1] := byte(0x80 ob ((x >> 6) yb 0x3F))
+                u[n + 2] := byte(0x80 ob (x yb 0x3F))
+                n := n + 3
+            fin
             j := j + 1
         fin
         u[n] := 13

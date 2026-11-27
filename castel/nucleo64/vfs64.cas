@@ -432,6 +432,15 @@ módulo Vfs64
         devolver nodo(a.nodo).clase = N_CARPETA
     fin
 
+    ; [etapa 10 f] si es un archivo de la unidad en memoria, dónde se ve
+    ; (virtual, en el mapa directo); si no, 0 (Sistema: mmap sin copiar)
+    público función vfs_de_unidad(a: puntero a Abierto): nat64
+        variable n: puntero a Nodo
+        n := nodo(a.nodo)
+        si n.clase = N_ARCHIVO y mm(n.montaje).clase = FS_UNIDAD entonces devolver dónde(nat32(n.primero)) fin
+        devolver 0
+    fin
+
     público función vfs_tamaño(a: puntero a Abierto): nat64
         devolver nodo(a.nodo).tamaño
     fin

@@ -123,6 +123,7 @@ módulo Hilos64
     variable difuntos_cerrojo: nat64
     variable próximo_id: nat64
     público variable va: bool                   ; el planificador está en marcha
+    público variable en_parada: bool            ; [etapa 10 f] el sistema se ha parado (Registro64 guarda ARRANQUE.TXT): sin cambiar de hilo
     público variable creados, acabados_n, robados, expropiaciones, avisos_despertar: nat64
     ; el reposo
     público variable con_mwait: bool
@@ -337,6 +338,7 @@ módulo Hilos64
         variable b: nat64
         variable c: puntero a Cpu
         variable h, n: puntero a Hilo
+        si en_parada entonces devolver fin
         b := sin_ints()
         c := yo()
         h := hilo(c.hilo)

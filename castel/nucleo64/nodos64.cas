@@ -390,4 +390,9 @@ módulo Nodos64
         abre_mutex(dirección(vfs_mutex))
     fin
 
+    ; [etapa 10 f] ¿nadie tiene el mutex del VFS? (ARRANQUE.TXT al pararse)
+    público función vfs_libre(): bool
+        devolver mutex_libre(dirección(vfs_mutex))
+    fin
+
 fin Nodos64.

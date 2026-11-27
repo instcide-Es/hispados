@@ -570,4 +570,19 @@ módulo Nvme64
         devolver ctl(d_ctl[d]).colas
     fin
 
+    ; [etapa 10 f] ¿nadie tiene los mutex de sus colas? (ARRANQUE.TXT al pararse)
+    público función nvme_libre(): bool
+        variable c, q: nat32
+        c := 0
+        mientras c < nv_n_ctl hacer
+            q := 0
+            mientras q < MAX_COLAS hacer
+                si no mutex_libre(dirección(ctl(c).mutex[q])) entonces devolver falso fin
+                q := q + 1
+            fin
+            c := c + 1
+        fin
+        devolver cierto
+    fin
+
 fin Nvme64.

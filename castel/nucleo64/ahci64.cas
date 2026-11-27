@@ -544,4 +544,15 @@ módulo Ahci64
         devolver bien
     fin
 
+    ; [etapa 10 f] ¿nadie tiene los mutex de sus discos? (ARRANQUE.TXT al pararse)
+    público función ahci_libre(): bool
+        variable i: nat32
+        i := 0
+        mientras i < MAX_SATA hacer
+            si no mutex_libre(dirección(d_mutex[i])) entonces devolver falso fin
+            i := i + 1
+        fin
+        devolver cierto
+    fin
+
 fin Ahci64.

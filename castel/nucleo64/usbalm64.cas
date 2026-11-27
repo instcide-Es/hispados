@@ -396,4 +396,15 @@ módulo Usbalm64
         devolver r <> 2
     fin
 
+    ; [etapa 10 f] ¿nadie tiene el mutex de una memoria? (ARRANQUE.TXT al pararse)
+    público función alm_libre(): bool
+        variable k: nat32
+        k := 0
+        mientras k < MAX_MEMORIAS hacer
+            si no mutex_libre(dirección(mems[k].m)) entonces devolver falso fin
+            k := k + 1
+        fin
+        devolver cierto
+    fin
+
 fin Usbalm64.

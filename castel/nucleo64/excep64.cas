@@ -51,6 +51,9 @@ módulo Excep64
     público variable pila_ini, pila_fin: nat64       ; la pila del núcleo
     ; [etapa 3]
     público variable al_parar: nat64        ; la función que para a los demás procesadores (Smp64)
+    público variable al_pararse: nat64      ; [etapa 10 f] la que guarda ARRANQUE.TXT al pararse (Registro64), o 0
+    público variable parada_qué: puntero a byte     ; [etapa 10 f] por qué se para (para la última línea de ARRANQUE.TXT)
+    público variable parada_del_montón: bool        ; [etapa 10 f] la parada es del montón (no se guarda nada)
     público variable parados: nat32         ; cuántos se han parado (lo dice al_parar)
     público variable otros: nat32           ; a cuántos se ha mandado parar
     público variable parada_de: nat64       ; 0, o el número + 1 del procesador que se está parando
@@ -271,6 +274,9 @@ módulo Excep64
         fin
         escribir("\n*** Hispa-64 se ha parado: excepción ", n, " ***\n")
         escribir(nombre(n), "\n")
+        si parada_qué = nulo entonces parada_qué := nombre(n) fin          ; [etapa 10 f]
+        ; (una excepción dentro de otra, o al guardar el registro: ya no se guarda)
+        si dentro > 1 entonces al_pararse := 0 fin
         si n = 2 y motivo_nmi <> nulo entonces escribir(motivo_nmi, "\n") fin
         dónde()
         k := 1
@@ -371,6 +377,7 @@ módulo Excep64
         hex16(lee64(m))
         escribir("\n")
         llamadas(lee64(m + 80))
+        si al_pararse <> 0 entonces llama0(al_pararse) fin         ; [etapa 10 f] ARRANQUE.TXT
         escribir("El procesador queda parado. Apunte lo de arriba (o hágale una foto) y reinicie el equipo.\n")
         si apagar_al_fallar entonces salir(99) fin
         quieto()
@@ -432,6 +439,7 @@ módulo Excep64
             cli
         fin
         si no toma_la_parada() entonces devolver fin
+        si parada_qué = nulo entonces parada_qué := qué fin
         escribir("\n*** Hispa-64 se ha parado: ", qué, " ***\n")
         dónde()
     fin
@@ -443,6 +451,7 @@ módulo Excep64
             mov {r}, rbp
         fin
         llamadas(r)
+        si al_pararse <> 0 entonces llama0(al_pararse) fin         ; [etapa 10 f] ARRANQUE.TXT
         escribir("El procesador queda parado. Apunte lo de arriba (o hágale una foto) y reinicie el equipo.\n")
         si apagar_al_fallar entonces salir(98) fin
         quieto()

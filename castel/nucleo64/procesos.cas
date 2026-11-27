@@ -61,7 +61,7 @@
 ; =============================================================================
 módulo Procesos
 
-    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Sinc64, Entradas, Espacios, Unidad64, Vfs64, Hora64
+    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Sinc64, Entradas, Espacios, Unidad64, Vfs64, Hora64, Vdso64
 
     público constante MAX_REG = 1024            ; (48 hasta la etapa 6; 256 hasta la 9)
     público constante MAX_HILOS = 512           ; [etapa 7] los hilos de un proceso (64 hasta la 9: el navegador, a cientos)
@@ -73,6 +73,7 @@ módulo Procesos
     público constante R_PILA = 2
     público constante R_MONTÓN = 3
     público constante R_MMAP = 4
+    público constante R_VDSO = 5                ; [etapa 10 f] el vDSO (Vdso64): de solo leer, siempre
     público constante R_COMPARTIDA = 1          ; [etapa 7] (reg_ext) MAP_SHARED anónima
     público constante R_ARCHIVO = 2             ; [etapa 7] (reg_ext) de un archivo
     público constante F_CONSOLA = 1             ; las clases de archivo abierto
@@ -203,6 +204,10 @@ módulo Procesos
     público variable cerrojo_consola: nat64
     público variable vivos, arrancados, cerrados_por_fallo: nat64
     público variable páginas_al_tocar: nat64    ; las que ha puesto un fallo de página
+    público variable páginas_prestadas: nat64   ; [etapa 10 f] las de la unidad, sin copiar (copia_trozo)
+    ; [etapa 10 f] las medidas (cuentas del TSC): execve (y lo de cargar el
+    ; programa), los fallos de página que ponen una página y el final de los procesos
+    público variable tsc_exec, tsc_carga, tsc_fallos, n_fallos, tsc_salidas: nat64
     variable próximo_pid: nat64
     variable azar_estado: nat64
     variable plantilla: nat64                   ; los registros x87, SSE y AVX al empezar (fxsave o xsave; tam_fpu octetos alineados a 64)
@@ -265,12 +270,24 @@ módulo Procesos
         fin
     fin
 
+    ; ([etapa 10 f] de 8 en 8 si todo es múltiplo de 8: con TCG, «rep movsb»
+    ; va octeto a octeto, y en los procesadores de verdad «rep movsq» va igual)
     público función copia_mem(a: nat64, de: nat64, n: nat64)
         ensamblador
             mov rdi, {a}
             mov rsi, {de}
             mov rcx, {n}
+            mov rax, rdi
+            or rax, rsi
+            or rax, rcx
+            test al, 7
+            jnz .octetos
+            shr rcx, 3
+            rep movsq
+            jmp .hecho
+        .octetos:
             rep movsb
+        .hecho:
         fin
     fin
 
@@ -278,8 +295,17 @@ módulo Procesos
         ensamblador
             mov rdi, {a}
             mov rcx, {n}
-            xor eax, eax
+            mov rax, rdi
+            or rax, rcx
+            test al, 7
+            mov eax, 0
+            jnz .octetos
+            shr rcx, 3
+            rep stosq
+            jmp .hecho
+        .octetos:
             rep stosb
+        .hecho:
         fin
     fin
 
@@ -453,6 +479,15 @@ módulo Procesos
             i := región_de(p, v)
             si i < 0 entonces devolver -12 fin
             v := p.reg_fin[nat32(i)]
+        fin
+        ; [etapa 10 f] el vDSO no se puede escribir (sus marcos son de todos)
+        si prot yb ESCRIBE <> 0 entonces
+            v := a
+            mientras v < b hacer
+                i := región_de(p, v)
+                si p.reg_clase[nat32(i)] = R_VDSO entonces devolver -13 fin
+                v := p.reg_fin[nat32(i)]
+            fin
         fin
         si no parte(p, a) o no parte(p, b) entonces devolver -12 fin
         k := 0
@@ -906,6 +941,7 @@ módulo Procesos
         variable lista: arreglo [MAX_PROC] de nat64
         variable n, i: nat32
         variable nk, suelto_: bool
+        variable t0: nat64
         h := actual()
         p := puntero(h.proceso)
         p.código := código yb 255
@@ -921,7 +957,9 @@ módulo Procesos
         si no nk o nat64(h) <> p.hilo entonces h.proceso := 0 fin
         p.espacio := 0
         ; ([etapa 7] el de su padre, si era prestado, se queda)
+        t0 := tsc()
         si e <> nulo y p.prestado = 0 entonces destruye_espacio(e) fin
+        suma_atómica(dirección(tsc_salidas), tsc() - t0)
         p.prestado := 0
         suelta_vfork(p)
         si no nk o nat64(h) <> p.hilo entonces suéltalo(h) fin
@@ -1556,7 +1594,7 @@ módulo Procesos
         variable h: puntero a Hilo
         variable i: ent32
         variable prot: nat32
-        variable b, señal, x, cód: nat64
+        variable b, señal, x, cód, t0: nat64
         variable bien: bool
         p := mío()
         si p = nulo entonces devolver falso fin
@@ -1575,8 +1613,11 @@ módulo Procesos
                 si bien entonces
                     x := pte(espacio_de(p), c2)
                     si x yb PRESENTE = 0 entonces
+                        t0 := tsc()
                         si pon_página(p, c2, prot) entonces
                             abre_mem(p)
+                            suma_atómica(dirección(n_fallos), 1)
+                            suma_atómica(dirección(tsc_fallos), tsc() - t0)
                             devolver cierto
                         fin
                         abre_mem(p)
@@ -1704,23 +1745,50 @@ módulo Procesos
     fin
 
     ; copia [f, f + n) del archivo a v (con las páginas que hagan falta, con
-    ; los permisos prot, y juntando los de una página que compartan dos trozos)
-    función copia_trozo(p: puntero a Proceso, v: nat64, f: nat64, n: nat64, prot: nat32): bool
-        variable x, trozo: nat64
+    ; los permisos prot, y juntando los de una página que compartan dos trozos).
+    ; [etapa 10 f] Si el archivo es de la unidad en memoria («d» y «fís_d»: su
+    ; dirección, virtual y física, alineada a 4 KB; «tam», su largo), sus
+    ; páginas no se copian: se prestan (Espacios.PRESTADA: el marco de la
+    ; unidad, de solo leer y con COPIAR: las de un trozo de escribir, al
+    ; escribirlas, se copian), salvo la que tenga que acabar en ceros («cola»:
+    ; memsz > filesz) o se salga del archivo.
+    ; Antes, un programa de 5 MB (TestAK) se copiaba entero en cada execve: con
+    ; TCG, casi 1 s cada vez; y cada página, también a cero antes de copiarla
+    función copia_trozo(p: puntero a Proceso, v: nat64, f: nat64, n: nat64, prot: nat32, d: nat64, fís_d: nat64, tam: nat64, cola: bool, fin_seg: nat64): bool
+        variable x, trozo, pág, fo, antes: nat64
         variable e: puntero a Espacio
         e := espacio_de(p)
         mientras n > 0 hacer
             x := pte(e, v)
+            trozo := 4096 - (v yb 4095)
+            si trozo > n entonces trozo := n fin
             si x yb PRESENTE = 0 entonces
+                pág := abajo(v)
+                fo := f - (v - pág) - d                 ; (lo del archivo que va en el principio de la página)
+                si fís_d <> 0 y fo + 4096 <= tam y (no cola o pág + 4096 <= fin_seg) entonces
+                    si no mapea_u(e, pág, fís_d + fo, (marcas(prot) yb (nob nat64(ESCRIBIR))) ob PRESTADA ob COPIAR) entonces
+                        ; (ya estaba: otra vuelta)
+                        seguir
+                    fin
+                    suma_atómica(dirección(páginas_prestadas), 1)
+                    v := v + trozo
+                    f := f + trozo
+                    n := n - trozo
+                    seguir
+                fin
                 si no pon_página(p, v, prot) entonces devolver falso fin
                 x := pte(e, v)
             sino
+                ; [etapa 10 f] (la de otro trozo, prestada: una copia suya antes de escribir en ella)
+                antes := x
+                si x yb PRESTADA <> 0 entonces
+                    si no rompe_copia(e, abajo(v), marcas(prot)) entonces devolver falso fin
+                    x := pte(e, v)
+                fin
                 ; (una página de dos trozos: con los permisos de los dos)
-                remarca_u(e, abajo(v), (marcas(prot) ob (x yb ESCRIBIR)) yb (x ob (nob bit_nx())))
+                remarca_u(e, abajo(v), (marcas(prot) ob (antes yb ESCRIBIR)) yb (antes ob (nob bit_nx())))
                 x := pte(e, v)
             fin
-            trozo := 4096 - (v yb 4095)
-            si trozo > n entonces trozo := n fin
             copia_mem(virt(marco_de(x)) + (v yb 4095), f, trozo)
             v := v + trozo
             f := f + trozo
@@ -1735,7 +1803,7 @@ módulo Procesos
     ; dónde se ven sus cabeceras de programa (AT_PHDR) y cuántas; en fin_, lo
     ; más alto; en interp e interp_l, su PT_INTERP (o 0); en base, lo que se
     ; ha sumado a sus direcciones
-    función carga_imagen(p: puntero a Proceso, d: nat64, tam: nat64, base_pie: nat64, ref ent: nat64, ref fdir: nat64, ref fnum: nat32, ref fin_: nat64, ref interp: nat64, ref interp_l: nat64, ref base: nat64): bool
+    función carga_imagen(p: puntero a Proceso, d: nat64, tam: nat64, fís_d: nat64, base_pie: nat64, ref ent: nat64, ref fdir: nat64, ref fnum: nat32, ref fin_: nat64, ref interp: nat64, ref interp_l: nat64, ref base: nat64): bool
         variable phoff, ph, off, va, fsz, msz, a, b, mín: nat64
         variable phnum, i, tipo_, fl: nat32
         variable prot: nat32
@@ -1805,7 +1873,7 @@ módulo Procesos
                     si ocupado(p, a, b) entonces devolver mal_elf("dos segmentos se pisan") fin
                     si no nueva_región(p, a, b, prot, R_PROGRAMA) entonces devolver mal_elf("tiene demasiados segmentos") fin
                 fin
-                si no copia_trozo(p, va, d + off, fsz, prot) entonces devolver mal_elf("no queda memoria") fin
+                si no copia_trozo(p, va, d + off, fsz, prot, d, fís_d, tam, msz > fsz, va + fsz) entonces devolver mal_elf("no queda memoria") fin
                 si b > fin_ entonces fin_ := b fin
                 si fdir = 0 y phoff >= off y phoff + nat64(phnum) * 56 <= off + fsz entonces fdir := va + (phoff - off) fin
                 hay_carga := cierto
@@ -1820,14 +1888,18 @@ módulo Procesos
 
     ; el programa (y, si lo pide, su cargador dinámico: PT_INTERP, por el
     ; VFS; /lib es la unidad en memoria) en la memoria de p
-    función carga_elf(p: puntero a Proceso, d: nat64, tam: nat64): bool
-        variable ent, fdir, fin_, interp, il, base, ent2, fdir2, fin2, interp2, il2, base2, buf, t2: nat64
+    ; [etapa 10 f] (prestado: d es de la unidad en memoria, sus páginas se pueden prestar)
+    función carga_elf(p: puntero a Proceso, d: nat64, tam: nat64, prestado: bool): bool
+        variable ent, fdir, fin_, interp, il, base, ent2, fdir2, fin2, interp2, il2, base2, buf, t2, fís: nat64
+        variable de_u: bool
         variable fnum, fnum2, i: nat32
         variable err: ent64
         variable ruta: arreglo [256] de byte
         p.al_dir := 0
         p.base_interp := 0
-        si no carga_imagen(p, d, tam, BASE_PIE, ent, fdir, fnum, fin_, interp, il, base) entonces devolver falso fin
+        fís := 0
+        si prestado y d yb 4095 = 0 y d >= dm() entonces fís := d - dm() fin
+        si no carga_imagen(p, d, tam, fís, BASE_PIE, ent, fdir, fnum, fin_, interp, il, base) entonces devolver falso fin
         p.entrada := ent
         p.al_entrada := ent
         p.al_dir := fdir
@@ -1841,16 +1913,18 @@ módulo Procesos
             i := i + 1
         fin
         ruta[i] := 0
-        buf := vfs_entero(dirección(ruta[0]), t2, err)
+        buf := vfs_entero_o_unidad(dirección(ruta[0]), t2, err, de_u)       ; [etapa 10 f] de la unidad, prestado
         si buf = 0 entonces
             motivo := "su cargador dinámico (PT_INTERP: /lib/ld-musl-x86_64.so.1, el de musl) no está"
             devolver falso
         fin
-        si no carga_imagen(p, buf, t2, BASE_INTERP, ent2, fdir2, fnum2, fin2, interp2, il2, base2) entonces
-            libera(puntero(buf))
+        fís := 0
+        si de_u y buf yb 4095 = 0 y buf >= dm() entonces fís := buf - dm() fin
+        si no carga_imagen(p, buf, t2, fís, BASE_INTERP, ent2, fdir2, fnum2, fin2, interp2, il2, base2) entonces
+            si no de_u entonces libera(puntero(buf)) fin
             devolver falso
         fin
-        libera(puntero(buf))
+        si no de_u entonces libera(puntero(buf)) fin
         si interp2 <> 0 entonces devolver mal_elf("su cargador dinámico pide a su vez otro") fin
         p.entrada := ent2
         p.base_interp := base2
@@ -1875,15 +1949,32 @@ módulo Procesos
     ; azar; debajo (alineado a 16), argc, argv, 0, envp, 0 y el vector auxiliar.
     ; [etapa 6] textos: los argc argumentos y los envc del entorno, seguidos
     ; (cada uno acabado en 0), en la memoria del núcleo
+    ; [etapa 10 f] el vDSO en p, 1 MB por debajo de su pila: el código (de
+    ; leer y ejecutar) y los datos (de leer); su dirección, o 0
+    función pon_vdso(p: puntero a Proceso): nat64
+        variable a: nat64
+        variable e: puntero a Espacio
+        si vdso_código = 0 entonces devolver 0 fin
+        a := p.pila_ini - 0x100000 - 8192
+        si ocupado(p, a, a + 8192) entonces devolver 0 fin
+        si no nueva_región(p, a, a + 4096, LEER ob EJECUTAR, R_VDSO) entonces devolver 0 fin
+        si no nueva_región(p, a + 4096, a + 8192, LEER, R_VDSO) entonces devolver 0 fin
+        e := espacio_de(p)
+        si no mapea_u(e, a, vdso_código, DISPOSITIVO ob COMPARTIDA) entonces devolver 0 fin
+        si no mapea_u(e, a + 4096, vdso_datos, DISPOSITIVO ob COMPARTIDA ob bit_nx()) entonces devolver 0 fin
+        devolver a
+    fin
+
     función pon_pila_v(p: puntero a Proceso, textos: puntero a byte, argc: nat32, envc: nat32): bool
         variable tabla: arreglo [180] de nat64
         variable dirs: arreglo [136] de nat64
-        variable sp, rnd, plat_v: nat64
+        variable sp, rnd, plat_v, vdso: nat64
         variable i, j, n, nt, k: nat32
         variable plat: puntero a byte
         si argc + envc > 134 entonces devolver falso fin
         p.pila_ini := TOPE - PILA_PROG
         si no nueva_región(p, p.pila_ini, TOPE, LEER ob ESCRIBE, R_PILA) entonces devolver falso fin
+        vdso := pon_vdso(p)
         sp := TOPE
         n := argc + envc
         ; los textos, arriba (por orden: el primero, el más alto)
@@ -1965,9 +2056,12 @@ módulo Procesos
         tabla[j + 33] := 0
         tabla[j + 34] := 51
         tabla[j + 35] := LARGO_MARCO + 128 + tam_fpu + 64
-        tabla[j + 36] := 0              ; AT_NULL
-        tabla[j + 37] := 0
-        j := j + 38
+        tabla[j + 36] := 33             ; [etapa 10 f] AT_SYSINFO_EHDR: el vDSO
+        tabla[j + 37] := vdso
+        si vdso = 0 entonces j := j - 2 fin
+        tabla[j + 38] := 0              ; AT_NULL
+        tabla[j + 39] := 0
+        j := j + 40
         ; (argc en una dirección múltiplo de 16)
         sp := sp - nat64(j) * 8
         sp := sp yb (nob nat64(15))
@@ -2258,7 +2352,7 @@ módulo Procesos
             devolver nulo
         fin
         p.espacio := nat64(e)
-        si no carga_elf(p, buf, tam) entonces
+        si no carga_elf(p, buf, tam, no con_ruta) entonces
             si con_ruta entonces libera(puntero(buf)) fin
             suelta_proceso(p)
             devolver nulo
@@ -2428,6 +2522,7 @@ módulo Procesos
     ; lo de las tuberías lo hace quien las tiene (al_otro_fd)
     público variable al_otro_fd: nat64          ; f(clase, objeto): una referencia más
     público variable al_cierra_fd: nat64        ; f(clase, objeto): una menos
+    público variable al_cierra_archivo: nat64   ; [etapa 10 f] f(id del proceso, Abierto): sus candados de fcntl, fuera (Candados64)
     público variable al_acabar_proc: nat64      ; [etapa 8] f(pid, 0): el proceso cierra todo (al acabar)
     ; [etapa 10 b] el primer descriptor libre desde mínimo_, ya apartado
     ; (F_APARTADO, con fd_cerrojo), o -1: dos hilos que abren a la vez no se
@@ -2571,6 +2666,9 @@ módulo Procesos
     público función cierra_fd_obj(clase: nat32, obj: nat64)
         si clase = F_APARTADO entonces devolver fin
         si clase = F_ARCHIVO y obj <> 0 entonces
+            si al_cierra_archivo <> 0 entonces
+                si mío() <> nulo entonces llama2_(al_cierra_archivo, mío().id, obj) sino llama2_(al_cierra_archivo, 0, obj) fin
+            fin
             vfs_cierra(puntero(obj))
         sino si clase > F_ARCHIVO y al_cierra_fd <> 0 entonces
             llama2_(al_cierra_fd, nat64(clase), obj)
@@ -2742,8 +2840,9 @@ módulo Procesos
         variable q: puntero a Proceso
         variable e, viejo: puntero a Espacio
         variable h: puntero a Hilo
-        variable b: nat64
+        variable b, t0, t1: nat64
         variable de_unidad: bool
+        t0 := tsc()
         t := reserva(LARGO_EXEC)
         si t = nulo entonces devolver -12 fin
         abs := dirección(t[1024])
@@ -2798,9 +2897,11 @@ módulo Procesos
         fin
         q.espacio := nat64(e)
         r := 0
-        si no carga_elf(q, buf, tam) entonces r := -8         ; ENOEXEC
+        t1 := tsc()
+        si no carga_elf(q, buf, tam, de_unidad) entonces r := -8         ; ENOEXEC
         sino si no pon_pila_v(q, textos, argc, envc) entonces r := -7
         fin
+        suma_atómica(dirección(tsc_carga), tsc() - t1)
         si no de_unidad entonces libera(puntero(buf)) fin
         si r < 0 entonces
             destruye_espacio(e)
@@ -2927,6 +3028,7 @@ módulo Procesos
         p64(m + 136, 0x202)
         p64(m + 144, p.pila)
         suma_atómica(dirección(execs), 1)
+        suma_atómica(dirección(tsc_exec), tsc() - t0)
         devolver 0
     fin
 
@@ -3137,6 +3239,8 @@ módulo Procesos
             detén_ini("no hay memoria para la tabla de copiar al escribir")
             detén_fin()
         fin
+        ; [etapa 10 f] el vDSO (sin él, los programas llaman al sistema, como antes)
+        si prepara_vdso() entonces vdso_al_día(desfase_ns()) fin
         al_fallo_usuario := nat64(dirección(al_fallo_))
         al_salida_mala := nat64(dirección(salida_mala))     ; [etapa 10 c]
         al_cambiar := nat64(dirección(al_cambiar_))

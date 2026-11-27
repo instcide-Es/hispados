@@ -905,4 +905,9 @@ módulo Discos64
         fin
     fin
 
+    ; [etapa 10 f] ¿nadie tiene sus cerrojos? (ARRANQUE.TXT al pararse)
+    público función discos_libres(): bool
+        devolver mem_cerrojo = 0 y mutex_libre(dirección(cb_mutex))
+    fin
+
 fin Discos64.

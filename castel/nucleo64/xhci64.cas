@@ -1096,4 +1096,15 @@ módulo Xhci64
         devolver "¿?"
     fin
 
+    ; [etapa 10 f] ¿nadie tiene sus cerrojos? (ARRANQUE.TXT al pararse)
+    público función xhci_libre(): bool
+        variable c: nat32
+        c := 0
+        mientras c < xh_n hacer
+            si ctl(c).cerrojo <> 0 o no mutex_libre(dirección(ctl(c).m_orden)) entonces devolver falso fin
+            c := c + 1
+        fin
+        devolver cierto
+    fin
+
 fin Xhci64.

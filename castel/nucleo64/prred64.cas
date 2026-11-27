@@ -109,6 +109,8 @@ módulo PrRed64
             escribir(" (solo «lo», 127.0.0.1); TCP/IP en el núcleo (ARP, IPv4, ICMP, UDP, TCP, DHCP; IPv6 con ICMPv6, ND y SLAAC), los sockets de POSIX\n")
         fin
         escribir("  el azar: ChaCha20")
+        ; [etapa 10 f] (el bloque, con el vector de prueba del RFC 8439)
+        si prueba_chacha() entonces escribir(" (el bloque, como el del RFC 8439)") sino mal("ChaCha20 no da el bloque del RFC 8439") fin
         si con_hw entonces escribir(" con RDSEED/RDRAND") sino escribir(" con los tiempos (sin RDRAND ni RDSEED)") fin
         escribir("; la hora: ")
         escribe_local()

@@ -103,6 +103,7 @@ módulo Monton64
     fin
 
     función estropeado(d: nat64, qué: puntero a byte)
+        parada_del_montón := cierto                  ; [etapa 10 f] (ARRANQUE.TXT no se guarda)
         detén_ini("el montón del núcleo está estropeado")
         escribir("En el bloque ")
         hex16(d + CABECERA)
@@ -365,6 +366,11 @@ módulo Monton64
         octetos := octetos - n
         liberaciones := liberaciones + 1
         suelta(dirección(cerrojo), b)
+    fin
+
+    ; [etapa 10 f] ¿nadie tiene sus cerrojos? (ARRANQUE.TXT al pararse)
+    público función montón_libre(): bool
+        devolver cerrojo = 0 y cua_cerrojo = 0
     fin
 
 fin Monton64.

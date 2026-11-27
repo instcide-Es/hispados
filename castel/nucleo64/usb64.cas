@@ -650,4 +650,17 @@ módulo Usb64
         si a.r.es_hub entonces escribir("; concentrador de ", a.puertos_hub, " puertos") fin
     fin
 
+    ; [etapa 10 f] ¿nadie tiene el mutex de un aparato? (ARRANQUE.TXT al pararse)
+    público función usb_libre(): bool
+        variable i: nat32
+        i := 0
+        mientras i < MAX_APARATOS hacer
+            si aparatos[i] <> nulo entonces
+                si no mutex_libre(dirección(aparatos[i].m)) entonces devolver falso fin
+            fin
+            i := i + 1
+        fin
+        devolver cierto
+    fin
+
 fin Usb64.

@@ -181,4 +181,9 @@ módulo Sinc64
         despierta_uno(es(nat64(m)))
     fin
 
+    ; [etapa 10 f] ¿no lo tiene nadie? (ARRANQUE.TXT al pararse: Registro64)
+    público función mutex_libre(m: puntero a Mutex): bool
+        devolver m.dueño = 0 y m.cerrojo = 0
+    fin
+
 fin Sinc64.

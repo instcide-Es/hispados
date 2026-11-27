@@ -8,6 +8,8 @@
 #   MHOLA, MHOLAP, MHOLAD       estático, estático de posición libre y
 #                               dinámico (con libsaludo.so)
 #   MHILOS(D), MSENALES(D), MPROCESOS(D), MMAPA(D)   estático y dinámico
+#   MRELOJ(D)                   [etapa 10 f] el vDSO y la hora, estático y dinámico
+#   MCANDADOS                   [etapa 10 f] los cerrojos de fcntl (y sqlite con ellos)
 #   MBUCLE                      da vueltas sin llamar al sistema (Ctrl+C)
 #   MUNIX                       [etapa 10 d] los sockets de Unix, SCM_RIGHTS y memfd
 #   ld-musl-x86_64.so.1         el cargador dinámico (la libc.so de musl):
@@ -51,10 +53,10 @@ T=$(mktemp -d "$S/.musl.XXXXXX")
     "$B/musl/lib/rcrt1.o" "$B/musl/lib/crti.o" "$(gcc -print-file-name=crtbeginS.o)" "$P/mhola.c" \
     "$(gcc -print-file-name=crtendS.o)" "$B/musl/lib/crtn.o"
 "$M" $CF -DCON_LIB -o "$S/MHOLAD" "$P/mhola.c" -L"$T" -lsaludo $DIN
-for p in mhilos msenales mprocesos mmapa; do
+for p in mhilos msenales mprocesos mmapa mreloj; do
   N=$(echo $p | tr a-z A-Z)
-  "$M" $CF -static -o "$S/$N" "$P/$p.c"
-  "$M" $CF -o "$S/${N}D" "$P/$p.c" $DIN
+  "$M" $CF -static -pthread -o "$S/$N" "$P/$p.c"
+  "$M" $CF -pthread -o "$S/${N}D" "$P/$p.c" $DIN
 done
 "$M" $CF -static -o "$S/MBUCLE" "$P/mbucle.c"
 "$M" $CF -static -o "$S/MDISP" "$P/mdisp.c"          # [etapa 8] los dispositivos
@@ -65,10 +67,17 @@ cp "$B/musl/lib/libc.so" "$S/ld-musl-x86_64.so.1"
 cp "$B/lua-obj/lua" "$S/LUA"
 cp "$P/prueba.lua" "$S/PRUEBA.LUA"
 rm -rf "$T"
-for f in MHOLA MHOLAP MHOLAD MHILOS MHILOSD MSENALES MSENALESD MPROCESOS MPROCESOSD MMAPA MMAPAD MBUCLE MDISP MSONIDO MUNIX LUA libsaludo.so ld-musl-x86_64.so.1; do
+for f in MHOLA MHOLAP MHOLAD MHILOS MHILOSD MSENALES MSENALESD MPROCESOS MPROCESOSD MMAPA MMAPAD MRELOJ MRELOJD MBUCLE MDISP MSONIDO MUNIX LUA libsaludo.so ld-musl-x86_64.so.1; do
   strip --strip-unneeded "$S/$f"
 done
 RED=$("$AQUI/hazred.sh" "$S"); RED=${RED##*hechos: }   # [etapa 9] los programas de red (programas/red/)
 CURLS=$("$AQUI/hazcurl.sh" "$S"); CURLS=${CURLS##*hechos: }   # [etapa 10 b] curl con BearSSL (terceros/curl)
 CXX=$("$AQUI/cxx/hazcxx.sh" "$S"); CXX=${CXX##*hechos: }   # [etapa 10] los de C++ (programas/cxx/)
-echo "hechos: MHOLA MHOLAP MHOLAD MHILOS MHILOSD MSENALES MSENALESD MPROCESOS MPROCESOSD MMAPA MMAPAD MBUCLE MDISP MSONIDO MUNIX ld-musl-x86_64.so.1 libsaludo.so LUA PRUEBA.LUA $RED $CURLS $CXX"
+# [etapa 10 f] los cerrojos de fcntl (MCANDADOS), con sqlite (el de libs/hazlibs.sh, de hazcxx.sh)
+CAND=""
+if [ -f "$B/sqlite-obj/libsqlite.a" ]; then
+  "$M" $CF -static -pthread -I"$R/terceros/sqlite" -o "$S/MCANDADOS" "$P/mcandados.c" "$B/sqlite-obj/libsqlite.a" -lm
+  strip --strip-unneeded "$S/MCANDADOS"
+  CAND=" MCANDADOS"
+fi
+echo "hechos: MHOLA MHOLAP MHOLAD MHILOS MHILOSD MSENALES MSENALESD MPROCESOS MPROCESOSD MMAPA MMAPAD MRELOJ MRELOJD MBUCLE MDISP MSONIDO MUNIX ld-musl-x86_64.so.1 libsaludo.so LUA PRUEBA.LUA $RED $CURLS $CXX$CAND"
