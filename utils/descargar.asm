@@ -2,10 +2,12 @@
 ;  Hispa-DOS DESCARGAR (en el disco DESCARGA.COM) - bajar un archivo por HTTP
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
-;  DESCARGAR [http://]servidor[:puerto]/ruta [archivo]
+;  DESCARGAR [/Y] [http://]servidor[:puerto]/ruta [archivo]
 ;  HTTP/1.0 sin cifrar, con barra de progreso; sigue hasta 4 redirecciones a
 ;  otra dirección http://. HTTPS (cifrado) todavía no. Esc para.
 ;  Si no se dice el archivo, se usa el último trozo de la ruta (en 8.3).
+;  Si el archivo ya existe, pregunta antes de sustituirlo (como MOVER y
+;  XCOPIAR); con /Y, no (para los archivos por lotes).
 ;  Necesita HSPRED (u otro packet driver). Ver docs/RED.md.
 ; =============================================================================
         cpu 386
@@ -28,14 +30,20 @@ start:
         je ayuda
         cmp byte [si], 13
         je uso
+        call opcion_y
+        cmp byte [si], 13
+        je uso
         mov di, url
         call palabra
         call blancos
+        call opcion_y
         cmp byte [si], 13
         je .sinarch
         mov di, archivo
         call palabra
         mov byte [arch_dado], 1
+        call blancos
+        call opcion_y
 .sinarch:
         call red_abrir
         jc error
@@ -49,6 +57,15 @@ start:
         jne .ad
         call nombre_de_ruta
 .ad:
+        ; ¿ya existe? Se pregunta antes de conectar (una vez por nombre)
+        call preguntar
+        jnc .seguir
+        mov si, m_nosust
+        call puts
+        call crlf
+        mov al, 1
+        jmp red_salir
+.seguir:
         ; el servidor
         mov si, m_buscando
         call puts
@@ -234,6 +251,61 @@ blancos:
 .s:
         inc si
         jmp blancos
+
+; «/Y» en SI (con los blancos de detrás): no preguntar antes de sustituir
+opcion_y:
+        cmp byte [si], '/'
+        jne .r
+        mov al, [si+1]
+        and al, 0xDF
+        cmp al, 'Y'
+        jne .r
+        mov al, [si+2]
+        cmp al, ' '
+        ja .r
+        mov byte [opt_y], 1
+        add si, 2
+        call blancos
+.r:
+        ret
+
+; si «archivo» ya existe (y no es el que ya se dijo que sí, ni hay /Y),
+; «¿Sustituirlo?»: CF=1 si la respuesta es no
+preguntar:
+        cmp byte [opt_y], 0
+        jne .si
+        push ds
+        pop es
+        mov si, archivo
+        mov di, arch_si
+.cmp:
+        lodsb
+        scasb
+        jne .mira
+        test al, al
+        jnz .cmp
+        jmp .si                     ; el mismo de antes (una redirección)
+.mira:
+        mov dx, archivo
+        mov ax, 0x4300
+        int 0x21
+        jc .si                      ; no existe
+        mov si, m_existe1
+        call puts
+        mov si, archivo
+        call puts
+        mov si, m_existe2
+        call puts
+        call ask_yes
+        jc .r
+        mov si, archivo
+        mov di, arch_si
+        mov cx, 251
+        rep movsb
+.si:
+        clc
+.r:
+        ret
 
 ; copiar una palabra de SI a DI (hasta 250)
 palabra:
@@ -863,10 +935,11 @@ nombre_tmp:
 
 m_uso       db "Baja un archivo de un servidor web (HTTP) y lo guarda en el disco.", 13, 10
             db 13, 10
-            db "DESCARGAR [http://]servidor[:puerto]/ruta [archivo]", 13, 10
+            db "DESCARGAR [/Y] [http://]servidor[:puerto]/ruta [archivo]", 13, 10
             db 13, 10
             db "  archivo   dónde guardarlo (si no se dice: el nombre de la ruta, o", 13, 10
             db "            INDEX.HTM)", 13, 10
+            db "  /Y        si el archivo ya existe, sustituirlo sin preguntar", 13, 10
             db 13, 10
             db "Solo HTTP sin cifrar: las direcciones https:// (cifradas) todavía no", 13, 10
             db "funcionan, y hoy casi todas las páginas lo son (esas las baja HTTPS, del", 13, 10
@@ -897,6 +970,9 @@ m_nohttp    db "El servidor no contesta como un servidor web (HTTP).", 0
 m_servidor  db "El servidor contesta: "
 h_linea     times 72 db 0
 m_nocrea    db "No se puede crear el archivo.", 0
+m_existe1   db "Ya existe ", 0
+m_existe2   db ". ¿Sustituirlo? (S/N) ", 0
+m_nosust    db "No se ha descargado: el archivo sigue como estaba.", 0
 m_disco     db "No se puede escribir en el disco (¿está lleno?).", 0
 m_parado    db "El servidor ha dejado de enviar (30 segundos sin nada).", 0
 m_esc       db "Descarga interrumpida (Esc).", 0
@@ -924,6 +1000,8 @@ ruta        resb 256
 archivo     resb 260
 tmparch     resb 264
 arch_dado   resb 1
+opt_y       resb 1
+arch_si     resb 251                ; el que ya se dijo que sí
 puerto      resw 1
 srv_ip      resd 1
 peti        resb 700
