@@ -1,0 +1,15 @@
+# Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+# MRUST, la prueba de Rust de Hispa-64 (etapa 10 f): solo la biblioteca estándar.
+[package]
+name = "mrust"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+publish = false
+
+[dependencies]
+
+[profile.release]
+opt-level = 2
+debug = false
+strip = true

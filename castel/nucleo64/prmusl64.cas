@@ -116,6 +116,7 @@ módulo PrMusl64
         si busca_archivo("MAK") >= 0 entonces
             si ak_todas entonces corre("MAK todas", 0) sino corre("MAK", 0) fin
         fin
+        si busca_archivo("MRUST") >= 0 entonces corre("MRUST uno dos", 0) fin  ; [etapa 10 f] Rust (con nuestra musl)
         si busca_archivo("MCURL") >= 0 entonces corre("MCURL", 0) fin          ; libcurl por 127.0.0.1
         si busca_archivo("MSONIDO") >= 0 entonces
             corre("MSONIDO", 0)                                                 ; [etapa 11] el sonido (/dev/dsp)

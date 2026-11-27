@@ -2028,14 +2028,15 @@ módulo Sistema
             caso 16:
                 si no fd_bien(p, a1) entonces
                     r := EBADF
-                sino si p.fd_clase[nat32(a1)] = F_CONSOLA entonces
-                    r := tty_ioctl(p, a2 yb 0xFFFFFFFF, a3)
-                sino si p.fd_clase[nat32(a1)] = F_SOCKET entonces
-                    r := ioctl_sock(p, a1, a2, a3)
-                sino si p.fd_clase[nat32(a1)] = F_UNIX entonces
-                    r := ioctl_unix(p, a1, a2, a3)
-                sino si es_objeto(p.fd_clase[nat32(a1)]) y a2 yb 0xFFFFFFFF = 0x5421 entonces
-                    ; FIONBIO
+                sino si a2 yb 0xFFFFFFFF = 0x5451 o a2 yb 0xFFFFFFFF = 0x5450 entonces
+                    ; [etapa 10 f] FIOCLEX y FIONCLEX, de cualquier descriptor
+                    p.fd_cloexec[nat32(a1)] := 0
+                    si a2 yb 0xFFFFFFFF = 0x5451 entonces p.fd_cloexec[nat32(a1)] := 1 fin
+                    r := 0
+                sino si a2 yb 0xFFFFFFFF = 0x5421 y p.fd_clase[nat32(a1)] <> F_SOCKET y p.fd_clase[nat32(a1)] <> F_UNIX entonces
+                    ; FIONBIO; [etapa 10 f] de cualquier descriptor (antes, solo de los
+                    ; objetos: la biblioteca de Rust lo usa con las tuberías, en
+                    ; Command::output, en vez de fcntl)
                     si copia_de(p, nat64(dirección(lím)), a3, 4) entonces
                         p.fd_nobloq[nat32(a1)] := 0
                         si lím yb 0xFFFFFFFF <> 0 entonces p.fd_nobloq[nat32(a1)] := 1 fin
@@ -2043,6 +2044,12 @@ módulo Sistema
                     sino
                         r := EFAULT
                     fin
+                sino si p.fd_clase[nat32(a1)] = F_CONSOLA entonces
+                    r := tty_ioctl(p, a2 yb 0xFFFFFFFF, a3)
+                sino si p.fd_clase[nat32(a1)] = F_SOCKET entonces
+                    r := ioctl_sock(p, a1, a2, a3)
+                sino si p.fd_clase[nat32(a1)] = F_UNIX entonces
+                    r := ioctl_unix(p, a1, a2, a3)
                 sino si es_de_disp(p.fd_clase[nat32(a1)]) entonces
                     r := ioctl_disp(p, p.fd_clase[nat32(a1)], p.fd_obj[nat32(a1)], a2, a3)
                 sino si p.fd_clase[nat32(a1)] = F_TUBO_L y a2 yb 0xFFFFFFFF = 0x541B entonces

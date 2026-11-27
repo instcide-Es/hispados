@@ -206,6 +206,8 @@ MSK=$(cd "$T/prog" && ./MSKIA 2> /dev/null)
 # con «ak=todas»), en el de KVM
 MAKL=$(cd "$T/prog" && ./MAK 2> /dev/null | grep "^  [0-9]* grupos")
 MAKT=$(cd "$T/prog" && ./MAK todas 2> /dev/null | grep "^  [0-9]* grupos")
+# [etapa 10 f] lo que dice MRUST (Rust con nuestra musl) en Linux: en Hispa-64, lo mismo
+MRS=$( [ -x "$T/prog/MRUST" ] && cd "$T/prog" && ./MRUST uno dos 2> /dev/null | grep '^  ')
 # skia_bien TEXTO: MSKIA en Hispa-64 frente a MSKIA en Linux: las mismas
 # líneas (menos la de lo dibujado y la huella); si el camino es el mismo, lo
 # dibujado igual (el crc32 de los píxeles y del PNG); y la huella (la media de
@@ -365,6 +367,7 @@ e7_bien() {   # SALIDA N [avx]
     && grep -q "^MIMG: todo bien (16 pruebas)$" <<< "$v" && grep -q "^Programa «MIMG»: acaba con el código 0, como debe" <<< "$v" && mismas "$MIM" "$v" \
     && { [ -z "$MLB" ] || { grep -q "^MLIBS: todo bien (" <<< "$v" && grep -q "^Programa «MLIBS»: acaba con el código 0, como debe" <<< "$v" && mismas "$MLB" "$v"; }; } \
     && grep -q "^MSKIA: todo bien (20 pruebas)$" <<< "$v" && grep -q "^Programa «MSKIA»: acaba con el código 0, como debe" <<< "$v" && skia_bien "$v" \
+    && { [ -z "$MRS" ] || { grep -q "^MRUST: todo bien (" <<< "$v" && grep -q "^Programa «MRUST uno dos»: acaba con el código 0, como debe" <<< "$v" && mismas "$MRS" "$v"; }; } \
     && grep -q "^MAK: todo bien (" <<< "$v" && grep -qE "^Programa «MAK( todas)?»: acaba con el código 0, como debe" <<< "$v" && [ -n "$MAKL" ] && [ -n "$MAKT" ] && { grep -qxF "$MAKL" <<< "$v" || grep -qxF "$MAKT" <<< "$v"; } \
     && grep -q "^  hilos: 200 std::thread, thread_local (200 destruidos), condition_variable, async, promise, timed_mutex$" <<< "$v" \
     && [ "$(grep -cE "^Programa «(MHOLA|MHOLAD|MHOLAP) uno dos»: acaba con el código 0, como debe|^Programa «(MHILOS|MHILOSD|MSENALES|MSENALESD|MPROCESOS|MPROCESOSD|MMAPA|MMAPAD)»: acaba con el código 0, como debe|^Programa «LUA /PRUEBA.LUA uno dos»: acaba con el código 0, como debe" <<< "$v")" = 12 ] \
@@ -376,7 +379,7 @@ e7_bien() {   # SALIDA N [avx]
 e7_ok() {   # SALIDA N QUÉ [avx]
   local v; v=$(serie "$1")
   if e7_bien "$1" "$2" "${4:-}"; then
-    ok "etapa 7 $3: musl (MHOLA estático, dinámico con ld-musl y libsaludo.so, y PIE; MHILOS, MSENALES, MPROCESOS y MMAPA, estáticos y dinámicos), Lua, [etapa 10] C++ (MCXX: 200 hilos, excepciones, flujos, regex; [etapa 10 c] con el compilador cruzado, estático y dinámico, MCXXD) y la letra (MTEXTO: HarfBuzz y FreeType, lo mismo que en Linux) y [etapa 10 b] ICU (MICU: 28 pruebas, lo mismo que en Linux; la zona, Europe/Madrid, por readlink de /etc/localtime) y libcurl (MCURL: 20 pruebas por 127.0.0.1, 16 a la vez con «multi») y [etapa 10 c] IPv6 (MRED6: TCP, UDP e ICMPv6 por ::1, los dos a la vez e IPV6_V6ONLY) y [etapa 10 d] los sockets de Unix (MUNIX: 85 pruebas, SCM_RIGHTS, SCM_CREDENTIALS, memfd, las carreras de H4 y H11, /tmp) y el IPC de Ladybird (MIPC: dos procesos, 60 cuadros por memfd) y [etapa 10 e] las bibliotecas de Ladybird (MIMG: zlib, libpng, libjpeg-turbo y libwebp; MLIBS: 12 más) y Skia (MSKIA: $(grep -o "el camino: [A-Z0-9]*" <<< "$v" | head -1), lo dibujado como en Linux) y AK de Ladybird (MAK: $(grep -o "^  [0-9]* grupos, [0-9]* casos" <<< "$v" | head -1 | sed "s/^  //") de TestAK), todo bien; $(grep '^Después de musl:' <<< "$v" | cut -d';' -f2 | sed 's/^ //')$( [ "${4:-}" = avx ] && echo '; los registros de AVX de 8 hilos, intactos')"
+    ok "etapa 7 $3: musl (MHOLA estático, dinámico con ld-musl y libsaludo.so, y PIE; MHILOS, MSENALES, MPROCESOS y MMAPA, estáticos y dinámicos), Lua, [etapa 10] C++ (MCXX: 200 hilos, excepciones, flujos, regex; [etapa 10 c] con el compilador cruzado, estático y dinámico, MCXXD) y la letra (MTEXTO: HarfBuzz y FreeType, lo mismo que en Linux) y [etapa 10 b] ICU (MICU: 28 pruebas, lo mismo que en Linux; la zona, Europe/Madrid, por readlink de /etc/localtime) y libcurl (MCURL: 20 pruebas por 127.0.0.1, 16 a la vez con «multi») y [etapa 10 c] IPv6 (MRED6: TCP, UDP e ICMPv6 por ::1, los dos a la vez e IPV6_V6ONLY) y [etapa 10 d] los sockets de Unix (MUNIX: 85 pruebas, SCM_RIGHTS, SCM_CREDENTIALS, memfd, las carreras de H4 y H11, /tmp) y el IPC de Ladybird (MIPC: dos procesos, 60 cuadros por memfd) y [etapa 10 e] las bibliotecas de Ladybird (MIMG: zlib, libpng, libjpeg-turbo y libwebp; MLIBS: 12 más) y Skia (MSKIA: $(grep -o "el camino: [A-Z0-9]*" <<< "$v" | head -1), lo dibujado como en Linux) y AK de Ladybird (MAK: $(grep -o "^  [0-9]* grupos, [0-9]* casos" <<< "$v" | head -1 | sed "s/^  //") de TestAK)$( [ -n "$MRS" ] && echo " y [etapa 10 f] Rust (MRUST: $(grep -o "^MRUST: todo bien ([0-9]* pruebas" <<< "$v" | head -1 | grep -o "[0-9]* pruebas"), lo mismo que en Linux)"), todo bien; $(grep '^Después de musl:' <<< "$v" | cut -d';' -f2 | sed 's/^ //')$( [ "${4:-}" = avx ] && echo '; los registros de AVX de 8 hilos, intactos')"
   else ko "etapa 7 $3 no dice lo que debe: $(grep -E '^Programa «[ML]|^M[A-Z]*: [0-9]* mal|^LUA:|^Después de musl|^  la memoria|MAL|parado' <<< "$v" | cut -c1-110 | paste -sd '|' | cut -c1-1500)"; fi
 }
 e3_dice() {   # SALIDA: lo que dice, para cuando sale mal

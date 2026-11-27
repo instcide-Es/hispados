@@ -21,6 +21,7 @@
 #               Skia (libs/hazimg.sh, libs/hazlibs.sh y hazskia.sh)
 #   TestAK y MAK [etapa 10 e] AK, LibCore... de Ladybird y sus pruebas
 #               (ladybird/hazak.sh)
+#   MRUST       [etapa 10 f] la prueba de Rust (../rust/hazrust.sh)
 # Uso: hazcxx.sh SALIDA   (dice en la última línea los que ha hecho; [etapa
 # 10 c] sin el compilador cruzado, build/cruzado de hazgcc.sh, ninguno)
 set -e
@@ -110,4 +111,6 @@ if [ -x "$AQUI/../libs/hazlibs.sh" ]; then LIBS=$("$AQUI/../libs/hazlibs.sh" "$S
 SK=$("$AQUI/hazskia.sh" "$S"); SK=${SK##*hechos: }
 # [etapa 10 e] las bibliotecas de base de Ladybird y sus pruebas de AK (TestAK y MAK)
 AK=$("$AQUI/../ladybird/hazak.sh" "$S"); AK=${AK##*hechos: }
-echo "hechos: MCXX MIPC${DIN:-} MTEXTO DEJAVU.TTF MICU icudt77l.dat $IMG$LIBS $SK $AK"
+# [etapa 10 f] Rust (../rust/hazrust.sh: MRUST; con cargo en el PC, o lo ya hecho en build/rust-obj)
+RS=$("$AQUI/../rust/hazrust.sh" "$S"); RS=${RS##*hechos: }; case $RS in "("*) RS="" ;; *) RS=" $RS" ;; esac
+echo "hechos: MCXX MIPC${DIN:-} MTEXTO DEJAVU.TTF MICU icudt77l.dat $IMG$LIBS $SK $AK$RS"
