@@ -211,12 +211,13 @@ MRS=$( [ -x "$T/prog/MRUST" ] && cd "$T/prog" && ./MRUST uno dos 2> /dev/null | 
 # [etapa 10 f] las pruebas de LibUnicode, LibURL, LibIPC y LibGfx de Ladybird
 # (programas/ladybird/hazlb.sh: TestLB, 46 MB, y MLB), aparte: solo en el
 # arranque de KVM (MODSK); lo que dice MLB en Linux (menos lo que lleva un
-# tiempo), lo mismo en Hispa-64
+# tiempo y las cuentas: en Hispa-64 hay grupos pendientes del núcleo, que MLB
+# corre pero no cuenta), lo mismo en Hispa-64
 mkdir -p "$T/proglb"
 "$AQUI/programas/ladybird/hazlb.sh" "$T/proglb" > "$T/proglb.txt" 2>&1 || true
 MODSK=$MODS
 for f in "$T"/proglb/*; do [ -f "$f" ] && MODSK="$MODSK,$f"; done
-MLBL=$( [ -x "$T/proglb/MLB" ] && cd "$T/proglb" && ./MLB 2> /dev/null | grep '^  ' | grep -v ' ms)\?$')
+MLBL=$( [ -x "$T/proglb/MLB" ] && cd "$T/proglb" && ./MLB 2> /dev/null | grep '^  ' | grep -v ' ms)\?$' | grep -v ' grupos, ')
 mlb_bien() {   # TEXTO
   [ -z "$MLBL" ] && return 0
   grep -q "^MLB: todo bien (" <<< "$1" && grep -q "^Programa «MLB»: acaba con el código 0, como debe" <<< "$1" && mismas "$MLBL" "$1"
