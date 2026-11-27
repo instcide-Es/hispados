@@ -4283,7 +4283,19 @@ sobre ICU), y lo guarda en `/tmp/mskia.png`, que lee otra vez.
   servidor y el PC: lo mismo) y en Hispa-64 en cada arranque con musl
   (`pruebas.sh`, etapa 7: las líneas de Linux, tal cual; lo de MSKIA, con
   `skia_bien`), también con 1 procesador y 128 MB («pc»).
-- **La batería** (`castel/nucleo64/pruebas.sh`): BATERÍA_PENDIENTE
+- **ARRANQUE.TXT** sin puerto serie, arrancando de una memoria USB (xHCI,
+  usb-storage) por UEFI con KVM: en /usb0p2, el arranque entero, fsck.fat
+  bien. Las imágenes, por UEFI desde el .vdi y por la BIOS desde el CD, con 4
+  procesadores (KVM): todo en orden y el escritorio.
+- **La batería** (`castel/nucleo64/pruebas.sh`): **137 pruebas** (eran 136:
+  la del registro del arranque). Cinco vueltas: la primera y la segunda
+  dijeron lo que había que ajustar en las pruebas (la unidad, de 52 a 60
+  archivos; con 128 MB, menos memoria libre y MLIBS sin memoria en la de
+  mimalloc; el pingüino de simdjson en la consola de la página 437; por UEFI,
+  GRUB sin sitio para los 45 MB de la unidad con 128 MB; plazos más largos; y
+  «MAK todas» en la de KVM); la tercera se paró por cambiar pruebas.sh
+  mientras corría; la cuarta, 136 bien y 1 mal (ECO servidor, SIGPIPE: arriba).
+  **La quinta, entera: 137 bien y 0 mal** (95 minutos, de 09:46 a 11:21 del 27).
 
 ### Lo que queda (y más adelante)
 
