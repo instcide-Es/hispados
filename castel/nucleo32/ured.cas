@@ -379,7 +379,7 @@ módulo Ured
         si apuntarse() <> 0 entonces salir(1) fin
         apunta("Hispa-Pentium 0.8: el servicio de red (RED.BIN)")
         apunta("(red 0.8.12: también el móvil por USB, el anclaje de USB de Android: RNDIS y CDC-NCM)")
-        apunta("(red 0.8.14: y los adaptadores de red USB de cable, CDC-ECM: el Realtek RTL8153)")
+        apunta("(red 0.8.13: y los adaptadores de red USB de cable, CDC-ECM: el Realtek RTL8153)")
         ; (WIFI) RED.INI y, si hay tarjeta Wi-Fi, WIFI.BIN (antes que la del
         ; cable: así enciende su radio mientras tanto)
         Rwifi.arrancar()
