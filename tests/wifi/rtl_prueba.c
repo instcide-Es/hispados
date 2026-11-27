@@ -218,6 +218,10 @@ int main(int argc, char **argv)
 	}
 	comprueba(h65 && h60 && h6e, "la antena compartida con el Bluetooth, para el Wi-Fi (órdenes 65h, 60h y 6Eh al firmware)");
 	comprueba(rtl_canal == 1 && rtl_sim_canal == 1, "la radio, en el canal 1");
+	comprueba(dijo("tras su tabla: 00h 10000") && dijo("51h 6B10E"),
+		  "la tabla de la radio con sus condiciones (00h en espera, no a 0; 51h la del encapsulado TFBGA90)");
+	comprueba(dijo("prueba de la antena 5") && dijo("la antena: se queda la 0"),
+		  "la prueba de las antenas al encender (6 maneras; se queda la de Linux si oyen igual)");
 	printf("  (encender: %llu ms de reloj; %d quejas del modelo hasta aquí)\n", (reloj_us - t0) / 1000, rtl_sim_quejas);
 
 	/* buscar redes */

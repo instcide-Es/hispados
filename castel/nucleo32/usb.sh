@@ -67,6 +67,9 @@
 # ACPI» de ese equipo, las de su \SDHCI.TXT), una entrada más, tras las de
 # prueba: arrancar lo instalado en el eMMC sin ACPI desde la memoria (GRUB
 # busca \HISPA\NUCLEO.BIN en los discos), sin cambiar su menú.
+# (0.8.12c) Con PRUEBA_WIFI_RECIBE=1 (y INSTALADO_SDHCI), las entradas 1 y 2:
+# el sistema de la memoria sin ACPI viendo el eMMC, con escritura; y
+# \PONWIFI.TXT: WIFI.BIN se copia a lo instalado (C:\HISPA\WIFI.BIN).
 # Con FIRMWARE_DIR=carpeta, lo de esa carpeta (el firmware de las tarjetas
 # Wi-Fi, que no es libre: no está en el repositorio) va a X:\FIRMWARE, y
 # INSTALAR lo copia a C:\FIRMWARE (como \SDHCI.TXT y \SDIO.TXT de X:).
@@ -130,7 +133,9 @@ cp $W/f/* $W/m/
 # (0.8.12b) el firmware de las tarjetas Wi-Fi, a X:\FIRMWARE
 if [ -n "${FIRMWARE_DIR:-}" ]; then mkdir -p $W/m/FIRMWARE; cp "$FIRMWARE_DIR"/* $W/m/FIRMWARE/; fi
 # (RTL8723BS) la memoria de prueba del Wi-Fi por SDIO: RED.LOG y el Wi-Fi primero
-[ -n "${PRUEBA_WIFI_SDIO:-}" ] && printf 'Registro=SI\r\nPreferir=WIFI\r\n' > $W/m/RED.INI
+[ -n "${PRUEBA_WIFI_SDIO:-}${PRUEBA_WIFI_RECIBE:-}" ] && printf 'Registro=SI\r\nPreferir=WIFI\r\n' > $W/m/RED.INI
+# (0.8.12c) WIFI.BIN, arrancado de la memoria, se copia a lo instalado
+[ -n "${PRUEBA_WIFI_RECIBE:-}" ] && printf 'WIFI.BIN de esta memoria a C:\\HISPA\\WIFI.BIN (el de antes, a WIFI.ANT)\r\n' > $W/m/PONWIFI.TXT
 [ -n "${TERMO:-}" ] && cp -r $W/termo $W/m/TERMO
 # lo que solo es para instalar (los textos del sistema instalado, lo que va a
 # otra carpeta y el arranque del disco), en \INSTALA
@@ -254,6 +259,15 @@ G
       menu_efi "${W1}Wi-Fi (Realtek por SDIO), SIN ACPI: el escritorio" ESCRIT8.BIN "escritorio $N sinacpi conred" "$M2" auto
       menu_efi "${W2}Wi-Fi, CON ACPI: aprende la controladora y como se enciende (puede congelarse)" ESCRIT8.BIN "escritorio $N conred fichaequipo" "$M2" auto
       menu_efi "${W3}Wi-Fi, SIN ACPI: el interprete de ordenes (texto: REDWIFI /REDES...)" SEMILLA.BIN "ordenes $N sinacpi conred" "$M2" auto
+    fi
+    # (0.8.12c, el Acer One 10: el Wi-Fi no oía nada) con PRUEBA_WIFI_RECIBE=1
+    # (y INSTALADO_SDHCI), primero: el sistema de la memoria SIN ACPI, viendo
+    # el eMMC (sdhci=) y pudiendo escribir en él («escritura»): WIFI.BIN lee
+    # C:\SDIO.TXT y, con X:\PONWIFI.TXT, se copia a C:\HISPA\WIFI.BIN (lo
+    # instalado lo usa sin reinstalar: la entrada 8)
+    if [ -n "${PRUEBA_WIFI_RECIBE:-}" ] && [ -n "${INSTALADO_SDHCI:-}" ]; then
+      menu_efi "1. Wi-Fi NUEVO, SIN ACPI: el escritorio de esta memoria (y lo pone en el eMMC)" ESCRIT8.BIN "escritorio escritura unidad=X registro sinacpi conred sdhci=$INSTALADO_SDHCI" "$M2" auto
+      menu_efi "2. Wi-Fi NUEVO, SIN ACPI: el interprete de ordenes (texto: REDWIFI /REDES)" SEMILLA.BIN "ordenes escritura unidad=X registro sinacpi conred sdhci=$INSTALADO_SDHCI" "$M2" auto
     fi
     # (0.8.12b) lo instalado en el eMMC, sin ACPI, desde la memoria
     if [ -n "${INSTALADO_SDHCI:-}" ]; then

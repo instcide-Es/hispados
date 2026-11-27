@@ -10,9 +10,12 @@
  * (RadioA), tal cual, de drivers/staging/rtl8723bs/hal/HalHWImg8723B_MAC.c,
  * HalHWImg8723B_BB.c y HalHWImg8723B_RF.c de Linux 6.6 (etiqueta v6.6 de
  * git.kernel.org; GPL-2.0, Copyright Realtek: el aviso, arriba). Sacadas de
- * allí con awk (solo los arreglos de números; sin condiciones: en estas
- * versiones no llevan ninguna). Las usa wifi/nucleo/radio_rtl.c, como
- * ODM_ReadAndConfig_MP_8723B_* de Linux: parejas (registro, valor).
+ * allí con awk (solo los arreglos de números). MAC_REG, PHY_REG y AGC_TAB
+ * no llevan condiciones; RadioA SÍ (las parejas 80002000h/90003000h/
+ * 90004000h + 40000000h, A0000000h y B0000000h: el «si» del encapsulado
+ * para 51h y 71h): radio_rtl.c las mira como CheckPositive de Linux. Las usa
+ * wifi/nucleo/radio_rtl.c, como ODM_ReadAndConfig_MP_8723B_* de Linux:
+ * parejas (registro, valor).
  */
 #include "rtl8723bs_tablas.h"
 

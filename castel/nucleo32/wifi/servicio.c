@@ -259,6 +259,97 @@ int hl_lee_texto(const char *r, char *d, int cabe)
 	return (int)n;
 }
 
+/* (0.8.12c, Acer One 10) La memoria de prueba del Wi-Fi: si en su raíz hay
+ * \PONWIFI.TXT y este WIFI.BIN corre desde ella (la unidad del sistema es
+ * la memoria: «\»), se copia a lo instalado (C:\HISPA\WIFI.BIN; el de
+ * antes, una vez, a C:\HISPA\WIFI.ANT), para que lo instalado lo use sin
+ * reinstalar. Si ya es igual, no se escribe nada */
+#define WIFI_COMPILADO "acer-wifi, " __DATE__ " " __TIME__
+static u8 copia_a[16384], copia_b[16384];
+
+static int copia_archivo(const char *de, const char *a, int si_igual_no)
+{
+	u32 m, d, n = 0, k, total = 0;
+	int igual = 1;
+
+	if (si_igual_no) {
+		m = sc(SC_ABRIR, (u32)de, 0, 0);
+		d = sc(SC_ABRIR, (u32)a, 0, 0);
+		if (ES_ERROR(m) || ES_ERROR(d))
+			igual = 0;
+		while (igual) {
+			n = sc(SC_LEER, m, (u32)copia_a, sizeof copia_a);
+			k = sc(SC_LEER, d, (u32)copia_b, sizeof copia_b);
+			if (ES_ERROR(n) || ES_ERROR(k) || n != k || memcmp(copia_a, copia_b, n) != 0)
+				igual = 0;
+			else if (n == 0)
+				break;
+		}
+		if (!ES_ERROR(m))
+			sc(SC_CERRAR, m, 0, 0);
+		if (!ES_ERROR(d))
+			sc(SC_CERRAR, d, 0, 0);
+		if (igual)
+			return 0;
+		n = 0;
+	}
+	m = sc(SC_ABRIR, (u32)de, 0, 0);
+	if (ES_ERROR(m))
+		return -1;
+	d = sc(SC_ABRIR, (u32)a, 2, 0);
+	if (ES_ERROR(d)) {
+		sc(SC_CERRAR, m, 0, 0);
+		return -2;
+	}
+	for (;;) {
+		n = sc(SC_LEER, m, (u32)copia_a, sizeof copia_a);
+		if (ES_ERROR(n) || n == 0)
+			break;
+		k = sc(SC_ESCRIBIR_ARCHIVO, d, (u32)copia_a, n);
+		if (ES_ERROR(k) || k != n) {
+			n = 0xFFFFFFFF;
+			break;
+		}
+		total += n;
+	}
+	sc(SC_CERRAR, d, 0, 0);
+	sc(SC_CERRAR, m, 0, 0);
+	return ES_ERROR(n) ? -3 : (int)total;
+}
+
+static void pon_en_lo_instalado(void)
+{
+	u32 m;
+	int r;
+
+	if (carpeta[0] != '\\' || carpeta[1])
+		return;
+	m = sc(SC_ABRIR, (u32)"\\PONWIFI.TXT", 0, 0);
+	if (ES_ERROR(m))
+		return;
+	sc(SC_CERRAR, m, 0, 0);
+	m = sc(SC_ABRIR, (u32)"C:\\HISPA\\WIFI.BIN", 0, 0);
+	if (ES_ERROR(m)) {
+		hl_log(1, "PONWIFI: no hay C:\\HISPA\\WIFI.BIN (¿no está instalado en C:?): no se copia\n");
+		return;
+	}
+	sc(SC_CERRAR, m, 0, 0);
+	m = sc(SC_ABRIR, (u32)"C:\\HISPA\\WIFI.ANT", 0, 0);
+	if (ES_ERROR(m)) {
+		r = copia_archivo("C:\\HISPA\\WIFI.BIN", "C:\\HISPA\\WIFI.ANT", 0);
+		hl_log(2, "PONWIFI: el WIFI.BIN de lo instalado, guardado en C:\\HISPA\\WIFI.ANT (%d octetos)\n", r);
+	} else {
+		sc(SC_CERRAR, m, 0, 0);
+	}
+	r = copia_archivo("\\WIFI.BIN", "C:\\HISPA\\WIFI.BIN", 1);
+	if (r == 0)
+		hl_log(2, "PONWIFI: lo instalado (C:\\HISPA\\WIFI.BIN) ya tiene este WIFI.BIN (%s)\n", WIFI_COMPILADO);
+	else if (r > 0)
+		hl_log(2, "PONWIFI: este WIFI.BIN (%s, %d octetos), copiado a lo instalado: C:\\HISPA\\WIFI.BIN\n", WIFI_COMPILADO, r);
+	else
+		hl_log(0, "PONWIFI: no se ha podido copiar este WIFI.BIN a C:\\HISPA\\WIFI.BIN (%d; ¿arrancado sin «escritura»?)\n", r);
+}
+
 /* ============================================ la memoria y los registros */
 #define DMA_PAGINAS 512			/* 2 MB: el montón del controlador */
 static u8 *dma_v;
@@ -1682,6 +1773,8 @@ int servicio_wifi(void)
 		escribe_archivo("WIFI.LOG", "", 0, 0);
 	else
 		hl_log(2, "---- WIFI.BIN otra vez en este arranque (lo de antes, arriba) ----\n");
+	if (!otra_vez && !simulada)
+		pon_en_lo_instalado();
 	/* el montón del controlador: 2 MB de memoria física seguida */
 	r = sc(SC_DMA, DMA_PAGINAS, (u32)&dma_f, 0);
 	if (ES_ERROR(r)) {
@@ -1692,7 +1785,7 @@ int servicio_wifi(void)
 	dma_v = (u8 *)r;
 	dma_tam = DMA_PAGINAS * 4096;
 	hl_monton(dma_v, dma_tam);
-	hl_log(2, "Hispa-Pentium: el servicio Wi-Fi (WIFI.BIN %s, %s)\n", VERSION, __DATE__);
+	hl_log(2, "Hispa-Pentium: el servicio Wi-Fi (WIFI.BIN %s, %s)\n", VERSION, WIFI_COMPILADO);
 	hl_log(2, "Memoria para la tarjeta: %u KB en %08X (se ve en %08X)\n", dma_tam >> 10, dma_f, (u32)dma_v);
 	lee_recordadas();
 	vuelca_registro();

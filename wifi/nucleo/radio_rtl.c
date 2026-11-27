@@ -37,6 +37,12 @@
  *     descriptor de 40 octetos (rtl8723b_fill_default_txdesc).
  * Sin interrupciones: en cada vuelta del servicio se mira la de la tarjeta
  * (y, por si acaso, cada 20 ms el registro HISR del chip).
+ * (0.8.12c, el Acer One 10 no oía nada) La tabla RadioA, con sus
+ * condiciones (antes sus cabeceras apagaban la radio: RF 00h = 0); el
+ * número de antenas del EFUSE (0xC3[0]), como Linux; y al encender se
+ * escucha con 6 maneras de poner la antena y se queda la que más oye
+ * (prueba_antenas). WIFI.LOG dice los registros de la antena y de la
+ * recepción al encender, tras cada búsqueda y en el resumen.
  *
  * Lo que NO se hace (Linux sí): la calibración IQ (PHY_IQCalibrate_8723B),
  * el control dinámico (DIG, el seguimiento de la potencia por temperatura),
@@ -232,7 +238,10 @@ static int autoload_mal;
 static o8 cristal = 0x20;
 static o8 idx_cck[14], idx_bw40[14];
 static signed char dif_ofdm, dif_bw20;
-static o8 ant_path, ant_num1 = 1, bt_existe, paquete;
+static o8 ant_path, ant_num1 = 1, bt_existe, paquete, tipo_paq;
+static int variante;			/* la manera de poner la antena (pon_variante) */
+static d32 n_sondeos, n_con_algo, n_avisos, rx_mayor, rx_tramas_leidas;
+static o8 hisr_ult;
 static d32 sys_cfg;
 static d32 rf18;			/* RfRegChnlVal[0] */
 static d32 rcr;
@@ -599,6 +608,8 @@ static int lee_efuse(void)
 	}
 	usados = a;
 	paquete = efuse_octeto(0x1FB) & 7;		/* Hal_EfuseParsePackageType_8723B */
+	/* PACKAGE_DEFAULT 0, QFN68 1, TFBGA90 2, TFBGA80 3, TFBGA79 4 (rtl8723b_hal.h) */
+	tipo_paq = paquete == 4 ? 4 : paquete == 5 ? 2 : paquete == 6 ? 1 : paquete == 7 ? 3 : 0;
 	efuse_corriente(0);
 	return usados;
 }
@@ -655,11 +666,14 @@ static void mira_efuse(void)
 		ant_num1 = 1;
 		ant_path = 0;
 	} else if (b != 0xFF) {
-		ant_num1 = !(b & 1);
+		/* EEPROMBluetoothAntNum = 0xC3[0]: Ant_x1 es 1 y Ant_x2 es 0
+		 * (hal_pg.h). Hasta la 0.8.12 se leía al revés: al firmware se le
+		 * decía «dos antenas» (0x60[2]) en las de una */
+		ant_num1 = (b & 1) != 0;
 		ant_path = (b & BIT(6)) ? 1 : 0;
 	} else {
 		ant_num1 = 1;
-		ant_path = paquete == 6 ? 1 : 0;	/* (QFN68: S0) */
+		ant_path = tipo_paq == 1 ? 1 : 0;	/* (PACKAGE_QFN68: S0) */
 	}
 }
 
@@ -893,6 +907,118 @@ static void antena_solo_wifi(void)
 	wr8(0x6cc, 0x3);
 }
 
+/* Las maneras de poner la antena que se prueban al encender (0.8.12c, para
+ * el Acer One 10: no se oía nada). La 0 es la de Linux (con lo que dice el
+ * EFUSE: la S1 o la S0, el conmutador de dentro); las otras, por si esta
+ * placa lleva la antena en la otra salida o con un conmutador de fuera.
+ * (halbtc8723b1ant_SetAntPath: «BTC_ANT_PATH_WIFI» y «BTC_ANT_PATH_PTA») */
+#define N_VARIANTES 6
+static const char *const nombre_variante[N_VARIANTES] = {
+	"como Linux (la salida del EFUSE, conmutador de dentro)",
+	"la otra salida (S0 si el EFUSE dice S1, y al revés)",
+	"la PTA (el Wi-Fi y el Bluetooth por turnos, como Linux al buscar)",
+	"conmutador de fuera, a la principal (92Ch = 1)",
+	"conmutador de fuera, a la auxiliar (92Ch = 2)",
+	"como la 0.8.12 (el registro 00h de la radio a 0)",
+};
+
+static d32 r92c_antes = 0xFFFFFFFF;	/* el 92Ch de antes de probar (el conmutador de fuera) */
+
+static void pon_variante(int v)
+{
+	int aux = ant_path, fuera = v == 3 || v == 4;
+	o8 p[2];
+	d32 x;
+
+	variante = v;
+	if (v == 0 && !bt_existe) {
+		/* (sin Bluetooth, Linux no toca la antena: 948h se queda en 280h) */
+		rf_pon(0x00, bRFRegOffsetMask, 0x10000);
+		return;
+	}
+	if (v == 1)
+		aux = !aux;
+	if (fuera)
+		aux = v == 4;
+	x = rd32(REG_LEDCFG0);
+	if (fuera)
+		x = (x & ~BIT(23)) | BIT(24);	/* 0x4C[24:23] = 10: la antena, por el Wi-Fi y el BT */
+	else
+		x = (x | BIT(23)) & ~BIT(24);	/* 0x4C[24:23] = 01: por el 0x64 */
+	wr32(REG_LEDCFG0, x);
+	wr8(REG_PAD_CTRL1, rd8(REG_PAD_CTRL1) & ~1);
+	if (r92c_antes == 0xFFFFFFFF)
+		r92c_antes = rd32(0x92c);
+	if (fuera) {
+		wr32(0x948, 0x0);
+		wr8(0x92c, (rd8(0x92c) & ~3) | (aux ? 2 : 1));
+	} else {
+		wr32(0x92c, r92c_antes);
+	}
+	if (fuera) {
+	} else if (v == 2) {
+		wr32(0x948, aux ? 0x80 : 0x200);
+	} else {
+		wr32(0x948, aux ? 0x280 : 0x0);
+	}
+	if (fw_listo) {
+		p[0] = aux ? 1 : 0;		/* «antenna inverse» */
+		p[1] = fuera ? 1 : 0;		/* el tipo de conmutador */
+		h2c(0x65, p, 2);
+	}
+	wr8(LOCAL(0x60), (aux ? 1 : 0) | (fuera ? 2 : 0) | (ant_num1 ? 0 : 4));
+	if (v == 2) {
+		if (rd8(0x765) != 0 && fw_listo) {
+			p[0] = 0;
+			h2c(0x6E, p, 1);
+		}
+		wr8(0x76e, 0xc);
+	}
+	rf_pon(0x00, bRFRegOffsetMask, v == 5 ? 0 : 0x10000);
+}
+
+/* REG_RXERR_RPT (664h): lo que ha visto el PHY, por tipos (hal_com_reg.h:
+ * 0 OFDM PPDU, 1 OFDM falsas, 2 OFDM MPDU bien, 3 OFDM MPDU mal, 4 CCK PPDU,
+ * 5 CCK falsas, 6 CCK MPDU bien, 7 CCK MPDU mal; 15 tiradas por la cola llena) */
+static d32 rxerr(int t)
+{
+	wr32(0x664, (d32)t << 28);
+	return rd32(0x664) & 0xFFFFF;
+}
+static const o8 tipos_rxerr[8] = { 0, 2, 3, 4, 6, 7, 1, 15 };
+static void cuenta_phy(d32 *c)
+{
+	int i;
+	for (i = 0; i < 8; i++)
+		c[i] = rxerr(tipos_rxerr[i]);
+}
+
+/* los registros que importan para recibir, al registro */
+static void vuelca_regs(const char *cuando)
+{
+	o8 hm[4], hs[4];
+	d32 c[8];
+
+	if (sdio_lee(&sd, 1, ftaddr(LOCAL(SDIO_REG_HIMR)), hm, 4) < 0)
+		falla();
+	if (sdio_lee(&sd, 1, ftaddr(LOCAL(SDIO_REG_HISR)), hs, 4) < 0)
+		falla();
+	cuenta_phy(c);
+	hl_log(2, "rtl: [%s] antena: 948h %08X, 4Ch %08X, 64h %02X, 67h %02X, 765h %02X, 76Eh %02X, 92Ch %08X, 930h %08X, "
+	       "38h %04X, local 60h %02X (variante %d)\n", cuando, rd32(0x948), rd32(REG_LEDCFG0), rd8(REG_PAD_CTRL1),
+	       rd8(0x67), rd8(0x765), rd8(0x76e), rd32(0x92c), rd32(0x930), rd16(REG_PWR_DATA), rd8(LOCAL(0x60)), variante);
+	hl_log(2, "rtl: [%s] recibir: CR %08X, RCR %08X, RXFLTMAP %04X/%04X/%04X, TXPAUSE %02X, BCN_CTRL %02X; "
+	       "RF 00h %05X, 01h %05X, 18h %05X; IGI (C50h) %02X; HIMR %02X%02X%02X%02X, HISR %02X%02X%02X%02X, RX0 %u octetos; "
+	       "aviso SDIO %d\n", cuando, rd32(REG_CR), rd32(REG_RCR), rd16(REG_RXFLTMAP0), rd16(REG_RXFLTMAP1),
+	       rd16(REG_RXFLTMAP2), rd8(REG_TXPAUSE), rd8(REG_BCN_CTRL), rf_lee(0x00, bRFRegOffsetMask),
+	       rf_lee(0x01, bRFRegOffsetMask), rf_lee(RF_CHNLBW, bRFRegOffsetMask), rd8(0xc50) & 0x7F,
+	       hm[3], hm[2], hm[1], hm[0], hs[3], hs[2], hs[1], hs[0], rd16(LOCAL(SDIO_REG_RX0_REQ_LEN)), sdio_avisa(&sd));
+	hl_log(2, "rtl: [%s] el PHY ha visto: OFDM %u (MPDU bien %u, mal %u), CCK %u (MPDU bien %u, mal %u), falsas %u, "
+	       "tiradas %u; sondeos %u (con algo %u, el mayor %u octetos, avisos de la tarjeta %u), tramas leídas %u, HISR %02X\n",
+	       cuando, c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], n_sondeos, n_con_algo, rx_mayor, n_avisos,
+	       rx_tramas_leidas, hisr_ult);
+}
+
 /* -------------------------------------------------------- MAC, BB y radio */
 static void tabla_bb(const unsigned *t, unsigned n)
 {
@@ -919,17 +1045,96 @@ static void tabla_bb(const unsigned *t, unsigned n)
 	}
 }
 
-/* odm_ConfigRFReg_8723B */
+/* CheckPositive (HalHWImg8723B_RF.c): lo de ODM en Linux (Init_ODM_ComInfo_8723b):
+ * el corte A (0), la plataforma ODM_CE (4), el encapsulado y la placa 0 */
+static int condicion_vale(d32 c1, d32 c2)
+{
+	d32 d1 = (0u << 24) | (4u << 16) | ((d32)tipo_paq << 12);
+
+	d32 mascara = 0;
+
+	if ((c1 & 0x0000F000) && (c1 & 0x0000F000) != (d1 & 0x0000F000))
+		return 0;
+	if ((c1 & 0x0F000000) && (c1 & 0x0F000000) != (d1 & 0x0F000000))
+		return 0;
+	c1 &= 0x000F0FFF;
+	d1 &= 0x000F0FFF;
+	if ((c1 & d1) != c1)
+		return 0;
+	if ((c1 & 0x0F) == 0)
+		return 1;		/* la placa no importa */
+	/* (en Linux, TypeGLNA, TypeGPA... a 0) */
+	if (c1 & BIT(0))
+		mascara |= 0x000000FF;
+	if (c1 & BIT(1))
+		mascara |= 0x0000FF00;
+	if (c1 & BIT(2))
+		mascara |= 0x00FF0000;
+	if (c1 & BIT(3))
+		mascara |= 0xFF000000;
+	return (c2 & mascara) == 0;
+}
+
+static void radio_par(d32 a, d32 v);
+
+/* ODM_ReadAndConfig_MP_8723B_RadioA: la tabla CON SUS CONDICIONES. Hasta la
+ * 0.8.12 se escribían también las cabeceras (80002000h, 40000000h, A0000000h,
+ * B0000000h...) como si fueran registros: «rf_pon» se queda con el octeto
+ * bajo, así que cada una escribía 0 en el registro 00h de la radio (RF_AC:
+ * el modo; 0 es «apagada») y ahí se quedaba: la radio no oía nada. El
+ * modelo de las pruebas no mira ese registro: allí iba. */
 static void tabla_radio(void)
 {
-	unsigned i;
+	unsigned i = 0, n = rtl_tabla_radioa_n;
+	const unsigned *t = rtl_tabla_radioa;
+
+	while (i + 1 < n) {
+		d32 a = t[i], v = t[i + 1];
+		int vale, cc;
+
+		if (a < 0x40000000u) {
+			radio_par(a, v);
+			i += 2;
+			continue;
+		}
+		/* el principio de un «si»: IF (00), ELSE IF (01), ELSE (10), ENDIF (11) en [29:28] */
+		cc = (a >> 28) & 3;
+		if (cc == 2 || cc == 3) {
+			vale = 1;
+			i += 2;
+		} else {
+			vale = condicion_vale(a, v);
+			i += 4;			/* la condición ocupa dos parejas */
+		}
+		if (cc == 3)
+			continue;		/* ENDIF suelto */
+		if (!vale) {
+			while (i + 1 < n && t[i] < 0x40000000u)
+				i += 2;
+			continue;
+		}
+		while (i + 1 < n && t[i] < 0x40000000u) {
+			radio_par(t[i], t[i + 1]);
+			i += 2;
+		}
+		/* lo demás, hasta el ENDIF, no */
+		while (i + 1 < n && !(t[i] >= 0x40000000u && ((t[i] >> 28) & 3) == 3)) {
+			i += 2;
+		}
+		if (i + 1 < n)
+			i += 2;			/* el ENDIF */
+	}
+}
+
+/* odm_ConfigRFReg_8723B */
+static void radio_par(d32 a, d32 v)
+{
 	int k;
 
-	for (i = 0; i + 1 < rtl_tabla_radioa_n; i += 2) {
-		d32 a = rtl_tabla_radioa[i], v = rtl_tabla_radioa[i + 1];
+	{
 		if (a == 0xfe || a == 0xffe) {
 			espera_ms(50);
-			continue;
+			return;
 		}
 		rf_pon(a, bRFRegOffsetMask, v);
 		espera_us(1);
@@ -999,7 +1204,7 @@ static void calibra_lc(void)
 	rf_pon(RF_CHNLBW, 0xfff, lc | 0x08000);
 	espera_ms(100);
 	rf_pon(0xB0, bRFRegOffsetMask, 0xDFFE0);
-	if (paquete >= 2 && paquete != 6)	/* (Linux: PackageType >= 2; 26 MHz, el canal 10) */
+	if (tipo_paq >= 2)		/* (Linux: PackageType >= 2; 26 MHz, el canal 10) */
 		rf_pon(RF_CHNLBW, 0xfff, lc);
 	if (t & 0x70)
 		wr8(0xd03, t);
@@ -1196,17 +1401,15 @@ static void entrega(o8 *p, int n)
 
 static o8 rxbuf[16384 + 512] __attribute__((aligned(4)));
 
-static void sondear(void)
+/* lo que haya en la cola RX0 (sd_int_dpc: HISR y RX0_REQ_LEN por CMD52) */
+static void lee_rx(void)
 {
 	o8 h = 0;
 	int k;
 
-	if (!vivo || !encendida)
-		return;
-	if (!sdio_avisa(&sd) && ahora() - t_sondeo < 20)
-		return;
-	t_sondeo = ahora();
+	n_sondeos++;
 	h = cmd52_lee(ftaddr(LOCAL(SDIO_REG_HISR)));
+	hisr_ult = h;
 	if (h & MASK_SDIO_HISR_CLEAR & 0xFF)
 		cmd52_pon(ftaddr(LOCAL(SDIO_REG_HISR)), h & MASK_SDIO_HISR_CLEAR & 0xFF);
 	for (k = 0; k < 16; k++) {
@@ -1214,6 +1417,11 @@ static void sondear(void)
 		int n = cmd52_lee(f) | (cmd52_lee(f + 1) << 8), l;
 		if (n == 0 || n == 0xFFFF)
 			break;
+		if (k == 0)
+			n_con_algo++;
+		if ((d32)n > rx_mayor)
+			rx_mayor = n;
+		rx_tramas_leidas++;
 		if (n > 16384) {
 			hl_log(1, "rtl: la cola de recepción dice %d octetos: se tira\n", n);
 			n = 16384;
@@ -1227,6 +1435,62 @@ static void sondear(void)
 		}
 		entrega(rxbuf, n);
 	}
+}
+
+static void sondear(void)
+{
+	int aviso;
+
+	if (!vivo || !encendida)
+		return;
+	aviso = sdio_avisa(&sd);
+	if (!aviso && ahora() - t_sondeo < 20)
+		return;
+	if (aviso)
+		n_avisos++;
+	t_sondeo = ahora();
+	lee_rx();
+}
+
+/* Al encender: se escucha con cada manera de poner la antena (canales 1, 6
+ * y 11, 300 ms en cada uno) y se queda la que más oye. Lo dice WIFI.LOG */
+static void prueba_antenas(void)
+{
+	static const o8 canales[3] = { 1, 6, 11 };
+	d32 antes[8], despues[8], t0, mejor_n = 0, mejor_phy = 0;
+	int v, k, mejor = 0;
+
+	for (v = 0; v < N_VARIANTES; v++) {
+		d32 rx0 = rx_bien, por[3], phy;
+		pon_variante(v);
+		cuenta_phy(antes);
+		for (k = 0; k < 3; k++) {
+			d32 r = rx_bien;
+			canal(canales[k]);
+			t0 = ahora();
+			while (ahora() - t0 < 300) {
+				lee_rx();
+				espera_ms(2);
+			}
+			por[k] = rx_bien - r;
+		}
+		cuenta_phy(despues);
+		for (k = 0; k < 8; k++)
+			despues[k] = (despues[k] - antes[k]) & 0xFFFFF;
+		phy = despues[0] + despues[3];
+		hl_log(2, "rtl: prueba de la antena %d, %s: %u tramas (canal 1: %u, 6: %u, 11: %u); el PHY: OFDM %u (bien %u, mal %u), "
+		       "CCK %u (bien %u, mal %u), falsas %u\n", v, nombre_variante[v], rx_bien - rx0, por[0], por[1], por[2],
+		       despues[0], despues[1], despues[2], despues[3], despues[4], despues[5], despues[6]);
+		if (v != 5 && (rx_bien - rx0 > mejor_n || (rx_bien - rx0 == mejor_n && phy > mejor_phy))) {
+			mejor = v;
+			mejor_n = rx_bien - rx0;
+			mejor_phy = phy;
+		}
+	}
+	pon_variante(mejor);
+	rtl_canal = 0;
+	canal(1);
+	hl_log(2, "rtl: la antena: se queda la %d (%s): %u tramas en la prueba\n", mejor, nombre_variante[mejor], mejor_n);
 }
 
 /* --------------------------------------------------------------- mandar */
@@ -1329,6 +1593,7 @@ static void barrido(int empieza)
 			wr8(REG_BCN_CTRL, rd8(REG_BCN_CTRL) & ~DIS_TSF_UDT);
 			wr32(REG_RCR, rcr);
 		}
+		vuelca_regs("tras buscar");
 	}
 }
 
@@ -1395,6 +1660,8 @@ int rtl_arranca(const struct sdio_plat *p, struct radio **r)
 	o8 v;
 
 	vivo = mac_on = fw_listo = encendida = 0;
+	r92c_antes = 0xFFFFFFFF;
+	variante = 0;
 	rtl_fallos_es = 0;
 	rtl_canal = 0;
 	e = sdio_arranca(&sd, p);
@@ -1465,6 +1732,8 @@ int rtl_enciende(void)
 	config_bb();
 	config_radio();
 	rf18 = rf_lee(RF_CHNLBW, bRFRegOffsetMask);
+	hl_log(2, "rtl: la radio, tras su tabla: 00h %05X (la 0.8.12 la dejaba a 0), 51h %05X; encapsulado %u (tipo %u)\n",
+	       rf_lee(0x00, bRFRegOffsetMask), rf_lee(0x51, bRFRegOffsetMask), paquete, tipo_paq);
 	if (config_mac() < 0)
 		return -5;
 	rtl_canal = 0;
@@ -1495,6 +1764,10 @@ int rtl_enciende(void)
 	}
 	encendida = 1;
 	t_sondeo = ahora();
+	n_sondeos = n_con_algo = n_avisos = rx_mayor = rx_tramas_leidas = 0;
+	vuelca_regs("al encender");
+	prueba_antenas();
+	vuelca_regs("tras la prueba de antenas");
 	hl_log(2, "rtl: en marcha en %u ms: canal 1, 20 MHz; colas libres %u/%u/%u/%u; RF 18h %05X; errores de E/S %d\n",
 	       ahora() - t0, libres[0], libres[1], libres[2], libres[3], rf18, rtl_fallos_es);
 	return rtl_fallos_es > 50 ? -6 : 0;
@@ -1509,6 +1782,8 @@ void rtl_cuentas(d32 *bien, d32 *mal, int *vel)
 
 void rtl_resumen(void)
 {
-	hl_log(2, "rtl: recibidas %u (malas %u); mandadas %u (fallos %u, sin sitio %u); E/S: %u CMD52, %u CMD53, %u errores; canal %d\n",
-	       rx_bien, rx_mal, tx_bien, tx_mal, tx_sin_sitio, sd.ordenes52, sd.ordenes53, sd.errores, rtl_canal);
+	hl_log(2, "rtl: recibidas %u (malas %u); mandadas %u (fallos %u, sin sitio %u); E/S: %u CMD52, %u CMD53, %u errores; canal %d; antena %d\n",
+	       rx_bien, rx_mal, tx_bien, tx_mal, tx_sin_sitio, sd.ordenes52, sd.ordenes53, sd.errores, rtl_canal, variante);
+	if (vivo && encendida)
+		vuelca_regs("resumen");
 }

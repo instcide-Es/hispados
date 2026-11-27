@@ -220,7 +220,10 @@ static void llega(const o8 *t, int n, int senal, int canal)
 	o8 *p;
 
 	(void)senal;
-	if (canal != rtl_sim_canal || !rtl_sim_fw_corre || !(m[0x100] & 0x80) || n < 24) {
+	/* (0.8.12c) la radio con el modo (RF 00h [19:16]) a 0 está apagada: no
+	 * oye nada (lo que pasaba en el Acer One 10 con las cabeceras de la tabla
+	 * escritas como registros) */
+	if (canal != rtl_sim_canal || !rtl_sim_fw_corre || !(m[0x100] & 0x80) || n < 24 || !((rf[0] >> 16) & 0xF)) {
 		rtl_sim_rx_tirados++;
 		return;
 	}
@@ -691,7 +694,7 @@ const struct sdio_plat *rtl_sim_monta(struct radio *punto, void (*e)(d32), d32 (
 	s[1] = 0x22;				/* 0xB9: el cristal */
 	PG(23, s);
 	memset(s, 0xFF, 8);
-	s[1] = 0x00; s[3] = 0x10;		/* 0xC1: la placa; 0xC3: una antena, S1 */
+	s[1] = 0x00; s[3] = 0x11;		/* 0xC1: la placa; 0xC3: una antena ([0] = 1, Ant_x1), S1 ([6] = 0) */
 	PG(24, s);
 	memset(s, 0xFF, 8);
 	memcpy(s + 2, mac, 6);			/* 0x11A */
