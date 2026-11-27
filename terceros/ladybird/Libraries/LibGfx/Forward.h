@@ -1,0 +1,59 @@
+/*
+ * Copyright (c) 2020, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+namespace Gfx {
+
+class Bitmap;
+class CMYKBitmap;
+class ColorSpace;
+class DecodedImageFrame;
+class Color;
+
+class Emoji;
+class Font;
+class ImageDecoder;
+struct FontPixelMetrics;
+
+class Palette;
+class YUVData;
+class PaletteImpl;
+struct PathData;
+class SharedImage;
+class SharedImageBuffer;
+class ShareableBitmap;
+struct SystemTheme;
+
+template<typename T>
+class Point;
+
+template<typename T>
+class Size;
+
+template<typename T>
+class Rect;
+
+using IntRect = Rect<int>;
+using FloatRect = Rect<float>;
+
+using IntPoint = Point<int>;
+using FloatPoint = Point<float>;
+
+using IntSize = Size<int>;
+using FloatSize = Size<float>;
+
+enum class BitmapFormat;
+enum class ColorRole;
+
+enum class MaskKind {
+    Alpha,
+    Luminance
+};
+
+}
+
+using Gfx::Color;

@@ -1,0 +1,192 @@
+/*
+ * Copyright (c) 2020, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/IntrusiveList.h>
+#include <AK/Noncopyable.h>
+#include <AK/RefCounted.h>
+#include <AK/RefPtr.h>
+#include <AK/SourceLocation.h>
+#include <AK/kmalloc.h>
+#include <LibGC/Forward.h>
+#include <LibGC/Ptr.h>
+
+namespace GC {
+
+class GC_API RootImpl : public RefCounted<RootImpl> {
+    AK_MAKE_NONCOPYABLE(RootImpl);
+    AK_MAKE_NONMOVABLE(RootImpl);
+
+public:
+    ~RootImpl();
+
+    Cell* cell() { return m_cell.ptr(); }
+    Cell const* cell() const { return m_cell.ptr(); }
+
+    SourceLocation const& source_location() const { return m_location; }
+
+private:
+    template<class T>
+    friend class Root;
+
+    explicit RootImpl(Cell*, SourceLocation location);
+    Ptr<Cell> m_cell;
+    SourceLocation m_location;
+
+    IntrusiveListNode<RootImpl> m_list_node;
+
+public:
+    using List = IntrusiveList<&RootImpl::m_list_node>;
+};
+
+template<class T>
+class Root {
+public:
+    AK_ALLOC_WITH_KMALLOC;
+
+    Root() = default;
+
+    static Root create(T* cell, SourceLocation location = SourceLocation::current())
+    {
+        return Root(adopt_ref(*new RootImpl(as_cell(const_cast<RemoveConst<T>*>(cell)), location)));
+    }
+
+    Root(T* cell, SourceLocation location = SourceLocation::current())
+    {
+        if (cell)
+            m_impl = adopt_ref(*new RootImpl(as_cell(cell), location));
+    }
+
+    Root(T& cell, SourceLocation location = SourceLocation::current())
+        : m_impl(adopt_ref(*new RootImpl(as_cell(&cell), location)))
+    {
+    }
+
+    Root(Ptr<T> cell, SourceLocation location = SourceLocation::current())
+        : Root(cell.ptr(), location)
+    {
+    }
+
+    Root(Ref<T> cell, SourceLocation location = SourceLocation::current())
+        : Root(*cell, location)
+    {
+    }
+
+    T* cell() const
+    {
+        if (!m_impl)
+            return nullptr;
+        return static_cell_cast<T>(m_impl->cell());
+    }
+
+    T* ptr() const
+    {
+        return cell();
+    }
+
+    bool is_null() const
+    {
+        return m_impl.is_null();
+    }
+
+    T* operator->() const
+    {
+        return cell();
+    }
+
+    [[nodiscard]] T& operator*() const
+    {
+        return *cell();
+    }
+
+    bool operator!() const
+    {
+        return !cell();
+    }
+    explicit operator bool() const
+    {
+        return cell();
+    }
+
+    operator T*() const { return cell(); }
+
+private:
+    explicit Root(NonnullRefPtr<RootImpl> impl)
+        : m_impl(move(impl))
+    {
+    }
+
+    RefPtr<RootImpl> m_impl;
+};
+
+template<class T>
+inline bool operator==(Root<T> const& lhs, Root<T> const& rhs)
+{
+    return lhs.ptr() == rhs.ptr();
+}
+
+template<class T>
+inline bool operator!=(Root<T> const& lhs, Root<T> const& rhs)
+{
+    return lhs.ptr() != rhs.ptr();
+}
+
+template<class T>
+inline Root<T> make_root(T* cell, SourceLocation location = SourceLocation::current())
+{
+    if (!cell)
+        return Root<T> {};
+    return Root<T>::create(cell, location);
+}
+
+template<class T>
+inline Root<T> make_root(T& cell, SourceLocation location = SourceLocation::current())
+{
+    return Root<T>::create(&cell, location);
+}
+
+template<class T>
+inline Root<T> make_root(Ptr<T> cell, SourceLocation location = SourceLocation::current())
+{
+    if (!cell)
+        return Root<T> {};
+    return Root<T>::create(cell.ptr(), location);
+}
+
+template<class T>
+inline Root<T> make_root(Ref<T> cell, SourceLocation location = SourceLocation::current())
+{
+    return Root<T>::create(cell.ptr(), location);
+}
+
+}
+
+namespace AK {
+
+template<typename T>
+struct Traits<GC::Root<T>> : public DefaultTraits<GC::Root<T>> {
+    static unsigned hash(GC::Root<T> const& handle) { return Traits<T>::hash(handle); }
+};
+
+template<typename T>
+struct Formatter<GC::Root<T>> : Formatter<T const*> {
+    ErrorOr<void> format(FormatBuilder& builder, GC::Root<T> const& value)
+    {
+        return Formatter<T const*>::format(builder, value.ptr());
+    }
+};
+
+namespace Detail {
+
+template<typename T>
+inline constexpr bool IsHashCompatible<GC::Root<T>, T> = true;
+
+template<typename T>
+inline constexpr bool IsHashCompatible<T, GC::Root<T>> = true;
+
+}
+}

@@ -1,0 +1,94 @@
+/*
+ * Copyright (c) 2026, Shannon Booth <shannon@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+mod blob_url_entry;
+pub mod form_urlencoded;
+mod host;
+mod input;
+mod parser;
+mod percent_encoding;
+mod scheme;
+mod serialize;
+mod types;
+
+use crate::origin::Host;
+
+pub use self::blob_url_entry::BlobUrlEntry;
+pub(crate) use self::host::parse_host_into;
+pub use self::input::UrlInput;
+pub use self::percent_encoding::percent_decode_bytes;
+pub use self::scheme::SchemeType;
+pub(crate) use self::scheme::default_port_for_scheme;
+pub(crate) use self::scheme::is_special_scheme;
+pub(crate) use self::scheme::special_schemes;
+pub use self::types::ExcludeFragment;
+pub use self::types::HostKind;
+pub use self::types::State;
+pub use self::types::URL_OFFSET_NONE;
+pub use self::types::Url;
+pub use self::types::UrlComponents;
+pub use self::types::UrlRef;
+
+#[derive(Debug, Default)]
+pub struct BasicParseOptions<'a> {
+    base_url: Option<UrlRef<'a>>,
+    encoding: Option<&'a str>,
+}
+
+impl<'a> BasicParseOptions<'a> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn base_url(mut self, base_url: impl Into<UrlRef<'a>>) -> Self {
+        self.base_url = Some(base_url.into());
+        self
+    }
+
+    pub fn encoding(mut self, encoding: impl Into<Option<&'a str>>) -> Self {
+        self.encoding = encoding.into();
+        self
+    }
+}
+
+// https://url.spec.whatwg.org/#concept-basic-url-parser
+pub fn basic_parse<'a>(input: impl Into<UrlInput<'a>>, options: BasicParseOptions<'_>) -> Option<Url> {
+    parser::basic_parse(input.into(), options.base_url, options.encoding)
+}
+
+// https://url.spec.whatwg.org/#concept-host-parser
+pub fn parse_host<'a>(input: impl Into<UrlInput<'a>>) -> Option<Host> {
+    let mut serialization = String::new();
+    let kind = parse_host_into(input.into(), false, &mut serialization)?;
+    Some(Host { kind, serialization })
+}
+
+pub fn create_with_data(mime_type: &str, payload: &str, is_base64: bool) -> Url {
+    let mut builder = String::from(mime_type);
+    if is_base64 {
+        builder.push_str(";base64");
+    }
+    builder.push(',');
+    builder.push_str(payload);
+    let mut url = String::from("data:");
+    percent_encoding::percent_encode_input_into(
+        UrlInput::from(builder.as_str()),
+        percent_encoding::PercentEncodeSet::Path,
+        false,
+        &mut url,
+    );
+    basic_parse(url.as_str(), BasicParseOptions::new()).expect("a data: URL parses")
+}
+
+// https://url.spec.whatwg.org/#concept-basic-url-parser
+pub fn basic_parse_with_state_override<'a>(
+    input: impl Into<UrlInput<'a>>,
+    url: &mut Url,
+    state_override: State,
+    encoding: Option<&str>,
+) -> bool {
+    parser::basic_parse_with_state_override(input.into(), url, state_override, encoding)
+}

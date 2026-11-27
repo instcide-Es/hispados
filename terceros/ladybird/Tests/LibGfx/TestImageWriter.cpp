@@ -1,0 +1,159 @@
+/*
+ * Copyright (c) 2024, the SerenityOS developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/MemoryStream.h>
+#include <LibGfx/Bitmap.h>
+#include <LibGfx/CMYKBitmap.h>
+#include <LibGfx/ImageFormats/JPEGLoader.h>
+#include <LibGfx/ImageFormats/JPEGWriter.h>
+#include <LibGfx/ImageFormats/PNGLoader.h>
+#include <LibGfx/ImageFormats/PNGWriter.h>
+#include <LibTest/TestCase.h>
+
+static ErrorOr<NonnullRefPtr<Gfx::Bitmap>> expect_single_frame(Gfx::ImageDecoderPlugin& plugin_decoder)
+{
+    EXPECT_EQ(plugin_decoder.frame_count(), 1u);
+    EXPECT(!plugin_decoder.is_animated());
+    EXPECT(!plugin_decoder.loop_count());
+
+    auto frame_descriptor = TRY(plugin_decoder.frame(0));
+    EXPECT_EQ(frame_descriptor.duration, 0);
+    return *frame_descriptor.image;
+}
+
+static ErrorOr<NonnullRefPtr<Gfx::Bitmap>> expect_single_frame_of_size(Gfx::ImageDecoderPlugin& plugin_decoder, Gfx::IntSize size)
+{
+    EXPECT_EQ(plugin_decoder.size(), size);
+    auto frame = TRY(expect_single_frame(plugin_decoder));
+    EXPECT_EQ(frame->size(), size);
+    return frame;
+}
+
+template<class Writer, class... ExtraArgs>
+static ErrorOr<ByteBuffer> encode_bitmap(Gfx::Bitmap const& bitmap, ExtraArgs... extra_args)
+{
+    if constexpr (requires(AllocatingMemoryStream stream) { Writer::encode(stream, bitmap, extra_args...); }) {
+        AllocatingMemoryStream stream;
+        TRY(Writer::encode(stream, bitmap, extra_args...));
+        return stream.read_until_eof();
+    } else {
+        return Writer::encode(bitmap, extra_args...);
+    }
+}
+
+template<class Writer, class Loader>
+static ErrorOr<NonnullRefPtr<Gfx::Bitmap>> get_roundtrip_bitmap(Gfx::Bitmap const& bitmap)
+{
+    auto encoded_data = TRY(encode_bitmap<Writer>(bitmap));
+    return expect_single_frame_of_size(*TRY(Loader::create(encoded_data)), bitmap.size());
+}
+
+static void expect_bitmaps_equal(Gfx::Bitmap const& a, Gfx::Bitmap const& b)
+{
+    VERIFY(a.size() == b.size());
+    for (int y = 0; y < a.height(); ++y)
+        for (int x = 0; x < a.width(); ++x)
+            EXPECT_EQ(a.get_pixel(x, y), b.get_pixel(x, y));
+}
+
+template<class Writer, class Loader>
+static ErrorOr<void> test_roundtrip(Gfx::Bitmap const& bitmap)
+{
+    auto decoded = TRY((get_roundtrip_bitmap<Writer, Loader>(bitmap)));
+    expect_bitmaps_equal(*decoded, bitmap);
+    return {};
+}
+
+static ErrorOr<AK::NonnullRefPtr<Gfx::Bitmap>> create_test_rgb_bitmap()
+{
+    auto bitmap = TRY(Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, Gfx::AlphaType::Unpremultiplied, { 47, 33 }));
+
+    for (int y = 0; y < bitmap->height(); ++y)
+        for (int x = 0; x < bitmap->width(); ++x)
+            bitmap->set_pixel(x, y, Gfx::Color((x * 255) / bitmap->width(), (y * 255) / bitmap->height(), x + y));
+
+    return bitmap;
+}
+
+static ErrorOr<AK::NonnullRefPtr<Gfx::Bitmap>> create_test_rgba_bitmap()
+{
+    auto bitmap = TRY(create_test_rgb_bitmap());
+
+    for (int y = 0; y < bitmap->height(); ++y) {
+        for (int x = 0; x < bitmap->width(); ++x) {
+            Color pixel = bitmap->get_pixel(x, y);
+            pixel.set_alpha(255 - x);
+            bitmap->set_pixel(x, y, pixel);
+        }
+    }
+
+    return bitmap;
+}
+
+TEST_CASE(test_jpeg)
+{
+    // JPEG is lossy, so the roundtripped bitmap won't match the original bitmap. But it should still have the same size.
+    (void)TRY_OR_FAIL((get_roundtrip_bitmap<Gfx::JPEGWriter, Gfx::JPEGImageDecoderPlugin>(TRY_OR_FAIL(create_test_rgb_bitmap()))));
+}
+
+TEST_CASE(test_jpeg_cmyk)
+{
+    auto bitmap = TRY_OR_FAIL(Gfx::CMYKBitmap::create_with_size({ 47, 33 }));
+    for (int y = 0; y < bitmap->size().height(); ++y)
+        for (int x = 0; x < bitmap->size().width(); ++x)
+            bitmap->scanline(y)[x] = { static_cast<u8>(x * 5), static_cast<u8>(y * 7), static_cast<u8>(x + y), 30 };
+
+    AllocatingMemoryStream stream;
+    TRY_OR_FAIL(Gfx::JPEGWriter::encode(stream, *bitmap));
+    auto encoded_data = TRY_OR_FAIL(stream.read_until_eof());
+
+    auto decoder = TRY_OR_FAIL(Gfx::JPEGImageDecoderPlugin::create(encoded_data));
+    EXPECT_EQ(decoder->natural_frame_format(), Gfx::NaturalFrameFormat::CMYK);
+    auto decoded = TRY_OR_FAIL(decoder->cmyk_frame());
+    EXPECT_EQ(decoded->size(), bitmap->size());
+
+    // Lossy compression and chroma subsampling allow some error, but every channel must keep its meaning.
+    for (int y = 0; y < bitmap->size().height(); ++y) {
+        for (int x = 0; x < bitmap->size().width(); ++x) {
+            auto expected = bitmap->scanline(y)[x];
+            auto actual = decoded->scanline(y)[x];
+            EXPECT(abs(expected.c - actual.c) <= 16);
+            EXPECT(abs(expected.m - actual.m) <= 16);
+            EXPECT(abs(expected.y - actual.y) <= 16);
+            EXPECT(abs(expected.k - actual.k) <= 16);
+        }
+    }
+}
+
+TEST_CASE(test_jpeg_icc_profile)
+{
+    // The profile is larger than one APP2 marker can hold, so libjpeg has to split it.
+    auto icc_data = TRY_OR_FAIL(ByteBuffer::create_uninitialized(70000));
+    for (size_t i = 0; i < icc_data.size(); ++i)
+        icc_data[i] = static_cast<u8>(i * 7);
+
+    auto bitmap = TRY_OR_FAIL(create_test_rgb_bitmap());
+    auto encoded_data = TRY_OR_FAIL(encode_bitmap<Gfx::JPEGWriter>(*bitmap, Gfx::JPEGWriter::Options { .icc_data = icc_data.bytes() }));
+
+    auto decoder = TRY_OR_FAIL(Gfx::JPEGImageDecoderPlugin::create(encoded_data));
+    (void)TRY_OR_FAIL(expect_single_frame_of_size(*decoder, bitmap->size()));
+    auto decoded_icc_data = TRY_OR_FAIL(decoder->icc_data());
+    EXPECT(decoded_icc_data.has_value());
+    EXPECT_EQ(*decoded_icc_data, icc_data.bytes());
+}
+
+TEST_CASE(test_jpeg_too_wide)
+{
+    // libjpeg cannot encode an image with a side above 65500 pixels. This must fail without terminating the process.
+    auto bitmap = TRY_OR_FAIL(Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, { 65501, 1 }));
+    EXPECT(encode_bitmap<Gfx::JPEGWriter>(*bitmap).is_error());
+}
+
+TEST_CASE(test_png)
+{
+    TRY_OR_FAIL((test_roundtrip<Gfx::PNGWriter, Gfx::PNGImageDecoderPlugin>(TRY_OR_FAIL(create_test_rgb_bitmap()))));
+    TRY_OR_FAIL((test_roundtrip<Gfx::PNGWriter, Gfx::PNGImageDecoderPlugin>(TRY_OR_FAIL(create_test_rgba_bitmap()))));
+}

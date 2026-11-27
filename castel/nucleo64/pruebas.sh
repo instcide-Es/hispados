@@ -208,6 +208,19 @@ MAKL=$(cd "$T/prog" && ./MAK 2> /dev/null | grep "^  [0-9]* grupos")
 MAKT=$(cd "$T/prog" && ./MAK todas 2> /dev/null | grep "^  [0-9]* grupos")
 # [etapa 10 f] lo que dice MRUST (Rust con nuestra musl) en Linux: en Hispa-64, lo mismo
 MRS=$( [ -x "$T/prog/MRUST" ] && cd "$T/prog" && ./MRUST uno dos 2> /dev/null | grep '^  ')
+# [etapa 10 f] las pruebas de LibUnicode, LibURL, LibIPC y LibGfx de Ladybird
+# (programas/ladybird/hazlb.sh: TestLB, 46 MB, y MLB), aparte: solo en el
+# arranque de KVM (MODSK); lo que dice MLB en Linux (menos lo que lleva un
+# tiempo), lo mismo en Hispa-64
+mkdir -p "$T/proglb"
+"$AQUI/programas/ladybird/hazlb.sh" "$T/proglb" > "$T/proglb.txt" 2>&1 || true
+MODSK=$MODS
+for f in "$T"/proglb/*; do [ -f "$f" ] && MODSK="$MODSK,$f"; done
+MLBL=$( [ -x "$T/proglb/MLB" ] && cd "$T/proglb" && ./MLB 2> /dev/null | grep '^  ' | grep -v ' ms)\?$')
+mlb_bien() {   # TEXTO
+  [ -z "$MLBL" ] && return 0
+  grep -q "^MLB: todo bien (" <<< "$1" && grep -q "^Programa «MLB»: acaba con el código 0, como debe" <<< "$1" && mismas "$MLBL" "$1"
+}
 # skia_bien TEXTO: MSKIA en Hispa-64 frente a MSKIA en Linux: las mismas
 # líneas (menos la de lo dibujado y la huella); si el camino es el mismo, lo
 # dibujado igual (el crc32 de los píxeles y del PNG); y la huella (la media de
@@ -1703,9 +1716,12 @@ else ko "etapa 10, la red por USB en marcha no sale como debe: $(grep -E 'USB: s
 # QEMU, que deja pasar cosas (en la 10, el SS de sysret sin el RPL 3: con KVM
 # en un AMD, #GP en el iretq y el doble fallo después de HOLACAS) ----
 if [ -w /dev/kvm ]; then
+  # ([etapa 10 f] con las pruebas de Ladybird en la unidad: MODSK)
+  MODS0=$MODS; MODS=$MODSK
   mb1 "apagar ak=todas" "$T/kvm1.txt" 512 -enable-kvm -cpu host -machine q35 -smp 4; c=$?
-  if [ $c = 85 ] && e4_bien "$T/kvm1.txt" 4 && e7_bien "$T/kvm1.txt" 4 && grep -qxF "$MAKT" <<< "$(serie "$T/kvm1.txt")"; then
-    ok "etapa 11, con KVM (-cpu host, q35, 4 procesadores): las etapas 4 y 7 enteras (los programas, musl, C++, la letra, MRED, MSONIDO; [etapa 10 e] Skia por su camino de $(serie "$T/kvm1.txt" | grep -o "el camino: [A-Z0-9]*" | head -1 | cut -d" " -f3) y TestAK entero: $(echo "$MAKT" | sed "s/^  //")), todo en orden"
+  MODS=$MODS0
+  if [ $c = 85 ] && e4_bien "$T/kvm1.txt" 4 && e7_bien "$T/kvm1.txt" 4 && grep -qxF "$MAKT" <<< "$(serie "$T/kvm1.txt")" && mlb_bien "$(serie "$T/kvm1.txt")"; then
+    ok "etapa 11, con KVM (-cpu host, q35, 4 procesadores): las etapas 4 y 7 enteras (los programas, musl, C++, la letra, MRED, MSONIDO; [etapa 10 e] Skia por su camino de $(serie "$T/kvm1.txt" | grep -o "el camino: [A-Z0-9]*" | head -1 | cut -d" " -f3) y TestAK entero: $(echo "$MAKT" | sed "s/^  //"); [etapa 10 f] las pruebas de LibUnicode, LibURL, LibIPC, LibCrypto y LibGfx de Ladybird: $(serie "$T/kvm1.txt" | grep -o "^  [0-9]* grupos, [0-9]* casos: .*" | tail -1 | sed "s/^  //") (MLB, lo mismo que en Linux)), todo en orden"
   else ko "etapa 11, con KVM (-cpu host) no sale (código $c): $(e4_dice "$T/kvm1.txt") $(serie "$T/kvm1.txt" | grep -E 'Doble|parado|  MAL' | head -5 | paste -sd '|')"; fi
   # [etapa 11 b] con KVM, el tiempo es el de verdad: aquí cuentan el tic (90 o más de los 100, el
   # temporizador cada 10 ms contra el TSC) y el planificador (etapa 3 entera, el interactivo incluido)

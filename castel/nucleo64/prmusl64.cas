@@ -121,6 +121,10 @@ módulo PrMusl64
         si busca_archivo("MSONIDO") >= 0 entonces
             corre("MSONIDO", 0)                                                 ; [etapa 11] el sonido (/dev/dsp)
             si hay_hda entonces escribir("  el sonido: ", hda_octetos, " octetos al anillo, ", hda_sin_datos, " veces sin datos, ", hda_lpib_atrás, " veces LPIB hacia atrás\n") fin
+        ; [etapa 10 f] las pruebas de LibUnicode, LibURL, LibIPC y LibGfx de
+        ; Ladybird (TestLB, de 46 MB, con los datos de ICU dentro: solo en el
+        ; arranque de KVM, que las lleva en la unidad)
+        si busca_archivo("MLB") >= 0 entonces corre("MLB", 0) fin
         fin
         si busca_archivo("LUA") >= 0 y busca_archivo("PRUEBA.LUA") >= 0 entonces corre("LUA /PRUEBA.LUA uno dos", 0) fin
         ; (los que quedasen sueltos acaban solos)

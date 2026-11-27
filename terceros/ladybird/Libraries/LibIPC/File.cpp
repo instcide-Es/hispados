@@ -1,0 +1,72 @@
+/*
+ * Copyright (c) 2020, Sergey Bugaev <bugaevc@serenityos.org>
+ * Copyright (c) 2021, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2023-2025, Tim Flynn <trflynn89@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibCore/File.h>
+#include <LibCore/System.h>
+#include <LibIPC/Attachment.h>
+#include <LibIPC/Decoder.h>
+#include <LibIPC/File.h>
+
+namespace IPC {
+
+File File::adopt_file(NonnullOwnPtr<Core::File> file)
+{
+    return File(file->leak_fd());
+}
+
+File File::adopt_fd(int fd)
+{
+    return File(fd);
+}
+
+ErrorOr<File> File::clone_fd(int fd)
+{
+    int new_fd = TRY(Core::System::dup(fd));
+    return File(new_fd);
+}
+
+File::File(int fd)
+    : m_fd(fd)
+{
+}
+
+File::File(File&& other)
+    : m_fd(exchange(other.m_fd, -1))
+{
+}
+
+File& File::operator=(File&& other)
+{
+    if (this != &other) {
+        if (m_fd != -1)
+            (void)Core::System::close(m_fd);
+        m_fd = exchange(other.m_fd, -1);
+    }
+    return *this;
+}
+
+File::~File()
+{
+    if (m_fd != -1)
+        (void)Core::System::close(m_fd);
+}
+
+template<>
+ErrorOr<File> decode(Decoder& decoder)
+{
+    auto attachment = TRY(decoder.attachments().try_dequeue());
+    int fd = attachment.to_fd();
+    if (fd < 0)
+        return Error::from_string_literal("Failed to obtain fd from attachment");
+#ifndef AK_OS_WINDOWS
+    TRY(Core::System::set_close_on_exec(fd, true));
+#endif
+    return File::adopt_fd(fd);
+}
+
+}

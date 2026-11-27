@@ -28,3 +28,16 @@ python3):
   tar xzf icu4c-78.3-sources.tgz && cd icu/source && rm -rf data && unzip ../../icu4c-78.3-data.zip
   ICU_DATA_FILTER_FILE=.../terceros/icu/filtro.json ./configure --disable-tests --disable-samples --disable-extras
   make     ->  data/out/tmp/icudt78l.dat
+
+[Etapa 10 f] Ladybird (LibUnicode) quiere los datos de todos los idiomas,
+como el ICU::data de vcpkg: sus pruebas (TestLB, que los lleva dentro, en
+vez de stubdata) piden el francés, el chino, el serbio..., y la
+transliteración (Halfwidth-Fullwidth). Son 27 MB, que no van en la unidad de
+cada arranque (MICU y Skia siguen con los 4 MB de icudt78l.dat): se hacen
+igual que los de arriba, pero con filtro-ladybird.json (todos los idiomas y
+todo, menos las conversiones, salvo windows-1252: Ladybird usa encoding_rs;
+los nombres de los caracteres y los «confusables», que no usa), y se dejan
+en build/icu-datos/icudt78l-ladybird.dat (castel/nucleo64/programas/
+ladybird/hazlb.sh los busca ahí; no van en el repositorio):
+  ICU_DATA_FILTER_FILE=.../terceros/icu/filtro-ladybird.json ./configure --disable-tests --disable-samples --disable-extras
+  make     ->  data/out/tmp/icudt78l.dat   (27.563.248 octetos)

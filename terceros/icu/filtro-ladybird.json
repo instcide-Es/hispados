@@ -1,0 +1,10 @@
+{
+  "featureFilters": {
+    "conversion_mappings": {
+      "includelist": ["ibm-5348_P100-1997"]
+    },
+    "unames": "exclude",
+    "confusables": "exclude"
+  },
+  "resourceFilters": []
+}

@@ -1,0 +1,53 @@
+/*
+ * Copyright (c) 2021, Max Wipfli <mail@maxwipfli.ch>
+ * Copyright (c) 2023-2024, Shannon Booth <shannon@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Optional.h>
+#include <AK/StringView.h>
+#include <AK/Utf16View.h>
+#include <LibURL/URL.h>
+
+namespace URL {
+
+class Parser {
+public:
+    enum class State {
+        SchemeStart,
+        Scheme,
+        NoScheme,
+        SpecialRelativeOrAuthority,
+        PathOrAuthority,
+        Relative,
+        RelativeSlash,
+        SpecialAuthoritySlashes,
+        SpecialAuthorityIgnoreSlashes,
+        Authority,
+        Host,
+        Hostname,
+        Port,
+        File,
+        FileSlash,
+        FileHost,
+        PathStart,
+        Path,
+        OpaquePath,
+        Query,
+        Fragment,
+    };
+
+    // https://url.spec.whatwg.org/#concept-basic-url-parser
+    static Optional<URL> basic_parse(StringView input, Optional<URL const&> base_url = {}, Optional<StringView> encoding = {});
+    static Optional<URL> basic_parse(Utf16View input, Optional<URL const&> base_url = {}, Optional<StringView> encoding = {});
+    static bool basic_parse(StringView input, URL& url, State state_override, Optional<StringView> encoding = {});
+    static bool basic_parse(Utf16View input, URL& url, State state_override, Optional<StringView> encoding = {});
+
+    static Optional<Host> parse_host(StringView input, bool is_opaque = false);
+    static Optional<Host> parse_host(Utf16View input, bool is_opaque = false);
+};
+
+}

@@ -1,0 +1,457 @@
+/*
+ * Copyright (c) 2022, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Format.h>
+#include <AK/StdLibExtras.h>
+#include <AK/Traits.h>
+#include <AK/Types.h>
+#include <LibGC/Forward.h>
+
+namespace GC {
+
+template<typename T>
+concept IsCellLike = IsBaseOf<Cell, T> || IsBaseOf<ForeignCell, T>;
+
+template<typename T>
+using ForeignCellBaseOf = CopyConst<T, ForeignCell>;
+
+// A pointer to a type that names foreign cells is a pointer to the foreign cell itself, whose first word and fields
+// after the header belong to the foreign implementation, so the type can add neither a vtable pointer nor fields.
+template<typename T>
+concept IsForeignCellHandle = IsBaseOf<ForeignCell, T> && !__is_polymorphic(T) && sizeof(T) == sizeof(ForeignCellBaseOf<T>) && alignof(T) == alignof(ForeignCellBaseOf<T>);
+
+template<typename T>
+requires(IsBaseOf<Cell, T>)
+ALWAYS_INLINE CopyConst<T, Cell>* as_cell(T* cell)
+{
+    return cell;
+}
+
+template<typename T>
+requires(IsBaseOf<ForeignCell, T>)
+ALWAYS_INLINE CopyConst<T, Cell>* as_cell(T* cell)
+{
+    static_assert(IsForeignCellHandle<T>, "A type naming foreign cells cannot add a vtable pointer or fields to ForeignCell");
+    return reinterpret_cast<CopyConst<T, Cell>*>(static_cast<ForeignCellBaseOf<T>*>(cell));
+}
+
+// The inverse of as_cell(), as unchecked as a static_cast.
+template<typename T>
+requires(IsBaseOf<Cell, T>)
+ALWAYS_INLINE T* static_cell_cast(CopyConst<T, Cell>* cell)
+{
+    return static_cast<T*>(cell);
+}
+
+template<typename T>
+requires(IsBaseOf<ForeignCell, T>)
+ALWAYS_INLINE T* static_cell_cast(CopyConst<T, Cell>* cell)
+{
+    static_assert(IsForeignCellHandle<T>, "A type naming foreign cells cannot add a vtable pointer or fields to ForeignCell");
+    return static_cast<T*>(reinterpret_cast<ForeignCellBaseOf<T>*>(cell));
+}
+
+// Cell is not a base of the types that name foreign cells, so Ptr<Cell> and Ref<Cell> convert from them through
+// as_cell() instead of a derived-to-base conversion.
+template<typename From, typename To>
+concept IsForeignCellConvertibleToCell = IsSame<RemoveConst<To>, Cell> && IsConvertible<From*, ForeignCell const*> && (IsConst<To> || !IsConst<From>);
+
+namespace Detail {
+
+template<typename T, typename U>
+ALWAYS_INLINE bool point_to_the_same_cell(T* a, U* b)
+{
+    if constexpr (IsForeignCellConvertibleToCell<T, U const>)
+        return as_cell(a) == b;
+    else if constexpr (IsForeignCellConvertibleToCell<U, T const>)
+        return a == as_cell(b);
+    else
+        return a == b;
+}
+
+}
+
+template<typename T>
+class Ptr;
+
+template<typename T>
+class Ref {
+public:
+    Ref() = delete;
+
+    Ref(T& ptr)
+        : m_ptr(&ptr)
+    {
+    }
+
+    template<typename U>
+    Ref(U& ptr)
+    requires(IsConvertible<U*, T*>)
+        : m_ptr(&static_cast<T&>(ptr))
+    {
+    }
+
+    template<typename U>
+    Ref(Ref<U> const& other)
+    requires(IsConvertible<U*, T*>)
+        : m_ptr(other.ptr())
+    {
+    }
+
+    template<typename U>
+    Ref(U& foreign_cell)
+    requires(IsForeignCellConvertibleToCell<U, T>)
+        : m_ptr(as_cell(&foreign_cell))
+    {
+    }
+
+    template<typename U>
+    Ref(Ref<U> const& foreign_cell)
+    requires(IsForeignCellConvertibleToCell<U, T>)
+        : m_ptr(as_cell(foreign_cell.ptr()))
+    {
+    }
+
+    template<typename U>
+    Ref& operator=(Ref<U> const& other)
+    requires(IsConvertible<U*, T*>)
+    {
+        m_ptr = static_cast<T*>(other.ptr());
+        return *this;
+    }
+
+    Ref& operator=(T& other)
+    {
+        m_ptr = &other;
+        return *this;
+    }
+
+    template<typename U>
+    Ref& operator=(U& other)
+    requires(IsConvertible<U*, T*>)
+    {
+        m_ptr = &static_cast<T&>(other);
+        return *this;
+    }
+
+    // NB: A member converts to a reference, a Ref and a Ptr, so assigning one would be ambiguous without this.
+    template<typename U>
+    Ref& operator=(NonnullMember<U> const& other)
+    requires(IsConvertible<U*, T*>)
+    {
+        m_ptr = static_cast<T*>(other.ptr());
+        return *this;
+    }
+
+    template<typename U>
+    Ref& operator=(Ref<U> const& foreign_cell)
+    requires(IsForeignCellConvertibleToCell<U, T>)
+    {
+        m_ptr = as_cell(foreign_cell.ptr());
+        return *this;
+    }
+
+    template<typename U>
+    Ref& operator=(U& foreign_cell)
+    requires(IsForeignCellConvertibleToCell<U, T>)
+    {
+        m_ptr = as_cell(&foreign_cell);
+        return *this;
+    }
+
+    RETURNS_NONNULL T* operator->() const { return m_ptr; }
+
+    [[nodiscard]] T& operator*() const { return *m_ptr; }
+
+    RETURNS_NONNULL T* ptr() const { return m_ptr; }
+
+    operator T&() const { return *m_ptr; }
+
+    operator bool() const = delete;
+    bool operator!() const = delete;
+
+private:
+    T* m_ptr { nullptr };
+};
+
+template<typename T>
+class Ptr {
+public:
+    constexpr Ptr() = default;
+
+    Ptr(T& ptr)
+        : m_ptr(&ptr)
+    {
+    }
+
+    Ptr(T* ptr)
+        : m_ptr(ptr)
+    {
+    }
+
+    template<typename U>
+    Ptr(Ptr<U> const& other)
+    requires(IsConvertible<U*, T*>)
+        : m_ptr(other.ptr())
+    {
+    }
+
+    Ptr(Ref<T> const& other)
+        : m_ptr(other.ptr())
+    {
+    }
+
+    template<typename U>
+    Ptr(Ref<U> const& other)
+    requires(IsConvertible<U*, T*>)
+        : m_ptr(other.ptr())
+    {
+    }
+
+    Ptr(nullptr_t)
+        : m_ptr(nullptr)
+    {
+    }
+
+    template<typename U>
+    Ptr(U& foreign_cell)
+    requires(IsForeignCellConvertibleToCell<U, T>)
+        : m_ptr(as_cell(&foreign_cell))
+    {
+    }
+
+    template<typename U>
+    Ptr(U* foreign_cell)
+    requires(IsForeignCellConvertibleToCell<U, T>)
+        : m_ptr(as_cell(foreign_cell))
+    {
+    }
+
+    template<typename U>
+    Ptr(Ptr<U> const& foreign_cell)
+    requires(IsForeignCellConvertibleToCell<U, T>)
+        : m_ptr(as_cell(foreign_cell.ptr()))
+    {
+    }
+
+    template<typename U>
+    Ptr(Ref<U> const& foreign_cell)
+    requires(IsForeignCellConvertibleToCell<U, T>)
+        : m_ptr(as_cell(foreign_cell.ptr()))
+    {
+    }
+
+    template<typename U>
+    Ptr& operator=(Ptr<U> const& other)
+    requires(IsConvertible<U*, T*>)
+    {
+        m_ptr = static_cast<T*>(other.ptr());
+        return *this;
+    }
+
+    Ptr& operator=(Ref<T> const& other)
+    {
+        m_ptr = other.ptr();
+        return *this;
+    }
+
+    template<typename U>
+    Ptr& operator=(Ref<U> const& other)
+    requires(IsConvertible<U*, T*>)
+    {
+        m_ptr = static_cast<T*>(other.ptr());
+        return *this;
+    }
+
+    Ptr& operator=(T& other)
+    {
+        m_ptr = &other;
+        return *this;
+    }
+
+    template<typename U>
+    Ptr& operator=(U& other)
+    requires(IsConvertible<U*, T*>)
+    {
+        m_ptr = &static_cast<T&>(other);
+        return *this;
+    }
+
+    Ptr& operator=(T* other)
+    {
+        m_ptr = other;
+        return *this;
+    }
+
+    template<typename U>
+    Ptr& operator=(U* other)
+    requires(IsConvertible<U*, T*>)
+    {
+        m_ptr = static_cast<T*>(other);
+        return *this;
+    }
+
+    // NB: A member converts to a reference, a Ref and a Ptr, so assigning one would be ambiguous without these.
+    template<typename U>
+    Ptr& operator=(NonnullMember<U> const& other)
+    requires(IsConvertible<U*, T*>)
+    {
+        m_ptr = static_cast<T*>(other.ptr());
+        return *this;
+    }
+
+    template<typename U>
+    Ptr& operator=(Member<U> const& other)
+    requires(IsConvertible<U*, T*>)
+    {
+        m_ptr = static_cast<T*>(other.ptr());
+        return *this;
+    }
+
+    template<typename U>
+    Ptr& operator=(Ptr<U> const& foreign_cell)
+    requires(IsForeignCellConvertibleToCell<U, T>)
+    {
+        m_ptr = as_cell(foreign_cell.ptr());
+        return *this;
+    }
+
+    template<typename U>
+    Ptr& operator=(Ref<U> const& foreign_cell)
+    requires(IsForeignCellConvertibleToCell<U, T>)
+    {
+        m_ptr = as_cell(foreign_cell.ptr());
+        return *this;
+    }
+
+    template<typename U>
+    Ptr& operator=(U& foreign_cell)
+    requires(IsForeignCellConvertibleToCell<U, T>)
+    {
+        m_ptr = as_cell(&foreign_cell);
+        return *this;
+    }
+
+    template<typename U>
+    Ptr& operator=(U* foreign_cell)
+    requires(IsForeignCellConvertibleToCell<U, T>)
+    {
+        m_ptr = as_cell(foreign_cell);
+        return *this;
+    }
+
+    T* operator->() const
+    {
+        ASSERT(m_ptr);
+        return m_ptr;
+    }
+
+    [[nodiscard]] T& operator*() const
+    {
+        ASSERT(m_ptr);
+        return *m_ptr;
+    }
+
+    T* ptr() const { return m_ptr; }
+
+    explicit operator bool() const { return !!m_ptr; }
+    bool operator!() const { return !m_ptr; }
+
+    Ref<T> as_nonnull() const
+    {
+        VERIFY(m_ptr);
+        return *m_ptr;
+    }
+
+private:
+    T* m_ptr { nullptr };
+};
+
+template<typename T, typename U>
+inline bool operator==(Ptr<T> const& a, Ptr<U> const& b)
+{
+    return Detail::point_to_the_same_cell(a.ptr(), b.ptr());
+}
+
+template<typename T, typename U>
+inline bool operator==(Ptr<T> const& a, Ref<U> const& b)
+{
+    return Detail::point_to_the_same_cell(a.ptr(), b.ptr());
+}
+
+template<typename T, typename U>
+inline bool operator==(Ref<T> const& a, Ref<U> const& b)
+{
+    return Detail::point_to_the_same_cell(a.ptr(), b.ptr());
+}
+
+template<typename T, typename U>
+inline bool operator==(Ref<T> const& a, Ptr<U> const& b)
+{
+    return Detail::point_to_the_same_cell(a.ptr(), b.ptr());
+}
+
+template<typename T>
+inline bool operator==(Ptr<T> const& ptr, nullptr_t)
+{
+    return ptr.ptr() == nullptr;
+}
+
+template<typename T>
+inline bool operator==(nullptr_t, Ptr<T> const& ptr)
+{
+    return ptr.ptr() == nullptr;
+}
+
+}
+
+namespace AK {
+
+template<typename T>
+struct Traits<GC::Ptr<T>> : public DefaultTraits<GC::Ptr<T>> {
+    static unsigned hash(GC::Ptr<T> const& value)
+    {
+        return Traits<T*>::hash(value.ptr());
+    }
+    static constexpr bool may_have_slow_equality_check() { return false; }
+};
+
+template<typename T>
+struct Traits<GC::Ref<T>> : public DefaultTraits<GC::Ref<T>> {
+    static unsigned hash(GC::Ref<T> const& value)
+    {
+        return Traits<T*>::hash(value.ptr());
+    }
+};
+
+template<typename T>
+struct Formatter<GC::Ptr<T>> : Formatter<T const*> {
+    ErrorOr<void> format(FormatBuilder& builder, GC::Ptr<T> const& value)
+    {
+        return Formatter<T const*>::format(builder, value.ptr());
+    }
+};
+
+template<Formattable T>
+struct Formatter<GC::Ref<T>> : Formatter<T> {
+    ErrorOr<void> format(FormatBuilder& builder, GC::Ref<T> const& value)
+    {
+        return Formatter<T>::format(builder, *value);
+    }
+};
+
+template<typename T>
+requires(!HasFormatter<T>)
+struct Formatter<GC::Ref<T>> : Formatter<T const*> {
+    ErrorOr<void> format(FormatBuilder& builder, GC::Ref<T> const& value)
+    {
+        return Formatter<T const*>::format(builder, value.ptr());
+    }
+};
+
+}

@@ -1,0 +1,322 @@
+/*
+ * Copyright (c) 2024-2025, Tim Flynn <trflynn89@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/OwnPtr.h>
+#include <LibUnicode/Collator.h>
+#include <LibUnicode/ICU.h>
+
+#include <unicode/coll.h>
+#include <unicode/stsearch.h>
+
+namespace Unicode {
+
+Usage usage_from_string(Utf16View usage)
+{
+    if (usage == "sort"sv)
+        return Usage::Sort;
+    if (usage == "search"sv)
+        return Usage::Search;
+    VERIFY_NOT_REACHED();
+}
+
+Utf16String usage_to_string(Usage usage)
+{
+    switch (usage) {
+    case Usage::Sort:
+        return "sort"_utf16;
+    case Usage::Search:
+        return "search"_utf16;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+static NonnullOwnPtr<icu::Locale> apply_usage_to_locale(icu::Locale const& locale, Usage usage, Utf16View collation)
+{
+    auto result = adopt_own(*locale.clone());
+    UErrorCode status = U_ZERO_ERROR;
+
+    switch (usage) {
+    case Usage::Sort:
+        result->setUnicodeKeywordValue("co", icu_string_piece(StringView { collation.ascii_bytes() }), status);
+        break;
+    case Usage::Search:
+        result->setUnicodeKeywordValue("co", "search", status);
+        break;
+    }
+
+    verify_icu_success(status);
+    return result;
+}
+
+Sensitivity sensitivity_from_string(Utf16View sensitivity)
+{
+    if (sensitivity == "base"sv)
+        return Sensitivity::Base;
+    if (sensitivity == "accent"sv)
+        return Sensitivity::Accent;
+    if (sensitivity == "case"sv)
+        return Sensitivity::Case;
+    if (sensitivity == "variant"sv)
+        return Sensitivity::Variant;
+    VERIFY_NOT_REACHED();
+}
+
+Utf16String sensitivity_to_string(Sensitivity sensitivity)
+{
+    switch (sensitivity) {
+    case Sensitivity::Base:
+        return "base"_utf16;
+    case Sensitivity::Accent:
+        return "accent"_utf16;
+    case Sensitivity::Case:
+        return "case"_utf16;
+    case Sensitivity::Variant:
+        return "variant"_utf16;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+static constexpr UColAttributeValue icu_sensitivity(Sensitivity sensitivity)
+{
+    switch (sensitivity) {
+    case Sensitivity::Base:
+        return UCOL_PRIMARY;
+    case Sensitivity::Accent:
+        return UCOL_SECONDARY;
+    case Sensitivity::Case:
+        return UCOL_PRIMARY;
+    case Sensitivity::Variant:
+        return UCOL_TERTIARY;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+static Sensitivity sensitivity_for_collator(icu::Collator const& collator)
+{
+    UErrorCode status = U_ZERO_ERROR;
+
+    auto attribute = collator.getAttribute(UCOL_STRENGTH, status);
+    verify_icu_success(status);
+
+    switch (attribute) {
+    case UCOL_PRIMARY:
+        attribute = collator.getAttribute(UCOL_CASE_LEVEL, status);
+        verify_icu_success(status);
+
+        return attribute == UCOL_ON ? Sensitivity::Case : Sensitivity::Base;
+
+    case UCOL_SECONDARY:
+        return Sensitivity::Accent;
+
+    default:
+        return Sensitivity::Variant;
+    }
+}
+
+CaseFirst case_first_from_string(Utf16View case_first)
+{
+    if (case_first == "upper"sv)
+        return CaseFirst::Upper;
+    if (case_first == "lower"sv)
+        return CaseFirst::Lower;
+    if (case_first == "false"sv)
+        return CaseFirst::False;
+    VERIFY_NOT_REACHED();
+}
+
+Utf16String case_first_to_string(CaseFirst case_first)
+{
+    switch (case_first) {
+    case CaseFirst::Upper:
+        return "upper"_utf16;
+    case CaseFirst::Lower:
+        return "lower"_utf16;
+    case CaseFirst::False:
+        return "false"_utf16;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+static constexpr UColAttributeValue icu_case_first(CaseFirst case_first)
+{
+    switch (case_first) {
+    case CaseFirst::Upper:
+        return UCOL_UPPER_FIRST;
+    case CaseFirst::Lower:
+        return UCOL_LOWER_FIRST;
+    case CaseFirst::False:
+        return UCOL_OFF;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+static bool ignore_punctuation_for_collator(icu::Collator const& collator)
+{
+    UErrorCode status = U_ZERO_ERROR;
+
+    auto attribute = collator.getAttribute(UCOL_ALTERNATE_HANDLING, status);
+    verify_icu_success(status);
+
+    return attribute == UCOL_SHIFTED;
+}
+
+class SubstringSearcherImpl final : public Collator::SubstringSearcher {
+public:
+    AK_ALLOC_WITH_KMALLOC;
+
+    SubstringSearcherImpl(icu::RuleBasedCollator const& collator, Utf16View const& haystack, Utf16View const& needle)
+    {
+        auto to_unicode_string = [](Utf16View const& string) {
+            if (string.has_latin1_storage()) {
+                auto utf8 = MUST(string.to_utf8());
+                return icu::UnicodeString::fromUTF8(icu_string_piece(utf8.bytes_as_string_view()));
+            }
+            return icu::UnicodeString { string.utf16_span().data(), static_cast<i32>(string.length_in_code_units()) };
+        };
+
+        auto* cloned_collator = dynamic_cast<icu::RuleBasedCollator*>(collator.clone());
+        VERIFY(cloned_collator);
+        m_collator = adopt_own(*cloned_collator);
+        m_pattern = to_unicode_string(needle);
+        m_text = to_unicode_string(haystack);
+
+        UErrorCode status = U_ZERO_ERROR;
+        m_search = make<icu::StringSearch>(m_pattern, m_text, m_collator.ptr(), nullptr, status);
+        verify_icu_success(status);
+    }
+
+    virtual Optional<Collator::Match> find_from(size_t start_offset) override
+    {
+        if (m_pattern.isEmpty() || start_offset > static_cast<size_t>(m_text.length()))
+            return {};
+
+        // ICU snaps offsets inside a surrogate pair or contraction backwards, so step forward until a match doesn't.
+        auto search_offset = static_cast<i32>(start_offset);
+        while (search_offset < m_text.length()) {
+            UErrorCode status = U_ZERO_ERROR;
+            m_search->setOffset(search_offset, status);
+            verify_icu_success(status);
+
+            auto const match_start = m_search->next(status);
+            verify_icu_success(status);
+            if (match_start == USEARCH_DONE)
+                return {};
+
+            if (static_cast<size_t>(match_start) >= start_offset) {
+                return Collator::Match {
+                    .start = static_cast<size_t>(match_start),
+                    .end = static_cast<size_t>(match_start + m_search->getMatchedLength()),
+                };
+            }
+
+            search_offset = m_text.moveIndex32(search_offset, 1);
+        }
+        return {};
+    }
+
+private:
+    OwnPtr<icu::RuleBasedCollator> m_collator;
+    icu::UnicodeString m_pattern;
+    icu::UnicodeString m_text;
+    OwnPtr<icu::StringSearch> m_search;
+};
+
+class CollatorImpl : public Collator {
+public:
+    explicit CollatorImpl(NonnullOwnPtr<icu::Collator> collator)
+        : m_collator(move(collator))
+    {
+    }
+
+    virtual Collator::Order compare(Utf16View const& lhs, Utf16View const& rhs) const override
+    {
+        UErrorCode status = U_ZERO_ERROR;
+        UCollationResult result;
+
+        // NB: ICU has no iterator over Latin-1, so a string with Latin-1 storage that is not ASCII is compared as UTF-16.
+        auto has_non_ascii_latin1_storage = [](Utf16View const& string) { return string.has_latin1_storage() && !string.has_ascii_storage(); };
+        if (has_non_ascii_latin1_storage(lhs) || has_non_ascii_latin1_storage(rhs)) {
+            result = m_collator->compare(icu_string(lhs), icu_string(rhs), status);
+        } else {
+            auto lhs_it = icu_string_iterator(lhs);
+            auto rhs_it = icu_string_iterator(rhs);
+            result = m_collator->compare(lhs_it, rhs_it, status);
+        }
+        verify_icu_success(status);
+
+        switch (result) {
+        case UCOL_LESS:
+            return Order::Before;
+        case UCOL_EQUAL:
+            return Order::Equal;
+        case UCOL_GREATER:
+            return Order::After;
+        }
+
+        VERIFY_NOT_REACHED();
+    }
+
+    virtual NonnullOwnPtr<SubstringSearcher> create_substring_searcher(Utf16View const& haystack, Utf16View const& needle) const override
+    {
+        auto* rule_based_collator = dynamic_cast<icu::RuleBasedCollator*>(m_collator.ptr());
+        VERIFY(rule_based_collator);
+        return make<SubstringSearcherImpl>(*rule_based_collator, haystack, needle);
+    }
+
+    virtual Sensitivity sensitivity() const override
+    {
+        return sensitivity_for_collator(*m_collator);
+    }
+
+    virtual bool ignore_punctuation() const override
+    {
+        return ignore_punctuation_for_collator(*m_collator);
+    }
+
+private:
+    NonnullOwnPtr<icu::Collator> m_collator;
+};
+
+NonnullOwnPtr<Collator> Collator::create(
+    Utf16View locale,
+    Usage usage,
+    Utf16View collation,
+    Optional<Sensitivity> sensitivity,
+    CaseFirst case_first,
+    bool numeric,
+    Optional<bool> ignore_punctuation)
+{
+    UErrorCode status = U_ZERO_ERROR;
+
+    auto& locale_data = LocaleData::for_locale_or_default(locale);
+
+    auto locale_with_usage = apply_usage_to_locale(locale_data.locale(), usage, collation);
+
+    auto collator = adopt_own(*icu::Collator::createInstance(*locale_with_usage, status));
+    verify_icu_success(status);
+
+    auto set_attribute = [&](UColAttribute attribute, UColAttributeValue value) {
+        collator->setAttribute(attribute, value, status);
+        verify_icu_success(status);
+    };
+
+    if (!sensitivity.has_value())
+        sensitivity = sensitivity_for_collator(*collator);
+
+    if (!ignore_punctuation.has_value())
+        ignore_punctuation = ignore_punctuation_for_collator(*collator);
+
+    set_attribute(UCOL_STRENGTH, icu_sensitivity(*sensitivity));
+    set_attribute(UCOL_CASE_LEVEL, sensitivity == Sensitivity::Case ? UCOL_ON : UCOL_OFF);
+    set_attribute(UCOL_CASE_FIRST, icu_case_first(case_first));
+    set_attribute(UCOL_NUMERIC_COLLATION, numeric ? UCOL_ON : UCOL_OFF);
+    set_attribute(UCOL_ALTERNATE_HANDLING, *ignore_punctuation ? UCOL_SHIFTED : UCOL_NON_IGNORABLE);
+    set_attribute(UCOL_NORMALIZATION_MODE, UCOL_ON);
+
+    return adopt_own(*new CollatorImpl(move(collator)));
+}
+
+}

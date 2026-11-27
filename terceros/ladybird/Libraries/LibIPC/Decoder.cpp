@@ -1,0 +1,207 @@
+/*
+ * Copyright (c) 2020, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2023-2025, Tim Flynn <trflynn89@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/Checked.h>
+#include <AK/IPv4Address.h>
+#include <AK/IPv6Address.h>
+#include <AK/JsonValue.h>
+#include <AK/Types.h>
+#include <AK/Utf16FlyString.h>
+#include <AK/Utf16String.h>
+#include <LibCore/AnonymousBuffer.h>
+#include <LibIPC/Decoder.h>
+#include <LibIPC/File.h>
+#include <LibURL/Parser.h>
+#include <LibURL/URL.h>
+
+namespace IPC {
+
+ErrorOr<size_t> Decoder::decode_size()
+{
+    auto max_size = exchange(m_max_size_of_next_value, NumericLimits<size_t>::max());
+    auto size = static_cast<size_t>(TRY(decode<u32>()));
+    if (size > max_size)
+        return Error::from_string_literal("IPC decode: Size exceeds the maximum");
+
+    // Every element of a string or container takes at least one byte or one attachment of the message.
+    if (size > m_stream.remaining() + m_attachments.size())
+        return Error::from_string_literal("IPC decode: Size exceeds the rest of the message");
+    return size;
+}
+
+template<>
+ErrorOr<String> decode(Decoder& decoder)
+{
+    auto length = TRY(decoder.decode_size());
+    return String::from_stream(decoder.stream(), length);
+}
+
+template<>
+ErrorOr<Utf16String> decode(Decoder& decoder)
+{
+    auto has_latin1_storage = TRY(decoder.decode<bool>());
+    auto length_in_code_units = TRY(decoder.decode_size());
+
+    return Utf16String::from_ipc_stream(decoder.stream(), length_in_code_units, has_latin1_storage);
+}
+
+template<>
+ErrorOr<Utf16FlyString> decode(Decoder& decoder)
+{
+    auto string = TRY(decoder.decode<Utf16String>());
+    return Utf16FlyString::from_utf16(string.utf16_view());
+}
+
+template<>
+ErrorOr<ByteString> decode(Decoder& decoder)
+{
+    auto length = TRY(decoder.decode_size());
+    if (length == 0)
+        return ByteString::empty();
+
+    return ByteString::create_and_overwrite(length, [&](Bytes bytes) -> ErrorOr<void> {
+        TRY(decoder.decode_into(bytes));
+        return {};
+    });
+}
+
+template<>
+ErrorOr<ByteBuffer> decode(Decoder& decoder)
+{
+    auto length = TRY(decoder.decode_size());
+    if (length == 0)
+        return ByteBuffer {};
+
+    auto buffer = TRY(ByteBuffer::create_uninitialized(length));
+    auto bytes = buffer.bytes();
+
+    TRY(decoder.decode_into(bytes));
+    return buffer;
+}
+
+template<>
+ErrorOr<JsonValue> decode(Decoder& decoder)
+{
+    auto json = TRY(decoder.decode<ByteString>());
+    return JsonValue::from_string(json);
+}
+
+template<>
+ErrorOr<AK::Duration> decode(Decoder& decoder)
+{
+    auto seconds = TRY(decoder.decode<i64>());
+    auto nanoseconds = TRY(decoder.decode<u32>());
+    auto duration = AK::Duration::maybe_from_seconds_and_nanoseconds(seconds, nanoseconds);
+    if (!duration.has_value())
+        return Error::from_string_literal("IPC: Invalid duration");
+    return duration.release_value();
+}
+
+template<>
+ErrorOr<UnixDateTime> decode(Decoder& decoder)
+{
+    auto nanoseconds = TRY(decoder.decode<i64>());
+    return AK::UnixDateTime::from_nanoseconds_since_epoch(nanoseconds);
+}
+
+template<>
+ErrorOr<IPv4Address> decode(Decoder& decoder)
+{
+    auto ipv4 = TRY(decoder.decode<u32>());
+    return IPv4Address(ipv4);
+}
+
+template<>
+ErrorOr<IPv6Address> decode(Decoder& decoder)
+{
+    auto ipv6 = TRY(decoder.decode<Array<u8, 16>>());
+    return IPv6Address(ipv6);
+}
+
+template<>
+ErrorOr<URL::URL> decode(Decoder& decoder)
+{
+    auto url_string = TRY(decoder.decode<ByteString>());
+    auto url = URL::Parser::basic_parse(url_string);
+    if (!url.has_value())
+        return Error::from_string_view("Failed to parse URL in IPC Decode"sv);
+
+    url->set_blob_url_entry(TRY(decoder.decode<Optional<URL::BlobURLEntry>>()));
+    return url.release_value();
+}
+
+template<>
+ErrorOr<URL::BlobURLEntry> decode(Decoder& decoder)
+{
+    URL::BlobURLEntry::Object object = URL::BlobURLEntry::MediaSource {};
+    if (TRY(decoder.decode<bool>()))
+        object = URL::BlobURLEntry::Blob { .token = TRY(decoder.decode<URL::BlobURLEntry::Token>()), .object = nullptr };
+    auto origin = TRY(decoder.decode<URL::Origin>());
+    return URL::BlobURLEntry { .object = move(object), .environment { .origin = move(origin) } };
+}
+
+template<>
+ErrorOr<URL::Origin> decode(Decoder& decoder)
+{
+    auto is_opaque = TRY(decoder.decode<bool>());
+    if (is_opaque) {
+        auto nonce = TRY(decoder.decode<URL::Origin::OpaqueData::Nonce>());
+        auto type = TRY(decoder.decode<URL::Origin::OpaqueData::Type>());
+        return URL::Origin { URL::Origin::OpaqueData { nonce, type } };
+    }
+
+    auto scheme = TRY(decoder.decode<Optional<String>>());
+    auto host = TRY(decoder.decode<URL::Host>());
+    auto port = TRY(decoder.decode<Optional<u16>>());
+    auto domain = TRY(decoder.decode<Optional<URL::Host>>());
+
+    return URL::Origin { move(scheme), move(host), port, move(domain) };
+}
+
+template<>
+ErrorOr<URL::Host> decode(Decoder& decoder)
+{
+    auto value = TRY(decoder.decode<URL::Host::VariantType>());
+    return URL::Host { move(value) };
+}
+
+template<>
+ErrorOr<URL::OpaqueHost> decode(Decoder& decoder)
+{
+    auto value = TRY(decoder.decode<String>());
+    return URL::OpaqueHost { move(value) };
+}
+
+template<>
+ErrorOr<Empty> decode(Decoder&)
+{
+    return Empty {};
+}
+
+template<>
+ErrorOr<Core::AnonymousBuffer> decode(Decoder& decoder)
+{
+    if (auto valid = TRY(decoder.decode<bool>()); !valid)
+        return Core::AnonymousBuffer {};
+
+    // We don't use decode_size() here since AnonymousBuffer is backed by shared memory, not heap allocation. Its
+    // contents are not part of the message.
+    auto encoded_size = TRY(decoder.decode<u64>());
+    if (!AK::is_within_range<size_t>(encoded_size))
+        return Error::from_string_literal("Anonymous buffer size does not fit on this platform");
+
+    auto size = static_cast<size_t>(encoded_size);
+    auto anon_file = TRY(decoder.decode<IPC::File>());
+
+    // The size is the sender's claim. Touching a mapping past the end of the file it maps raises SIGBUS, so a sender that
+    // claims more than it sent could crash us whenever we got to that part of the buffer.
+    auto buffer = TRY(Core::AnonymousBuffer::create_from_anon_fd(anon_file.take_fd(), size));
+    TRY(buffer.validate_backing_size());
+    return buffer;
+}
+
+}

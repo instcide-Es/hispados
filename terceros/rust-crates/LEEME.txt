@@ -1,0 +1,158 @@
+Las crates de Rust de crates.io que piden las bibliotecas de Ladybird que
+compila Hispa-64 desde la etapa 10 f (docs/64/HISPA-64.md, sección 23;
+castel/nucleo64/programas/ladybird/hazlb.sh): los .crate tal cual los da
+crates.io (https://crates.io/api/v1/crates/NOMBRE/VERSIÓN/download), sin
+cambiar nada, cada uno con el SHA-256 que dice el Cargo.lock de Ladybird
+(terceros/ladybird/Cargo.lock; crates.py lo comprueba antes de abrirlos).
+Cada .crate lleva dentro su licencia (LICENSE*, COPYING...).
+
+Son las que cargo necesita para resolver el «workspace» de hazlb.sh (las de
+todas las plataformas: también las de wasm, que no se compilan); las que
+acaban dentro de los programas (TestLB) van con «dentro»; las demás son
+herramientas del compilado (cbindgen, cc, syn, quote...: «compilar») o solo
+están para que cargo resuelva («resolver»).
+
+Licencias: todas compatibles con la GPL-2.0 o posterior, menos dos que lo
+son con la GPL-3.0 (y por eso con «la GPL-2.0 o posterior»):
+  - calendrical_calculations 0.2.4 (dentro: el calendario de LibUnicode,
+    de ICU4X): solo Apache-2.0, compatible con la GPL-3.0, no con la 2.0;
+  - cbindgen 0.29.2 (compilar: no va en los programas): MPL-2.0, compatible
+    con la GPL por su 3.3.
+De las que dan a elegir se toma la MIT (o la BSD, Zlib o Unicode-3.0 si es
+la que hay); r-efi da a elegir también LGPL-2.1 o posterior.
+
+Crate                                   Uso        Licencia
+------------------------------------------------------------------------------
+adler2 2.0.1                             dentro     0BSD OR MIT OR Apache-2.0
+alloc-no-stdlib 3.0.0                    compilar   BSD-3-Clause
+alloc-stdlib 0.3.0                       compilar   BSD-3-Clause
+anstream 1.0.0                           compilar   MIT OR Apache-2.0
+anstyle 1.0.14                           compilar   MIT OR Apache-2.0
+anstyle-parse 1.0.0                      compilar   MIT OR Apache-2.0
+anstyle-query 1.1.5                      compilar   MIT OR Apache-2.0
+anstyle-wincon 3.0.11                    compilar   MIT OR Apache-2.0
+anyhow 1.0.104                           compilar   MIT OR Apache-2.0
+array-init 2.1.0                         dentro     MIT OR Apache-2.0
+autocfg 1.5.0                            compilar   Apache-2.0 OR MIT
+bitflags 2.11.0                          dentro     MIT OR Apache-2.0
+brotli 9.1.3                             compilar   BSD-3-Clause AND MIT
+brotli-decompressor 6.3.2                compilar   BSD-3-Clause/MIT
+byteorder 1.5.0                          dentro     Unlicense OR MIT
+calendrical_calculations 0.2.4           dentro     Apache-2.0
+cbindgen 0.29.2                          compilar   MPL-2.0
+cc 1.5.1                                 compilar   MIT OR Apache-2.0
+cfg-if 1.0.4                             dentro     MIT OR Apache-2.0
+clap 4.6.0                               compilar   MIT OR Apache-2.0
+clap_builder 4.6.0                       compilar   MIT OR Apache-2.0
+clap_lex 1.1.0                           compilar   MIT OR Apache-2.0
+colorchoice 1.0.5                        compilar   MIT OR Apache-2.0
+core_detect 1.0.0                        dentro     MIT/Apache-2.0
+core_maths 0.1.1                         dentro     MIT
+crc32fast 1.5.5                          dentro     MIT OR Apache-2.0
+displaydoc 0.2.5                         compilar   MIT OR Apache-2.0
+encoding_rs 0.8.44                       dentro     (Apache-2.0 OR MIT) AND BSD-3-Clause
+equivalent 1.0.2                         compilar   Apache-2.0 OR MIT
+errno 0.3.14                             compilar   MIT OR Apache-2.0
+fastrand 2.5.0                           compilar   Apache-2.0 OR MIT
+fdeflate 0.3.7                           dentro     MIT OR Apache-2.0
+find-msvc-tools 0.1.14                   compilar   MIT OR Apache-2.0
+flate2 1.1.11                            dentro     MIT OR Apache-2.0
+foldhash 0.1.5                           compilar   Zlib
+foldhash 0.2.0                           dentro     Zlib
+getrandom 0.4.2                          dentro     MIT OR Apache-2.0
+hashbrown 0.15.5                         compilar   MIT OR Apache-2.0
+hashbrown 0.16.1                         compilar   MIT OR Apache-2.0
+hashbrown 0.17.1                         dentro     MIT OR Apache-2.0
+heck 0.5.0                               compilar   MIT OR Apache-2.0
+icu_calendar 2.4.0                       dentro     Unicode-3.0
+icu_calendar_data 2.4.0                  dentro     Unicode-3.0
+icu_locale_core 2.4.0                    dentro     Unicode-3.0
+icu_locale_fallback 2.4.0                dentro     Unicode-3.0
+icu_locale_fallback_data 2.4.0           dentro     Unicode-3.0
+icu_provider 2.4.0                       dentro     Unicode-3.0
+id-arena 2.3.0                           resolver   MIT/Apache-2.0
+indexmap 2.13.1                          compilar   Apache-2.0 OR MIT
+is_terminal_polyfill 1.70.2              compilar   MIT OR Apache-2.0
+itoa 1.0.18                              compilar   MIT OR Apache-2.0
+ixdtf 0.6.7                              dentro     Unicode-3.0
+jxl 0.7.4                                dentro     BSD-3-Clause
+jxl_macros 0.7.4                         compilar   BSD-3-Clause
+jxl_simd 0.7.4                           dentro     BSD-3-Clause
+jxl_transforms 0.7.4                     dentro     BSD-3-Clause
+leb128fmt 0.1.0                          resolver   MIT OR Apache-2.0
+libc 0.2.190                             dentro     MIT OR Apache-2.0
+libm 0.2.16                              dentro     MIT
+linux-raw-sys 0.12.1                     compilar   Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
+litemap 0.8.2                            dentro     Unicode-3.0
+log 0.4.29                               compilar   MIT OR Apache-2.0
+memchr 2.8.0                             dentro     Unlicense OR MIT
+miniz_oxide 0.8.9                        dentro     MIT OR Zlib OR Apache-2.0
+miniz_oxide 0.9.1                        dentro     MIT OR Zlib OR Apache-2.0
+multiversion_no_op 1.0.0                 compilar   Apache-2.0 OR MIT
+num-derive 0.4.2                         compilar   MIT OR Apache-2.0
+num-traits 0.2.19                        dentro     MIT OR Apache-2.0
+once_cell 1.21.4                         compilar   MIT OR Apache-2.0
+once_cell_polyfill 1.70.2                compilar   MIT OR Apache-2.0
+png 0.18.1                               dentro     MIT OR Apache-2.0
+potential_utf 0.1.5                      dentro     Unicode-3.0
+prettyplease 0.2.37                      resolver   MIT OR Apache-2.0
+proc-macro2 1.0.106                      compilar   MIT OR Apache-2.0
+quote 1.0.45                             compilar   MIT OR Apache-2.0
+r-efi 6.0.0                              resolver   MIT OR Apache-2.0 OR LGPL-2.1-or-later
+rustc-demangle 0.1.28                    dentro     MIT/Apache-2.0
+rustix 1.1.6                             compilar   Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
+rustversion 1.0.23                       compilar   MIT OR Apache-2.0
+scopeguard 1.2.0                         dentro     MIT OR Apache-2.0
+semver 1.0.28                            resolver   MIT OR Apache-2.0
+serde 1.0.228                            compilar   MIT OR Apache-2.0
+serde_core 1.0.228                       compilar   MIT OR Apache-2.0
+serde_derive 1.0.228                     compilar   MIT OR Apache-2.0
+serde_json 1.0.149                       compilar   MIT OR Apache-2.0
+serde_spanned 1.1.1                      compilar   MIT OR Apache-2.0
+shlex 2.0.1                              compilar   MIT OR Apache-2.0
+simd-adler32 0.3.10                      dentro     MIT
+simdutf8 0.1.5                           dentro     MIT OR Apache-2.0
+stable_deref_trait 1.2.1                 dentro     MIT OR Apache-2.0
+strsim 0.11.1                            compilar   MIT
+subtle 2.6.1                             compilar   BSD-3-Clause
+syn 2.0.117                              compilar   MIT OR Apache-2.0
+syn 3.0.4                                compilar   MIT OR Apache-2.0
+synstructure 0.13.2                      compilar   MIT
+synstructure 0.14.0                      compilar   MIT
+tempfile 3.27.0                          compilar   MIT OR Apache-2.0
+thiserror 2.0.20                         dentro     MIT OR Apache-2.0
+thiserror-impl 2.0.20                    compilar   MIT OR Apache-2.0
+tinystr 0.8.5                            dentro     Unicode-3.0
+toml 0.9.12+spec-1.1.0                   compilar   MIT OR Apache-2.0
+toml_datetime 0.7.5+spec-1.1.0           compilar   MIT OR Apache-2.0
+toml_parser 1.1.2+spec-1.1.0             compilar   MIT OR Apache-2.0
+toml_writer 1.1.1+spec-1.1.0             compilar   MIT OR Apache-2.0
+unicode-ident 1.0.24                     compilar   (MIT OR Apache-2.0) AND Unicode-3.0
+unicode-xid 0.2.6                        compilar   MIT OR Apache-2.0
+utf8parse 0.2.2                          compilar   Apache-2.0 OR MIT
+wasip2 1.0.2+wasi-0.2.9                  resolver   Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
+wasip3 0.4.0+wasi-0.3.0-rc-2026-01-06    resolver   Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
+wasm-encoder 0.244.0                     resolver   Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
+wasm-metadata 0.244.0                    resolver   Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
+wasmparser 0.244.0                       resolver   Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
+windows-link 0.2.1                       resolver   MIT OR Apache-2.0
+windows-sys 0.61.2                       resolver   MIT OR Apache-2.0
+winnow 0.7.15                            compilar   MIT
+winnow 1.0.1                             compilar   MIT
+wit-bindgen 0.51.0                       resolver   Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
+wit-bindgen-core 0.51.0                  resolver   Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
+wit-bindgen-rust 0.51.0                  resolver   Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
+wit-bindgen-rust-macro 0.51.0            resolver   Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
+wit-component 0.244.0                    resolver   Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
+wit-parser 0.244.0                       resolver   Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
+writeable 0.6.4                          dentro     Unicode-3.0
+yoke 0.8.4                               dentro     Unicode-3.0
+yoke-derive 0.8.4                        compilar   Unicode-3.0
+yuv 0.8.20                               dentro     BSD-3-Clause OR Apache-2.0
+zerofrom 0.1.7                           dentro     Unicode-3.0
+zerofrom-derive 0.1.7                    compilar   Unicode-3.0
+zerotrie 0.2.5                           dentro     Unicode-3.0
+zerovec 0.11.9                           dentro     Unicode-3.0
+zerovec-derive 0.11.7                    compilar   Unicode-3.0
+zlib-rs 0.6.8                            compilar   Zlib
+zmij 1.0.21                              compilar   MIT

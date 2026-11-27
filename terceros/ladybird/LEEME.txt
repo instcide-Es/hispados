@@ -11,5 +11,22 @@ que no se usan: los archivos y las opciones, en castel/nucleo64/programas/
 ladybird/hazak.sh, que hace lo que haría su CMake). Lo que pide AK de fuera:
 fast_float, simdutf, zmij y mimalloc (terceros/, libs/hazlibs.sh) y las
 cabeceras de las matemáticas de llvm-libc (terceros/llvm-libc).
-Sin LibUnicode (pide ICU 78.3 y un «crate» de Rust: más adelante); por eso,
+[Etapa 10 e] Sin LibUnicode (pide ICU 78.3 y un «crate» de Rust); por eso,
 sin LibCore/TimeZone.cpp ni las pruebas TestString y TestUtf16String.
+
+[Etapa 10 f] (docs/64/HISPA-64.md, sección 23) Del mismo commit, sin cambiar
+nada: Libraries/LibUnicode, LibRegex, LibURL, LibTextCodec, LibCompress,
+LibCrypto (solo para las cabeceras: no se compila; es la de OpenSSL),
+LibIPC, LibGfx, LibImageDecoders, LibGC (solo las cabeceras que incluye
+LibGfx), LibMediaCodecs (solo sus cabeceras .h y Color/), RustAllocator,
+RustPanic.rs y RustDemangle.rs, AK/Rust, Tests/LibUnicode, LibURL, LibIPC y
+LibGfx (con sus test-inputs), Meta/Generators/generate_ipc_definitions.py,
+Meta/Utils, Meta/CMake/RustCrateInit.cpp.in, Cargo.toml, Cargo.lock y
+rust-toolchain.toml (la parte de Rust de Ladybird: su «workspace»). Las
+compila castel/nucleo64/programas/ladybird/hazlb.sh (lo que hace su CMake,
+a mano; sus crates de crates.io, en terceros/rust-crates), y las pruebas,
+TestLB, las corre MLB en Hispa-64.
+Lo que cambia para Hispa-64, aparte, en castel/nucleo64/programas/ladybird/
+hispa64 (la capa de Hispa-64, delante en la ruta de cabeceras): wuffs/
+wuffs-v0.3.c, que pone la 0.4 de wuffs (MIT) en vez de la 0.3 (solo Apache-2.0)
+para el GIFLoader de LibGfx.

@@ -1,0 +1,21 @@
+LibCrypto de Hispa-64 (etapa 10 f, docs/64/HISPA-64.md, sección 23)
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+La LibCrypto de Ladybird (terceros/ladybird/Libraries/LibCrypto) está hecha
+sobre OpenSSL, y Carlos aún no ha decidido si OpenSSL (Apache-2.0: la GPL-3
+para el conjunto) va en Hispa-64. Esta es la misma biblioteca, con las
+MISMAS cabeceras de Ladybird (Hash/Hash.h, Authentication/HMAC.h, PK/EC.h,
+PK/RSA.h, Curves/EdwardsCurve.h: no se cambia ninguna), hecha por dentro
+sobre lo que ya hay en terceros/:
+  - SHA-1, SHA-256, SHA-384 y SHA-512: BearSSL 0.6 (MIT);
+  - SHA3-256, SHA3-384 y SHA3-512 (BearSSL no los tiene): sha3.c, nuestro
+    (Keccak-f[1600] de FIPS 202);
+  - HMAC: hmac.cpp, nuestro (RFC 2104), para todos los anteriores;
+  - RSA PKCS #1 v1.5 (solo comprobar firmas): BearSSL (i31);
+  - ECDSA con P-256, P-384 y P-521 (solo comprobar): BearSSL (i31/m31);
+  - Ed25519 (solo comprobar): monocypher 4 (crypto_ed25519_check; BSD-2 o
+    CC0).
+Lo que no es de la interfaz (OpenSSL.h, OpenSSLForward.h: para quien use
+OpenSSL directamente, como RequestServer), no se usa aquí.
+Las pruebas, las de Ladybird (Tests/LibCrypto: TestHash, TestHMAC, TestRSA y
+TestEd25519), en TestLB (MLB).

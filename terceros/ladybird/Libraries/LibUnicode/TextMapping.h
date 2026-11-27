@@ -1,0 +1,44 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/Types.h>
+
+namespace Unicode {
+
+enum class CaseMapping : u8 {
+    Lowercase,
+    Uppercase,
+    Titlecase,
+};
+
+}
+
+// The caller owns the destination and edit storage. All offsets are UTF-16 code units.
+struct UnicodeTextMappingOutput {
+    void* context;
+    u16* (*allocate_text)(void*, size_t);
+    void (*append_edit)(void*, size_t source_start, size_t source_length, size_t destination_start, size_t destination_length);
+};
+
+extern "C" {
+void unicode_apply_case_mapping(u16 const* text, size_t length, u8 mapping, u16 const* locale, size_t locale_length, bool preserve_existing, UnicodeTextMappingOutput);
+void unicode_apply_fullwidth_mapping(u16 const* text, size_t length, UnicodeTextMappingOutput);
+void unicode_normalize(u16 const* text, size_t length, u8 form, UnicodeTextMappingOutput);
+bool unicode_text_may_require_bidi_processing(u16 const* text, size_t length);
+
+void unicode_current_time_zone(UnicodeTextMappingOutput);
+bool unicode_set_current_time_zone(u16 const* time_zone, size_t length);
+void unicode_available_time_zones(void* context, void (*append)(void*, u16 const*, size_t));
+bool unicode_resolve_primary_time_zone(u16 const* time_zone, size_t length, UnicodeTextMappingOutput);
+bool unicode_time_zone_offset(u16 const* time_zone, size_t length, i64 seconds, u32 nanoseconds, bool is_local, i64* offset_nanoseconds, bool* in_dst);
+size_t unicode_disambiguated_time_zone_offsets(u16 const* time_zone, size_t length, i64 seconds, u32 nanoseconds, i64* offset_nanoseconds, bool* in_dst, size_t capacity);
+bool unicode_time_zone_transition(u16 const* time_zone, size_t length, i64 seconds, u32 nanoseconds, u8 direction, bool include_given_time, u8 transition_rule, i64* transition_milliseconds);
+bool unicode_time_zone_display_name(u8 const* locale, size_t locale_length, u8 const* time_zone, size_t time_zone_length, bool in_dst, double time, UnicodeTextMappingOutput);
+void unicode_default_locale(UnicodeTextMappingOutput);
+size_t unicode_quotation_mark(u16 const* language, size_t length, bool open, bool alternate, u16 const** result);
+}

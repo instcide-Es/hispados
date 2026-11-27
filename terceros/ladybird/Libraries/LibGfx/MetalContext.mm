@@ -1,0 +1,135 @@
+/*
+ * Copyright (c) 2024, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/Function.h>
+#include <AK/OwnPtr.h>
+#include <LibGfx/MetalContext.h>
+
+#import <Metal/Metal.h>
+
+namespace Gfx {
+
+class MetalTextureImpl final : public MetalTexture {
+public:
+    AK_ALLOC_WITH_KMALLOC;
+
+    MetalTextureImpl(id<MTLTexture> texture)
+        : m_texture(texture)
+    {
+    }
+
+    void const* texture() const override { return m_texture; }
+    size_t width() const override { return m_texture.width; }
+    size_t height() const override { return m_texture.height; }
+
+    virtual ~MetalTextureImpl()
+    {
+        [m_texture release];
+    }
+
+private:
+    id<MTLTexture> m_texture;
+};
+
+static MTLPixelFormat metal_pixel_format(MetalTextureFormat format)
+{
+    switch (format) {
+    case MetalTextureFormat::BGRA8:
+        return MTLPixelFormatBGRA8Unorm;
+    case MetalTextureFormat::RGBA8:
+        return MTLPixelFormatRGBA8Unorm;
+    case MetalTextureFormat::R8:
+        return MTLPixelFormatR8Unorm;
+    case MetalTextureFormat::RG8:
+        return MTLPixelFormatRG8Unorm;
+    case MetalTextureFormat::R16:
+        return MTLPixelFormatR16Unorm;
+    case MetalTextureFormat::RG16:
+        return MTLPixelFormatRG16Unorm;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+class MetalContextImpl final : public MetalContext {
+public:
+    AK_ALLOC_WITH_KMALLOC;
+
+    MetalContextImpl(id<MTLDevice> device, id<MTLCommandQueue> queue)
+        : m_device(device)
+        , m_queue(queue)
+    {
+    }
+
+    void const* device() const override { return m_device; }
+    void const* queue() const override { return m_queue; }
+
+    OwnPtr<MetalTexture> create_texture_from_iosurface(Core::IOSurfaceHandle const& iosurface, MetalTextureFormat format, size_t plane) override
+    {
+        auto pixel_format = metal_pixel_format(format);
+        auto* const descriptor = [[MTLTextureDescriptor alloc] init];
+        descriptor.pixelFormat = pixel_format;
+        descriptor.width = iosurface.plane_count() > 0 ? iosurface.plane_width(plane) : iosurface.width();
+        descriptor.height = iosurface.plane_count() > 0 ? iosurface.plane_height(plane) : iosurface.height();
+        descriptor.storageMode = MTLStorageModeShared;
+        descriptor.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+
+        id<MTLTexture> texture = [m_device newTextureWithDescriptor:descriptor iosurface:(IOSurfaceRef)iosurface.core_foundation_pointer() plane:plane];
+        [descriptor release];
+        if (!texture)
+            return {};
+        return make<MetalTextureImpl>(texture);
+    }
+
+    bool rows_have_linear_texture_alignment(Core::IOSurfaceHandle const& iosurface, MetalTextureFormat format, size_t plane) const override
+    {
+        auto bytes_per_row = iosurface.plane_count() > 0 ? iosurface.bytes_per_row_of_plane(plane) : iosurface.bytes_per_row();
+        return bytes_per_row % [m_device minimumLinearTextureAlignmentForPixelFormat:metal_pixel_format(format)] == 0;
+    }
+
+    void when_committed_work_is_scheduled(Function<void()>&& callback) override
+    {
+        // The queue schedules its command buffers in the order they were committed.
+        @autoreleasepool {
+            auto* callback_to_invoke = new Function<void()>(move(callback));
+            id<MTLCommandBuffer> command_buffer = [m_queue commandBuffer];
+            [command_buffer addScheduledHandler:^(id<MTLCommandBuffer>) {
+                (*callback_to_invoke)();
+                delete callback_to_invoke;
+            }];
+            [command_buffer commit];
+        }
+    }
+
+    virtual ~MetalContextImpl() override
+    {
+        [m_queue release];
+        [m_device release];
+    }
+
+private:
+    id<MTLDevice> m_device;
+    id<MTLCommandQueue> m_queue;
+};
+
+RefPtr<MetalContext> get_metal_context()
+{
+    auto device = MTLCreateSystemDefaultDevice();
+    if (!device) {
+        dbgln("Failed to create Metal device");
+        return {};
+    }
+
+    auto queue = [device newCommandQueue];
+    if (!queue) {
+        dbgln("Failed to create Metal command queue");
+        [device release];
+        return {};
+    }
+
+    return adopt_ref(*new MetalContextImpl(device, queue));
+}
+
+}

@@ -1,0 +1,402 @@
+/*
+ * Copyright (c) 2024-2026, Tim Flynn <trflynn89@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <AK/Array.h>
+#include <AK/Mutex.h>
+#include <AK/NeverDestroyed.h>
+#include <AK/NonnullOwnPtr.h>
+#include <AK/QuickSort.h>
+#include <LibUnicode/ICU.h>
+#include <LibUnicode/TextMapping.h>
+#include <LibUnicode/TimeZone.h>
+
+#include <unicode/basictz.h>
+#include <unicode/timezone.h>
+#include <unicode/ucal.h>
+
+namespace Unicode {
+
+struct SystemTimeZoneCache {
+    Mutex mutex;
+    Optional<Utf16String> time_zone;
+};
+
+static SystemTimeZoneCache& system_time_zone_cache()
+{
+    static NeverDestroyed<SystemTimeZoneCache> cache;
+    return *cache;
+}
+
+static Utf16String current_time_zone_impl(OwnPtr<icu::TimeZone> time_zone)
+{
+    UErrorCode status = U_ZERO_ERROR;
+
+    if (!time_zone || *time_zone == icu::TimeZone::getUnknown())
+        return "UTC"_utf16;
+
+    icu::UnicodeString time_zone_id;
+    time_zone->getID(time_zone_id);
+
+    icu::UnicodeString time_zone_name;
+    time_zone->getCanonicalID(time_zone_id, time_zone_name, status);
+
+    if (icu_failure(status))
+        return "UTC"_utf16;
+
+    return icu_string_to_utf16_string(time_zone_name);
+}
+
+static Utf16String current_host_time_zone()
+{
+    return current_time_zone_impl(adopt_own_if_nonnull(icu::TimeZone::detectHostTimeZone()));
+}
+
+static Utf16String current_default_time_zone()
+{
+    return current_time_zone_impl(adopt_own_if_nonnull(icu::TimeZone::createDefault()));
+}
+
+Utf16String current_time_zone()
+{
+    auto& cache = system_time_zone_cache();
+    MutexLocker locker { cache.mutex };
+    return cache.time_zone.ensure([] { return current_host_time_zone(); });
+}
+
+void clear_system_time_zone_cache()
+{
+    auto& cache = system_time_zone_cache();
+    MutexLocker locker { cache.mutex };
+    cache.time_zone.clear();
+}
+
+ErrorOr<void> set_current_time_zone(Utf16View time_zone)
+{
+    auto time_zone_data = TimeZoneData::for_time_zone(time_zone);
+    if (!time_zone_data.has_value())
+        return Error::from_string_literal("Unable to find the provided time zone");
+
+    auto& cache = system_time_zone_cache();
+    MutexLocker locker { cache.mutex };
+    icu::TimeZone::setDefault(time_zone_data->time_zone());
+    cache.time_zone = current_default_time_zone();
+
+    return {};
+}
+
+// https://github.com/unicode-org/icu/blob/main/icu4c/source/tools/tzcode/icuzones
+static constexpr bool is_legacy_non_iana_time_zone(StringView time_zone)
+{
+    constexpr auto legacy_zones = to_array({
+        "ACT"sv,
+        "AET"sv,
+        "AGT"sv,
+        "ART"sv,
+        "AST"sv,
+        "BET"sv,
+        "BST"sv,
+        "Canada/East-Saskatchewan"sv,
+        "CAT"sv,
+        "CNT"sv,
+        "CST"sv,
+        "CTT"sv,
+        "EAT"sv,
+        "ECT"sv,
+        "IET"sv,
+        "IST"sv,
+        "JST"sv,
+        "MIT"sv,
+        "NET"sv,
+        "NST"sv,
+        "PLT"sv,
+        "PNT"sv,
+        "PRT"sv,
+        "PST"sv,
+        "SST"sv,
+        "US/Pacific-New"sv,
+        "VST"sv,
+    });
+
+    if (time_zone.starts_with("SystemV/"sv))
+        return true;
+
+    return legacy_zones.contains_slow(time_zone);
+}
+
+static Vector<Utf16String> icu_available_time_zones(Optional<StringView> region)
+{
+    UErrorCode status = U_ZERO_ERROR;
+
+    Array<u8, 4> region_buffer {};
+    char const* icu_region = nullptr;
+    if (region.has_value()) {
+        VERIFY(region->length() < region_buffer.size());
+        region->bytes().copy_to(region_buffer.span());
+        icu_region = reinterpret_cast<char const*>(region_buffer.data());
+    }
+
+    auto time_zone_enumerator = adopt_own_if_nonnull(icu::TimeZone::createTimeZoneIDEnumeration(UCAL_ZONE_TYPE_ANY, icu_region, nullptr, status));
+    if (icu_failure(status))
+        return { Utf16String::from_ascii_without_validation("UTC"sv.bytes()) };
+
+    Vector<Utf16String> time_zones;
+    while (true) {
+        i32 length = 0;
+        auto const* time_zone = time_zone_enumerator->next(&length, status);
+
+        if (icu_failure(status) || time_zone == nullptr)
+            break;
+
+        StringView time_zone_view { time_zone, static_cast<size_t>(length) };
+        if (!is_legacy_non_iana_time_zone(time_zone_view))
+            time_zones.append(Utf16String::from_ascii_without_validation(time_zone_view.bytes()));
+    }
+
+    quick_sort(time_zones);
+    return time_zones;
+}
+
+Vector<Utf16String> const& available_time_zones()
+{
+    static NeverDestroyed<Vector<Utf16String>> time_zones { icu_available_time_zones({}) };
+    return *time_zones;
+}
+
+Vector<Utf16String> available_time_zones_in_region(Utf16View region)
+{
+    VERIFY(region.length_in_code_units() < 4);
+    Array<char, 4> region_buffer {};
+    for (auto i = 0uz; i < region.length_in_code_units(); ++i) {
+        auto code_unit = region.code_unit_at(i);
+        VERIFY(code_unit <= 0x7f);
+        region_buffer[i] = static_cast<char>(code_unit);
+    }
+    return icu_available_time_zones(StringView { region_buffer.data(), region.length_in_code_units() });
+}
+
+Optional<Utf16String> resolve_primary_time_zone(Utf16View time_zone)
+{
+    UErrorCode status = U_ZERO_ERROR;
+
+    icu::UnicodeString iana_id;
+    icu::TimeZone::getIanaID(icu_string(time_zone), iana_id, status);
+
+    if (icu_failure(status))
+        return {};
+
+    return icu_string_to_utf16_string(iana_id);
+}
+
+static UDate to_icu_time(UnixDateTime time)
+{
+    // We must clamp the time we provide to ICU such that the result of converting milliseconds to days fits in an i32.
+    // Further, that conversion must still be valid after applying DST offsets to the time we provide.
+    static constexpr auto min_time = (static_cast<UDate>(AK::NumericLimits<i32>::min()) + U_MILLIS_PER_DAY) * U_MILLIS_PER_DAY;
+    static constexpr auto max_time = (static_cast<UDate>(AK::NumericLimits<i32>::max()) - U_MILLIS_PER_DAY) * U_MILLIS_PER_DAY;
+    return clamp(static_cast<UDate>(time.milliseconds_since_epoch()), min_time, max_time);
+}
+
+Optional<TimeZoneOffset> time_zone_offset(Utf16View time_zone, UnixDateTime time, TimeZoneTime time_type)
+{
+    UErrorCode status = U_ZERO_ERROR;
+
+    auto time_zone_data = TimeZoneData::for_time_zone(time_zone);
+    if (!time_zone_data.has_value())
+        return {};
+
+    i32 raw_offset = 0;
+    i32 dst_offset = 0;
+
+    auto icu_time = to_icu_time(time);
+
+    if (time_type == TimeZoneTime::Local)
+        as<icu::BasicTimeZone>(time_zone_data->time_zone()).getOffsetFromLocal(icu_time, UCAL_TZ_LOCAL_FORMER, UCAL_TZ_LOCAL_FORMER, raw_offset, dst_offset, status);
+    else
+        time_zone_data->time_zone().getOffset(icu_time, false, raw_offset, dst_offset, status);
+    if (icu_failure(status))
+        return {};
+
+    return TimeZoneOffset {
+        .offset = AK::Duration::from_milliseconds(raw_offset + dst_offset),
+        .in_dst = dst_offset == 0 ? TimeZoneOffset::InDST::No : TimeZoneOffset::InDST::Yes,
+    };
+}
+
+Vector<TimeZoneOffset> disambiguated_time_zone_offsets(Utf16View time_zone, UnixDateTime time)
+{
+    UErrorCode status = U_ZERO_ERROR;
+
+    auto time_zone_data = TimeZoneData::for_time_zone(time_zone);
+    if (!time_zone_data.has_value())
+        return {};
+
+    auto& basic_time_zone = as<icu::BasicTimeZone>(time_zone_data->time_zone());
+    auto icu_time = to_icu_time(time);
+
+    auto get_offset = [&](auto disambiguation_option) -> Optional<TimeZoneOffset> {
+        i32 raw_offset = 0;
+        i32 dst_offset = 0;
+
+        basic_time_zone.getOffsetFromLocal(icu_time, disambiguation_option, disambiguation_option, raw_offset, dst_offset, status);
+        if (icu_failure(status))
+            return {};
+
+        return TimeZoneOffset {
+            .offset = AK::Duration::from_milliseconds(raw_offset + dst_offset),
+            .in_dst = dst_offset == 0 ? TimeZoneOffset::InDST::No : TimeZoneOffset::InDST::Yes,
+        };
+    };
+
+    auto former = get_offset(UCAL_TZ_LOCAL_FORMER);
+    auto latter = get_offset(UCAL_TZ_LOCAL_LATTER);
+
+    Vector<TimeZoneOffset> offsets;
+
+    if (former.has_value() && latter.has_value()) {
+        if (former->offset == latter->offset) {
+            offsets.append(*former);
+        } else if (former->offset > latter->offset) {
+            offsets.append(*former);
+            offsets.append(*latter);
+        }
+    } else if (former.has_value()) {
+        offsets.append(*former);
+    }
+
+    return offsets;
+}
+
+Optional<TimeZoneTransition> get_time_zone_transition(Utf16View time_zone, UnixDateTime time, TimeZoneTransition::Options options)
+{
+    auto time_zone_data = TimeZoneData::for_time_zone(time_zone);
+    if (!time_zone_data.has_value())
+        return OptionalNone {};
+
+    auto& basic_time_zone = as<icu::BasicTimeZone>(time_zone_data->time_zone());
+
+    auto current_icu_time = to_icu_time(time);
+    bool include_current_time = options.include_given_time == TimeZoneTransition::Options::IncludeGivenTime::Yes;
+
+    icu::TimeZoneTransition result;
+    auto found_transition = [&] {
+        if (options.direction == TimeZoneTransition::Options::Direction::Previous)
+            return basic_time_zone.getPreviousTransition(current_icu_time, include_current_time, result);
+
+        return basic_time_zone.getNextTransition(current_icu_time, include_current_time, result);
+    };
+
+    while (found_transition()) {
+        auto time_result = result.getTime();
+
+        switch (options.transition_rule) {
+        case TimeZoneTransition::Options::TransitionRule::AnyTransition: {
+            return TimeZoneTransition {
+                .transition = AK::Duration::from_milliseconds(time_result),
+            };
+        }
+        case TimeZoneTransition::Options::TransitionRule::TransitionWhereUTCOffsetChanges: {
+            auto const* from_rule = result.getFrom();
+            auto const* to_rule = result.getTo();
+
+            i32 from_utc_offset = from_rule->getRawOffset() + from_rule->getDSTSavings();
+            i32 to_utc_offset = to_rule->getRawOffset() + to_rule->getDSTSavings();
+
+            if (from_utc_offset != to_utc_offset) {
+                return TimeZoneTransition {
+                    .transition = AK::Duration::from_milliseconds(time_result),
+                };
+            }
+
+            current_icu_time = time_result;
+            include_current_time = false;
+            break;
+        }
+        }
+    }
+
+    return OptionalNone {};
+}
+
+}
+
+static UnixDateTime unix_date_time_from_parts(i64 seconds, u32 nanoseconds)
+{
+    return UnixDateTime::from_seconds_since_epoch(seconds) + AK::Duration::from_nanoseconds(nanoseconds);
+}
+
+static void write_utf16_to(UnicodeTextMappingOutput output, Utf16View text)
+{
+    auto* destination = output.allocate_text(output.context, text.length_in_code_units());
+    for (size_t i = 0; i < text.length_in_code_units(); ++i)
+        destination[i] = text.code_unit_at(i);
+}
+
+extern "C" void unicode_current_time_zone(UnicodeTextMappingOutput output)
+{
+    auto time_zone = Unicode::current_time_zone();
+    write_utf16_to(output, time_zone.utf16_view());
+}
+
+extern "C" bool unicode_set_current_time_zone(u16 const* time_zone, size_t length)
+{
+    return !Unicode::set_current_time_zone(Utf16View { reinterpret_cast<char16_t const*>(time_zone), length }).is_error();
+}
+
+extern "C" void unicode_available_time_zones(void* context, void (*append)(void*, u16 const*, size_t))
+{
+    for (auto const& time_zone : Unicode::available_time_zones()) {
+        auto view = time_zone.utf16_view();
+        Vector<u16> code_units;
+        code_units.ensure_capacity(view.length_in_code_units());
+        for (size_t i = 0; i < view.length_in_code_units(); ++i)
+            code_units.unchecked_append(view.code_unit_at(i));
+        append(context, code_units.data(), code_units.size());
+    }
+}
+
+extern "C" bool unicode_resolve_primary_time_zone(u16 const* time_zone, size_t length, UnicodeTextMappingOutput output)
+{
+    auto primary = Unicode::resolve_primary_time_zone(Utf16View { reinterpret_cast<char16_t const*>(time_zone), length });
+    if (!primary.has_value())
+        return false;
+    write_utf16_to(output, primary->utf16_view());
+    return true;
+}
+
+extern "C" bool unicode_time_zone_offset(u16 const* time_zone, size_t length, i64 seconds, u32 nanoseconds, bool is_local, i64* offset_nanoseconds, bool* in_dst)
+{
+    auto offset = Unicode::time_zone_offset(Utf16View { reinterpret_cast<char16_t const*>(time_zone), length }, unix_date_time_from_parts(seconds, nanoseconds), is_local ? Unicode::TimeZoneTime::Local : Unicode::TimeZoneTime::UTC);
+    if (!offset.has_value())
+        return false;
+    *offset_nanoseconds = offset->offset.to_nanoseconds();
+    *in_dst = offset->in_dst == Unicode::TimeZoneOffset::InDST::Yes;
+    return true;
+}
+
+extern "C" size_t unicode_disambiguated_time_zone_offsets(u16 const* time_zone, size_t length, i64 seconds, u32 nanoseconds, i64* offset_nanoseconds, bool* in_dst, size_t capacity)
+{
+    auto offsets = Unicode::disambiguated_time_zone_offsets(Utf16View { reinterpret_cast<char16_t const*>(time_zone), length }, unix_date_time_from_parts(seconds, nanoseconds));
+    VERIFY(offsets.size() <= capacity);
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        offset_nanoseconds[i] = offsets[i].offset.to_nanoseconds();
+        in_dst[i] = offsets[i].in_dst == Unicode::TimeZoneOffset::InDST::Yes;
+    }
+    return offsets.size();
+}
+
+extern "C" bool unicode_time_zone_transition(u16 const* time_zone, size_t length, i64 seconds, u32 nanoseconds, u8 direction, bool include_given_time, u8 transition_rule, i64* transition_milliseconds)
+{
+    Unicode::TimeZoneTransition::Options options {
+        .direction = static_cast<Unicode::TimeZoneTransition::Options::Direction>(direction),
+        .include_given_time = include_given_time ? Unicode::TimeZoneTransition::Options::IncludeGivenTime::Yes : Unicode::TimeZoneTransition::Options::IncludeGivenTime::No,
+        .transition_rule = static_cast<Unicode::TimeZoneTransition::Options::TransitionRule>(transition_rule),
+    };
+    auto transition = Unicode::get_time_zone_transition(Utf16View { reinterpret_cast<char16_t const*>(time_zone), length }, unix_date_time_from_parts(seconds, nanoseconds), options);
+    if (!transition.has_value())
+        return false;
+    *transition_milliseconds = transition->transition.to_milliseconds();
+    return true;
+}
