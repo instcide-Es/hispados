@@ -93,6 +93,7 @@ h486=0
 for off in 32256 1048576; do
   MTOOLS_SKIP_CHECK=1 mdir -i $T/hdd.img@@$off ::HISPADOS/EDICION.INI > /dev/null 2>&1 && h486=1
   MTOOLS_SKIP_CHECK=1 mdir -i $T/hdd.img@@$off ::HISPA32 > /dev/null 2>&1 && h486=1
+  MTOOLS_SKIP_CHECK=1 mdir -i $T/hdd.img@@$off ::HSPTLS.SEM > /dev/null 2>&1 && h486=1   # [0.9.32] solo en 486
 done
 if [ $h486 = 0 ]; then echo "  OK   con N, Hispa-386: sin EDICION.INI ni \\HISPA32"; else echo "  FAIL con N al disquete «Hispa-486» ha quedado algo de Hispa-486"; fail=1; fi
 check $T/l2.txt "Hispa-DOS 0.9.31 - núcleo compatible con MS-DOS 6.22"

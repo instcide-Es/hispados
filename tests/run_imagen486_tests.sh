@@ -77,6 +77,10 @@ txt() { tr -d '\r' < $1 | iconv -f CP437 -t UTF-8 -c > $1.txt; }
 # dice %ARRANQUE% y CENTRO.INI va sin unidad; aquí se leen como en la C:)
 hd() { mtype -i $T/hdd.img@@$OFF "$@" 2>/dev/null | tr -d '\r' | iconv -f CP437 -t UTF-8 -c | sed -e 's/%ARRANQUE%/C:/g' -e 's/^\(Programa\|Carpeta\)=\\/\1=C:\\/'; }
 hdtiene() { if mdir -i $T/hdd.img@@$OFF "::$1" > /dev/null 2>&1; then ok "en el disco duro: $1"; else ko "falta en el disco duro: $1"; fi; }
+# [0.9.32] la semilla de HSPTLS que deja el instalador: 32 octetos, no todos iguales
+semilla() { rm -f $T/sem.bin; mcopy -i $T/hdd.img@@$OFF ::HSPTLS.SEM $T/sem.bin 2>/dev/null
+  if [ "$(stat -c %s $T/sem.bin 2>/dev/null)" = 32 ] && [ "$(od -An -v -tx1 $T/sem.bin | tr ' ' '\n' | grep . | sort -u | wc -l)" -gt 8 ]; then
+    ok "en el disco duro: HSPTLS.SEM (la semilla del azar, 32 octetos)"; else ko "HSPTLS.SEM: no está o no vale"; fi; }
 hdnotiene() { if mdir -i $T/hdd.img@@$OFF "::$1" > /dev/null 2>&1; then ko "(no debe estar) $1"; else ok "no está: $1"; fi; }
 # máquina N TIEMPO opciones-de-QEMU... (lo que se teclea, por la entrada)
 maquina() {
@@ -168,6 +172,7 @@ for f in HISPA32/CALC32.EXE HISPA32/HOLA32.EXE HISPA32/CTL32.EXE HISPA32/MENU32.
 done
 hd ::HISPADOS/INTERNET/NAVEGA.INI | grep -qx 'Favorito=ClicGest: la biblioteca|https://clicgest.es/biblioteca' \
   && ok "NAVEGA.INI: el favorito de la biblioteca" || ko "NAVEGA.INI sin el favorito de la biblioteca"
+semilla
 hd ::HISPADOS/EDICION.INI > $T/edi.txt
 grep -qx 'Gama=486' $T/edi.txt && ok "EDICION.INI: Gama=486" || ko "EDICION.INI sin Gama=486"
 hd ::HISPADOS/VENTANAS.INI > $T/ven.txt
@@ -368,6 +373,7 @@ if [ -n "$OFF8" ]; then
            HISPADOS/INTERNET/NAVEGA.EXE HISPADOS/INTERNET/HSPTLS.DLL HISPADOS/INTERNET/WSOCK32.DLL \
            HISPADOS/INTERNET/MSVCRT.DLL HISPADOS/INTERNET/NAVEGA.INI; do hdtiene $f; done
   hdnotiene HISPADOS/INTERNET/HW32.COM
+  semilla
   hd ::AUTOEXEC.BAT > $T/aut8.txt
   grep -qx 'C:\\HISPADOS\\VENTANAS' $T/aut8.txt && ok "AUTOEXEC.BAT: el de Hispa-486" || ko "AUTOEXEC.BAT sin C:\\HISPADOS\\VENTANAS"
   red_auto $T/aut8.txt

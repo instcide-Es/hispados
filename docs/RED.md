@@ -1153,8 +1153,10 @@ dinámica y con implementaciones de 32 bits. Lo nuestro (`hsptls.c`):
   leen las dos). En un equipo recién instalado y sin tocar es poco azar para
   lo que se pide hoy: es el punto flaco, y está dicho. Sin TSC (un 486) y sin
   semilla (la primera vez), `TlsInfo` lo dice: «poco azar: sin TSC ni
-  semilla». (Crear la semilla al instalar, con el tiempo de las teclas, queda
-  para el instalador.)
+  semilla». Desde la 0.9.32, **el instalador la crea**: en un disco de
+  Hispa-486 sin `C:\HSPTLS.SEM`, cada tecla que se pulsa al instalar mezcla
+  el contador del reloj (PIT) y los tics de la BIOS, y al acabar, con la
+  hora, deja los 32 octetos en `\HSPTLS.SEM` (si ya había una, no se toca).
 - **TlsEscribir** espera lo que haga falta mientras el servidor vaya
   leyendo; si en 60 s no puede mandar nada, da la conexión por cortada (-1).
 - Las sesiones se reanudan si el servidor guarda su identificador (los
