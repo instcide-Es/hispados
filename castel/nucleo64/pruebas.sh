@@ -196,10 +196,12 @@ mismas() {   # LÍNEAS TEXTO: ¿están todas las LÍNEAS, tal cual, en TEXTO?
 }
 
 # ---- por multiboot (QEMU -kernel): rápido, solo el puerto serie ----
+# ([etapa 10 d] 240 s: con 8 procesadores, TCG y los programas de la 10 d, el
+# arranque entero con musl llegaba a los 150 de antes)
 mb1() {   # LÍNEA SALIDA MEMORIA [más opciones de QEMU]
   local l=$1 s=$2 m=$3; shift 3
   rm -f "$s"
-  timeout 150 qemu-system-x86_64 -kernel "$T/HISPA64.BIN" -initrd "$MODS" -append "$l" -display none -serial file:"$s" \
+  timeout 240 qemu-system-x86_64 -kernel "$T/HISPA64.BIN" -initrd "$MODS" -append "$l" -display none -serial file:"$s" \
     -monitor none $DBG -no-reboot -nic none -m "$m" "$@" > /dev/null 2>&1
 }
 hay() { serie "$1" | grep -q -- "$2"; }

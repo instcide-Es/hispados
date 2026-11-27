@@ -4010,7 +4010,7 @@ MUNIX: los sockets de Unix (AF_UNIX) y memfd_create; estático
   O_NONBLOCK: EAGAIN al leer y con la cola llena (240 KB); poll y epoll (EPOLLIN, EPOLLRDHUP, EPOLLHUP)
   bind a una ruta (stat: S_IFSOCK, EADDRINUSE, unlink), listen, connect, accept, SO_PEERCRED; abstracto y automático; sendto y recvfrom
   SCM_RIGHTS a otro proceso (una tubería, un eventfd y un memfd hechos después del fork), MSG_CTRUNC; SCM_CREDENTIALS; memfd compartido y sus sellos; 300 pasados
-  dos hilos: 10.000 mensajes de ida y vuelta en 1187 ms; 4 MB por un socket de flujo, la suma bien
+  dos hilos: 2.000 mensajes de ida y vuelta en 238 ms; 4 MB por un socket de flujo, la suma bien
   carreras: 40 rondas de futex con plazo contra FUTEX_WAKE y 30 procesos que acaban con sus hilos saliendo a la vez
   /tmp: 100 KB escritos, leídos y borrados
 MUNIX: todo bien (77 pruebas)

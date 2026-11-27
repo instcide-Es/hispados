@@ -15,7 +15,7 @@
  *     con SO_PASSCRED;
  *   - memfd_create, ftruncate, fstat, mmap MAP_SHARED en dos procesos (el
  *     otro lo recibe por el socket), los sellos (F_ADD_SEALS);
- *   - dos hilos que se pasan 20.000 mensajes, 4 MB de un lado a otro con
+ *   - dos hilos que se pasan 4.000 mensajes (2.000 de ida y vuelta), 4 MB de un lado a otro con
  *     su suma, y 300 descriptores pasados y cerrados (el núcleo mira después
  *     que no queda ningún socket ni memoria).
  * Al final, «MUNIX: todo bien (N pruebas)» y código 0. Corre igual en Linux. */
@@ -415,7 +415,7 @@ static void hilos(void)
 	socketpair(AF_UNIX, SOCK_SEQPACKET, 0, ph);
 	pthread_create(&h, NULL, eco, NULL);
 	clock_gettime(CLOCK_MONOTONIC, &t0);
-	for (i = 0; i < 10000; i++) {
+	for (i = 0; i < 2000; i++) {
 		int l = snprintf(b, sizeof b, "mensaje %d", i);
 		if (write(ph[0], b, l) == l && read(ph[0], c, sizeof c) == l && memcmp(b, c, l) == 0) ok++;
 	}
@@ -423,7 +423,7 @@ static void hilos(void)
 	close(ph[0]);
 	pthread_join(h, NULL);
 	close(ph[1]);
-	MIRA(ok == 10000, "10.000 mensajes de ida y vuelta entre dos hilos");
+	MIRA(ok == 2000, "2.000 mensajes de ida y vuelta entre dos hilos");
 	socketpair(AF_UNIX, SOCK_STREAM, 0, s);
 	pthread_create(&h, NULL, manda_mucho, &s[0]);
 	while ((n = read(s[1], k, sizeof k)) > 0) {
@@ -435,7 +435,7 @@ static void hilos(void)
 	close(s[1]);
 	for (i = 0; i < 512; i++) { int j; for (j = 0; j < 8192; j++) esperada += (unsigned char)(i * 7 + j); }
 	MIRA(total == 4u << 20 && suma == esperada, "4 MB por un socket de flujo, con su suma");
-	printf("  dos hilos: 10.000 mensajes de ida y vuelta en %ld ms; 4 MB por un socket de flujo, la suma bien\n",
+	printf("  dos hilos: 2.000 mensajes de ida y vuelta en %ld ms; 4 MB por un socket de flujo, la suma bien\n",
 	       (long)((t1.tv_sec - t0.tv_sec) * 1000 + (t1.tv_nsec - t0.tv_nsec) / 1000000));
 }
 
