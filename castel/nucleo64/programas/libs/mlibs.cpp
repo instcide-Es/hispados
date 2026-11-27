@@ -175,7 +175,7 @@ static void prueba_mimalloc()
 			memset(p, (uint8_t)(i + semilla), n);
 			v.push_back({p, n});
 			octetos += n;
-			if (v.size() > 500) {
+			if (v.size() > 200) {   // (unos 3 MB vivos por hilo: cabe en un equipo de 128 MB)
 				auto q = v[x % v.size()];
 				if (q.first[q.second - 1] != q.first[0]) fallos++;
 				mi_free(q.first);
@@ -465,8 +465,11 @@ static void prueba_simdjson()
 	mira(ok && nombre == "Muñoz Ibáñez" && edad == 77 && suma == 332.5 && nota == "ñ y 🐧", "simdjson: DOM");
 	mira(ok2 && ciudad == "Logroño", "simdjson: On-Demand");
 	mira(okm && rechaza && impl > 0 && impl == impl_bien, "simdjson: minify, el malo y cada implementación");
+	// (el pingüino, por su número: la consola de Hispa-64, en la página 437, no lo tiene)
+	std::string nota_ver = nota;
+	if (size_t k = nota_ver.find("🐧"); k != std::string::npos) nota_ver.replace(k, strlen("🐧"), "U+1F427");
 	printf("  simdjson %s: «%.*s», %lld años, cuotas que suman %.1f, la nota con \\u: «%.*s»; On-Demand: «%.*s»; minify: %zu de %zu octetos; «[1, 2,, 3]», rechazado: %s\n",
-	       SIMDJSON_VERSION, (int)nombre.size(), nombre.data(), (long long)edad, suma, (int)nota.size(), nota.data(), (int)ciudad.size(), ciudad.data(), nmin, strlen(js), rechaza ? "sí" : "no");
+	       SIMDJSON_VERSION, (int)nombre.size(), nombre.data(), (long long)edad, suma, (int)nota_ver.size(), nota_ver.data(), (int)ciudad.size(), ciudad.data(), nmin, strlen(js), rechaza ? "sí" : "no");
 }
 
 // ---- zstd ----

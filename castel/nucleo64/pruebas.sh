@@ -224,10 +224,12 @@ mismas() {   # LÍNEAS TEXTO: ¿están todas las LÍNEAS, tal cual, en TEXTO?
 # ---- por multiboot (QEMU -kernel): rápido, solo el puerto serie ----
 # ([etapa 10 d] 240 s: con 8 procesadores, TCG y los programas de la 10 d, el
 # arranque entero con musl llegaba a los 150 de antes)
+# ([etapa 10 e] 360 s: MIMG, MLIBS, MSKIA y los 12 grupos de TestAK, con TCG,
+# son de 30 a 90 s más; y por UEFI, 300)
 mb1() {   # LÍNEA SALIDA MEMORIA [más opciones de QEMU]
   local l=$1 s=$2 m=$3; shift 3
   rm -f "$s"
-  timeout 240 qemu-system-x86_64 -kernel "$T/HISPA64.BIN" -initrd "$MODS" -append "$l" -display none -serial file:"$s" \
+  timeout 360 qemu-system-x86_64 -kernel "$T/HISPA64.BIN" -initrd "$MODS" -append "$l" -display none -serial file:"$s" \
     -monitor none $DBG -no-reboot -nic none -m "$m" "$@" > /dev/null 2>&1
 }
 hay() { serie "$1" | grep -q -- "$2"; }
@@ -282,7 +284,7 @@ e3_bien() {   # SALIDA N
 e4_bien() {   # SALIDA N
   local s=$1 n=$2 v; v=$(serie "$s")
   grep -q "^Programas: syscall y sysret (los números de Linux x86-64), swapgs, una pila del núcleo por hilo$" <<< "$v" \
-    && grep -q "^Unidad en memoria: 52 archivos: " <<< "$v" \
+    && grep -q "^Unidad en memoria: 60 archivos: " <<< "$v" \
     && grep -q "^  argc = 4: HOLA uno dos tres$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.5 x86_64$" <<< "$v" \
     && grep -q "^  la unidad en memoria: SALUDO.TXT dice «Hola, soy SALUDO.TXT" <<< "$v" && grep -q "^  writev: en tres trozos$" <<< "$v" \
     && grep -q "^HOLA: todo bien (28 pruebas)$" <<< "$v" && grep -q "^Programa «HOLA uno dos tres»: acaba con el código 0, como debe" <<< "$v" \
@@ -1105,7 +1107,7 @@ v=$(serie "$T/e7.txt")
 HM1=$(TZ=Europe/Madrid date +%H:%M)
 HOY=$(LC_ALL=C TZ=Europe/Madrid date +%-d)
 if [ $c = 85 ] && grep -q "^ORDENES 1.0, el intérprete de órdenes de Hispa-64 (en Hispa-64 0.11.5, etapa 10 e " <<< "$v" \
-   && grep -q "^ *[0-9.]*  HOLA$" <<< "$v" && grep -q "^         <DIR>  sata0/$" <<< "$v" && grep -q "^  52 archivos (" <<< "$v" \
+   && grep -q "^ *[0-9.]*  HOLA$" <<< "$v" && grep -q "^         <DIR>  sata0/$" <<< "$v" && grep -q "^  60 archivos (" <<< "$v" \
    && [ "$(grep -c "^hola desde el teclado$" <<< "$v")" = 1 ] && grep -q "^            22  copia.txt$" <<< "$v" \
    && grep -q "^/sata0/prueba> " <<< "$v" \
    && grep -q "^creardir: «/nada»: es de solo leer .*(EROFS, error 30 de Linux)$" <<< "$v" \
@@ -1158,7 +1160,7 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
   uefi() {   # SALIDA [opciones de QEMU]
     local s=$1; shift
     rm -f "$s"; cp $OVMF_V "$T/vars.fd"
-    timeout 200 qemu-system-x86_64 -machine q35 -drive if=pflash,format=raw,readonly=on,file=$OVMF_C \
+    timeout 300 qemu-system-x86_64 -machine q35 -drive if=pflash,format=raw,readonly=on,file=$OVMF_C \
       -drive if=pflash,format=raw,file="$T/vars.fd" -drive file="$IMG",format=raw,if=virtio \
       -display none -serial file:"$s" $DBG -no-reboot -nic none "$@" > /dev/null 2>&1
   }
@@ -1168,7 +1170,7 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
      && grep -q "^Pantalla: [0-9]* x [0-9]* puntos, 32 bits por punto" <<< "$S" && grep -q "^  consola de [0-9]* x [0-9]* letras" <<< "$S" \
      && grep -q "^  la pantalla, en 0xFFFFC00000000000, con escritura combinada (PAT)$" <<< "$S" \
      && grep -q "^  módulo del cargador: HISPA64.SIM, .*: los nombres de [0-9]* funciones (HISPA64.SIM)$" <<< "$S" \
-     && grep -qE "^Memoria: (9[0-9]|1[0-9][0-9]),[0-9] MB libres en [0-9]* trozos" <<< "$S" && grep -q "^Montón: 2000 reservas" <<< "$S" \
+     && grep -qE "^Memoria: ([6-9][0-9]|1[0-9][0-9]),[0-9] MB libres en [0-9]* trozos" <<< "$S" && grep -q "^Montón: 2000 reservas" <<< "$S" \
      && grep -q "^ACPI: 2.0 o más, de «BOCHS »; XSDT en 0x[0-9A-F]*, [0-9]* tablas: FACP APIC HPET MCFG .*DSDT (todas con la suma bien)$" <<< "$S" \
      && grep -q "ACPI NVS" <<< "$S" && grep -q "^Hispa-64 etapa 11: todo en orden.$" <<< "$S"; then
     ok "por UEFI de 64 bits (OVMF + GRUB, multiboot2) con 128 MB: «$(grep '^Cargador' <<< "$S")»; «$(grep '^Memoria:' <<< "$S" | cut -d';' -f1)»; la pantalla del GOP con escritura combinada, el módulo HISPA64.SIM, RSDP 2.0 y «todo en orden»"
@@ -1227,7 +1229,7 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
   "$AQUI/imagen.sh" "$T/uefi5" prueba "apagar escribir dir=/sata0p1 programa=/sata0p1/boot/prog/HOLACAS" > "$T/img5.txt" 2>&1 \
     || ko "imagen.sh (etapa 5) no hace la imagen: $(tail -2 "$T/img5.txt" | paste -sd ' ')"
   rm -f "$T/uefi5.txt"; cp $OVMF_V "$T/vars5.fd"
-  timeout 200 qemu-system-x86_64 -machine q35 -drive if=pflash,format=raw,readonly=on,file=$OVMF_C -drive if=pflash,format=raw,file="$T/vars5.fd" \
+  timeout 300 qemu-system-x86_64 -machine q35 -drive if=pflash,format=raw,readonly=on,file=$OVMF_C -drive if=pflash,format=raw,file="$T/vars5.fd" \
     -drive file="$T/uefi5/hispa64.img",if=none,id=b0,format=raw -device ide-hd,drive=b0,bus=ide.0 -m 512 -smp 4 \
     -display none -serial file:"$T/uefi5.txt" -monitor none $DBG -no-reboot -nic none > /dev/null 2>&1; c=$?
   S="$T/uefi5.txt"
