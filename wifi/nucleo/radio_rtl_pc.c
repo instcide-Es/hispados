@@ -113,10 +113,12 @@ static const char *busca(const char *t, const char *p)
 	return NULL;
 }
 
-/* lee «nombre» de la unidad del sistema o de la X:; 1 si es de este equipo */
+/* lee «nombre» de la unidad del sistema, de la X: o (0.8.12c: arrancado de
+ * la memoria USB con el sistema instalado en el eMMC a la vista, el Acer One
+ * 10) de la C:; 1 si es de este equipo */
 static int lee_de_este_equipo(const char *nombre, char *t, int cabe, const char **donde)
 {
-	static const char *const sitios[] = { "\\", "X:\\", NULL };
+	static const char *const sitios[] = { "\\", "X:\\", "C:\\", NULL };
 	char r[24];
 	const char *p;
 	d32 a, b;
