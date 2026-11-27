@@ -10,7 +10,7 @@ cueste un año.
 
 Este documento es el plan: lo que se quiere, las decisiones de arquitectura con su
 porqué, y las etapas, cada una con lo que se verá funcionar y cómo se prueba. Las
-**etapas 0 a 9 están hechas** (secciones 6 a 15), y la **10** y la **11**, en su base (secciones 16 a 23: la 10 f, la última, con Rust, ICU 78.3 y las bibliotecas de Ladybird, el reloj del núcleo con el TSC y el vDSO, y los cerrojos de fcntl).
+**etapas 0 a 9 están hechas** (secciones 6 a 15), y la **10** y la **11**, en su base (secciones 16 a 24: la 10 g, la última, con LibJS y Ladybird sin ventana dentro de Hispa-64 —el texto, el árbol de cajas, una captura y https://hispados.es/—, y lo que le faltaba al núcleo: enlaces, 65.536 descriptores y regiones, mremap, flock...).
 
 ---
 
@@ -267,7 +267,7 @@ y la Wi-Fi son lo que más puede alargarlo.
 | 7 | musl, POSIX, herramientas de compilar cruzado | **hecha (24/11)** | — |
 | 8 | Gráficos: compositor, ventanas, ratón, oficina | **hecha (24/11)** | — |
 | 9 | Red por cable, TCP/IP, TLS; Wi-Fi en paralelo | **hecha (25/11)** (la Wi-Fi, en paralelo: 3–5 meses) | — |
-| 10 | Navegador moderno (Ladybird o WebKit) | **la base, hecha (25/11)**: C++, la letra (FreeType y HarfBuzz), TCP de hoy; y lo que quedaba de la 9 (sección 16). **La base de la 10 b, hecha (25/11)**: curl 8.14.1 con BearSSL (la orden y libcurl, con «multi») e ICU 77.1 (con sus datos filtrados), readlink (sección 19). **La 10 c, hecha (26/11)**: una referencia al descriptor durante cada llamada, la causa de fondo de lo lento con varios procesadores (la TLB: la cuarentena del montón) y de los cortes del sonido, el compilador cruzado (GCC 14.3 con la libstdc++ para musl; C++ dinámico), **IPv6** (SLAAC, ND, ICMPv6, AF_INET6) y lo de la auditoría (sección 20). **La 10 d, hecha (26/11)**: los sockets de Unix (AF_UNIX, con SCM_RIGHTS y SCM_CREDENTIALS), `memfd_create` con sus sellos, un programa de C++23 que se habla con otro como los de Ladybird, el vigilante, el HPET de 32 bits y H4 y H11 de la auditoría (sección 21). **La 10 e, hecha (27/11)**: Skia m148 (la de Ladybird) con el procesador, las bibliotecas que pide Ladybird (17 en `terceros/`, con su prueba), AK, LibCore, LibFileSystem, LibThreading y LibTest de Ladybird con sus pruebas de AK (970 casos) dentro de Hispa-64, preadv y pwritev (sección 22). **La 10 f, hecha (27/11)**: Rust con nuestra musl, ICU 78.3, LibUnicode, LibURL, LibIPC, LibGfx (y LibRegex, LibCompress, LibTextCodec, LibImageDecoders, LibCrypto propia) con sus pruebas dentro de Hispa-64; el reloj del núcleo con el TSC, el vDSO, getrandom rápido y los programas de la unidad sin copiar (TestAK, de 25 s a 3 s con KVM), los cerrojos de fcntl y ARRANQUE.TXT al pararse (sección 23). Queda el navegador mismo: lo que pide, en la sección 23 | (8–12 sem.) |
+| 10 | Navegador moderno (Ladybird o WebKit) | **la base, hecha (25/11)**: C++, la letra (FreeType y HarfBuzz), TCP de hoy; y lo que quedaba de la 9 (sección 16). **La base de la 10 b, hecha (25/11)**: curl 8.14.1 con BearSSL (la orden y libcurl, con «multi») e ICU 77.1 (con sus datos filtrados), readlink (sección 19). **La 10 c, hecha (26/11)**: una referencia al descriptor durante cada llamada, la causa de fondo de lo lento con varios procesadores (la TLB: la cuarentena del montón) y de los cortes del sonido, el compilador cruzado (GCC 14.3 con la libstdc++ para musl; C++ dinámico), **IPv6** (SLAAC, ND, ICMPv6, AF_INET6) y lo de la auditoría (sección 20). **La 10 d, hecha (26/11)**: los sockets de Unix (AF_UNIX, con SCM_RIGHTS y SCM_CREDENTIALS), `memfd_create` con sus sellos, un programa de C++23 que se habla con otro como los de Ladybird, el vigilante, el HPET de 32 bits y H4 y H11 de la auditoría (sección 21). **La 10 e, hecha (27/11)**: Skia m148 (la de Ladybird) con el procesador, las bibliotecas que pide Ladybird (17 en `terceros/`, con su prueba), AK, LibCore, LibFileSystem, LibThreading y LibTest de Ladybird con sus pruebas de AK (970 casos) dentro de Hispa-64, preadv y pwritev (sección 22). **La 10 f, hecha (27/11)**: Rust con nuestra musl, ICU 78.3, LibUnicode, LibURL, LibIPC, LibGfx (y LibRegex, LibCompress, LibTextCodec, LibImageDecoders, LibCrypto propia) con sus pruebas dentro de Hispa-64; el reloj del núcleo con el TSC, el vDSO, getrandom rápido y los programas de la unidad sin copiar (TestAK, de 25 s a 3 s con KVM), los cerrojos de fcntl y ARRANQUE.TXT al pararse (sección 23). **La 10 g, hecha (27/11)**: los enlaces simbólicos, 65.536 descriptores y regiones, mremap (la causa de TestURLPattern colgado), memfd con read y write, madvise de archivos, EDEADLK, flock, statfs, `__vdso_getcpu`; ensambla.py de 28 minutos a 1; MLB sin pendientes; **LibJS (8.449 pruebas) y Ladybird sin ventana dentro de Hispa-64** (texto, árbol, captura PNG, https://hispados.es/) (sección 24). Queda: mmap compartido de escribir de archivos (sqlite en WAL), WebCrypto, vídeo, la ventana | (8–12 sem.) |
 | 11 | Impresión IPP, sonido HDA, energía (suspender, batería) | **la base, hecha (25/11)**: el planificador, TCP con congestión, la INTx, el tiempo de procesador y **el sonido (HD Audio, /dev/dsp)** (sección 17). **La 11 b, hecha (25/11)**: el tic estable (la calibración del APIC), **ACPICA en el núcleo** (la batería, el cable, el EC, apagar por `_S5`, el `_CRS` de los enlaces de los `_PRT`), el brillo y HWP (sección 18). Quedan suspender, los P-states sin HWP, IPP y la mezcla del sonido | (en paralelo) |
 | 12 | Instalar en el disco, actualizar, cuentas | 3–4 sem. | (en paralelo) |
 | 13 | (opcional) Cargador UEFI propio, Secure Boot; UEFI de 32 bits | 3–4 sem. | — |
@@ -4574,3 +4574,242 @@ Apache-2.0 (se elige la MIT).
   `-march=x86-64-v2`, el SIMD de libjpeg-turbo y dav1d, la memoria mínima por
   UEFI, los sockets de Unix en el disco, el recolector de ciclos, H12 y H13,
   VirtualBox, ensambla.py frente a NASM.
+
+---
+
+## 24. La etapa 10 g, hecha (27/11/2026): lo que le faltaba al núcleo para Ladybird, LibJS y el navegador sin ventana
+
+### Las decisiones
+
+- **Por qué la 10 g**: los 4 grupos pendientes de MLB (sección 23) y lo que
+  quedaba del núcleo (madvise de archivos, EDEADLK, el vDSO), y de ahí,
+  LibJS, LibWeb y el navegador sin ventana. Y ensambla.py, que se llevaba casi
+  media hora de los 90 minutos de la batería.
+
+### Lo del núcleo
+
+- **TestURLPattern colgado, la causa**: `mremap` daba siempre ENOMEM. El
+  `pthread_getattr_np` de musl, para el hilo principal, mide la pila bajando
+  de página en página con `mremap(p, 4096, 8192, 0)` mientras dé ENOMEM
+  (dentro de la pila) y para con el EFAULT de debajo (sin nada puesto): con
+  ENOMEM siempre, no acababa nunca. Lo llama `AK::StackInfo` (LibRegex,
+  LibJS: el límite de la recursión). Ahora **mremap** de verdad (`remapea`,
+  sistema.cas): EFAULT si no hay nada puesto, EINVAL con marcas que no hay o
+  mal alineado, achicar (lo de más, fuera), crecer en su sitio una región
+  anónima y privada si lo de después está libre; moverla (MREMAP_MAYMOVE sin
+  sitio, MREMAP_FIXED), ENOMEM (musl copia: es lo que haría con poca
+  memoria).
+- **Los enlaces simbólicos** (vfs64.cas): FAT y exFAT no tienen (en Linux,
+  `symlink` en vfat da EPERM); /tmp, el disco en memoria, hace de tmpfs, que
+  sí: sus enlaces van en una tabla en la memoria (256: la ruta absoluta del
+  enlace, ya sin enlaces por en medio, y lo que dice, tal cual), y también en
+  «/» (la unidad de solo leer: el enlace va en la tabla, como el `ln -s` de
+  quien manda en Linux; así `/share` puede llevar a `/tmp/...`, que es donde
+  Ladybird busca lo suyo: `../share/Lagom` desde el programa). Los siguen
+  todas las rutas (`normaliza`, hasta 40 veces: ELOOP), y los ven
+  `getdents64` (DT_LNK), `lstat` y `newfstatat` con AT_SYMLINK_NOFOLLOW
+  (S_IFLNK, 0777, el largo), `readlink`/`readlinkat`, `unlink`, `rename` (del
+  enlace, encima de uno, y la carpeta que los tiene: van con ella), `rmdir`
+  (ENOTEMPTY con alguno dentro; de un enlace, ENOTDIR), `mkdir` (EEXIST) y
+  `open` con O_NOFOLLOW (ELOOP) o O_CREAT y O_EXCL (EEXIST); `symlink` (88) y
+  `symlinkat` (266). Lo único que no es como Linux: «..» se resuelve antes que
+  los enlaces (en la ruta, sin mirar el disco).
+- **Los descriptores** (procesos.cas): eran arreglos de 256 dentro del
+  Proceso; Ladybird sube RLIMIT_NOFILE a 65.536 (LibMain) y LibIPC pasa
+  hasta 16.000 en un mensaje (TestTransportSocket abre 32.000 a la vez).
+  Ahora las seis tablas (`fd_clase`, `fd_obj`, `fd_cloexec`, `fd_nobloq`,
+  `fd_uso`, `fd_gen`) van en un sitio fijo de la **zona de los
+  descriptores** (desde 0xFFFFD00000000000, 2 MB por proceso, 1.024 sitios),
+  en su sitio para 65.536, con solo las páginas de los que caben puestas
+  (`fd_cap`, de 1.024 en 1.024: 28 KB al empezar). Crecen sin moverse (los
+  demás hilos del proceso las leen sin cerrojo hasta `fd_cap`, que solo
+  crece) y se sueltan con el Proceso (`libera_proceso`). **RLIMIT_NOFILE de
+  verdad**: 1.024 al empezar, como Linux, hasta 65.536 (`setrlimit`,
+  `prlimit64`; más, EPERM; lo de ahora más que lo más, EINVAL); se hereda;
+  `dup2` por encima, EBADF; `F_DUPFD` por encima, EINVAL.
+- **Un memfd con read y write** (disp64.cas): LibIPC manda lo grande (65 MB
+  en TestConnection) en un memfd: `ftruncate`, `write`, los sellos, `fstat`,
+  `lseek` con SEEK_HOLE y `mmap` compartido del otro lado. Antes, `write`
+  daba EINVAL. Ahora read, write, pread, pwrite y lseek (SET, CUR, END, DATA
+  y HOLE: sin huecos), con F_SEAL_WRITE y F_SEAL_GROW (EPERM). La posición es
+  del objeto (la de un memfd es la de su única descripción).
+- **El par cerrado de LibIPC**: en Hispa-64 ya era como Linux (poll: POLLIN,
+  POLLHUP y POLLRDHUP; recv, lo que quedaba y 0; send, EPIPE; epoll,
+  EPOLLIN, EPOLLHUP y EPOLLRDHUP: MPOSIX lo mira igual que en Linux). Lo que
+  fallaba en TestConnection era el memfd de 65 MB.
+- **madvise(MADV_DONTNEED)** de lo de un archivo: otra vez lo del archivo
+  (lo privado que se hubiera escrito, perdido, como Linux). Cada mmap de un
+  archivo deja un registro (lo abierto, con una referencia, la dirección y el
+  desplazamiento: `pon_mapa`, `reg_arch`); los que ya no usa ninguna región se
+  sueltan al quitar; al bifurcar se copian; en execve y al acabar, fuera. Lo
+  anónimo y privado, a cero; lo anónimo compartido y lo de los
+  dispositivos, como está (en Linux, igual).
+- **EDEADLK en F_SETLKW** (candados64.cas), como `posix_locks_deadlock` de
+  Linux: antes de esperar por uno de POSIX de otro proceso, se sigue la cadena
+  de quién espera a quién; si vuelve a quien pide, EDEADLK. Los OFD, no (como
+  Linux).
+- **El vDSO**: `__vdso_getcpu` (con `rdtscp`: el núcleo pone en IA32_TSC_AUX
+  el número de cada procesador, Entradas.pon_tsc_aux; sin rdtscp, la llamada)
+  y la llamada **getcpu** (309), que no estaba. Del reloj de KVM sin el TSC
+  estable, el vDSO sigue llamando al sistema: **es lo que hace Linux**
+  (`vread_pvclock` da U64_MAX sin PVCLOCK_TSC_STABLE_BIT: cada procesador
+  tiene su pvclock, y lo que asegura que no vaya hacia atrás de uno a otro es
+  el `cmpxchg` del núcleo con lo último dado, que desde el programa no se
+  puede); con el bit, el núcleo ya va con el TSC, y el vDSO también. Lo de la
+  sección 23 («pvclock en el vDSO cuando el TSC no es estable») era un error.
+- **MPOSIX** (programas/musl/mposix.c): 96 pruebas de todo lo de arriba, en
+  cada arranque con musl, las mismas líneas que en Linux (el memfd, de 65 MB
+  si hay memoria; si no, de 4 MB).
+- **MLB**, sin pendientes: **35 grupos, 431 casos: 430 bien y 1 conocido**,
+  lo mismo que en Linux, en 8 s (eran 35 s, con los plazos de los colgados).
+- Hispa-64 **0.11.7** (uname: «etapa 10 g (Ladybird sin ventana)»).
+
+### ensambla.py, de 28 minutos a 1
+
+- Con el núcleo (150.000 líneas), 360 pasadas de 4 a 5 s. Ahora las pasadas
+  de en medio (las que solo miden: no sacan octetos) no vuelven a leer la
+  línea que haría lo mismo que la vez anterior. Lo que hace una línea (cuánto
+  avanzan la dirección y la posición, y `bits` y `absolute`) depende solo de
+  `bits` y `absolute` antes, de las etiquetas que lee (de su valor, solo en una
+  cuenta que hay que saber ya —`times`, `resb`, `align`: `fijo`— o en un
+  salto; en lo demás, como en NASM, un operando con una etiqueta va siempre en
+  la forma larga: lo que ocupa no depende de su valor, solo de que esté), de
+  un salto, solo de si llega en corto, y con `align`, de la posición. Se guarda
+  eso de la última vez; si es lo mismo, se hace lo mismo. La primera pasada y
+  la última (la de los octetos) van sin esto. Y una cuenta que es una
+  etiqueta o un número solos, sin bajar por todos los niveles.
+- Probado: el núcleo, los mismos octetos que NASM (y que la de antes); los 33
+  archivos de las pruebas de Castel (ejemplos de 16, 32 y 64 bits, las formas,
+  ENSAMBLA, la semilla de Hispa-Pentium —que la de antes no acaba en 15
+  minutos—), iguales que con la de antes o que NASM.
+
+### Lo que pidió después el navegador (al correrlo dentro)
+
+Con `traza=rutas` en la línea del núcleo (lo que cada programa busca y no
+está, y las llamadas que fallan, por el puerto serie):
+- **Las regiones**: eran 1.024 por proceso (arreglos dentro del Proceso);
+  LibJS y mimalloc pasan de eso (mmap daba ENOMEM y luego ICU,
+  U_MEMORY_ALLOCATION_ERROR). Ahora sus tablas van en la misma zona que las
+  de los descriptores (el sitio de cada proceso es de 4 MB), de 1.024 en
+  1.024, hasta 65.536 (el `max_map_count` de Linux es 65.530); el proceso de
+  paso de execve también tiene las suyas; al bifurcar se copian con el mutex
+  de la memoria del padre.
+- **mmap hasta todo el espacio** (era 1 TB): LibGC reserva 4 TB sin nada
+  puesto (la jaula de lo primitivo) y 64 GB alineados.
+- **/proc/self/status** (y /proc/PID/status del suyo): Name, State, Pid,
+  PPid, TracerPid 0, FDSize, VmRSS, RssAnon, RssShmem, VmSwap, Threads (lo
+  lee LibCore: «¿me están depurando?», y lo que gasta cada proceso).
+- **flock** (73): el candado de BSD (de todo el archivo y de lo abierto,
+  aparte de los de fcntl, como Linux), con LOCK_NB (EWOULDBLOCK); con los
+  candados de fcntl (`pon_o_espera`, la parte de poner y esperar, para los
+  dos).
+- **statfs y fstatfs** (137, 138): el tipo (la unidad, RAMFS; /tmp, TMPFS;
+  FAT; exFAT), el bloque, los bloques, los libres si se saben, ST_RDONLY.
+- **chmod, fchmod, fchmodat**: en FAT no hay permisos: lo que está, 0.
+- **HOME y XDG_RUNTIME_DIR**: en Hispa-64 no hay usuarios y «/» es de solo
+  leer: MWEB los pone en /tmp/web (Ladybird crea ahí su perfil y sus
+  sockets).
+
+### Lo de los programas: LibJS, LibWeb y el navegador sin ventana
+
+- **Con el CMake de Ladybird** (830fbef6, sin cambiar nada: `terceros/ladybird`
+  ya lleva AK, Libraries, Services, Meta, Utilities, Base y Tests/LibJS, 126
+  MB) y nuestra capa, `programas/ladybird/hispa64/`: `cmake/cadena.cmake` (el
+  cruzado y musl, estático; Rust para x86_64-unknown-linux-musl),
+  `cmake/check_for_dependencies.cmake` (las dependencias: nuestras
+  bibliotecas de `build/*-obj` y sus cabeceras de `terceros/`; lo que no hay
+  —OpenSSL, ANGLE, Vulkan, FFmpeg, SDL, fontconfig, D-Bus, PulseAudio, Qt—,
+  vacío o solo sus cabeceras) y `cmake/raiz/CMakeLists.txt` (la raíz, sin
+  Qt). Todos los generadores de código de Ladybird son de Python: no hay
+  herramientas de C++ del anfitrión. `programas/ladybird/hazweb.sh` lo hace en
+  el PC (2.771 piezas, unos 25 minutos con 12 hilos, sin red: las crates de
+  `terceros/rust-crates`); sin cargo (el servidor), copia `build/web-obj/sal`
+  y hace MJS y MWEB.
+- **Sin OpenSSL**: LibCrypto, la nuestra (sobre BearSSL y monocypher);
+  RequestServer con nuestros `CURL.cpp`, `AIA.cpp` y
+  `CertificateExceptions.cpp`: curl con BearSSL comprueba la cadena y el
+  nombre (con un archivo de autoridades malo, «SSL verification failed»); sin
+  buscar los certificados intermedios que falten ni excepciones.
+  `sinopenssl.c`: las 150 funciones de OpenSSL que se nombran; de verdad,
+  solo el azar, el borrado seguro y los parámetros: la WebCrypto de las
+  páginas y DNSSEC no van.
+- **Sin ANGLE** (`singl.c`: no hay EGL; Skia dibuja con el procesador: no hay
+  WebGL), **sin FFmpeg** (`LibMediaCodecs/FFmpegFunctions.cpp`: la tabla de
+  sus funciones, vacías: WebContent arranca, sin vídeo ni sonido), **sin
+  fontconfig** (`LibGfx/SystemFontMatcherHispa64.cpp`: sans-serif, DejaVu
+  Sans; serif, DejaVu Serif; monospace, DejaVu Sans Mono; sin ella,
+  WebContent se paraba al arrancar sin letra), sin D-Bus ni libedit (lo
+  mínimo), sin la caja de arena (`--disable-sandbox`: Hispa-64 no tiene
+  seccomp ni Landlock).
+- **`pila.c`**: musl da al hilo principal, como pila, solo lo ya usado (lo
+  mide con mremap, sección de arriba); LibJS decía «Maximum call stack size
+  exceeded» al empezar. Como glibc: la de RLIMIT_STACK (8 MB).
+- **MJS** (`mjs.c`): las pruebas de LibJS (`Tests/LibJS/Runtime`, 1.324
+  archivos, dentro de MJS) con `test-js-runtime`. En Linux y en Hispa-64 (KVM,
+  4 procesadores, 3 GB): **8.449 bien y 3 fallos esperados de 8.452**; el
+  único grupo que falla, `gc-moving-cells.js`, pide el JIT, que va apagado. En
+  Hispa-64, 170 s (en Linux, 50).
+- **MWEB** (`mweb.c`): Ladybird sin ventana. En este Ladybird no hay
+  `headless-browser`: lo hace el Hub con `--headless=text`, `layout-tree` o
+  `screenshot`. MWEB lleva dentro los recursos (`Base/res`, lo que hace
+  falta), las letras DejaVu, las autoridades (ISRG Root X1 y X2) y una página
+  de prueba (HTML, CSS y JavaScript que cambia la página, con Intl en
+  español); los deja en /tmp/web, hace el enlace `/share` -> `/tmp/web/share`
+  (Ladybird busca lo suyo en `../share/Lagom` desde el programa, `/bin/Hub`)
+  y lanza el Hub, que lanza WebContent, RequestServer, ImageDecoder y
+  Compositor. **En Hispa-64: las 7 líneas de la página, como en Linux (2 s);
+  el árbol de cajas; la captura (PNG de 800 x 600, octeto a octeto la misma
+  que en Linux); y https://hispados.es/ con la red de QEMU (1,7 s)**.
+  `MWEB URL [MODO [CA]]`: cualquier página.
+- Con `--disable-sql-database`: la base de datos de Ladybird (sqlite en modo
+  WAL) pone su `-shm` en memoria compartida con **mmap MAP_SHARED de escribir
+  de un archivo**, que Hispa-64 aún no tiene («disk I/O error»).
+
+### Las licencias nuevas
+
+Todas compatibles con la GPL-2.0 o posterior. **Por la vía de la GPLv3**
+(Apache-2.0 sola): **flatbuffers** (dentro de WebContent) y parte de las
+cabeceras de Khronos (las de ANGLE). **adblock**, MPL-2.0 (compatible con la
+GPL; dentro de WebContent). Las cabeceras de **FFmpeg**, LGPL-2.1 o posterior
+(solo cabeceras: nada de su código). Las demás crates nuevas, MIT o BSD (las
+de «MIT o Apache-2.0», por la MIT), su tabla en `terceros/rust-crates/LEEME.txt`.
+**Nada de OpenSSL, ni ring ni rustls** (las que solo hacen falta para que
+cargo resuelva el «workspace» van sin código: `terceros/rust-crates/resolver/`).
+
+### Qué hace
+
+| Archivo | Qué |
+|---|---|
+| `vfs64.cas` | los enlaces simbólicos (en /tmp y en «/»), statfs |
+| `procesos.cas` | la zona de las tablas: descriptores (65.536) y regiones (65.536); RLIMIT_NOFILE; los registros de los mmap de archivos |
+| `sistema.cas` | mremap, symlink, lstat, readlink, madvise, getcpu, flock, statfs, chmod, /proc/self/status, `traza=rutas` |
+| `disp64.cas` | read, write y lseek de un memfd |
+| `candados64.cas` | EDEADLK; flock |
+| `vdso64.asm`, `vdso64.cas`, `entradas.cas` | `__vdso_getcpu`, IA32_TSC_AUX |
+| `programas/musl/mposix.c` | MPOSIX (105 pruebas, igual que en Linux) |
+| `programas/ladybird/hazweb.sh`, `mjs.c`, `mweb.c`, `hispa64/` | Ladybird entero, MJS y MWEB |
+| `castel/ensambla.py` | la memoria de cada línea entre pasadas |
+
+### Cómo se ha probado
+
+- MPOSIX, igual en Linux y en Hispa-64 (105 pruebas), en cada arranque con
+  musl; MLB, 430 bien y 1 conocido (como en Linux), en el de KVM; y un
+  arranque más con KVM y 3 GB con MJS y MWEB (en la batería).
+- A mano, con la red de QEMU (e1000) y un disco FAT32: MWEB con el texto, el
+  árbol, la captura (sacada del disco: la misma que en Linux) y
+  https://hispados.es/.
+- **La batería**: 142 pruebas (eran 141: el arranque de LibJS y Ladybird).
+
+### Lo que queda (y más adelante)
+
+- **mmap MAP_SHARED de escribir de un archivo** (las páginas del archivo,
+  compartidas entre quienes lo mapean y lo que se lee y escribe): para la base
+  de datos de Ladybird (sqlite en WAL) y para quitar `--disable-sql-database`.
+- La WebCrypto y DNSSEC (las funciones de OpenSSL que pide Ladybird, sobre
+  BearSSL), el vídeo y el sonido (FFmpeg, o dav1d y los suyos), WebGL.
+- test262 entero (las pruebas de LibJS de Ladybird ya están).
+- Ladybird con ventana (sobre /dev/fb0 o VENTANAS: el Compositor con Skia).
+- Lo de antes: HarfBuzz 10.2.0 y brotli 1.2.1, `-march=x86-64-v2`, el SIMD de
+  libjpeg-turbo y dav1d, la memoria mínima por UEFI, los sockets de Unix en el
+  disco, el recolector de ciclos, H12 y H13, VirtualBox, ARRANQUE.TXT al
+  pararse antes de haber visto los discos.
