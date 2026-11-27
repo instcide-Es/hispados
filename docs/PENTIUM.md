@@ -5142,6 +5142,23 @@ después de compilar la semilla, más de 2 min: 120 s no daban, ya en la
 0.8.11), WireGuard y Tailscale, el UHCI de la `06`, el escritorio y «Usar:
 Cable» del `wifi`, y la 8d y la RAM del `termo`.
 
+**La 0.8.13** (26 y 27/11, rama `pentium-0813`, sobre la 0.8.12): las ramas
+`hpmini-radio`, `acer-instalar`, `termo-121`, `paq-grupos`, `p4b`, «Dejar
+entrar a Claude» en Configuración › Red, `acer-wifi` (la RTL8723BS del Acer
+One 10 ya conecta: la tabla RadioA con sus condiciones, las antenas del EFUSE,
+la prueba de antenas) y `pentium-rtl8153` (la red por USB de cable, CDC-ECM,
+parte **59**, `SOLO=redusb`). Suben base, wifi y red a la 0.8.13 (la red, por
+encima de la 0.8.12.1 publicada), paquetes 1.9, accesori 1.1.1, hvprun
+0.10.1, oficina 1.1.1 y navega 0.2.4. Al juntar, `usb.sh` (las memorias de
+prueba `PRUEBA_WIFI_RADIO`, `PRUEBA_WIFI_RECIBE` y `PRUEBA_RED_USB`, todas).
+`tableta-usb` (la tableta USB de QEMU y VirtualBox como ratón absoluto) se
+queda fuera: con ella, `dispositivos` da 74/30 e `informe` 66/10 (las dos
+usan la `usb-tablet` como el aparato «SIN CONTROLADOR»; hay que rehacer esas
+pruebas antes). Las pruebas (27/11; PC de Albinyana, -j 12 en dos tandas, y
+en el VPS `wifi`, `navegador`, `pintura` y `termo`, que en el PC fallaban por
+la carga, el compilador o ImageMagick): las 56 partes, **5416 bien, 0 mal**
+(`redusb` 84/0, `rtl` 69/0, `wifi` 119/0, `termo` 185/0).
+
 **La carga fuerte** (rama `termo-fuerte`, marcas «(TERMO-FUERTE)» en el
 núcleo y «(TERMO 1.2)» en el Termómetro; sobre la 0.8.11). Para ver si una
 fuente o un cargador frenan a un portátil (el MSI GT80 Titan, que se congela
