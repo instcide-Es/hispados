@@ -1453,8 +1453,26 @@ módulo Procesos
     fin
 
     ; (con h_cerrojo de p) SIGKILL: todos sus hilos acaban
+    público variable dice_al_matar: bool        ; [etapa 10 h] «trazamata»: con SIGKILL, dónde estaba cada hilo
+
     función mata_todos_(p: puntero a Proceso, s: nat64)
         variable i: nat32
+        variable t: puntero a Hilo
+        si dice_al_matar y s = SIGKILL y p.saliendo = 0 entonces
+            escribir("[mata] ", dirección(p.nombre[0]), " (", p.id, ") con SIGKILL; sus hilos:\n")
+            i := 0
+            mientras i < MAX_HILOS hacer
+                si p.hilos[i] <> 0 entonces
+                    t := puntero(p.hilos[i])
+                    si t.llam_n <> 0 entonces
+                        escribir("[mata]   hilo ", t.tid, " (estado ", t.estado, "): en la llamada ", t.llam_n - 1, " (", t.llam_a1, ", ", t.llam_a2, ", ", t.llam_a3, ")\n")
+                    sino
+                        escribir("[mata]   hilo ", t.tid, " (estado ", t.estado, "): fuera de las llamadas\n")
+                    fin
+                fin
+                i := i + 1
+            fin
+        fin
         si p.saliendo = 0 entonces
             p.saliendo := 1
             p.código := 0

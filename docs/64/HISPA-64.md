@@ -10,7 +10,7 @@ cueste un año.
 
 Este documento es el plan: lo que se quiere, las decisiones de arquitectura con su
 porqué, y las etapas, cada una con lo que se verá funcionar y cómo se prueba. Las
-**etapas 0 a 9 están hechas** (secciones 6 a 15), y la **10** y la **11**, en su base (secciones 16 a 24: la 10 g, la última, con LibJS y Ladybird sin ventana dentro de Hispa-64 —el texto, el árbol de cajas, una captura y https://hispados.es/—, y lo que le faltaba al núcleo: enlaces, 65.536 descriptores y regiones, mremap, flock...).
+**etapas 0 a 9 están hechas** (secciones 6 a 15), y la **10** y la **11**, en su base (secciones 16 a 25: la 10 h, la última, con **Ladybird con ventana en el escritorio de Hispa-64** —NAVEGADOR, nuestra interfaz sobre el Hub de Ladybird: pestañas, barra de direcciones, teclado, ratón y rueda; https://hispados.es/ y https://github.com/—, mmap compartido de escribir de archivos —sqlite en modo WAL: la base de datos de Ladybird— y dos esperas perdidas: la de la prueba del eco y la de epoll_ctl).
 
 ---
 
@@ -267,7 +267,7 @@ y la Wi-Fi son lo que más puede alargarlo.
 | 7 | musl, POSIX, herramientas de compilar cruzado | **hecha (24/11)** | — |
 | 8 | Gráficos: compositor, ventanas, ratón, oficina | **hecha (24/11)** | — |
 | 9 | Red por cable, TCP/IP, TLS; Wi-Fi en paralelo | **hecha (25/11)** (la Wi-Fi, en paralelo: 3–5 meses) | — |
-| 10 | Navegador moderno (Ladybird o WebKit) | **la base, hecha (25/11)**: C++, la letra (FreeType y HarfBuzz), TCP de hoy; y lo que quedaba de la 9 (sección 16). **La base de la 10 b, hecha (25/11)**: curl 8.14.1 con BearSSL (la orden y libcurl, con «multi») e ICU 77.1 (con sus datos filtrados), readlink (sección 19). **La 10 c, hecha (26/11)**: una referencia al descriptor durante cada llamada, la causa de fondo de lo lento con varios procesadores (la TLB: la cuarentena del montón) y de los cortes del sonido, el compilador cruzado (GCC 14.3 con la libstdc++ para musl; C++ dinámico), **IPv6** (SLAAC, ND, ICMPv6, AF_INET6) y lo de la auditoría (sección 20). **La 10 d, hecha (26/11)**: los sockets de Unix (AF_UNIX, con SCM_RIGHTS y SCM_CREDENTIALS), `memfd_create` con sus sellos, un programa de C++23 que se habla con otro como los de Ladybird, el vigilante, el HPET de 32 bits y H4 y H11 de la auditoría (sección 21). **La 10 e, hecha (27/11)**: Skia m148 (la de Ladybird) con el procesador, las bibliotecas que pide Ladybird (17 en `terceros/`, con su prueba), AK, LibCore, LibFileSystem, LibThreading y LibTest de Ladybird con sus pruebas de AK (970 casos) dentro de Hispa-64, preadv y pwritev (sección 22). **La 10 f, hecha (27/11)**: Rust con nuestra musl, ICU 78.3, LibUnicode, LibURL, LibIPC, LibGfx (y LibRegex, LibCompress, LibTextCodec, LibImageDecoders, LibCrypto propia) con sus pruebas dentro de Hispa-64; el reloj del núcleo con el TSC, el vDSO, getrandom rápido y los programas de la unidad sin copiar (TestAK, de 25 s a 3 s con KVM), los cerrojos de fcntl y ARRANQUE.TXT al pararse (sección 23). **La 10 g, hecha (27/11)**: los enlaces simbólicos, 65.536 descriptores y regiones, mremap (la causa de TestURLPattern colgado), memfd con read y write, madvise de archivos, EDEADLK, flock, statfs, `__vdso_getcpu`; ensambla.py de 28 minutos a 1; MLB sin pendientes; **LibJS (8.449 pruebas) y Ladybird sin ventana dentro de Hispa-64** (texto, árbol, captura PNG, https://hispados.es/) (sección 24). Queda: mmap compartido de escribir de archivos (sqlite en WAL), WebCrypto, vídeo, la ventana | (8–12 sem.) |
+| 10 | Navegador moderno (Ladybird o WebKit) | **la base, hecha (25/11)**: C++, la letra (FreeType y HarfBuzz), TCP de hoy; y lo que quedaba de la 9 (sección 16). **La base de la 10 b, hecha (25/11)**: curl 8.14.1 con BearSSL (la orden y libcurl, con «multi») e ICU 77.1 (con sus datos filtrados), readlink (sección 19). **La 10 c, hecha (26/11)**: una referencia al descriptor durante cada llamada, la causa de fondo de lo lento con varios procesadores (la TLB: la cuarentena del montón) y de los cortes del sonido, el compilador cruzado (GCC 14.3 con la libstdc++ para musl; C++ dinámico), **IPv6** (SLAAC, ND, ICMPv6, AF_INET6) y lo de la auditoría (sección 20). **La 10 d, hecha (26/11)**: los sockets de Unix (AF_UNIX, con SCM_RIGHTS y SCM_CREDENTIALS), `memfd_create` con sus sellos, un programa de C++23 que se habla con otro como los de Ladybird, el vigilante, el HPET de 32 bits y H4 y H11 de la auditoría (sección 21). **La 10 e, hecha (27/11)**: Skia m148 (la de Ladybird) con el procesador, las bibliotecas que pide Ladybird (17 en `terceros/`, con su prueba), AK, LibCore, LibFileSystem, LibThreading y LibTest de Ladybird con sus pruebas de AK (970 casos) dentro de Hispa-64, preadv y pwritev (sección 22). **La 10 f, hecha (27/11)**: Rust con nuestra musl, ICU 78.3, LibUnicode, LibURL, LibIPC, LibGfx (y LibRegex, LibCompress, LibTextCodec, LibImageDecoders, LibCrypto propia) con sus pruebas dentro de Hispa-64; el reloj del núcleo con el TSC, el vDSO, getrandom rápido y los programas de la unidad sin copiar (TestAK, de 25 s a 3 s con KVM), los cerrojos de fcntl y ARRANQUE.TXT al pararse (sección 23). **La 10 g, hecha (27/11)**: los enlaces simbólicos, 65.536 descriptores y regiones, mremap (la causa de TestURLPattern colgado), memfd con read y write, madvise de archivos, EDEADLK, flock, statfs, `__vdso_getcpu`; ensambla.py de 28 minutos a 1; MLB sin pendientes; **LibJS (8.449 pruebas) y Ladybird sin ventana dentro de Hispa-64** (texto, árbol, captura PNG, https://hispados.es/) (sección 24). **La 10 h, hecha (28/11)**: **Ladybird con ventana** (NAVEGADOR en VENTANAS: pestañas, barra de direcciones, teclado, ratón y rueda; en el menú Inicio), mmap MAP_SHARED de escribir de archivos y msync (sqlite en WAL: la base de datos y la caché de disco de Ladybird), epoll_ctl que avisa (RequestServer que no contestaba), la causa del fallo intermitente del eco (de la prueba) (sección 25). Queda: WebCrypto, los cuadros de diálogo del navegador, vídeo | (8–12 sem.) |
 | 11 | Impresión IPP, sonido HDA, energía (suspender, batería) | **la base, hecha (25/11)**: el planificador, TCP con congestión, la INTx, el tiempo de procesador y **el sonido (HD Audio, /dev/dsp)** (sección 17). **La 11 b, hecha (25/11)**: el tic estable (la calibración del APIC), **ACPICA en el núcleo** (la batería, el cable, el EC, apagar por `_S5`, el `_CRS` de los enlaces de los `_PRT`), el brillo y HWP (sección 18). Quedan suspender, los P-states sin HWP, IPP y la mezcla del sonido | (en paralelo) |
 | 12 | Instalar en el disco, actualizar, cuentas | 3–4 sem. | (en paralelo) |
 | 13 | (opcional) Cargador UEFI propio, Secure Boot; UEFI de 32 bits | 3–4 sem. | — |
@@ -4850,3 +4850,223 @@ cargo resuelva el «workspace» van sin código: `terceros/rust-crates/resolver/
   libjpeg-turbo y dav1d, la memoria mínima por UEFI, los sockets de Unix en el
   disco, el recolector de ciclos, H12 y H13, VirtualBox, ARRANQUE.TXT al
   pararse antes de haber visto los discos.
+
+## 25. La etapa 10 h, hecha (28/11/2026): Ladybird con ventana, mmap compartido de escribir de archivos y dos esperas perdidas
+
+### Las decisiones
+
+- **Por qué la 10 h**: lo que dejó la 10 g (sección 24): el fallo
+  intermitente de la batería, mmap MAP_SHARED de escribir de un archivo (la
+  base de datos de Ladybird) y, sobre todo, **el navegador con ventana**.
+- **El camino de la ventana: una interfaz propia, pequeña, sobre el Hub**.
+  El Ladybird de hoy (830fbef6) se parte en el **Hub** (el navegador de
+  verdad: pestañas, historial, ajustes, y quien lanza WebContent,
+  RequestServer, ImageDecoder y el Compositor, que pinta con Skia por el
+  procesador) y **la interfaz** (en Ladybird, la de Qt o la de AppKit), que
+  le habla por su protocolo de IPC (`Services/Hub/HubServer.ipc` y
+  `HubClient.ipc`). Lo más sencillo y sólido: una interfaz nuestra, **NAVEGADOR**
+  (`programas/ladybird/hispa64/navegador/`), que hace lo mismo que
+  `UI/Qt/HubConnection.cpp` y `RemoteView.cpp` de Qt pero contra las
+  ventanas de Hispa-64 (VENTANAS). Nada de Ladybird se cambia: el Hub y los
+  demás son los mismos programas que ya corrían sin ventana. Descartado:
+  hacer de VENTANAS un «Wayland» o una «Qt» (mucho más, y para nada más);
+  meter el Hub en el mismo proceso (Ladybird lo permite, pero el protocolo
+  es el mismo y un fallo del Hub se llevaría la ventana).
+
+### Lo primero: la causa del fallo intermitente de la Realtek con 8 procesadores
+
+- No era del núcleo: **era de la prueba**. El cliente del eco del anfitrión
+  (en pruebas.sh) se conectaba desde que arrancaba QEMU, antes de que el
+  invitado tuviera red; slirp (la red de QEMU) acepta la conexión en el
+  anfitrión y manda el SYN al invitado, y lo repite hasta 75 s. Sin
+  respuesta en 30 s, el cliente lo dejaba y probaba otra vez, pero su
+  conexión vieja seguía viva en slirp, con los 100 KB y el FIN que había
+  mandado. Con 8 procesadores el invitado llega al `listen` a los ~30 s,
+  justo el plazo del primer intento: si una repetición del SYN viejo llegaba
+  justo después, el servidor ECO se quedaba con esa conexión, la devolvía
+  entera («1 conexiones, 102400 octetos devueltos») a un cliente que ya no
+  estaba, y al nuevo ya no lo atendía (solo atiende una): ningún `.eco`.
+  Desde la 10 g (soltar las tablas al acabar), el arranque iba un poco más
+  deprisa y caía en esa ventana. Comprobado con un cliente que apunta cada
+  intento: en una vuelta buena, el invitado dice «conexión 1: write: Broken
+  pipe (cortada por el otro lado: no cuenta)» —la vieja— y luego atiende la
+  buena; en la mala, slirp ya lo había aceptado todo y no hay EPIPE (en
+  Linux, igual).
+- **El arreglo**: el cliente espera al «ECO: escuchando» del puerto serie
+  antes de conectarse. Tres vueltas de la Realtek con 8 procesadores:
+  bien, y el invitado ya no ve ninguna conexión vieja.
+
+### mmap MAP_SHARED de escribir de un archivo y msync (vfs64.cas, procesos.cas, sistema.cas)
+
+- **Las páginas compartidas del archivo** (`Vfs64.Comp`, colgado del Nodo:
+  `n.comp`): un arreglo con el marco de cada página del archivo, desde la
+  0, que se llena al tocarlas (con lo del disco; lo que pasa del final, a
+  cero). Son las mismas para todos los que mapean el archivo (todos los
+  procesos y todas sus regiones: el Nodo es uno por archivo). Mientras las
+  hay, **son lo que vale del archivo en su trozo**: `read` las lee encima de
+  lo del disco; `write` escribe en el disco y en ellas; `ftruncate` pone a
+  cero lo que queda detrás del final nuevo (si luego crece, se ve a cero,
+  como Linux). Lo de ellas va al archivo con **msync** (26; con MS_SYNC,
+  también al disco), con fsync, con sync y al soltar el nodo (la última
+  referencia: cada mmap tiene la suya, con lo abierto). Hasta 1 GB por
+  archivo. Lo que se escribe en la memoria más allá del final, en la última
+  página, no va al archivo (como Linux); tocar una página entera más allá
+  del final, en Linux, da SIGBUS: aquí, ceros (lo único distinto).
+- **Las regiones** `R_COMPARCH` (procesos.cas): se ponen al tocarlas
+  (`pon_página`, con el registro del mmap de la 10 g: lo abierto y el
+  desplazamiento), con la marca COMPARTIDA (se comparten al bifurcar, como
+  las de /dev/shm); el marco, con una cuenta más por cada página puesta
+  (`Espacios.comparte_marco`). madvise(MADV_DONTNEED) las deja como están
+  (en Linux, lo compartido no se pierde). Los errores: de uno abierto sin
+  O_RDWR, EACCES; de la unidad en memoria (de solo leer), EACCES.
+- **msync**: mal alineado o MS_SYNC con MS_ASYNC, EINVAL; algo sin poner en
+  medio, ENOMEM (después de volcar lo que sí, como Linux).
+- **Las pruebas**: MPOSIX (121, eran 105): dos mmap del mismo archivo, read
+  y write con lo mapeado, un hijo que escribe y el padre lo ve, msync y sus
+  errores, ftruncate (a cero al crecer), lo escrito en el archivo al
+  soltarlo, EACCES; y MCANDADOS (48, eran 44): **sqlite en modo WAL** con
+  dos procesos (uno lee mientras el otro escribe, sin SQLITE_BUSY;
+  checkpoint; integrity_check; abierta otra vez). Igual que en Linux.
+- Y así, **fuera `--disable-sql-database`**: Ladybird ya tiene su base de
+  datos (cookies, historial, localStorage...) y **su caché de disco**
+  (`INDEX.db`, también en WAL).
+
+### Lo que trajo la caché de disco: una espera perdida en epoll_ctl (sistema.cas)
+
+- Con la caché de disco en marcha, una de cada tres o cuatro veces el Hub
+  decía «Ending a helper process that did not respond in time» y «Failed to
+  connect to RequestServer» (el navegador, con y sin ventana, no arrancaba).
+  Para verlo sin cambiar los tiempos (con la traza de cada llamada,
+  `trazaprog=NOMBRE`, nuevo, no fallaba), **`trazamata`**: cuando un proceso
+  recibe SIGKILL, dice dónde estaba cada uno de sus hilos (la llamada en
+  curso y sus argumentos: `Hilo.llam_n`). Salió: el hilo principal de
+  RequestServer en `ppoll` y el de IPC en **`epoll_pwait`**, los dos sin
+  plazo, con el mensaje del Hub ya en el socket.
+- **La causa**: `epoll_ctl` no avisaba (Sondeo64.avisa). El hilo de IPC
+  toma el número de cambios, mira la lista de su epoll y duerme; si en
+  medio el hilo principal añade el socket del Hub —con su primer mensaje
+  ya dentro: el número de cambios ya había subido antes—, nadie lo despierta
+  nunca. En Linux, añadir a un epoll uno que ya está listo despierta a quien
+  espera. Ahora `epoll_ctl` avisa (ADD, MOD y DEL), y ADD pone el sitio nuevo
+  antes de subir la cuenta (quien mira a la vez no ve uno a medias).
+  Antes del arreglo, 2 de 9 vueltas de MWEB (con KVM y 4 procesadores) colgadas; después, 12 de 12 bien.
+
+### NAVEGADOR: Ladybird con ventana (programas/ladybird/hispa64/navegador)
+
+- **`navegador.cpp`** (la interfaz): lanza el Hub (`/bin/Hub`, con
+  `SOCKET_TAKEOVER=ipc:N`, `--ui-info=` lo que sabe hacer la interfaz y
+  `--ui-pid=`, como la de Qt), le pide `initialize` y `create_view` por cada
+  pestaña, y le dice el tamaño (`view_set_viewport`), que pinte en la
+  memoria (`view_set_presents_from_cpu_memory`), cuál está delante, el foco
+  y lo que hay que cargar (`view_load`). **Lo que se pinta**: los búferes
+  que el Compositor deja en memoria compartida para cada página
+  (`view_install_backing_stores`, `view_present_backing_store`; los lleva
+  `WebView::PageBackingStores`, el mismo de Qt), copiados a la ventana
+  (BGRA, que es el 0x00RRGGBB de VENTANAS) debajo de la barra; el que deja de
+  estar delante vuelve al Compositor (`release_backing_store`).
+- **La barra** (con la letra de la oficina, la DejaVu Sans con suavizado):
+  las pestañas (con su título, «×» para cerrarla y «+» para otra), ← → y
+  ↻ (o ✕ mientras carga; ↻ dibujado: la DejaVu recortada no lo tiene) y la
+  **barra de direcciones** (escribir, con los acentos y la ñ; Inicio, Fin,
+  las flechas, Retroceso, Supr, Ctrl+A, Ctrl+V; Intro: una dirección —con o
+  sin https://— o, si no lo es, una búsqueda en DuckDuckGo; Esc, a la
+  página). El título de la ventana, el de la página. El enlace bajo el
+  ratón, abajo a la izquierda.
+- **El teclado** a la página (KeyDown y KeyUp: las teclas de Hispa-64
+  llegan al pulsarlas), con el texto (`should_insert_text`); **el ratón**
+  (mover, los tres botones, el doble clic, salir de la página) y **la
+  rueda** (tres líneas de 40 puntos por paso; con Mayús, de lado). Los
+  atajos: Ctrl+L (la barra), Ctrl+T (una pestaña en blanco, con la barra
+  para escribir), Ctrl+W (cerrarla), Ctrl+Tab (la siguiente), F5 o Ctrl+R
+  (recargar). La forma del puntero (la I en el texto).
+- **Las ventanas que abre una página** (target=_blank, window.open): una
+  pestaña más. Los cuadros que aún no hay (alert, confirm, prompt, elegir
+  archivo, color, fecha, un `<select>`, permisos): se contesta lo prudente
+  (cerrado, no, nada), para que la página siga. Las descargas, a
+  /tmp/web/descargas. El portapapeles, el de VENTANAS.
+- **`conexion.h`**: la punta de la interfaz del protocolo
+  (`IPC::ConnectionToServer<HubClientEndpoint, HubServerEndpoint>`), con los
+  mensajes que se atienden; los otros ~110 (traducir, ortografía, mandos de
+  juego...), **`talones.py`**: los saca de HubClient.ipc al compilar, vacíos
+  (si Ladybird añade uno, sigue compilando).
+- **`ventana.c`** (C): las ventanas (la capa «so» de la oficina,
+  so_hispa64.c, dentro, con su `main` con otro nombre) y la letra (lienzo.c),
+  con tipos de C sencillos (`ventana.h`): las cabeceras de la oficina no se
+  cruzan con las de Ladybird. Los sucesos los espera otro hilo (en el futex
+  de la ventana) y avisa al bucle de Ladybird (Core::EventLoop) por un tubo.
+- **Al arrancar**: si no están, los recursos de Ladybird en /tmp/web (los
+  deja **`MWEB --prepara`**, nuevo: lo mismo que para el navegador sin
+  ventana) y la casa en /tmp/web/casa. Sin la bienvenida de Ladybird
+  (about:welcome, en inglés: con el perfil en /tmp, saldría cada vez): abre
+  https://hispados.es/ o lo que se le diga (`NAVEGADOR URL`).
+- **En el menú Inicio**: «Navegador (páginas web)», el primero (solo si está
+  NAVEGADOR: en la imagen de siempre no sale y el menú queda como antes). Y
+  en la línea del núcleo, **`navegador`** o **`navegador=URL`** con
+  `escritorio`: el escritorio con el Navegador abierto (la entrada «el
+  escritorio con el Navegador» del menú de la imagen con el navegador).
+- **Las letras y las autoridades** (hazweb.sh, en /tmp/web): la DejaVu Sans
+  entera (no la recortada de la oficina: las páginas de hoy traen flechas,
+  griego, cirílico...) y **las autoridades de Mozilla**
+  (`terceros/autoridades-mozilla`, 120, MPL-2.0: compatible) en vez de solo
+  las dos de Let's Encrypt (github.com va con Sectigo y USERTrust).
+- **Visto a mano** (QEMU, KVM, 4 procesadores, 3 GB, la red de QEMU):
+  https://hispados.es/ (con sus letras web y sus colores), https://github.com/
+  escrito en la barra, la rueda, atrás, otra pestaña, una búsqueda de
+  «ñandú» en DuckDuckGo y un enlace de sus resultados (Wikipedia contesta
+  «429» a la IP del servidor: es de Wikipedia).
+
+### La prueba de la ventana (pruebas.sh)
+
+- Por UEFI (la pantalla del GOP, 1280 x 800) con KVM y 3 GB, sin tarjeta de
+  red: la imagen con VENTANAS, NAVEGADOR y los programas de Ladybird
+  (`imagen.sh` con **`PROGS_DE=`**, nuevo: los programas ya hechos, sin
+  hacerlos otra vez) y `escritorio navegador=file:///tmp/web/paginas/ventana.html`
+  (una página de la unidad: un enlace, un campo, un bloque más abajo y
+  localStorage). Se mira en los pantallazos (los puntos de cada color en
+  cada sitio: la barra, la pestaña, el fondo de la página, el enlace, lo que
+  deja ver la rueda, la otra página) y en lo que dice NAVEGADOR (cada página
+  cargada y cada título): escribir «ñandú y pingüino» en el campo (la página
+  lo pone en su título), la rueda, el enlace con el ratón, el botón de
+  atrás, Ctrl+T con una dirección escrita en la barra, Ctrl+W; y que no haya
+  errores de sqlite.
+
+### Las imágenes
+
+- La de siempre y la **con navegador** (`WEB=1 imagen.sh`), como en la 10 g;
+  la del navegador lleva NAVEGADOR (59 MB más) y la entrada «el escritorio
+  con el Navegador».
+- Hispa-64 **0.11.8** (uname: «etapa 10 h (Ladybird con ventana)»).
+
+### Qué hace
+
+| Archivo | Qué |
+|---|---|
+| `castel/nucleo64/pruebas.sh` | el cliente del eco, cuando el invitado escucha; la prueba de la ventana; MPOSIX 121, MCANDADOS 48 |
+| `vfs64.cas`, `nodos64.cas` | las páginas compartidas de los archivos (`Comp`): read, write, ftruncate, fsync, sync |
+| `procesos.cas`, `sistema.cas` | `R_COMPARCH`, mmap MAP_SHARED de escribir, msync; epoll_ctl avisa; `trazaprog=`, `trazamata` |
+| `hispa64.cas` | `navegador` y `navegador=URL` con `escritorio` |
+| `programas/musl/mposix.c`, `mcandados.c` | las pruebas del mmap compartido y de sqlite en WAL |
+| `programas/ladybird/hispa64/navegador/` | NAVEGADOR: `navegador.cpp`, `conexion.h`, `talones.py`, `ventana.c` y `.h`, su CMake |
+| `programas/ladybird/mweb.c`, `hazweb.sh` | `MWEB --prepara`, sin `--disable-sql-database`; NAVEGADOR, la DejaVu Sans entera, las autoridades de Mozilla |
+| `programas/ladybird/hispa64/paginas/` | `ventana.html` y `otra.html` (la prueba de la ventana) |
+| `programas/ventanas/ventanas.c` | «Navegador» en el menú Inicio |
+| `imagen.sh` | `PROGS_DE=`; la entrada del escritorio con el Navegador |
+| `terceros/autoridades-mozilla/` | las autoridades de Mozilla (MPL-2.0) |
+
+### Lo que queda (y más adelante)
+
+- **La WebCrypto** (`crypto.subtle`): la parte de Rust de LibCrypto de
+  Ladybird (`Libraries/LibCrypto/Rust/src/sys.rs`) llama a ~90 funciones de
+  OpenSSL 3 (EVP_MD, EVP_MAC, EVP_CIPHER, EVP_KDF, EVP_PKEY): hay que
+  hacerlas sobre BearSSL (los resúmenes, HMAC, AES-GCM/CBC/CTR/KW, PBKDF2,
+  HKDF, ECDSA y ECDH con P-256/384/521, Ed25519 y X25519 con monocypher,
+  RSA). No dio tiempo en la 10 h; `crypto.getRandomValues` y `randomUUID`
+  sí van (RAND_bytes).
+- NAVEGADOR: los cuadros de diálogo (alert, confirm, prompt, `<select>`,
+  elegir archivo), el menú del botón derecho, buscar en la página, el zoom,
+  los marcadores, arrastrar las pestañas; la rueda del touchpad con
+  precisión; las teclas al soltarlas (VENTANAS solo da las pulsaciones).
+- `pidfd_open` (434: el Hub vigila a la interfaz con él; sin él, mira cada
+  segundo con kill, como en los sistemas que no lo tienen).
+- Lo de la sección 24: DNSSEC, vídeo y sonido, WebGL, test262 entero; y lo
+  de antes.

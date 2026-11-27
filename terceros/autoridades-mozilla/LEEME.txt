@@ -1,0 +1,16 @@
+Las autoridades de certificados de Mozilla (las raíces en las que confía
+Firefox: el programa de certificados de Mozilla, de NSS, certdata.txt), en
+un solo archivo PEM (120 certificados), tal como las reparte el paquete
+ca-certificates 20260816ubuntu0.24.04.2 de Ubuntu (/etc/ssl/certs/
+ca-certificates.crt), sin cambiar nada.
+  SHA-256 de autoridades.pem:
+  0e4c9a8eb123513b1c131c0aec2d3f9ddaad02b77b8af53bff30e1e7fc3c6b71
+
+Licencia: la lista de Mozilla es MPL-2.0 (https://www.mozilla.org/MPL/2.0/),
+compatible con la GPL-2.0 o posterior de Hispa (la MPL-2.0 lo permite por su
+sección 3.3). Los certificados en sí son datos públicos de cada autoridad.
+
+Lo usa Hispa-64 desde la etapa 10 h (docs/64/HISPA-64.md, sección 25): el
+navegador (NAVEGADOR y MWEB) comprueba con ellas las páginas de https
+(antes solo llevaba las dos de Let's Encrypt, que no bastan para, por
+ejemplo, github.com, que va con Sectigo y USERTrust).

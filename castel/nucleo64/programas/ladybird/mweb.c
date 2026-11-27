@@ -20,6 +20,9 @@
  * En Linux (para probar), PREFIJO es la carpeta de encima de la de MWEB, y
  * el enlace es PREFIJO/share (MWEB_PREFIJO=... lo cambia).
  * Uso: MWEB                 la página de prueba, comparada
+ *      MWEB --prepara       [etapa 10 h] solo deja los recursos en /tmp/web
+ *                           y el enlace /share (para NAVEGADOR, Ladybird con
+ *                           ventana), y no los quita al acabar
  *      MWEB URL [MODO [CA]] cualquier página (file://, https://...), con
  *                           MODO text (lo de siempre), layout-tree o
  *                           screenshot (a /tmp/web/captura.png); dice lo que
@@ -169,7 +172,9 @@ int main(int argc, char **argv)
 	ssize_t r = readlink("/proc/self/exe", carpeta, sizeof carpeta - 1);
 	if (r > 0) { carpeta[r] = 0; char *b = strrchr(carpeta, '/'); if (b) *b = 0; } else strcpy(carpeta, ".");
 	setvbuf(stdout, NULL, _IOLBF, 0);
-	printf("MWEB: Ladybird sin ventana (el Hub con --headless: LibWeb, LibJS, WebContent, RequestServer, ImageDecoder y Compositor)\n");
+	int prepara = argc > 1 && !strcmp(argv[1], "--prepara");
+	if (!prepara)
+		printf("MWEB: Ladybird sin ventana (el Hub con --headless: LibWeb, LibJS, WebContent, RequestServer, ImageDecoder y Compositor)\n");
 	int n = 0;
 	char base[] = "/tmp/web";
 	borra(base);
@@ -194,6 +199,10 @@ int main(int argc, char **argv)
 	setenv("XDG_CACHE_HOME", "/tmp/web/casa/.cache", 1);
 	mkdir("/tmp/web/run", 0700);
 	setenv("XDG_RUNTIME_DIR", "/tmp/web/run", 1);         /* (si no, /run/user/0: los sockets de Ladybird) */
+	if (prepara) {
+		printf("MWEB: los recursos de Ladybird en /tmp/web (%d archivos) y el enlace %s\n", n, share);
+		return 0;
+	}
 	snprintf(hub, sizeof hub, "%s/Hub", carpeta);
 	const char *url = argc > 1 ? argv[1] : "file:///tmp/web/paginas/prueba.html";
 	const char *modo = argc > 2 ? argv[2] : "text";
@@ -203,10 +212,10 @@ int main(int argc, char **argv)
 	char certificado[600] = "";
 	if (argc > 3) snprintf(certificado, sizeof certificado, "--certificate=%s", argv[3]);
 	else if (!strncmp(url, "https:", 6)) snprintf(certificado, sizeof certificado, "--certificate=/tmp/web/share/autoridades.pem");
-	/* («--disable-sql-database»: la base de datos de Ladybird, sqlite en modo WAL,
-	 * pone en memoria compartida su «-shm» con mmap MAP_SHARED de escribir de un
-	 * archivo, que Hispa-64 aún no tiene: «disk I/O error»; la sección 24 del plan) */
-	char *av[] = { hub, opción, "--disable-sandbox", "--disable-sql-database", "--screenshot-path=/tmp/web/captura.png", (char *)url, certificado[0] ? certificado : NULL, NULL };
+	/* ([etapa 10 h] con la base de datos de Ladybird: sqlite en modo WAL, con su
+	 * «-shm» por mmap MAP_SHARED de escribir de un archivo, que Hispa-64 ya
+	 * tiene; antes, «--disable-sql-database») */
+	char *av[] = { hub, opción, "--disable-sandbox", "--screenshot-path=/tmp/web/captura.png", (char *)url, certificado[0] ? certificado : NULL, NULL };
 	const char *sal = "/tmp/web/salida.txt";
 	int st = 0;
 	long ms = 0;

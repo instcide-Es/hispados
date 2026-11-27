@@ -78,7 +78,7 @@ módulo Hispa64
     importar Registro64
     importar Sondeo64, Chacha64, Hora64, Objet64, Redcom64, Prt64, Intel64, Rtl64, Virtio64, Usbred64, Ip64, Tcp64, Red64, PrRed64
 
-    constante VERSIÓN = "0.11.7"
+    constante VERSIÓN = "0.11.8"
     constante MB1 = 0x2BADB002
     constante MB2 = 0x36D76289
     constante MAX_MÓDULOS = 128                 ; (16 hasta la etapa 6; 64 hasta la 10 e: con los de la 10 f ya eran 65)
@@ -756,6 +756,9 @@ módulo Hispa64
     función etapa9()
         variable v: arreglo [210] de byte
         variable h: arreglo [210] de byte
+        valor_de("trazaprog=", dirección(v[0]))                ; [etapa 10 h] cada llamada de un programa
+        copia_texto(dirección(Sistema.traza_prog[0]), dirección(v[0]), 32)
+        Procesos.dice_al_matar := tiene("trazamata")      ; [etapa 10 h] con SIGKILL, dónde estaba cada hilo
         valor_de("ip=", dirección(v[0]))
         valor_de("hosts=", dirección(h[0]))
         Ip64.sin_ipv6 := tiene("sinipv6")          ; [etapa 10 c]
@@ -1324,15 +1327,43 @@ módulo Hispa64
         si vivos <> 0 o en_tabla <> 0 o n_espacios <> 0 o tablas_usuario <> 0 entonces mal6("quedan procesos, zombis o espacios") fin
     fin
 
+    ; [etapa 10 h] t detrás de lo que ya hay en d (de máx octetos, con el 0)
+    función junta(d: puntero a byte, t: puntero a byte, máx: nat32)
+        variable i, j: nat32
+        i := 0
+        mientras d[i] <> 0 hacer i := i + 1 fin
+        j := 0
+        mientras t[j] <> 0 y i + 1 < máx hacer
+            d[i] := t[j]
+            i := i + 1
+            j := j + 1
+        fin
+        d[i] := 0
+    fin
+
     ; el intérprete de órdenes (ORDENES, de la unidad) en la consola, hasta que
     ; acabe («salir») o se pulse el botón de encendido; falso si no está
     función intérprete(): bool
         variable p: puntero a Proceso
         variable r: nat64
+        variable v: arreglo [210] de byte
+        variable orden: arreglo [230] de byte
         ; [etapa 8] con «escritorio» en la línea: antes, el escritorio (VENTANAS);
         ; al salir de él, el intérprete
         si tiene("escritorio") y busca_archivo("VENTANAS") >= 0 entonces
-            p := lanza("VENTANAS")
+            ; [etapa 10 h] con «navegador» (o «navegador=URL»), el escritorio
+            ; con el Navegador (Ladybird con ventana) abierto
+            valor_de("navegador=", dirección(v[0]))
+            si (tiene("navegador") o v[0] <> 0) y busca_archivo("NAVEGADOR") >= 0 entonces
+                copia_texto(dirección(orden[0]), "VENTANAS NAVEGADOR", 220)
+                si v[0] <> 0 entonces
+                    junta(dirección(orden[0]), "=", 220)
+                    junta(dirección(orden[0]), dirección(v[0]), 220)
+                fin
+                p := lanza(dirección(orden[0]))
+            sino
+                p := lanza("VENTANAS")
+            fin
             si p <> nulo entonces
                 mientras no ha_acabado(p) y no botón hacer duerme_ms(20) fin
                 si botón entonces devolver cierto fin

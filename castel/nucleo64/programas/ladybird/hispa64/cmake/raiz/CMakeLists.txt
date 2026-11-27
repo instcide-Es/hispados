@@ -107,3 +107,6 @@ foreach (s AudioServer Compositor Hub ImageDecoder MediaServer SystemProbe Video
     add_subdirectory(${LB}/Services/${s} Services/${s})
 endforeach()
 add_subdirectory(${CAPA}/RequestServer Services/RequestServer)
+# [etapa 10 h] NAVEGADOR: Ladybird con ventana en el escritorio de Hispa-64
+# (nuestra interfaz, sobre el Hub: hispa64/navegador)
+add_subdirectory(${CAPA}/navegador Navegador)

@@ -331,7 +331,7 @@ e4_bien() {   # SALIDA N
   local s=$1 n=$2 v; v=$(serie "$s")
   grep -q "^Programas: syscall y sysret (los números de Linux x86-64), swapgs, una pila del núcleo por hilo$" <<< "$v" \
     && [ "$(grep -o "^Unidad en memoria: [0-9]* archivos: " <<< "$v" | grep -o "[0-9]*")" -ge "$(ls "$T/prog" | wc -l)" ] \
-    && grep -q "^  argc = 4: HOLA uno dos tres$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.7 x86_64$" <<< "$v" \
+    && grep -q "^  argc = 4: HOLA uno dos tres$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.8 x86_64$" <<< "$v" \
     && grep -q "^  la unidad en memoria: SALUDO.TXT dice «Hola, soy SALUDO.TXT" <<< "$v" && grep -q "^  writev: en tres trozos$" <<< "$v" \
     && grep -q "^HOLA: todo bien (28 pruebas)$" <<< "$v" && grep -q "^Programa «HOLA uno dos tres»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^HOLACAS: todo bien (con acentos de la página 437: «añadir», «canción»)$" <<< "$v" \
@@ -372,7 +372,7 @@ e7_bien() {   # SALIDA N [avx]
     && grep -q "^MHOLA: hola desde musl (printf); estático$" <<< "$v" \
     && grep -q "^MHOLA: hola desde musl (printf); dinámico: ld-musl en 0x7f0000000000, el programa en 0x555555554000$" <<< "$v" \
     && grep -q "^MHOLA: hola desde musl (printf); estático de posición libre, en 0x555555554000$" <<< "$v" \
-    && grep -q "^  libsaludo.so: hola (42)$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.7 x86_64 (etapa 10 g (Ladybird sin ventana))$" <<< "$v" \
+    && grep -q "^  libsaludo.so: hola (42)$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.8 x86_64 (etapa 10 h (Ladybird con ventana))$" <<< "$v" \
     && grep -q "^  procesadores (sched_getaffinity): $n$" <<< "$v" \
     && [ "$(grep -c "^MHOLA: todo bien (" <<< "$v")" = 3 ] && [ "$(grep -c "^MHILOS: todo bien (" <<< "$v")" = 2 ] \
     && [ "$(grep -c "^  8 hilos que suman 2000 veces con un mutex: 16000 (exacto)" <<< "$v")" = 2 ] \
@@ -441,7 +441,7 @@ pci_igual() {   # SALIDA opciones de QEMU
 }
 mb1 apagar "$T/mb1.txt" 128; c=$?
 S=$T/mb1.txt
-if [ $c = 85 ] && hay $S "^Hispa-64 0.11.7 ─ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.$" \
+if [ $c = 85 ] && hay $S "^Hispa-64 0.11.8 ─ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.$" \
    && hay $S "^Cargador: qemu, multiboot$" && serie $S | grep -qE "^Memoria: ([6-9][0-9]|1[0-2][0-9]),[0-9] MB libres en [0-9]* trozos \(de 127,4 MB que da el firmware\); [0-9,]* [KM]B usados por el núcleo$" \
    && hay $S "^  sin la identidad de abajo: 1 MB ya no está en las tablas$" && hay $S "los nombres de [0-9]* funciones (HISPA64.SIM)$" \
    && hay $S "^El núcleo, en la mitad alta: 0xFFFFFFFF80100000 (código, de solo leer)" && hay $S "^TSS con pilas propias (IST)" \
@@ -1166,7 +1166,7 @@ con_interprete "$T/e7.txt" "$TECLAS7" -drive file="$T/w7/fat.img",if=none,id=s0,
 v=$(serie "$T/e7.txt")
 HM1=$(TZ=Europe/Madrid date +%H:%M)
 HOY=$(LC_ALL=C TZ=Europe/Madrid date +%-d)
-if [ $c = 85 ] && grep -q "^ORDENES 1.0, el intérprete de órdenes de Hispa-64 (en Hispa-64 0.11.7, etapa 10 g " <<< "$v" \
+if [ $c = 85 ] && grep -q "^ORDENES 1.0, el intérprete de órdenes de Hispa-64 (en Hispa-64 0.11.8, etapa 10 h " <<< "$v" \
    && grep -q "^ *[0-9.]*  HOLA$" <<< "$v" && grep -q "^         <DIR>  sata0/$" <<< "$v" && grep -q "^  $(ls "$T/prog" | wc -l) archivos (" <<< "$v" \
    && [ "$(grep -c "^hola desde el teclado$" <<< "$v")" = 1 ] && grep -q "^            22  copia.txt$" <<< "$v" \
    && grep -q "^/sata0/prueba> " <<< "$v" \
@@ -1228,7 +1228,7 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
   # dos últimos, icudt77l.dat y libstdc++.so.6, se quedaban fuera)
   uefi "$T/uefi.txt" -m 192 -monitor none; c=$?
   S=$(serie "$T/uefi.txt")
-  if [ $c = 85 ] && grep -q "Hispa-64 0.11.7 ─ Copyright" <<< "$S" && grep -q "^Cargador: GRUB .*, multiboot2, con UEFI de 64 bits$" <<< "$S" \
+  if [ $c = 85 ] && grep -q "Hispa-64 0.11.8 ─ Copyright" <<< "$S" && grep -q "^Cargador: GRUB .*, multiboot2, con UEFI de 64 bits$" <<< "$S" \
      && grep -q "^Pantalla: [0-9]* x [0-9]* puntos, 32 bits por punto" <<< "$S" && grep -q "^  consola de [0-9]* x [0-9]* letras" <<< "$S" \
      && grep -q "^  la pantalla, en 0xFFFFC00000000000, con escritura combinada (PAT)$" <<< "$S" \
      && grep -q "^  módulo del cargador: HISPA64.SIM, .*: los nombres de [0-9]* funciones (HISPA64.SIM)$" <<< "$S" \
@@ -1818,6 +1818,95 @@ if [ -w /dev/kvm ]; then
        && grep -q "^Programa «MWEB»: acaba con el código 0, como debe" <<< "$v" && grep -q "^  la memoria: la de antes;" <<< "$v"; then
       ok "[etapa 10 g] con KVM y 3 GB: LibJS (MJS: $(grep -o "^  Tests: .*" <<< "$v" | sed "s/^  Tests: *//"), en $(grep -o "^  test-js-runtime: acaba con el código 0, en [0-9]* ms" <<< "$v" | grep -o "[0-9]* ms")) y Ladybird sin ventana (MWEB: el Hub con WebContent, RequestServer, ImageDecoder y Compositor; el texto de la página de prueba, 7 de 7 líneas, en $(grep -o "^  Hub --headless=text file:///tmp/web/paginas/prueba.html: acaba con el código 0, en [0-9]* ms" <<< "$v" | grep -o "[0-9]* ms")); después, la memoria, la de antes"
     else ko "[etapa 10 g] LibJS y Ladybird sin ventana no salen (código $c): $(grep -E "^MJS|^MWEB|^  test-js-runtime|^  falta|^  errores|  MAL|parado" <<< "$v" | head -8 | paste -sd '|')"; fi
+  fi
+  # [etapa 10 h] Ladybird con ventana: NAVEGADOR (la interfaz de Hispa-64 sobre el
+  # Hub de Ladybird, programas/ladybird/hispa64/navegador) en el escritorio
+  # (VENTANAS), por UEFI (la pantalla del GOP) con KVM y 3 GB, sin tarjeta de red, con
+  # una página de la unidad (paginas/ventana.html). Se mira en los pantallazos
+  # (los puntos de cada color en cada sitio: la barra, la página, lo que deja
+  # ver la rueda, la otra página) y en lo que dice NAVEGADOR (cada página
+  # cargada y cada título nuevo): escribir en un campo (con ñ, ú y ü: el
+  # título que pone la página), la rueda, un enlace con el ratón, el botón de
+  # atrás, Ctrl+T con una dirección escrita en la barra, Ctrl+W.
+  if [ -x "$T/progweb/NAVEGADOR" ] && [ -f $OVMF_C ]; then
+    rm -rf "$T/pnav" && mkdir -p "$T/pnav"
+    for f in VENTANAS ORDENES; do ln -f "$T/prog/$f" "$T/pnav/$f"; done
+    for f in NAVEGADOR MWEB Hub WebContent RequestServer ImageDecoder Compositor SystemProbe; do ln -f "$T/progweb/$f" "$T/pnav/$f"; done
+    WEB=1 PROGS_DE="$T/pnav" "$AQUI/imagen.sh" "$T/uefi-nav" prueba "escritorio navegador=file:///tmp/web/paginas/ventana.html sinpruebas sinmusl" > "$T/img-nav.txt" 2>&1 \
+      || ko "[etapa 10 h] imagen.sh no hace la imagen del navegador: $(tail -2 "$T/img-nav.txt" | paste -sd ' ')"
+    SN="$T/nav.txt"; MN="$T/monnav.sock"; QN="$T/qmpnav.sock"
+    rm -f "$SN" "$MN" "$QN" "$T"/nav-*.ppm; cp $OVMF_V "$T/varsnav.fd"
+    timeout 600 qemu-system-x86_64 -enable-kvm -cpu host -machine q35 -m 3072 -smp 4 -drive if=pflash,format=raw,readonly=on,file=$OVMF_C \
+      -drive if=pflash,format=raw,file="$T/varsnav.fd" -drive file="$T/uefi-nav/hispa64.img",format=raw,if=none,id=d0,snapshot=on -device ide-hd,drive=d0,bus=ide.0 \
+      -device qemu-xhci,id=xhci -device usb-tablet,bus=xhci.0 -display none -serial file:"$SN" \
+      -monitor unix:"$MN",server,nowait -qmp unix:"$QN",server,nowait -no-reboot -nic none > /dev/null 2>&1 &
+    qn=$!
+    bienn=1
+    esperan() { local i; for i in $(seq 1 $(( $2 * 5 ))); do serie "$SN" | grep -q -- "$1" && return 0; sleep 0.2; done; bienn=0; echo "  (etapa 10 h: no llega «$1»)"; return 1; }
+    cuantas() { serie "$SN" | grep -c -- "$1"; }
+    fotn() { $PZN foto "$MN" "$T/nav-$1.ppm" 2> /dev/null; }
+    PZN="python3 -I $AQUI/pantallazo.py"
+    ratonn() {   # X Y [clic | abajo N | arriba N]
+      python3 -I - "$QN" "$@" <<'PY' 2> /dev/null
+import json, socket, sys, time
+s = socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); f = s.makefile('rw')
+f.readline(); f.write('{"execute": "qmp_capabilities"}\n'); f.flush(); f.readline()
+def manda(ev):
+    f.write(json.dumps({"execute": "input-send-event", "arguments": {"events": ev}}) + '\n'); f.flush(); f.readline()
+manda([{"type": "abs", "data": {"axis": "x", "value": (int(sys.argv[2]) * 32767 + 1278) // 1279}},
+       {"type": "abs", "data": {"axis": "y", "value": (int(sys.argv[3]) * 32767 + 798) // 799}}])
+time.sleep(0.2)
+if len(sys.argv) > 4 and sys.argv[4] == 'clic':
+    for d in (True, False):
+        manda([{"type": "btn", "data": {"button": "left", "down": d}}]); time.sleep(0.15)
+elif len(sys.argv) > 5:
+    b = 'wheel-down' if sys.argv[4] == 'abajo' else 'wheel-up'
+    for i in range(int(sys.argv[5])):
+        for d in (True, False):
+            manda([{"type": "btn", "data": {"button": b, "down": d}}]); time.sleep(0.05)
+        time.sleep(0.1)
+PY
+      sleep 0.5
+    }
+    teclasn() { python3 -I "$AQUI/programas/teclas.py" "$MN" "$@" 2> /dev/null; sleep 0.3; }
+    # (la ventana, maximizada: la página empieza en (1, 96) de la pantalla de 1280 x 800)
+    esperan "^NAVEGADOR: cargada file:///tmp/web/paginas/ventana.html$" 240 && sleep 2
+    fotn 1
+    ratonn 171 224 clic; teclasn 'ñandú y pingüino'
+    esperan "^NAVEGADOR: título «Escrito: ñandú y pingüino»$" 30 && sleep 1
+    fotn 2
+    ratonn 640 500 abajo 6; sleep 2; fotn 3
+    ratonn 640 500 arriba 8; sleep 1.5; ratonn 171 146 clic; sleep 0.5
+    esperan "^NAVEGADOR: cargada file:///tmp/web/paginas/otra.html$" 60 && sleep 1.5
+    fotn 4
+    ratonn 22 77 clic
+    for i in $(seq 1 150); do [ "$(cuantas '^NAVEGADOR: cargada file:///tmp/web/paginas/ventana.html$')" -ge 2 ] && break; sleep 0.2; done
+    sleep 1.5; fotn 5
+    teclasn '{ctrl-t}'; sleep 1; teclasn 'file:///tmp/web/paginas/otra.html{intro}'
+    for i in $(seq 1 300); do [ "$(cuantas '^NAVEGADOR: cargada file:///tmp/web/paginas/otra.html$')" -ge 2 ] && break; sleep 0.2; done
+    sleep 1.5; fotn 6
+    teclasn '{ctrl-w}'; sleep 2; fotn 7
+    kill $qn 2> /dev/null; wait $qn 2> /dev/null
+    vn=$(serie "$SN")
+    rn() { $PZN "$@" 2> /dev/null || echo 0; }
+    n_fon=$(rn cuenta "$T/nav-1.ppm" 1 96 1278 668 FFFBE6)         # el fondo de la página
+    n_bar=$(rn cuenta "$T/nav-1.ppm" 1 56 1278 38 F6F7F9)          # la barra de herramientas
+    n_pes=$(rn cuenta "$T/nav-1.ppm" 1 28 1278 28 F6F7F9)          # la pestaña activa
+    n_ver=$(rn cuenta "$T/nav-1.ppm" 21 116 300 60 2E8B57)         # el enlace (verde)
+    n_mo2=$(rn cuenta "$T/nav-2.ppm" 1 96 1278 668 8B2E5A)         # el bloque morado, antes de la rueda...
+    n_mo3=$(rn cuenta "$T/nav-3.ppm" 1 96 1278 668 8B2E5A)         # ...y después
+    n_otr=$(rn cuenta "$T/nav-4.ppm" 1 96 1278 668 E6F0FF)         # la otra página
+    n_vue=$(rn cuenta "$T/nav-5.ppm" 1 96 1278 668 FFFBE6)         # atrás: la primera otra vez
+    n_ot6=$(rn cuenta "$T/nav-6.ppm" 1 96 1278 668 E6F0FF)         # la pestaña nueva, con la otra
+    n_p6=$(rn cuenta "$T/nav-6.ppm" 1 28 1278 28 C9CED5)           # (con dos pestañas, una en gris)
+    n_p7=$(rn cuenta "$T/nav-7.ppm" 1 28 1278 28 C9CED5)           # Ctrl+W: una sola otra vez
+    n_fo7=$(rn cuenta "$T/nav-7.ppm" 1 96 1278 668 FFFBE6)
+    if [ $bienn = 1 ] && [ "$n_fon" -gt 300000 ] && [ "$n_bar" -gt 8000 ] && [ "$n_pes" -gt 3000 ] && [ "$n_ver" -gt 15000 ] \
+       && [ "$n_mo3" -gt $(( n_mo2 + 100000 )) ] && [ "$n_otr" -gt 300000 ] && [ "$n_vue" -gt 300000 ] && [ "$n_ot6" -gt 300000 ] \
+       && [ "$n_p6" -gt 3000 ] && [ "$n_p7" -lt 500 ] && [ "$n_fo7" -gt 300000 ] \
+       && grep -q "^VENTANAS: ventana nueva «.*Navegador" <<< "$vn" && ! grep -qi "disk I/O error\|database is locked\|SQLITE_IOERR" <<< "$vn"; then
+      ok "[etapa 10 h] Ladybird con ventana (NAVEGADOR en el escritorio, por UEFI, KVM y 3 GB): la página de la unidad pintada en la ventana ($n_fon puntos de su fondo; la barra, $n_bar; el enlace, $n_ver), lo escrito en un campo con ñ, ú y ü (el título que pone la página: «Escrito: ñandú y pingüino»), la rueda ($n_mo2 a $n_mo3 puntos del bloque de abajo), un enlace con el ratón (la otra página: $n_otr), atrás ($n_vue), Ctrl+T y una dirección escrita en la barra (dos pestañas: $n_ot6), Ctrl+W (una); con la base de datos de Ladybird (sqlite en modo WAL), sin errores"
+    else ko "[etapa 10 h] Ladybird con ventana no hace lo que debe: fondo $n_fon, barra $n_bar, pestaña $n_pes, enlace $n_ver, rueda $n_mo2/$n_mo3, otra $n_otr, atrás $n_vue, Ctrl+T $n_ot6/$n_p6, Ctrl+W $n_p7/$n_fo7; $(grep -E '^NAVEGADOR|^VENTANAS: (arranca|ventana)|parado|disk I/O' <<< "$vn" | tail -8 | paste -sd '|')"; fi
   fi
   # [etapa 11 b] con KVM, el tiempo es el de verdad: aquí cuentan el tic (90 o más de los 100, el
   # temporizador cada 10 ms contra el TSC) y el planificador (etapa 3 entera, el interactivo incluido)

@@ -52,7 +52,7 @@ CMAKE=$(command -v cmake || true)
 [ -z "$CMAKE" ] && [ -x "$HERR/cmake-3.31.6-linux-x86_64/bin/cmake" ] && CMAKE=$HERR/cmake-3.31.6-linux-x86_64/bin/cmake
 NINJA=$(command -v ninja || true)
 [ -z "$NINJA" ] && [ -x "$HERR/ninja" ] && NINJA=$HERR/ninja
-PROGS="Hub WebContent RequestServer ImageDecoder Compositor SystemProbe test-js-runtime js"
+PROGS="Hub WebContent RequestServer ImageDecoder Compositor SystemProbe test-js-runtime js Navegador"
 
 # MJS (mjs.c), con las pruebas de LibJS dentro (js.tar, como lb.tar de MLB)
 haz_mjs() {
@@ -70,7 +70,11 @@ haz_mweb() {
   rm -rf "$O/webtar" && mkdir -p "$O/webtar/share/fonts"
   cp -a "$L/Base/res" "$O/webtar/share/Lagom"
   cp "$T/dejavu/"*.TTF "$O/webtar/share/fonts/"
-  cp "$AQUI/hispa64/autoridades.pem" "$O/webtar/share/"
+  # ([etapa 10 h] la DejaVu Sans entera, no la recortada de la oficina: las
+  # páginas de hoy traen flechas, griego, cirílico, signos...)
+  cp "$T/dejavu/DejaVuSans.ttf" "$O/webtar/share/fonts/SANS.TTF"
+  # ([etapa 10 h] las autoridades de Mozilla, no solo las de Let's Encrypt)
+  cp "$T/autoridades-mozilla/autoridades.pem" "$O/webtar/share/"
   cp -a "$AQUI/hispa64/paginas" "$O/webtar/paginas"
   tar --format=ustar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C "$O/webtar" -cf "$O/web.tar" share paginas
   printf '\t.section .rodata\n\t.globl web_tar\n\t.globl web_tar_fin\nweb_tar:\n\t.incbin "%s"\nweb_tar_fin:\n\t.byte 0\n\t.section .note.GNU-stack,"",@progbits\n' "$O/web.tar" > "$O/webtar.s"
@@ -81,6 +85,7 @@ if [ -z "$CARGO" ] || [ -z "$CMAKE" ] || [ -z "$NINJA" ] || [ ! -x "$CC" ]; then
   # sin Rust o sin cmake: lo ya hecho
   if [ -f "$O/sal/Hub" ] && [ -x "$CC" ]; then
     for p in $PROGS; do [ -f "$O/sal/$p" ] && cp "$O/sal/$p" "$S/"; done
+    [ -f "$S/Navegador" ] && mv "$S/Navegador" "$S/NAVEGADOR"
     haz_mjs
     haz_mweb
     echo "hechos: $(cd "$S" && ls | tr '\n' ' ')"
@@ -152,6 +157,8 @@ for p in $PROGS; do
   "$X-strip" --strip-unneeded -o "$O/sal/$p" "$C/bin/$p"
   cp "$O/sal/$p" "$S/"
 done
+# ([etapa 10 h] la interfaz, NAVEGADOR: con mayúsculas, como los demás programas de Hispa-64)
+mv "$S/Navegador" "$S/NAVEGADOR"
 haz_mjs
 haz_mweb
 echo "hechos: $(cd "$S" && ls | tr '\n' ' ')"

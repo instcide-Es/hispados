@@ -76,6 +76,24 @@ módulo Sistema
 
     público variable llamadas: nat64            ; cuántas se han atendido
     público variable traza_rutas: bool          ; [etapa 10 g] «traza=rutas»
+    público variable traza_prog: arreglo [32] de byte   ; [etapa 10 h] «trazaprog=NOMBRE» (vacío: ninguno)
+
+    ; (los nombres de los programas, sin mirar mayúsculas: «REQUESTSERVER»)
+    función mismo_nombre(a: puntero a byte, b: puntero a byte): bool
+        variable i: nat32
+        variable x, z: byte
+        i := 0
+        mientras i < 31 hacer
+            x := a[i]
+            z := b[i]
+            si x >= 'a' y x <= 'z' entonces x := x - 32 fin
+            si z >= 'a' y z <= 'z' entonces z := z - 32 fin
+            si x <> z entonces devolver falso fin
+            si x = 0 entonces devolver cierto fin
+            i := i + 1
+        fin
+        devolver cierto
+    fin
     variable época: nat64                       ; los segundos de Unix al arrancar
     variable época_ns: nat64                    ; ahora_ns() entonces
 
@@ -1694,8 +1712,8 @@ módulo Sistema
         fin
         pon_texto(dirección(t[0]), 0, "Hispa-64")
         pon_texto(dirección(t[0]), 65, "hispa64")
-        pon_texto(dirección(t[0]), 130, "0.11.7")
-        pon_texto(dirección(t[0]), 195, "etapa 10 g (Ladybird sin ventana)")
+        pon_texto(dirección(t[0]), 130, "0.11.8")
+        pon_texto(dirección(t[0]), 195, "etapa 10 h (Ladybird con ventana)")
         pon_texto(dirección(t[0]), 260, "x86_64")
         pon_texto(dirección(t[0]), 325, "(none)")
         si no copia_a(p, v, nat64(dirección(t[0])), 390) entonces devolver EFAULT fin
@@ -2415,6 +2433,7 @@ módulo Sistema
         variable r: ent64
         variable usa: bool
         variable gen: nat32
+        variable tb: nat64
         p := mío()
         h := actual()
         n := l64(m + 112)
@@ -2427,6 +2446,19 @@ módulo Sistema
         iret := 0
         suma_atómica(dirección(llamadas), 1)
         t0 := tsc()                         ; [etapa 10 f] (las medidas: «medidas»)
+        h.llam_n := n + 1                   ; [etapa 10 h] (para «trazamata»)
+        h.llam_a1 := a1
+        h.llam_a2 := a2
+        h.llam_a3 := a3
+        ; [etapa 10 h] «trazaprog=NOMBRE»: cada llamada de ese programa, al
+        ; entrar y al salir (para ver dónde se queda uno que no contesta)
+        si traza_prog[0] <> 0 entonces
+            si mismo_nombre(dirección(p.nombre[0]), dirección(traza_prog[0])) entonces
+                tb := toma(dirección(cerrojo_consola))
+                escribir("[entra] ", dirección(p.nombre[0]), " (", p.id, "/", h.tid, "): ", n, " (", a1, ", ", a2, ", ", a3, ")\n")
+                suelta(dirección(cerrojo_consola), tb)
+            fin
+        fin
         ; [etapa 10 c] el descriptor, tomado mientras dura (si lo es: si no,
         ; la llamada da su error como siempre)
         usa := falso
@@ -2704,6 +2736,14 @@ módulo Sistema
         si usa entonces deja_fd(p, a1, gen) fin
         ; [etapa 10 g] «traza=rutas»: lo que un programa busca y no está (para ver qué le falta)
         si traza_rutas y r < 0 y r <> -11 entonces traza_ruta(p, n, a1, a2, r) fin
+        h.llam_n := 0
+        si traza_prog[0] <> 0 entonces
+            si mismo_nombre(dirección(p.nombre[0]), dirección(traza_prog[0])) entonces
+                tb := toma(dirección(cerrojo_consola))
+                escribir("[sale] ", dirección(p.nombre[0]), " (", p.id, "/", h.tid, "): ", n, " = ", r, "\n")
+                suelta(dirección(cerrojo_consola), tb)
+            fin
+        fin
         ; [etapa 10 f] cuántas de cada una y cuánto llevan (en cuentas del TSC)
         si n < 512 entonces
             suma_atómica(dirección(llam_n[nat32(n)]), 1)
@@ -2836,11 +2876,14 @@ módulo Sistema
             caso 1:
                 si k <> 0xFFFFFFFF entonces devolver -17 fin          ; EEXIST
                 si e.n >= MAX_EP entonces devolver -28 fin           ; ENOSPC
+                ; ([etapa 10 h] lo del sitio nuevo antes que la cuenta: otro
+                ; hilo que mira la lista a la vez no ve uno a medias; en x86
+                ; las escrituras se ven en su orden)
                 k := nat32(e.n)
-                e.n := e.n + 1
                 e.fd[k] := fd
                 e.ev[k] := t[0] yb 0xFFFFFFFF
                 e.dato[k] := (t[0] >> 32) ob (t[1] << 32)
+                e.n := e.n + 1
             caso 2:
                 si k = 0xFFFFFFFF entonces devolver ENOENT fin
                 e.n := e.n - 1
@@ -2853,6 +2896,16 @@ módulo Sistema
                 e.dato[k] := (t[0] >> 32) ob (t[1] << 32)
             si no: devolver EINVAL
         fin
+        ; [etapa 10 h] a quien espera en este epoll (en otro hilo), que mire
+        ; otra vez: como en Linux, añadir uno que ya está listo lo despierta.
+        ; Sin esto, un hilo que ya había mirado la lista (sin el nuevo) dormía
+        ; para siempre si lo del nuevo había llegado antes: el número de
+        ; cambios (Sondeo64.gen) no se movía. Era la causa de RequestServer
+        ; «que no contesta» (el Hub lo cierra a los 30 s): su hilo de IPC
+        ; esperaba en epoll_pwait mientras el principal añadía el socket del
+        ; Hub, con su primer mensaje ya dentro (una de cada tres o cuatro
+        ; veces, desde que la caché de disco de Ladybird va: etapa 10 h).
+        Sondeo64.avisa()
         devolver 0
     fin
 

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<!-- Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+     Hispa-64, etapa 10 h (docs/64/HISPA-64.md, sección 25): la página de la
+     prueba de NAVEGADOR (Ladybird con ventana) en pruebas.sh: un enlace
+     (verde, arriba a la izquierda), un campo para escribir (lo escrito pasa
+     al título: lo dice NAVEGADOR por el puerto serie), un bloque morado más
+     abajo (para la rueda del ratón) y localStorage (la base de datos de
+     Ladybird, sqlite en modo WAL). -->
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Hispa-64: la ventana</title>
+<style>
+  body { margin: 0; background: #fffbe6; font-family: sans-serif; height: 3000px; }
+  #enlace { position: absolute; left: 20px; top: 20px; width: 300px; height: 60px; background: #2e8b57; color: #fff; font-size: 24px; line-height: 60px; text-align: center; text-decoration: none; }
+  #campo { position: absolute; left: 20px; top: 110px; width: 300px; height: 36px; font-size: 20px; }
+  #ls { position: absolute; left: 360px; top: 30px; font-size: 20px; color: #0050a0; }
+  #abajo { position: absolute; left: 0; top: 900px; width: 100%; height: 400px; background: #8b2e5a; }
+</style>
+</head>
+<body>
+<a id="enlace" href="otra.html">A la otra página</a>
+<input id="campo" type="text" autocomplete="off">
+<p id="ls">localStorage: no</p>
+<div id="abajo"></div>
+<script>
+  document.getElementById("campo").addEventListener("input", e => { document.title = "Escrito: " + e.target.value; });
+  try {
+    localStorage.setItem("hispa64", "sí, ñandú");
+    document.getElementById("ls").textContent = "localStorage: " + localStorage.getItem("hispa64");
+  } catch (e) {
+    document.getElementById("ls").textContent = "localStorage: " + e;
+  }
+</script>
+</body>
+</html>

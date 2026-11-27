@@ -127,11 +127,13 @@ static int inicio_abierto, inicio_sel = -1;
 static struct {
 	const char *nombre, *ruta;
 } progs[] = {
+	/* [etapa 10 h] Ladybird con ventana (NAVEGADOR, en la imagen con el navegador) */
+	{ "Navegador (páginas web)", "/NAVEGADOR" },
 	{ "Pluma (textos)", "/PLUMA" },
 	{ "Cuentas (hojas de cálculo)", "/CUENTAS" },
 	{ "Notas (bloc de notas)", "/NOTAS" },
 };
-#define N_PROGS 3
+#define N_PROGS 4
 static int prog_hay[N_PROGS];
 static int emerg = -1;			/* la ventana del menú emergente abierto */
 static int em_x, em_y, em_an, em_n, em_sel = -1;
@@ -634,7 +636,15 @@ static void pinta_barra(void)
 	lz_ui_negrita(&L, AN - 12 - lz_ui_ancho_negrita(t), y + 22, t, 0xFFFFFF);
 }
 
-static int inicio_y(void) { return AL - BARRA - 8 - 40 * (N_PROGS + 1) - 48; }
+/* ([etapa 10 h] con los que hay: sin NAVEGADOR, el menú de siempre) */
+static int inicio_y(void)
+{
+	int k, n = 0;
+
+	for (k = 0; k < N_PROGS; k++)
+		n += prog_hay[k] != 0;
+	return AL - BARRA - 8 - 40 * (n + 1) - 48;
+}
 
 static void pinta_inicio(void)
 {

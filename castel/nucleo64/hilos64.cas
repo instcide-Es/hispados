@@ -98,6 +98,7 @@ módulo Hilos64
         borra_tid: nat64            ; CLONE_CHILD_CLEARTID y set_tid_address: al acabar, 0 y FUTEX_WAKE
         robusta, robusta_largo: nat64           ; set_robust_list
         forzada: nat64              ; la señal de un fallo del procesador, para entregarla al volver
+        llam_n, llam_a1, llam_a2, llam_a3: nat64    ; [etapa 10 h] la llamada al sistema en curso (su número + 1; 0: ninguna) y sus 3 primeros argumentos
         f_dir, f_cód, f_err, f_trap: nat64      ; lo de esa señal (si_addr, si_code, el error y la excepción)
         interrumpible: nat64        ; la Espera de la que le saca una señal (o 0)
         t_usuario, t_sistema: nat64 ; [etapa 11] el tiempo de procesador, en el programa y en el núcleo (ns, de 10 en 10 ms: el tic)

@@ -32,6 +32,8 @@
 # Con «prueba», el menú no espera, escribe por el puerto serie y el núcleo
 # arranca con la línea de órdenes LÍNEA («apagar» si no se dice: acaba en
 # QEMU con el código 42): lo usa pruebas.sh.
+# [etapa 10 h] PROGS_DE=CARPETA: los programas de la unidad, los de esa
+# carpeta, sin hacerlos (con WEB=1, el disco grande del navegador).
 # Nada se monta (mtools): no hace falta ser root.
 set -e
 AQUI=$(cd "$(dirname "$0")" && pwd)
@@ -46,12 +48,18 @@ nasm -f bin "$S/hispa64m.asm" -o "$S/HISPA64.BIN"
 rm -f "$S/hispa64m.asm"
 python3 -I "$AQUI/simbolos.py" "$S/hispa64.map" "$S/HISPA64.SIM"
 # los programas de la unidad en memoria, y sus líneas de module2
+if [ -n "${PROGS_DE:-}" ]; then
+  # [etapa 10 h] los programas de esa carpeta, ya hechos (pruebas.sh: la del navegador con ventana)
+  rm -rf "$S/prog" && mkdir -p "$S/prog"
+  cp -l "$PROGS_DE"/* "$S/prog/" 2> /dev/null || cp "$PROGS_DE"/* "$S/prog/"
+else
 "$AQUI/programas/hazlos.sh" "$S/prog" > /dev/null
 # [etapa 10 g] con WEB=1, también LibJS y Ladybird sin ventana (hazweb.sh: unos
 # 490 MB más en la unidad; el disco, de 1,25 GB; hacen falta 3 GB de memoria)
 if [ "${WEB:-0}" = 1 ]; then
   "$AQUI/programas/ladybird/hazweb.sh" "$S/prog" > /dev/null
   rm -f "$S/prog/js"
+fi
 fi
 PROGS=$(cd "$S/prog" && ls)
 MODS2=""
@@ -79,7 +87,7 @@ else
   }
   {
     cat <<'CFG'
-# Hispa-64 0.11.7 (etapa 10 g). Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+# Hispa-64 0.11.8 (etapa 10 h). Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 set timeout=5
 set default=0
 serial --unit=0 --speed=115200
@@ -89,7 +97,7 @@ terminal_output console serial
 set gfxpayload=keep
 if cpuid -l; then
 CFG
-    entrada "Hispa-64 0.11.7 (etapa 10 g): el escritorio, con Pluma, Cuentas y Notas (la consola, en el menú Inicio; los discos, solo leer; la red, con IPv6; curl)" "escritorio"
+    entrada "Hispa-64 0.11.8 (etapa 10 h): el escritorio, con Pluma, Cuentas y Notas (la consola, en el menú Inicio; los discos, solo leer; la red, con IPv6; curl)" "escritorio"
     entrada "Hispa-64: el escritorio, guardando en los discos (SOLO en VirtualBox o en discos de prueba)" "escritorio escribir"
     entrada "Hispa-64: el intérprete de órdenes (sin el escritorio; «VENTANAS» lo abre)" ""
     entrada "Hispa-64: con escritura en los discos (SOLO en VirtualBox, en discos de prueba o en memorias USB de prueba)" "escribir"
@@ -97,6 +105,7 @@ CFG
     entrada "Hispa-64: sin la red (si se queda al poner en marcha la tarjeta de red)" "sinred"
     entrada "Hispa-64: el USB sin MSI ni MSI-X (si el teclado o el ratón USB no van)" "sinmsix sinmsi"
     entrada "Hispa-64: sin las pruebas de musl (si se queda en ellas)" "sinmusl"
+    [ "${WEB:-0}" = 1 ] && entrada "Hispa-64: el escritorio con el Navegador (Ladybird con ventana; con la red)" "escritorio navegador"
     [ "${WEB:-0}" = 1 ] && entrada "Hispa-64: con las pruebas de Ladybird al arrancar (LibJS, MJS, unos 3 minutos; y el navegador sin ventana, MWEB)" "ladybird"
     entrada "Hispa-64: sin USB (si se queda al mirar el USB)" "sinusb"
     entrada "Hispa-64: sin touchpad I2C (si se queda al buscarlo)" "sini2c"
