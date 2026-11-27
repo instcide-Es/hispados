@@ -1098,13 +1098,7 @@ pon_car_dos:
         mov cx, 1
         call h_es
         pop es
-        pop di
-        pop si
-        pop dx
-        pop cx
-        pop bx
-        pop ax
-        ret
+        jmp sal_di
 .pantalla:
         cmp word [cs:con_dev+2], 0  ; ¿un CON cargado con DEVICE=? A él
         je .bios
@@ -1200,11 +1194,19 @@ pon_num32_ancho:
         add al, '0'
         call pon_car
         loop .c
+; las salidas que sacan DI, SI, DX, CX, BX y AX (o los últimos) y vuelven:
+; todas aquí («jmp sal_..» en vez de los pop y el ret)
+sal_di:
         pop di
+sal_si:
         pop si
+sal_dx:
         pop dx
+sal_cx:
         pop cx
+sal_bx:
         pop bx
+sal_ax:
         pop ax
         ret
 ; espera una tecla -> AL. Las que no son letra (las flechas, Inicio, las de
@@ -1637,11 +1639,7 @@ ed_cursor:
         xor bh, bh
         mov ah, 2
         call ed_v10
-        pop dx
-        pop cx
-        pop bx
-        pop ax
-        ret
+        jmp sal_dx
 ; pinta la línea desde la letra AX, y [ed_sobra] espacios detrás (para borrar
 ; lo que quede de antes). Si con eso sube la pantalla, corrige dónde empieza
 ; la línea. Deja el cursor detrás de lo pintado. Conserva los registros
@@ -1687,12 +1685,7 @@ ed_pinta:
         sub dh, al
         mov [ed_org+1], dh
         mov word [ed_sobra], 0
-        pop si
-        pop dx
-        pop cx
-        pop bx
-        pop ax
-        ret
+        jmp sal_si
 .pon:
         push cx
         mov ah, 0x0E

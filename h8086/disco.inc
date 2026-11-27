@@ -1200,12 +1200,7 @@ fat_pon:
         mov [si], dh
         mov byte [fat_sucia], 1
 .x:
-        pop si
-        pop dx
-        pop cx
-        pop bx
-        pop ax
-        ret
+        jmp sal_si
 ; busca un grupo libre (desde el último que se dio, para no repasar la FAT
 ; entera cada vez) y lo marca como último de una cadena -> AX. CF=1 si el
 ; disco está lleno
