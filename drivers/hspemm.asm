@@ -73,6 +73,7 @@ SVC_EMS     equ 0
 SVC_I15     equ 1
 SVC_REAL    equ 2
 SVC_BUSY    equ 3
+SVC_VDS     equ 4                   ; [VDS] INT 4Bh AX=81xxh
 
 ; llamada al monitor desde el modo V86: ARPL no existe en modo real/V86 y da
 ; «código no válido» (#UD), que el monitor reconoce si viene de este segmento
@@ -95,6 +96,7 @@ devname db "EMMXXXX0"               ; los programas buscan este nombre
 req         dd 0
 old15       dd 0
 old2f       dd 0
+old4b       dd 0                    ; [VDS]
 xms_chain   dd 0
 active      db 0                    ; 1 = en modo V86 con el monitor
 winmsg      db 0
@@ -177,6 +179,42 @@ int15:
         iret
 .chain:
         jmp far [cs:old15]
+
+; ---- [VDS] INT 4Bh AX=81xxh: Virtual DMA Services (los drivers de «bus
+; master»: tarjetas de red PCI, SCSI...) ----
+; Con la paginación del monitor, la memoria superior y el marco EMS son
+; páginas de otra RAM: la dirección que ve un driver cargado con LH no es la
+; física, y la tarjeta que hace DMA con ella escribe en otro sitio. VDS le da
+; la física (especificación de Microsoft, según la Interrupt List de Ralf
+; Brown, INT 4Bh). Lo hace el monitor; aquí, a quien llama, CF y ZF.
+int4b:
+        cmp ah, 0x81
+        jne .chain
+        cmp byte [cs:active], 0
+        je .chain
+        MONCALL SVC_VDS
+        push bp
+        mov bp, sp
+        push ax
+        pushf
+        pop ax                      ; lo que deja el monitor
+        and al, 0x41                ; CF y ZF
+        and byte [bp+6], 0xBE
+        or [bp+6], al
+        pop ax
+        pop bp
+        iret
+.chain:
+        cmp word [cs:old4b+2], 0
+        je .none
+        jmp far [cs:old4b]
+.none:
+        mov al, 0x0F                ; «función no admitida», CF = 1
+        push bp
+        mov bp, sp
+        or byte [bp+6], 1
+        pop bp
+        iret
 
 ; ---- INT 2Fh AX=1605h: Windows arranca ----
 int2f:
@@ -851,6 +889,19 @@ init:
         mov dx, int67
         mov ax, 0x2567
         int 0x21
+        ; [VDS] INT 4Bh y el bit 5 de 0040:007Bh («hay VDS»)
+        mov ax, 0x354B
+        int 0x21
+        mov [old4b], bx
+        mov [old4b+2], es
+        mov dx, int4b
+        mov ax, 0x254B
+        int 0x21
+        push ds
+        mov ax, 0x40
+        mov ds, ax
+        or byte [0x7B], 0x20
+        pop ds
         ; la memoria nueva, a cero
         cmp word [frame_seg], 0
         je .nz
@@ -2032,6 +2083,11 @@ ud_trap:
         je svc_real
         cmp al, 0xC0 + SVC_BUSY
         je .s_busy
+        cmp al, 0xC0 + SVC_VDS
+        je .s_vds
+        jmp mon_exit
+.s_vds:
+        call svc_vds
         jmp mon_exit
 .s_ems:
         call ems_dispatch
@@ -2050,6 +2106,205 @@ ud_trap:
 ; volver a modo real (Windows): sigue en real16, en la parte residente
 svc_real:
         jmp SEL_C16:real16
+
+; ---- [VDS] Virtual DMA Services, INT 4Bh AX=81xxh ----
+; Especificación de Microsoft (1.0), tal como la recoge la Interrupt List de
+; Ralf Brown (INT 4Bh, tablas 03218-03221). Esta versión no tiene búferes de
+; DMA ni scatter/gather: 8102h (versión), 8103h (bloquear: la dirección física
+; si la región es contigua), 8104h (soltar), 810Bh y 810Ch (no traducir un
+; canal del 8237); lo demás, error 0Fh («no admitida»). DDS: +0 tamaño (dd),
+; +4 desplazamiento (dd), +8 segmento (dw), +0Ah identificador de búfer (dw),
+; +0Ch dirección física (dd). Error: CF = 1 y AL = código.
+VDS_TOPE    equ 0x400000            ; lo que describe PT0
+svc_vds:
+        mov eax, [ebp+P_EAX]
+        cmp al, 0x02
+        je .ver
+        cmp al, 0x03
+        je .lock
+        cmp al, 0x04
+        je .unlock
+        cmp al, 0x0B
+        je .dis
+        cmp al, 0x0C
+        je .ena
+        mov al, 0x0F                ; función no admitida
+        jmp .err
+.rsv:
+        mov al, 0x10                ; bits reservados en DX
+        jmp .err
+; 8102h: AH.AL = versión 1.0, BX = producto, CX = revisión, DX = marcas
+; (0: ni búfer ni remapeo), SI:DI = búfer de DMA más grande (0: ninguno)
+.ver:
+        cmp word [ebp+P_EDX], 0
+        jne .rsv
+        mov word [ebp+P_EAX], 0x0100
+        mov word [ebp+P_EBX], 0x4853        ; «HS»
+        mov word [ebp+P_ECX], 1
+        mov word [ebp+P_EDX], 0
+        mov word [ebp+P_ESI], 0
+        mov word [ebp+P_EDI], 0
+        jmp .ok
+; 8103h: DX = marcas (bit 1 copiar, 2 sin búfer, 3 sin remapeo, 4 sin cruzar
+; 64 KB, 5 sin cruzar 128 KB; 0 y 6-15 reservados)
+.lock:
+        test word [ebp+P_EDX], 0xFFC1
+        jnz .rsv
+        V86PTR ebx, F_ES, P_EDI     ; EBX = la DDS
+        mov ecx, [ebx]              ; ECX = tamaño
+        movzx eax, word [ebx+8]
+        shl eax, 4
+        add eax, [ebx+4]            ; EAX = dirección lineal
+        jc .inval
+        cmp eax, VDS_TOPE
+        jae .inval
+        mov edx, eax
+        add edx, ecx
+        jc .inval
+        cmp edx, VDS_TOPE
+        ja .inval
+        push eax
+        call .fisica                ; EDX = física de EAX (CF = 1 si no está)
+        pop eax
+        jc .nolock
+        mov esi, edx                ; ESI = física del principio
+        ; ¿contigua? página a página, la física de cada una seguida de la anterior
+        mov edi, ecx                ; EDI = lo contiguo (si llega a ECX, todo)
+        test ecx, ecx
+        jz .cont
+        mov edi, eax
+        and edi, ~0xFFF
+        add edi, 0x1000
+        sub edi, eax                ; lo que queda en la primera página
+        push esi
+.pag:
+        cmp edi, ecx
+        jae .pagok
+        push eax
+        add eax, edi                ; el principio de la página siguiente
+        call .fisica
+        pop eax
+        jc .pagfin
+        pop esi
+        push esi
+        add esi, edi                ; donde debería estar
+        cmp edx, esi
+        jne .pagfin
+        add edi, 0x1000
+        jmp .pag
+.pagok:
+        mov edi, ecx
+.pagfin:
+        pop esi
+        cmp edi, ecx
+        jb .nocont
+.cont:
+        ; ¿cruza un límite de 64 KB o de 128 KB que no debe?
+        test ecx, ecx
+        jz .bien
+        mov edx, 0xFFFF0000
+        test word [ebp+P_EDX], 0x10
+        jnz .lim
+        mov edx, 0xFFFE0000
+        test word [ebp+P_EDX], 0x20
+        jz .bien
+.lim:
+        mov eax, esi
+        lea edi, [esi+ecx-1]
+        xor eax, edi
+        test eax, edx
+        jz .bien
+        ; lo que cabe hasta el límite
+        mov eax, esi
+        and eax, edx
+        not edx
+        lea eax, [eax+edx+1]
+        sub eax, esi
+        mov [ebx], eax
+        mov al, 0x02                ; cruza un límite
+        jmp .err
+.bien:
+        mov [ebx+0x0C], esi
+        mov word [ebx+0x0A], 0      ; sin búfer
+        jmp .ok
+.nocont:
+        mov [ebx], edi              ; lo más largo que es contiguo
+        mov al, 0x01                ; no está en memoria contigua
+        jmp .err
+.nolock:
+        mov al, 0x03                ; no se pueden bloquear las páginas
+        jmp .err
+.inval:
+        mov al, 0x07                ; región no válida
+        jmp .err
+; 8104h: sin búferes, solo vale el identificador 0
+.unlock:
+        test word [ebp+P_EDX], 0xFFFD
+        jnz .rsv
+        V86PTR ebx, F_ES, P_EDI
+        cmp word [ebx+0x0A], 0
+        je .ok
+        mov al, 0x0A                ; identificador de búfer no válido
+        jmp .err
+; 810Bh/810Ch: BX = canal (0-7); 810Ch da ZF = 1 si la cuenta llega a 0
+.dis:
+.ena:
+        cmp word [ebp+P_EDX], 0
+        jne .rsv
+        movzx edx, word [ebp+P_EBX]
+        cmp edx, 7
+        ja .canal
+        cmp al, 0x0C
+        je .ena2
+        cmp byte [vds_dis+edx], 0xFF
+        je .sobre
+        inc byte [vds_dis+edx]
+        jmp .ok
+.ena2:
+        cmp byte [vds_dis+edx], 0
+        je .bajo
+        dec byte [vds_dis+edx]
+        jnz .ok
+        and dword [ebp+F_EFL], ~1
+        or dword [ebp+F_EFL], 0x40  ; ZF: ya se traduce otra vez
+        push edi
+        mov edi, edx
+        call dma_fix                ; con lo que el programa haya escrito
+        pop edi
+        ret
+.canal:
+        mov al, 0x0C                ; canal de DMA no válido
+        jmp .err
+.sobre:
+        mov al, 0x0D
+        jmp .err
+.bajo:
+        mov al, 0x0E
+        jmp .err
+.ok:
+        and dword [ebp+F_EFL], ~0x41
+        ret
+.err:
+        mov [ebp+P_EAX], al
+        or dword [ebp+F_EFL], 1
+        ret
+; EAX = dirección lineal (< VDS_TOPE) -> EDX = física, CF = 1 si no está
+.fisica:
+        mov edx, eax
+        shr edx, 12
+        mov edx, [PT0_LIN+edx*4]
+        test dl, 1
+        jz .nofis
+        and edx, ~0xFFF
+        push eax
+        and eax, 0xFFF
+        or edx, eax
+        pop eax
+        clc
+        ret
+.nofis:
+        stc
+        ret
 
 ; interrupción con el procesador en anillo 0: solo puede ser la que despierta
 ; al HLT emulado; se refleja al programa V86, que sigue tras su HLT
@@ -2804,6 +3059,8 @@ dma_fix:
         shl ecx, 16
         add eax, ecx                ; dirección lineal que quiere el programa
         mov dword [dma_delta+edi*4], 0
+        cmp byte [vds_dis+edi], 0   ; [VDS] el driver ha pedido que no se traduzca
+        jne .r
         cmp eax, 0xA0000
         jb .r
         cmp eax, 0x100000
@@ -4743,6 +5000,7 @@ dma_delta   resd 8
 dma_addr    resw 8
 dma_latch   resw 8
 dma_page    resb 8
+vds_dis     resb 8                  ; [VDS] 810Bh: cuántas veces se ha pedido no traducir cada canal
 dma_ff      resb 2
 pic_master  resw 1
 pic_slave   resw 1

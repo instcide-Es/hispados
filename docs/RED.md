@@ -51,14 +51,14 @@ Guardado en PRUEBA.BIN (150.000 octetos).
    `RED.INI`) y la enseña. No hace falta llamarlo antes de las otras: la
    primera orden de red que se use la pide.
 3. `PING nombre|dirección [/N:n] [/T]` y
-   `DESCARGAR [http://]servidor[:puerto]/ruta [archivo]`.
+   `DESCARGAR [/Y] [http://]servidor[:puerto]/ruta [archivo]`.
 
 | Orden | Para qué |
 |---|---|
 | `HSPRED [/INT:xx] [/INFO] [/AUTO] [/USB] [/DEPURA[:archivo]] [/U]` | El controlador. `/AUTO`: para el `AUTOEXEC.BAT`: sin tarjeta sale en silencio y, con una tarjeta Wi-Fi, elige entre el cable y el Wi-Fi (ver «Cable o Wi-Fi»). `/USB`: usar el adaptador USB-Ethernet (el que lleva HSPUSB) aunque haya una tarjeta PCI que valga. `/INFO`: tarjeta, PCI (con la revisión), puertos, el chip exacto (familia de la RTL8168 por su `TxConfig`, número de pieza de la PCnet), IRQ, MAC, enlace y velocidad, vector, memoria, programas que lo usan, contadores y la IP (también con el controlador ya cargado). `/INT:xx`: el vector (60h-80h; si no, el primero libre desde el 60h, nunca el 67h de EMS). `/U`: descargarlo (si ningún programa lo usa). `/DEPURA[:archivo]`: todo lo que HSPRED escribe en la pantalla se añade además a un archivo (`HSPRED.LOG` si no se dice otro), línea a línea (si el equipo se cuelga, queda hasta donde llegó), y la Yukon cuenta su puesta en marcha paso a paso; con `/INFO`, es el informe para mandar a quien depura. Solo para la Marvell Yukon: `/MEMORIA` y `/PUERTOS` (por dónde van sus registros, sin probar cuál contesta) y `/SONDEO` (sin IRQ: mira la tarjeta en cada tic del reloj). |
 | `CONFRED [/RENOVAR] [/LIBERAR]` | La configuración IP. `/RENOVAR` (`/RENEW`) la pide otra vez; `/LIBERAR` (`/RELEASE`) la olvida. `/ALL` se acepta (como en Windows) y hace lo mismo que sin nada. |
 | `PING destino [/N:n] [/T]`, `PING /P` | `/P`: a la puerta de enlace (el router) que haya dado `CONFRED`, sin tener que escribir su dirección. Eco de ICMP: 4 veces (o *n*, o hasta Esc con `/T`), con el tiempo (de 55 en 55 ms: el reloj de la BIOS) y el TTL, y el resumen de paquetes perdidos. Código de salida 1 si no contestó ninguno. |
-| `DESCARGAR url [archivo]` | HTTP/1.0 sin cifrar. Barra de progreso si el servidor dice el tamaño (si no, los octetos que van llegando). Sigue hasta 4 redirecciones a `http://`. Si no se dice el archivo, el último trozo de la ruta en 8.3 (`INDEX.HTM` si no hay). Si algo falla (404, disco lleno, Esc, el servidor corta), lo dice y borra el archivo a medias. |
+| `DESCARGAR [/Y] url [archivo]` | HTTP/1.0 sin cifrar. Barra de progreso si el servidor dice el tamaño (si no, los octetos que van llegando). Sigue hasta 4 redirecciones a `http://`. Si no se dice el archivo, el último trozo de la ruta en 8.3 (`INDEX.HTM` si no hay). Si el archivo ya existe, pregunta antes de sustituirlo («¿Sustituirlo? (S/N)»; con `/Y`, no pregunta: para los archivos por lotes), y el de antes solo se sustituye cuando la descarga ha llegado entera. Si algo falla (404, disco lleno, Esc, el servidor corta), lo dice y borra el archivo a medias. |
 | `CONSOLA [/PUERTO:n] [/CADUCA:s]` | Consola remota por red (servidor TCP, puerto 2323 por omisión): deja entrar a otra persona a este equipo, con un código de acceso de 6 cifras que solo se ve aquí (en pantalla desde el principio, de un solo uso, cambia tras 3 fallos y caduca a los 10 minutos). Abierta y controlada por el usuario. Ver [docs/CONSOLA.md](CONSOLA.md). |
 | `ACTUALIZAR [url]` | Instalador por red. Mira por HTTP (`versiones.txt`) si hay una versión más nueva o una edición más rica que la instalada (`lib/version.inc`), según la CPU/RAM/disco del equipo; y, si el usuario quiere, **baja el paquete `.PAQ` y lo instala en el sitio** conservando `*.INI`/`*.REC`. La dirección sale, por orden, de lo que se escriba, de `ACTUALIZAR=` en `RED.INI`, o de la de por omisión. Ver más abajo. |
 
@@ -879,6 +879,64 @@ La configuración que se consigue (por DHCP o de `RED.INI`) se guarda en
 `CONFRED /RENOVAR` o reiniciar. La concesión de DHCP no se renueva sola (en
 casa suele ser de un día o más): `CONFRED /RENOVAR`.
 
+## Con el driver de DOS de su tarjeta (en lugar de HSPRED)
+
+CONFRED, PING, DESCARGAR, CONSOLA y ACTUALIZAR hablan con la tarjeta por la
+especificación de los *packet drivers* de FTP Software (buscan «PKT DRVR» de
+INT 60h a 80h), así que **cualquier *packet driver* de DOS vale en lugar de
+HSPRED**: el del disquete del fabricante de la tarjeta o uno de los libres de
+Crynwr (el paquete `crynwr` de FreeDOS). Se carga antes, como en MS-DOS:
+
+```
+NE2000 0x60 3 0x300        (NE2000 ISA: INT, IRQ y puerto)
+PCNTPK INT=0x60            (AMD PCnet PCI)
+CONFRED
+```
+
+Con HSPEMM también se pueden cargar arriba (`LH NE2000 ...`): los de tarjetas
+PCI que hacen el DMA ellas mismas (PCNTPK) piden la dirección física por VDS,
+que HSPEMM tiene (docs/HSPEMM.md, «VDS»). Sin la configuración compartida de
+HSPRED, CONFRED la pide por DHCP (o la lee de `RED.INI`) cada vez. Probado con
+NE2000 y PCNTPK de Crynwr en QEMU (`tests/run_pktdrv_terceros_tests.sh`, con
+`CRYNWR=carpeta`: los drivers no van en Hispa-DOS).
+
+### Con un driver NDIS 2 (el `.DOS` de la tarjeta)
+
+Muchas tarjetas de los 90 solo traen un driver **NDIS 2** (un «MAC», `*.DOS`,
+el de LAN Manager y Trabajo en Grupo), que va con un gestor de protocolos
+(`PROTMAN$`) y un `PROTOCOL.INI`. Hispa-DOS trae los dos lados que faltan,
+propios y escritos con la especificación pública NDIS 2.0.1 de
+3Com/Microsoft (0.9.32, **primera versión, 0.1**):
+
+- `HSPPMAN.SYS`, el gestor de protocolos: lee `PROTOCOL.INI` (de
+  `/I:carpeta` o de `\LANMAN` en la unidad de arranque) y deja su imagen
+  a los drivers, como el `PROTMAN.DOS` de Microsoft (que también vale).
+- `HSPNDIS.COM`, el protocolo: se une al MAC y por arriba es un *packet
+  driver* en INT 60h, así que CONFRED, PING, DESCARGAR, CONSOLA y ACTUALIZAR
+  van por la tarjeta como con HSPRED.
+
+```
+CONFIG.SYS:    DEVICE=C:\HISPADOS\HSPPMAN.SYS /I:C:\LANMAN
+               DEVICE=C:\LANMAN\NE2000.DOS        (el de la tarjeta)
+PROTOCOL.INI:  [NE2000_NIF]
+                 DRIVERNAME = MS2000$
+                 IOADDRESS = 0x300
+                 INTERRUPT = 3
+               [HSPNDIS]
+                 BINDINGS = NE2000_NIF
+AUTOEXEC.BAT:  C:\HISPADOS\HSPNDIS
+               CONFRED
+```
+
+(Las claves de la sección de la tarjeta son las que diga su disquete.)
+Probado en QEMU, como caja negra, con el `NE2000.DOS` de Trabajo en Grupo
+3.11 (que no va en Hispa-DOS: es de Microsoft): se registra, se une y llegan
+las tramas; ese driver en QEMU solo manda tramas de 60 octetos (no pone el
+largo en la tarjeta: igual en MS-DOS 6.22), así que DHCP con él no se ha
+podido probar en QEMU. Para que estos drivers funcionen, el núcleo entiende
+`\DEV\NOMBRE` (así abre el MAC el gestor) y llama a los drivers con DS:SI en
+su cabecera, como MS-DOS.
+
 ## API
 
 ### HSPRED: controlador de paquetes («packet driver», especificación de FTP Software 1.09)
@@ -1132,8 +1190,10 @@ dinámica y con implementaciones de 32 bits. Lo nuestro (`hsptls.c`):
   leen las dos). En un equipo recién instalado y sin tocar es poco azar para
   lo que se pide hoy: es el punto flaco, y está dicho. Sin TSC (un 486) y sin
   semilla (la primera vez), `TlsInfo` lo dice: «poco azar: sin TSC ni
-  semilla». (Crear la semilla al instalar, con el tiempo de las teclas, queda
-  para el instalador.)
+  semilla». Desde la 0.9.32, **el instalador la crea**: en un disco de
+  Hispa-486 sin `C:\HSPTLS.SEM`, cada tecla que se pulsa al instalar mezcla
+  el contador del reloj (PIT) y los tics de la BIOS, y al acabar, con la
+  hora, deja los 32 octetos en `\HSPTLS.SEM` (si ya había una, no se toca).
 - **TlsEscribir** espera lo que haga falta mientras el servidor vaya
   leyendo; si en 60 s no puede mandar nada, da la conexión por cortada (-1).
 - Las sesiones se reanudan si el servidor guarda su identificador (los

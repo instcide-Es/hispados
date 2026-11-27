@@ -64,6 +64,9 @@ printf '; a mano\r\nDHCP=NO\r\nIP=10.0.2.20\r\nMASCARA=255.255.255.0\r\nPUERTA=1
 mkimg() {   # mkimg destino
   cp "$IMG" $1
   mdel -i $1 ::HISPADOS/HISPA.WAV 2>/dev/null   # sitio para lo que se descarga
+  # (y para DESCARGAR /Y: el de antes solo se quita cuando el nuevo, que se
+  # baja al lado, ha llegado entero; hacen falta 2 x 150.000 octetos)
+  mdel -i $1 ::HISPADOS/VENTANAS.COM 2>/dev/null
   mcopy -o -i $1 $T/RED2.INI ::RED2.INI
   mcopy -o -i $1 $T/RED3.INI ::RED3.INI
 }
@@ -85,7 +88,8 @@ check() { if grep -qF -- "$2" $T/$1.txt; then ok "$2"; else ko "$2"; fi; }
 checkn() { if grep -qF -- "$2" $T/$1.txt; then ko "(no debía salir) $2"; else ok "sin «$2»"; fi; }
 U="http://10.0.2.2:$PORT"
 CMDS=('3|HSPRED' '2|HSPRED /INFO' '4|CONFRED' '7|PING 10.0.2.2 /N:3'
-      "12|DESCARGAR $U/PRUEBA.BIN"
+      "12|DESCARGAR $U/PRUEBA.BIN" "4|DESCARGAR $U/PRUEBA.BIN" '2|N'
+      "12|DESCARGAR /Y $U/PRUEBA.BIN"
       "4|DESCARGAR $U/no-existe.txt" '3|DESCARGAR https://ejemplo.org/x.zip'
       '2|DEL A:\HISPADOS\RED.INI' '2|COPY A:\RED2.INI A:\HISPADOS\RED.INI'
       '4|CONFRED /RENOVAR' '5|PING prueba.hispados /N:2'
@@ -134,6 +138,11 @@ for nic in $RONDA1; do
   if [ "$n" -ge 5 ]; then ok "PING 10.0.2.2: $n respuestas (3 + 2 a mano)"; else ko "PING 10.0.2.2: $n respuestas"; fi
   check $nic "Paquetes: enviados = 3, recibidos = 3, perdidos = 0"
   check $nic "Guardado en PRUEBA.BIN (150.000 octetos)."
+  # 0.9.32: si ya existe, pregunta (N: no lo toca) y con /Y lo sustituye
+  check $nic "Ya existe PRUEBA.BIN. ¿Sustituirlo? (S/N)"
+  check $nic "No se ha descargado: el archivo sigue como estaba."
+  n=$(grep -c "Guardado en PRUEBA.BIN (150.000 octetos)." $T/$nic.txt)
+  if [ "$n" -ge 2 ]; then ok "DESCARGAR /Y lo sustituye sin preguntar ($n veces guardado)"; else ko "DESCARGAR /Y: guardado $n veces"; fi
   check $nic "[█████████████████████████] 100%"
   check $nic "El servidor contesta: HTTP/1.0 404 File not found"
   check $nic "Las direcciones https:// (cifradas) todavía no funcionan"

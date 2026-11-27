@@ -3851,12 +3851,7 @@ cfg_device_do:
         mov ax, [es:di]
         mov [ld_next], ax
         ; petición INIT
-        push ds
-        pop es
-        mov di, dreq
-        mov cx, 15
-        xor ax, ax
-        rep stosw
+        call dreq_zero
         mov byte [dreq], 0x17
         mov byte [dreq+2], 0
         mov word [dreq+0x0E], 0
@@ -3899,7 +3894,9 @@ cfg_device_do:
         pop di
         pop es
         mov [dreq+0x16], al
-        call dev_call
+        push dword [dc_hdr]         ; (su INIT puede llamar a otro driver,
+        call dev_call               ; como NE2000.DOS a PROTMAN$ por IOCTL)
+        pop dword [dc_hdr]
         test word [dreq+3], 0x8000
         jnz .initerr
         ; memoria usada hasta la dirección de corte
@@ -4266,12 +4263,7 @@ media_check:
         je .changed
         jmp .done
 .drv:
-        push ds
-        pop es
-        mov di, dreq
-        mov cx, 15
-        xor ax, ax
-        rep stosw
+        call dreq_zero
         mov byte [dreq], 0x13
         mov al, [cur_drv+D_UNIT]
         mov [dreq+1], al
@@ -4283,8 +4275,26 @@ media_check:
         call dev_call
         test word [dreq+3], 0x8000
         jnz .done
-        cmp byte [dreq+0x0E], 0xFF  ; FFh cambiado, 0 no se sabe, 1 igual
+        cmp byte [dreq+0x0E], 1     ; FFh cambiado, 0 no se sabe, 1 igual
+        je .done
+        cmp byte [dreq+0x0E], 0     ; «no se sabe», como en MS-DOS: cambiado
+        jne .bb                     ; si no hay nada a medio escribir (SRDISK
+        cmp byte [fat_dirty], 0     ; lo dice así al cambiar de tamaño)
         jne .done
+.bb:
+        ; cambiado: como en MS-DOS, se le piden las medidas del disco nuevo
+        ; (orden 2, BUILD BPB; con el búfer de sector) y se apunta la BPB que da
+        mov byte [dreq+2], 2
+        mov word [dreq+0x0E], secbuf
+        mov [dreq+0x10], ds
+        mov dword [cache_lba], 0xFFFFFFFF
+        call dev_call
+        test word [dreq+3], 0x8000
+        jnz .changed
+        mov eax, [dreq+0x12]
+        test eax, eax
+        jz .changed
+        mov [cur_drv+D_BPBPTR], eax
 .changed:
         ; puede haber cambiado: fuera las cachés y se vuelve a leer el disco.
         ; Si el número de serie del volumen es el mismo, es el mismo disco
@@ -5744,12 +5754,7 @@ con_check:
         push dword [dc_hdr]
         mov eax, [con_hdr]
         mov [dc_hdr], eax
-        push ds
-        pop es
-        mov di, dreq
-        mov cx, 15
-        xor ax, ax
-        rep stosw
+        call dreq_zero
         mov byte [dreq], 0x0E
         mov byte [dreq+2], 5
         call dev_call
@@ -8148,6 +8153,14 @@ dir_ident:
 .r:
         ret
 
+; find_entry con lo que deja walk: la carpeta (w_dir) desde el principio y
+; el nombre (w_name); DL = 16h, o el que ya traiga DL (find_wname_dl)
+find_wname:
+        mov dl, 0x16
+find_wname_dl:
+        mov eax, [w_dir]
+        xor cx, cx
+        mov si, w_name
 ; EAX = directorio, CX = índice inicial, SI = patrón (11), DL = atributos
 ; -> CF=0: CX = índice encontrado, fentry = copia de la entrada
 find_entry:
@@ -8517,18 +8530,31 @@ walk:
         je .last
         inc si
         push si
-        mov eax, [w_dir]
-        xor cx, cx
-        mov si, w_name
-        mov dl, 0x16
-        call find_entry
+        call find_wname
         pop si
-        jc .nf
+        jc .dev
         test byte [fentry+11], 0x10
         jz .nf
         call dir_clus
         mov [w_dir], eax
         jmp .comp
+; \DEV\NOMBRE: como en MS-DOS, la carpeta «DEV» de la raíz (si no existe de
+; verdad) es la de los dispositivos: «\DEV\PROTMAN$» es PROTMAN$ (los
+; drivers NDIS 2 de Microsoft abren así el gestor de protocolos). Solo si lo
+; que sigue es el último trozo y es un dispositivo.
+.dev:
+        cmp si, npath+4             ; el primer trozo, de 3 letras...
+        jne .nf
+        cmp word [w_name], 'DE'     ; ...«DEV»
+        jne .nf
+        cmp byte [w_name+2], 'V'
+        jne .nf
+        mov di, w_name
+        call to11
+        cmp byte [si], 0
+        jne .nf
+        call check_device
+        jnc .nf
 .last:
         mov byte [w_has], 1
 .ok:
@@ -8585,6 +8611,9 @@ resolve_dir:
 ; -----------------------------------------------------------------------------
 ;  Ficheros: SFT y tabla de handles del PSP (JFT)
 ; -----------------------------------------------------------------------------
+; get_sft con el BX del programa
+get_sft_bx:
+        mov bx, [F_BX]
 ; BX = handle -> DI = SFT; CF=1 (AX=6) si no es válido
 get_sft:
         cmp bx, 20
@@ -9094,11 +9123,7 @@ open_path:
         ret
 .file:
         push si
-        mov eax, [w_dir]
-        xor cx, cx
-        mov si, w_name
-        mov dl, 0x16
-        call find_entry
+        call find_wname
         pop si
         jc .nf
         test byte [fentry+11], 0x10
@@ -9723,8 +9748,7 @@ share_close:
 fn_5c:
         cmp byte [F_AL], 1
         ja .func
-        mov bx, [F_BX]
-        call get_sft
+        call get_sft_bx
         jc ret_err
         cmp byte [di+SFT_TYPE], T_FILE
         jne .done                   ; dispositivos: no hay nada que bloquear
@@ -10128,11 +10152,7 @@ create_file:
         je .nopath
         inc si
         loop .chk
-        mov eax, [w_dir]
-        xor cx, cx
-        mov si, w_name
-        mov dl, 0x16
-        call find_entry
+        call find_wname
         jc .new
         cmp byte [cf_new], 0
         jne .exists
@@ -10144,11 +10164,7 @@ create_file:
         ; los programas de FCB) se sueltan antes, como recicla MS-DOS.
         call fcb_drop_open
         jnc .nodrop
-        mov eax, [w_dir]            ; soltar pudo reescribir la entrada
-        xor cx, cx
-        mov si, w_name
-        mov dl, 0x16
-        call find_entry
+        call find_wname
         jc .new
 .nodrop:
         call file_is_open
@@ -10520,10 +10536,8 @@ dev_call:
         popad
         ret
 
-; AL = orden, DX:BX = búfer, CX = cuenta -> AX = transferido; CF si error
-dev_rw:
-        push di
-        push es
+; la petición (dreq) a cero, con ES = DS; AX y CX no cambian
+dreq_zero:
         push ds
         pop es
         push ax
@@ -10534,6 +10548,13 @@ dev_rw:
         rep stosw
         pop cx
         pop ax
+        ret
+
+; AL = orden, DX:BX = búfer, CX = cuenta -> AX = transferido; CF si error
+dev_rw:
+        push di
+        push es
+        call dreq_zero
         mov byte [dreq], 0x16
         mov [dreq+2], al
         mov [dreq+0x0E], bx
@@ -10557,14 +10578,7 @@ drv_block_io:
         mov ecx, [cur_drv+D_DRVHDR]
         mov [dc_hdr], ecx
         push es
-        push ds
-        pop es
-        push eax
-        mov di, dreq
-        mov cx, 15
-        xor ax, ax
-        rep stosw
-        pop eax
+        call dreq_zero
         pop es
         mov byte [dreq], 0x1E
         mov cl, [cur_drv+D_UNIT]
@@ -12520,8 +12534,7 @@ fn_3d:
         jmp ret_err
 
 fn_3e:
-        mov bx, [F_BX]
-        call get_sft
+        call get_sft_bx
         jc ret_err
         mov al, 0xFF
         call jft_set
@@ -12529,8 +12542,7 @@ fn_3e:
         ret
 
 fn_3f:
-        mov bx, [F_BX]
-        call get_sft
+        call get_sft_bx
         jc ret_err
         mov al, [di+SFT_TYPE]
         cmp al, T_FILE
@@ -12645,8 +12657,7 @@ con_read:
         ret
 
 fn_40:
-        mov bx, [F_BX]
-        call get_sft
+        call get_sft_bx
         jc ret_err
         mov al, [di+SFT_TYPE]
         cmp al, T_CON
@@ -12698,8 +12709,7 @@ fn_40:
         ret
 
 fn_42:
-        mov bx, [F_BX]
-        call get_sft
+        call get_sft_bx
         jc ret_err
         cmp byte [di+SFT_TYPE], T_FILE
         jne .dev
@@ -12744,11 +12754,7 @@ fn_43:
         je .nf
         call name_nowild
         jc .nf
-        mov eax, [w_dir]
-        xor cx, cx
-        mov si, w_name
-        mov dl, 0x16
-        call find_entry
+        call find_wname
         jc .nf
         movzx ax, byte [fentry+11]
         mov [F_CX], ax
@@ -12809,8 +12815,7 @@ fn_44:
 ; 4402h / 4403h: datos de control de un driver de carácter (IOCTL de entrada
 ; o de salida, órdenes 3 y 0Ch del driver); IFSHLP.SYS de Windows lo usa
 .ioctl_rw:
-        mov bx, [F_BX]
-        call get_sft
+        call get_sft_bx
         jc ret_err
         cmp byte [di+SFT_TYPE], T_DEV
         jne .iobad
@@ -12991,8 +12996,7 @@ fn_44:
 .gnc:
         ret
 .info:
-        mov bx, [F_BX]
-        call get_sft
+        call get_sft_bx
         jc ret_err
         mov al, [di+SFT_TYPE]
         cmp al, T_FILE
@@ -13044,8 +13048,7 @@ fn_44:
         ret
 
 fn_45:
-        mov bx, [F_BX]
-        call get_sft
+        call get_sft_bx
         jc ret_err
         call jft_alloc
         jc ret_err
@@ -13055,8 +13058,7 @@ fn_45:
         mov [F_AX], bx
         ret
 fn_46:
-        mov bx, [F_BX]
-        call get_sft
+        call get_sft_bx
         jc ret_err
         push di
         mov bx, [F_CX]
@@ -13078,8 +13080,7 @@ fn_46:
         jmp ret_err
 
 fn_57:
-        mov bx, [F_BX]
-        call get_sft
+        call get_sft_bx
         jc ret_err
         cmp byte [F_AL], 0
         jne .set
@@ -13225,11 +13226,7 @@ fn_39:
         je .acc
         call name_ok
         jc .acc
-        mov eax, [w_dir]
-        xor cx, cx
-        mov si, w_name
-        mov dl, 0x16
-        call find_entry
+        call find_wname
         jnc .acc
         xor eax, eax
         call fat_alloc
@@ -13412,11 +13409,7 @@ fn_56:
         je .acc
         call name_ok
         jc .acc
-        mov eax, [w_dir]
-        xor cx, cx
-        mov si, w_name
-        mov dl, 0x16
-        call find_entry
+        call find_wname
         jnc .acc
         mov eax, [w_dir]
         cmp eax, [rn_dir]
@@ -13476,8 +13469,7 @@ fn_56:
 
 ; ---- 68h / 6Ah: confirmar escritura ----
 fn_68:
-        mov bx, [F_BX]
-        call get_sft
+        call get_sft_bx
         jc ret_err
         cmp byte [di+SFT_TYPE], T_FILE
         jne .r
@@ -15189,11 +15181,8 @@ fn_0f:
         mov byte [F_AL], 0
         ret
 .file:
-        mov eax, [w_dir]
-        xor cx, cx
-        mov si, w_name
         mov dl, [fcb_attr]
-        call find_entry
+        call find_wname_dl
         jc .fail
         test byte [fentry+11], 0x18
         jnz .fail
@@ -15676,11 +15665,8 @@ fn_23:
         call fcb_setup
         call fcb_resolve
         jc .fail
-        mov eax, [w_dir]
-        xor cx, cx
-        mov si, w_name
         mov dl, [fcb_attr]
-        call find_entry
+        call find_wname_dl
         jc .fail
         call fcb_recsize
         mov eax, [fentry+28]
@@ -16184,12 +16170,17 @@ l_int15:
 
 ; salidas: el código llama aquí (CALL/JMP lejano a KSEG) y a la vuelta se
 ; comprueba A20 antes de volver a él
+; Como MS-DOS, la estrategia y la interrupción se llaman con ES:BX en la
+; petición y DS:SI en la cabecera del driver: hay drivers que leen sus datos
+; con DS sin cargarlo (PROTMAN.DOS de NDIS 2) y los comprimidos con UPX (SRDISK
+; de FreeDOS) copian en DS al descomprimirse. dev_call repone DS al volver.
 l_devcall:
+        lds si, [cs:dc_hdr]
         call far [cs:dc_far]
         mov ax, KSEG
-        mov ds, ax
         mov es, ax
         mov bx, dreq
+        lds si, [cs:dc_hdr]
         call far [cs:dc_far2]
         call a20_gate
         retf
@@ -16822,6 +16813,11 @@ low_end:
 ;   IMG_END = F040h, .init = 0F32h; INIT_ORG de EFC0h a F0A0h
 ;   MARGEN_IMG  = 32 octetos, MARGEN_INIT = 46 octetos (no queda más sitio:
 ;   lo próximo, adelgazar)
+;   27/11/2026 (0.9.32, drivers de otros: \DEV\, DS:SI en la cabecera,
+;   dc_hdr tras el INIT, BUILD BPB): adelgazado (find_wname, get_sft_bx,
+;   dreq_zero: 160 octetos menos) e INIT_ORG otra vez en F0A0h:
+;   IMG_END = F020h, .init = 0F38h
+;   MARGEN_IMG  = 64 octetos, MARGEN_INIT = 40 octetos
 ; Si una de las dos comprobaciones falla, se puede mover INIT_ORG (en
 ; múltiplos de 16) mientras la otra tenga sitio; si no lo tiene ninguna, hay
 ; que adelgazar el núcleo de verdad.

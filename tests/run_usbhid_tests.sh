@@ -37,7 +37,7 @@ check "HSPUSB 0.2 - USB nativo de Hispa-DOS (UHCI, OHCI, EHCI y xHCI)"
 check "Teclado USB preparado."
 check "Ratón USB preparado."
 check "A:\\>VER"
-check "Hispa-DOS versión 0.9.31 (compatible con MS-DOS 6.22)"
+check "Hispa-DOS versión 0.9.32 (compatible con MS-DOS 6.22)"
 check "A:\\>ECHO Hola"
 # la flecha arriba (tecla extendida) repite la orden: dos "Hola"
 n=$(grep -c "^Hola$" $T/log.txt)

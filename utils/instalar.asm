@@ -444,6 +444,7 @@ instala_comun:
         call oficina                ; [0.9.22] el disquete «Oficina», si hace falta
         call disq486                ; [HISPA-486] y el disquete «Hispa-486», si se quiere
         call disqinet               ; [INTERNET] y, en Hispa-486, el disquete «Internet»
+        call semilla                ; [0.9.32] y en Hispa-486, \HSPTLS.SEM
         cmp byte [setup], 0
         jne setup_fin
         cmp byte [updmode], 0
@@ -717,6 +718,7 @@ instal2:
         call puts
         mov ah, 0x08
         int 0x21
+        call azar                   ; [0.9.32] el tiempo de la tecla
         mov si, msg_crlf
         jmp puts
 
@@ -776,6 +778,7 @@ oficina:
         call puts
         mov ah, 0x08
         int 0x21
+        call azar                   ; [0.9.32] el tiempo de la tecla
         mov si, msg_crlf
         jmp puts
 
@@ -848,6 +851,7 @@ disq486:
         call puts
         mov ah, 0x08
         int 0x21
+        call azar                   ; [0.9.32] el tiempo de la tecla
         mov si, msg_crlf
         jmp puts
 .r:
@@ -964,6 +968,7 @@ disqinet:
         call puts
         mov ah, 0x08
         int 0x21
+        call azar                   ; [0.9.32] el tiempo de la tecla
         mov si, msg_crlf
         jmp puts
 .r:
@@ -996,6 +1001,94 @@ copia_auto:
         cmp ax, [ncopied]
         je .r
         mov byte [auto_puesto], 1
+.r:
+        ret
+
+; [0.9.32] El azar de HSPTLS (las conexiones cifradas de Hispa-486). En un
+; 486 no hay contador de ciclos (TSC) y la primera vez HSPTLS tendría «poco
+; azar» (TlsInfo lo dice): por eso, al instalar, cada tecla mezcla en az_pozo
+; el contador del reloj (PIT, que da 1,19 millones de vueltas por segundo:
+; el momento exacto de cada pulsación no lo sabe nadie) y los tics de la
+; BIOS; al acabar, con la hora, se guarda como \HSPTLS.SEM del disco (si no
+; hay ya una). HSPTLS la pasa por SHA-256 con lo suyo y la renueva cada vez.
+; Todo se conserva (registros e indicadores).
+azar:
+        pusha
+        push es
+        pushf
+        cli
+        xor al, al
+        out 0x43, al                ; el canal 0, congelado para leerlo
+        in al, 0x40
+        mov ah, al
+        in al, 0x40
+        popf
+        xchg al, ah
+        call .mete                  ; (lo de abajo, lo que más cambia)
+        mov al, ah
+        call .mete
+        push word 0x40
+        pop es
+        mov ax, [es:0x6C]
+        call .mete
+        mov al, ah
+        call .mete
+        pop es
+        popa
+        ret
+.mete:
+        pushf
+        movzx bx, byte [az_i]
+        mov dl, [az_pozo+bx]
+        rol dl, 3
+        xor dl, al
+        add dl, [az_ant]
+        mov [az_pozo+bx], dl
+        mov [az_ant], dl
+        inc bx
+        and bl, 31
+        mov [az_i], bl
+        popf
+        ret
+
+; [0.9.32] Al acabar, en un disco de Hispa-486 sin semilla: la hora y la
+; fecha (INT 1Ah) en el pozo y \HSPTLS.SEM (32 octetos) en la raíz
+semilla:
+        mov al, [dst]
+        mov [ed_ruta], al
+        mov dx, ed_ruta
+        call existe
+        jc .r                       ; no es de Hispa-486
+        mov al, [dst]
+        mov [sem_ruta], al
+        mov dx, sem_ruta
+        call existe
+        jnc .r                      ; ya tiene una (vale más: no se toca)
+        mov ah, 0x02
+        int 0x1A
+        mov al, cl
+        call azar.mete
+        mov al, dh
+        call azar.mete
+        mov ah, 0x04
+        int 0x1A
+        mov al, dl
+        call azar.mete
+        mov al, dh
+        call azar.mete
+        call azar
+        mov dx, sem_ruta
+        xor cx, cx
+        mov ah, 0x3C
+        int 0x21
+        jc .r
+        mov bx, ax
+        mov dx, az_pozo
+        mov cx, 32
+        mov ah, 0x40
+        int 0x21
+        mov ah, 0x3E
+        int 0x21
 .r:
         ret
 
@@ -1057,6 +1150,7 @@ ask_yes:
         mov dx, lbuf
         mov ah, 0x0A
         int 0x21
+        call azar                   ; [0.9.32] el tiempo de la respuesta
         mov si, msg_crlf
         call puts
         cmp byte [lbuf+1], 0
@@ -1563,6 +1657,7 @@ s_salir_ya:
 tecla_raw:
         mov ah, 0x07
         int 0x21
+        call azar                   ; [0.9.32] el tiempo de la tecla
         xor ah, ah
         test al, al
         jnz .r
@@ -2066,6 +2161,10 @@ bk_va       db "C:\HISPADOS\VENTANAS.ANT", 0
 bk_ci       db "C:\HISPADOS\CENTRO.INI", 0
 bk_cn       db "C:\HISPADOS\CENTRO.ANT", 0
 ed_ruta     db "C:\HISPADOS\EDICION.INI", 0
+sem_ruta    db "C:\HSPTLS.SEM", 0         ; [0.9.32] la semilla de HSPTLS
+az_i        db 0
+az_ant      db 0x5A
+az_pozo     times 32 db 0
 d4_ruta     db "A:\HISPADOS\EDICION.INI", 0
 h32_ruta    db "C:\HISPA32", 0
 ed_src      db 0                ; el origen es de Hispa-486

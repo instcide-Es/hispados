@@ -98,6 +98,40 @@ que necesita el modo real «de verdad» no puede funcionar, y lo dice:
 Por lo anterior, en los `CONFIG.SYS` de la distribución HSPEMM solo se carga
 en la opción «Juegos» del menú de arranque; «Normal» sigue en modo real.
 
+## VDS: los drivers con DMA en la memoria superior
+
+Con HSPEMM, la memoria superior y el marco EMS son páginas de otra RAM: la
+dirección que ve un programa cargado con `LH` o `DEVICEHIGH` (por ejemplo
+CE01:0000) **no es la física**. Para el DMA del ISA (el 8237: disquete, Sound
+Blaster) HSPEMM ya le da al controlador la dirección de verdad, pero una
+tarjeta que hace el DMA ella misma (*bus master*: las de red PCI, como la AMD
+PCnet, las controladoras SCSI) escribiría en otro sitio. Esos drivers piden
+la dirección física a **VDS** (*Virtual DMA Services*, INT 4Bh AX=81xxh), como
+con el EMM386 de MS-DOS.
+
+HSPEMM tiene VDS (especificación de Microsoft 1.0, tal como la recoge la
+Interrupt List de Ralf Brown, INT 4Bh), con el bit 5 de 0040:007Bh puesto:
+
+| Función | Qué hace |
+|---|---|
+| 8102h (DX=0) | la versión: AX=0100h (1.0), BX=4853h («HS»), CX=1, DX=0 (sin búfer ni remapeo), SI:DI=0 (no hay búfer) |
+| 8103h | bloquear una región (ES:DI → DDS: +0 tamaño, +4 desplazamiento, +8 segmento): si es contigua en la memoria física, su dirección (+0Ch) y el búfer 0; si no, error 01h con lo más largo que sí lo es; con DX bit 4 o bit 5, error 02h si cruza un límite físico de 64 KB o 128 KB (y en el tamaño, lo que cabe hasta él) |
+| 8104h | soltarla (sin búferes: solo el identificador 0) |
+| 810Bh / 810Ch | no traducir / volver a traducir el canal BX (0-7) del 8237 (hasta 255 veces; 810Ch da ZF=1 al volver a 0) |
+| 8105h-810Ah | error 0Fh («no admitida»): ni *scatter/gather* ni búferes de DMA, todavía |
+
+Errores: CF=1 y AL=código (01h no contigua, 02h cruza un límite, 03h página
+que no está, 07h región no válida —más allá de los 4 primeros MB—, 0Ah
+búfer no válido, 0Ch canal no válido, 0Dh/0Eh cuenta de 810Bh/810Ch, 0Fh no
+admitida, 10h bits reservados en DX). Si HSPEMM no está activo (Windows en
+marcha), INT 4Bh sigue a quien la tuviera antes.
+
+Probado con el *packet driver* PCNTPK de Crynwr (GPL, de FreeDOS) en la
+memoria superior (`LH PCNTPK INT=0x60`) y la AMD PCnet de QEMU: sin VDS no le
+llegaba nada; con VDS, DHCP, PING y DESCARGAR como sin HSPEMM
+(`tests/run_pktdrv_terceros_tests.sh`, con `CRYNWR=`); y con `VDSTEST.COM`
+(`tests/run_vds_tests.sh`).
+
 ## HSPUSB en modo V86
 
 `HSPUSB` sí funciona con HSPEMM (memorias, teclado, ratón y mandos USB, con

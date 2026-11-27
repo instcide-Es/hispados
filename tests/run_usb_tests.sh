@@ -55,7 +55,7 @@ check() {
   if grep -qF -- "$2" "$1"; then echo "  OK   $2"; else echo "  FAIL $2"; fail=1; fi
 }
 echo "== Hispa-DOS USB image tests =="
-check $T/l1.txt "Hispa-DOS 0.9.31 - núcleo compatible con MS-DOS 6.22"
+check $T/l1.txt "Hispa-DOS 0.9.32 - núcleo compatible con MS-DOS 6.22"
 check $T/l1.txt "HSPXMS 0.1: gestor XMS 3.0"
 check $T/l1.txt "Bienvenido a Hispa-DOS"
 # (con el disco duro, la memoria de arranque es la X: y el disco la C:; docs/UNIDADES.md)
@@ -67,7 +67,7 @@ check $T/l1.txt "Hispa-DOS esta instalado."
 check $T/l1.txt "Unidad para Hispa-DOS: C: (disco 2, partición 1"
 check $T/l1.txt " Directorio de C:\\"
 echo "-- arranque desde el disco duro --"
-check $T/l2.txt "Hispa-DOS 0.9.31 - núcleo compatible con MS-DOS 6.22"
+check $T/l2.txt "Hispa-DOS 0.9.32 - núcleo compatible con MS-DOS 6.22"
 check $T/l2.txt "Bienvenido a Hispa-DOS"
 check $T/l2.txt " Directorio de C:\\"
 check $T/l2.txt "HISPADOS"
@@ -79,7 +79,7 @@ n=$(grep -cF "No se ha instalado nada." $T/l3.txt)
 if [ "$n" -ge 1 ]; then echo "  OK   [C] Cancelar: No se ha instalado nada."; else echo "  FAIL [C] Cancelar: No se ha instalado nada."; fail=1; fi
 check $T/l3.txt "Se dará formato y se borrará TODO lo que tenga"
 if [ "$n" -eq 2 ]; then echo "  OK   [N] y después «N»: No se ha instalado nada."; else echo "  FAIL [N] y después «N»: No se ha instalado nada. (sale $n veces)"; fail=1; fi
-check $T/l3.txt "Hispa-DOS versión 0.9.31"
+check $T/l3.txt "Hispa-DOS versión 0.9.32"
 if cmp -s $T/hdd.img $T/hdd_antes.img; then echo "  OK   el disco duro no ha cambiado"; else echo "  FAIL el disco duro ha cambiado"; fail=1; fi
 P=$(mktemp --suffix=.img)
 dd if=$T/hdd.img of=$P bs=512 skip=63 status=none
