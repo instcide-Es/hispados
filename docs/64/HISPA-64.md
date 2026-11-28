@@ -5422,6 +5422,36 @@ Hispa-64 0.11.10 (uname: «etapa 11 a (la casa, la batería y suspender)»).
 | `programas/ventanas/ventanas.c` | la batería en la barra, el aviso, el brillo, «Suspender el equipo» en el menú Inicio |
 | `tests/acpi/haz_tapa.py`, `tapa-qemu.aml` | la tapa de mentira y los Notify del brillo |
 
+### Cómo se ha probado
+
+- **La batería entera: 156 de 157** (eran 145: la casa, el corte de luz en
+  sus dos momentos y a medias, la casa estropeada, la casa por UEFI,
+  ACPICA con la tapa y las teclas del brillo, la batería baja, /dev/energia,
+  S3 por UEFI con KVM, e imprimir), en el servidor con KVM. La que no: una
+  vez, MRELOJ con «reloj=hpet» y KVM en «pc» con un procesador («4 hilos a
+  la vez: ninguna lectura hacia atrás»); repetido tres veces aparte, bien
+  las tres (intermitente, de antes: no toca nada de la 11 a). En la vuelta
+  de antes, 155 de 157 (las dos que no, arregladas: la oficina en el
+  escritorio con la casa, y xrstor de S3 por UEFI).
+- **La casa**: MCASA; el corte (QEMU matado con kill -9 a mitad de MCASA
+  escribe; «prueba=cortediario1», con el diario escrito sin la
+  confirmación, y «2», confirmado sin poner en su sitio); al arrancar
+  otra vez, lo del diario repetido (o no, en el 1), la comprobación y MCASA
+  comprueba (lo guardado con fsync, entero; nada mal); hazcasa.py
+  --estropea (3 cúmulos perdidos y un tamaño de más), arreglado; fsck.fat
+  sin nada que decir después de cada una; y por UEFI la imagen: /casa es
+  sata0p3.
+- **La batería, la tapa y el brillo**: con tests/acpi/tapa-qemu.aml (nuevo)
+  y los de antes, en «pc» y q35: Fn y subir (90 %), dos veces bajar (70 %),
+  la tapa cerrada y abierta; la batería al 9 % (el aviso) y al 2 % (se
+  apaga en orden; QEMU acaba con 0); MENERGIA.
+- **S3**: por UEFI (OVMF), KVM, q35 con `ICH9-LPC.disable_s3=0`, 4
+  procesadores, SATA con la casa, teclado y tableta USB: dormido,
+  despertado con system_wakeup, y de vuelta un hilo en cada procesador, el
+  disco de la casa escrito y leído, el USB enumerado otra vez, la pantalla
+  con su modo (QEMU da el pantallazo de 640x480, con la letra), todo en
+  orden y la casa cerrada bien. Por multiboot (SeaBIOS) también con NVMe.
+
 ### Lo que queda (y más adelante)
 
 - **Suspender desde una memoria USB**: hoy no se ofrece (la memoria, al
