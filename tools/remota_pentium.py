@@ -64,7 +64,11 @@ def ultimo():
 
 
 def opciones(equipo, puerto, nombre):
-    return ['-p', str(puerto), '-S', os.path.join(DIR, 'ctl-%s' % nombre),
+    # REMOTA_SALTO=usuario@equipo:puerto entra pasando por otro equipo de la
+    # misma red (p. ej. el PC de Albinyana), sin abrir puertos en el router.
+    salto = os.environ.get('REMOTA_SALTO')
+    extra = ['-J', salto] if salto else []
+    return extra + ['-p', str(puerto), '-S', os.path.join(DIR, 'ctl-%s' % nombre),
             '-o', 'UserKnownHostsFile=' + os.path.join(DIR, 'conocidos'),
             '-o', 'HostKeyAlias=' + nombre, '-o', 'StrictHostKeyChecking=accept-new',
             '-o', 'UpdateHostKeys=no', '-o', 'LogLevel=ERROR']

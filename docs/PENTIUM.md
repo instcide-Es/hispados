@@ -4741,7 +4741,7 @@ registros, las claves del Wi-Fi si se miran) se ven por el camino. Pentium ya
 tenía un SSH escrito y probado, así que la consola remota **es** SSH: el
 código de la pantalla es la contraseña de un solo uso, y el cliente es OpenSSH
 (con `tools/remota_pentium.py`). Se mantiene lo que valía de CONSOLA: el
-puerto **2323** (el mismo reenvío del router: `charlie-box.ddns.net:2323`), el
+puerto **2323** (el mismo reenvío del router de la 486: `TU-ROUTER:2323`), el
 código de 6 cifras solo en la pantalla, un solo uso, la caducidad, los tres
 intentos con la pausa que crece y que sin código no entra nadie. El cliente
 sabe también hablar con la CONSOLA de 386/486 (`consola486`).
@@ -4789,7 +4789,7 @@ sabe también hablar con la CONSOLA de 386/486 (`consola486`).
 ### El cliente: `tools/remota_pentium.py` (el VPS)
 
 ```
-remota_pentium.py abrir charlie-box.ddns.net 123456 --nombre toshiba   (o la IP 100.x de Tailscale)
+remota_pentium.py abrir TU-ROUTER 123456 --nombre toshiba   (o la IP 100.x de Tailscale)
 remota_pentium.py orden "ver"
 remota_pentium.py registros                (WIFI.LOG, RED.LOG, ARRANQUE.TXT, SDHCI.TXT, SDIO.TXT, BT.LOG, REMOTA.LOG)
 remota_pentium.py leer '\HISPA\WIFI.LOG' wifi.log
