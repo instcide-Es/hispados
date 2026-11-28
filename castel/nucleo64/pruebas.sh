@@ -2085,5 +2085,109 @@ if [ $c = 85 ] && hay "$T/e11s9.txt" "^Sonido: 00:0[0-9A-F].0 8086:293E, HD Audi
    && sonido_bien "$T/e11s9.txt" "$SON/ich9.wav" && hay "$T/e11s9.txt" "^Hispa-64 etapa 11: todo en orden.$"; then
   ok "etapa 11, el sonido (ich9-intel-hda y hda-duplex, 1 procesador): lo grabado, $(python3 -I "$OYE" "$SON/ich9.wav" 440,1000 | awk '{ printf "%s%s ms a %s Hz (%s cortes)", (NR > 1 ? " y " : ""), $5, $6, $9 }')"
 else ko "etapa 11, el sonido (ich9-intel-hda) no sale (código $c): $(serie "$T/e11s9.txt" | grep -E '^Sonido|^MSONIDO|MAL|parado' | paste -sd '|') $(python3 -I "$OYE" "$SON/ich9.wav" 440,1000 2>&1 | paste -sd '|')"; fi
+# ---- [etapa 11 a] imprimir (programas/imprimir: IMPRIMIR, IPP sin CUPS; la orden
+# PDF; Cuentas a PDF; «Imprimir…» de NAVEGADOR) contra una impresora de mentira
+# en el anfitrión (imprimir/ipp_prueba.py: una «sin controlador» con PDF y PWG
+# raster, y otra solo con PWG raster), que comprueba cada trabajo (el PDF entero:
+# la tabla xref, los flujos, las páginas, el texto y las imágenes; el PWG raster,
+# cada fila) ----
+RP=$T/imprimir; rm -rf "$RP"; mkdir -p "$RP/pdf" "$RP/pwg"; IPPS=$AQUI/programas/imprimir/ipp_prueba.py
+(exec python3 -I "$IPPS" "$RP/pdf" --color C81E3C) > "$RP/srv1.txt" 2>&1 & PIP1=$!
+(exec python3 -I "$IPPS" "$RP/pwg" --sinpdf) > "$RP/srv2.txt" 2>&1 & PIP2=$!
+for i in $(seq 1 50); do grep -q '^listo' "$RP/srv1.txt" 2> /dev/null && grep -q '^listo' "$RP/srv2.txt" 2> /dev/null && break; sleep 0.2; done
+PI1=$(grep -o '^listo [0-9]*' "$RP/srv1.txt" | grep -o '[0-9]*$'); PI2=$(grep -o '^listo [0-9]*' "$RP/srv2.txt" | grep -o '[0-9]*$')
+# (y la búsqueda con DNS-SD, por unicast al anfitrión, en 127.0.0.1:5353, si está libre)
+PIP3=""; MDNS=0
+if [ -n "$PI1" ]; then
+  (exec python3 -I "$IPPS" --mdns "$PI1") > "$RP/srv3.txt" 2>&1 & PIP3=$!
+  for i in $(seq 1 25); do grep -q '^listo' "$RP/srv3.txt" 2> /dev/null && { MDNS=1; break; }; sleep 0.2; done
+fi
+# (1) por multiboot, con RED.PRB: Cuentas hace el PDF de una hoja (--convierte) e
+# IMPRIMIR lo manda: a la de PDF (el texto de las celdas, en el PDF que llega), a
+# la de PWG raster (pintado por Hispa-PDF a 300 ppp), a la de siempre (-g, en
+# /tmp/.config: HOME es «/»); sin impresora que conteste (código 3); un archivo
+# que no está (6); lo que dice la impresora (-m); y PDF INFO del PDF de Cuentas
+if [ -x "$T/prog/IMPRIMIR" ] && [ -x "$T/prog/CUENTAS" ] && [ -n "$PI1" ] && [ -n "$PI2" ]; then
+  printf 'Concepto;Importe\nCuota de noviembre;25,50\nBingo del jueves;61,90\nTotal;=B2+B3\n' > "$RP/PRUEBA.CSV"
+  {
+    echo "CUENTAS --convierte /PRUEBA.CSV /tmp/PRUEBA.PDF"
+    echo "PDF INFO /tmp/PRUEBA.PDF"
+    echo "IMPRIMIR -m -i ipp://10.0.2.2:$PI1/ipp/print"
+    echo "IMPRIMIR -i ipp://10.0.2.2:$PI1/ipp/print -t Cuentas /tmp/PRUEBA.PDF"
+    echo "IMPRIMIR -i ipp://10.0.2.2:$PI2/ipp/print -t Raster /tmp/PRUEBA.PDF"
+    echo "=2 IMPRIMIR /tmp/PRUEBA.PDF"
+    echo "=1 IMPRIMIR -g 10.0.2.2:$PI1/ipp/print"
+    echo "IMPRIMIR -g ipp://10.0.2.2:$PI1/ipp/print"
+    echo "IMPRIMIR -t Siempre /tmp/PRUEBA.PDF"
+    echo "=3 IMPRIMIR -i ipp://10.0.2.2:1/ipp/print /tmp/PRUEBA.PDF"
+    echo "=6 IMPRIMIR -i ipp://10.0.2.2:$PI1/ipp/print /NOESTA.PDF"
+    [ $MDNS = 1 ] && echo "IMPRIMIR -b 10.0.2.2"
+  } > "$RP/RED.PRB"
+  m="$RP/RED.PRB,$RP/PRUEBA.CSV"; for f in "$T"/prog/*; do m="$m,$f"; done
+  rm -f "$RP/mb.txt"
+  timeout 300 qemu-system-x86_64 -kernel "$T/HISPA64.BIN" -initrd "$m" -append "apagar sinmusl" -display none -serial file:"$RP/mb.txt" \
+    -monitor none $DBG -no-reboot -m 512 -machine q35 -smp 2 -nic user,model=e1000 > /dev/null 2>&1; c=$?
+  vp=$(serie "$RP/mb.txt"); s1=$(cat "$RP/srv1.txt"); s2=$(cat "$RP/srv2.txt")
+  if [ $c = 85 ] && grep -q "^cuentas: PRUEBA.CSV (Texto separado por comas (.CSV), 1 hojas) -> PRUEBA.PDF" <<< "$vp" \
+     && grep -q "^/tmp/PRUEBA.PDF: PDF 1.7, 1 páginas$" <<< "$vp" \
+     && grep -q "^IMPRIMIR: la impresora: Impresora de prueba de Hispa-64 (lista)$" <<< "$vp" && grep -q "^  formatos: application/pdf image/pwg-raster" <<< "$vp" \
+     && grep -q "^IMPRIMIR: mandado a ipp://10.0.2.2:$PI1/ipp/print: trabajo 1, en PDF (" <<< "$vp" \
+     && grep -q "^IMPRIMIR: mandado a ipp://10.0.2.2:$PI2/ipp/print: trabajo 1, en PWG raster (1 página a 300 ppp, en color; " <<< "$vp" \
+     && grep -q "^IMPRIMIR: no hay impresora: diga cuál con -i" <<< "$vp" && grep -q "^IMPRIMIR: «10.0.2.2:$PI1/ipp/print» no es una URI de impresora" <<< "$vp" \
+     && grep -q "^IMPRIMIR: la impresora de siempre: ipp://10.0.2.2:$PI1/ipp/print (en /tmp/.config/impresora.txt)$" <<< "$vp" \
+     && grep -q "^IMPRIMIR: mandado a ipp://10.0.2.2:$PI1/ipp/print: trabajo 2, en PDF (" <<< "$vp" \
+     && grep -q "^IMPRIMIR: no se puede llegar a 10.0.2.2:1: no contesta en ese puerto" <<< "$vp" \
+     && grep -q "^IMPRIMIR: /NOESTA.PDF: no está$" <<< "$vp" \
+     && { [ $MDNS = 0 ] || grep -q "^IMPRIMIR: en la red: «Impresora de prueba»: ipp://10.0.2.2:$PI1/ipp/print$" <<< "$vp"; } \
+     && ! grep -q "^Programa «.*»: acaba con el código [0-9]*$" <<< "$vp" && ! grep -q "  MAL: " <<< "$vp" \
+     && grep -q "^trabajo 1 («Cuentas», application/pdf, [0-9]* octetos): PDF bien: 1 página, texto «ConceptoImporteCuota de noviembre25,5Bingo del jueves61,9Total87,4PRUEBAPágina 1 de 1»$" <<< "$s1" \
+     && grep -q "^trabajo 2 («Siempre», application/pdf, " <<< "$s1" \
+     && grep -q "^trabajo 1 («Raster», image/pwg-raster, [0-9]* octetos): PWG bien: 1 página, 2480x3508 a 300 ppp, en sRGB; puntos oscuros: [0-9][0-9][0-9][0-9]*$" <<< "$s2"; then
+    ok "[etapa 11 a] imprimir sin CUPS: Cuentas a PDF (--convierte; PDF INFO lo lee) e IMPRIMIR por IPP a una impresora de mentira: lo que admite (Get-Printer-Attributes), el PDF (llega entero, con el texto de las celdas: «Cuota de noviembre 25,5…»), a PWG raster si no admite PDF (pintado por Hispa-PDF: $(grep -o '2480x3508 a 300 ppp, en sRGB; puntos oscuros: [0-9]*' <<< "$s2")), la impresora de siempre (-g, en /tmp/.config), y los errores (sin impresora, 2; no contesta, 3; el archivo no está, 6)$( [ $MDNS = 1 ] && echo '; y buscarla con DNS-SD (_ipp._tcp.local, por unicast al anfitrión: la multidifusión, cuando el núcleo la tenga)')"
+  else ko "[etapa 11 a] imprimir sin CUPS no hace lo que debe (código $c): $(grep -E '^cuentas|^IMPRIMIR|^Programa «(IMPRIMIR|CUENTAS|PDF)|  MAL|parado' <<< "$vp" | head -14 | cut -c1-150 | paste -sd '|'); la impresora: $(grep '^trabajo\|mal hecha' "$RP"/srv?.txt | cut -c1-200 | paste -sd '|')"; fi
+fi
+# (2) NAVEGADOR (con la imagen del navegador de la 10 h, KVM y 3 GB): Ctrl+P y «Elegir la
+# impresora…» (el cuadro de pregunta: la dirección de la de mentira), Ctrl+P e «Imprimir en …»
+# (la página de prueba, paginas/imprimir.html, más alta que una hoja y con tres bloques de un
+# color: llega un PDF de 2 hojas con sus puntos), y Ctrl+P y «Guardar como PDF…» (el selector de
+# archivos para guardar, con el título de la página de nombre: el PDF, en la casa)
+if [ -c /dev/kvm ] && [ -x "$T/progweb/NAVEGADOR" ] && [ -x "$T/prog/IMPRIMIR" ] && [ -f $OVMF_C ] && [ -f "$T/uefi-nav/hispa64.img" ] && [ -n "$PI1" ]; then
+  OFI=$(( 2048 * 512 ))
+  mcopy -o -i "$T/uefi-nav/hispa64.img@@$OFI" ::boot/grub/grub.cfg "$RP/grub-antes.cfg" 2> /dev/null
+  mcopy -o -i "$T/uefi-nav/hispa64.img@@$OFI" "$T/prog/IMPRIMIR" ::boot/prog/IMPRIMIR 2> /dev/null
+  sed 's|navegador=file:///tmp/web/paginas/ventana.html|navegador=file:///tmp/web/paginas/imprimir.html|; s|^\(  module2 /boot/HISPA64.SIM HISPA64.SIM\)$|\1\n  module2 /boot/prog/IMPRIMIR IMPRIMIR|' "$RP/grub-antes.cfg" > "$RP/grub-imp.cfg"
+  mcopy -o -i "$T/uefi-nav/hispa64.img@@$OFI" "$RP/grub-imp.cfg" ::boot/grub/grub.cfg 2> /dev/null
+  SP="$RP/nav.txt"; MP="$RP/mon.sock"; rm -f "$SP" "$MP"; cp $OVMF_V "$RP/vars.fd"
+  timeout 900 qemu-system-x86_64 -enable-kvm -cpu host -machine q35 -m 3072 -smp 4 -drive if=pflash,format=raw,readonly=on,file=$OVMF_C \
+    -drive if=pflash,format=raw,file="$RP/vars.fd" -drive file="$T/uefi-nav/hispa64.img",format=raw,if=none,id=d0,snapshot=on -device ide-hd,drive=d0,bus=ide.0 \
+    -device qemu-xhci,id=xhci -device usb-tablet,bus=xhci.0 -display none -serial file:"$SP" \
+    -monitor unix:"$MP",server,nowait -no-reboot -nic user,model=e1000 > /dev/null 2>&1 &
+  qp=$!
+  bienp=1; faltap=""
+  esperap() { local i; for i in $(seq 1 $(( $2 * 5 ))); do serie "$SP" | grep -q -- "$1" && return 0; sleep 0.2; done; bienp=0; faltap="$faltap|$1"; echo "  (etapa 11 a: no llega «$1»)"; return 1; }
+  teclasp() { python3 -I "$AQUI/programas/teclas.py" "$MP" "$@" 2> /dev/null; sleep 0.3; }
+  esperap "^NAVEGADOR: cargada file:///tmp/web/paginas/imprimir.html$" 240 && sleep 1.5
+  teclasp '{ctrl-p}'; esperap "^VENTANAS: menú emergente de «.*» (4 opciones)$" 20 && sleep 0.5
+  teclasp '{abajo}{abajo}{intro}'; esperap "^NAVEGADOR: cuadro «impresora»" 20 && sleep 0.5
+  teclasp "ipp://10.0.2.2:$PI1/ipp/print{intro}"; esperap "^NAVEGADOR: la impresora, ipp://10.0.2.2:$PI1/ipp/print (en /tmp/.config/impresora.txt)$" 20
+  teclasp '{ctrl-p}'; esperap "^VENTANAS: menú emergente de «.*» (4 opciones)$" 20 && sleep 0.5
+  teclasp '{abajo}{abajo}{intro}'; esperap "^NAVEGADOR: imprimir: mandado a ipp://10.0.2.2:$PI1/ipp/print: trabajo [0-9]*, en PDF (.*) (código 0)$" 120
+  teclasp '{ctrl-p}'; sleep 1; teclasp '{abajo}{intro}'; esperap "^NAVEGADOR: cuadro «guardar»" 20 && sleep 0.8
+  teclasp '{intro}'; esperap "^NAVEGADOR: PDF hecho /tmp/web/casa/Hoja para imprimir.pdf ([0-9]* hojas, [0-9]* octetos)$" 120
+  sleep 1
+  kill $qp 2> /dev/null; wait $qp 2> /dev/null
+  mcopy -o -i "$T/uefi-nav/hispa64.img@@$OFI" "$RP/grub-antes.cfg" ::boot/grub/grub.cfg 2> /dev/null
+  mdel -i "$T/uefi-nav/hispa64.img@@$OFI" ::boot/prog/IMPRIMIR 2> /dev/null
+  vn=$(serie "$SP"); s1=$(cat "$RP/srv1.txt")
+  tp=$(grep "^trabajo [0-9]* («Hoja para imprimir», application/pdf, " <<< "$s1" | tail -1)
+  hp=$(grep -o "^NAVEGADOR: PDF hecho /tmp/web/casa/Hoja para imprimir.pdf ([0-9]* hojas" <<< "$vn" | grep -o '[0-9]* hojas' | grep -o '[0-9]*')
+  rp=$(sed -n 's/.*, \([0-9]*\) puntos del color C81E3C.*/\1/p' <<< "$tp")
+  if [ "$bienp" = 1 ] && grep -q ": PDF bien: 2 páginas, 2 imágenes (" <<< "$tp" && [ "${rp:-0}" -gt 1000000 ] && [ "$hp" = 2 ] \
+     && grep -q "^NAVEGADOR: la casa, /tmp/web/casa (en la memoria: se pierde al apagar)$" <<< "$vn"; then
+    ok "[etapa 11 a] «Imprimir…» de NAVEGADOR (Ctrl+P): la impresora elegida (en /tmp/.config, la de IMPRIMIR y la oficina), la página entera pintada por Ladybird a un PDF de hojas A4 y por IPP a la de mentira ($(sed 's/.*: PDF bien: //; s/, texto.*//' <<< "$tp")), y «Guardar como PDF…» con el selector para guardar (el título de la página de nombre: 2 hojas)"
+  else ko "[etapa 11 a] «Imprimir…» de NAVEGADOR no hace lo que debe: falta ${faltap#|}; la impresora: ${tp:-nada}; $(grep -E '^NAVEGADOR: (imprimir|PDF|cuadro|la impresora|aviso)|parado' <<< "$vn" | tail -8 | cut -c1-160 | paste -sd '|')"; fi
+fi
+kill $PIP1 $PIP2 $PIP3 2> /dev/null; wait $PIP1 $PIP2 $PIP3 2> /dev/null
+
 echo "== Hispa-64: $BIEN bien, $MAL mal =="
 [ $MAL = 0 ]

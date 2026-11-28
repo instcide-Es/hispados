@@ -3,7 +3,8 @@
 # sección 25): NAVEGADOR, la interfaz de Ladybird para el escritorio de
 # Hispa-64 (navegador.cpp), con el Hub de Ladybird detrás. Lleva la capa de
 # las ventanas y la letra de la oficina (castel/nucleo32/oficina/comun, en C:
-# ventana.c) y los mensajes del Hub (hubipc, de Services/Hub).
+# ventana.c) y los mensajes del Hub (hubipc, de Services/Hub). [etapa 11 a]
+# Y la página a PDF para «Imprimir…» (pdfpagina.c, con stb_image y miniz).
 set(OFI "${HISPA64_R}/castel/nucleo32/oficina/comun")
 set(VEN "${HISPA64_R}/castel/nucleo64/programas/ventanas")
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
@@ -25,7 +26,7 @@ add_custom_command(
     VERBATIM)
 
 add_library(navoficina STATIC
-    ventana.c
+    ventana.c pdfpagina.c "${OFI}/miniz_ofi.c"
     "${OFI}/texto.c" "${OFI}/ttf.c" "${OFI}/letras.c" "${OFI}/lienzo.c" "${OFI}/ui.c" "${OFI}/iconos.c"
     "${CMAKE_CURRENT_BINARY_DIR}/letras_dejavu.c")
 target_compile_definitions(navoficina PRIVATE OFI_HISPA64)

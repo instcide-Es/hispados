@@ -35,6 +35,17 @@
  *   - la página de inicio propia (⌂, «+» y Ctrl+T): inicio.html, en español,
  *     con el buscador, los accesos, los marcadores y lo último visitado;
  *   - Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+A, Ctrl+Z y Ctrl+Y, como la interfaz de Qt.
+ * [etapa 11 a] (sección 27)
+ *   - la casa, la de HOME (la del disco: /casa) si es de escribir y no es «/»:
+ *     las descargas en su Descargas, «Guardar como PDF» en su Documentos, y lo
+ *     del navegador (los marcadores, el historial, la página de inicio, los
+ *     ajustes de Ladybird) en .config/navegador; si no, en /tmp/web/casa como
+ *     antes (y se pierde al apagar);
+ *   - «Imprimir…» (Ctrl+P, el ☰ y el botón derecho): la página entera, pintada
+ *     por Ladybird (view_take_and_save_screenshot), en hojas A4 a un PDF
+ *     (pdfpagina.c) que se guarda donde se diga (el selector de archivos para
+ *     guardar) o que se manda a la impresora de red con IMPRIMIR (IPP, sin
+ *     CUPS); y «Elegir la impresora…».
  * Uso: NAVEGADOR [URL]   (sin URL, https://hispados.es/)
  * Lo que necesita Ladybird (los recursos, las letras, las autoridades) lo
  * deja MWEB --prepara en /tmp/web, como para el navegador sin ventana. */
@@ -60,6 +71,7 @@
 #include <LibWebView/URL.h>
 
 #include "conexion.h"
+#include "pdfpagina.h"
 #include "ventana.h"
 
 #include <errno.h>
@@ -91,10 +103,34 @@ static constexpr int ALTO_BUSCA = 36;               // [etapa 10 i] la barra de 
 static constexpr int ALTO_AVISO = 28;               // [etapa 10 i] el aviso, abajo
 static constexpr int TAM = 13 * 4;                  // 13 puntos (en cuartos, como la oficina)
 static constexpr char const* INICIO = "https://hispados.es/";
-// [etapa 10 i] la casa (como MWEB: sin usuarios, en /tmp/web) y lo que se guarda en ella
-static constexpr char const* CASA = "/tmp/web/casa";
-static constexpr char const* DESCARGAS = "/tmp/web/casa/Descargas";
-static constexpr char const* INICIO_PROPIO = "file:///tmp/web/casa/inicio.html";
+// [etapa 10 i] la casa (como MWEB: sin usuarios, en /tmp/web) y lo que se guarda en ella;
+// [etapa 11 a] o la de HOME, la del disco (elige_casa)
+static char CASA[512] = "/tmp/web/casa";
+static char DATOS[600] = "/tmp/web/casa";                   // marcadores.txt, historial.txt, inicio.html
+static char DESCARGAS[600] = "/tmp/web/casa/Descargas";
+static char DOCUMENTOS[600] = "/tmp/web/casa";              // [etapa 11 a] a dónde va «Guardar como PDF»
+static char INICIO_PROPIO[700] = "file:///tmp/web/casa/inicio.html";
+static char HOME_DE_ANTES[512] = "/";                       // (para IMPRIMIR: la casa de todos los programas)
+static bool EN_EL_DISCO = false;
+
+static void elige_casa()
+{
+    char const* h = getenv("HOME");
+    struct stat st;
+    if (h)
+        snprintf(HOME_DE_ANTES, sizeof HOME_DE_ANTES, "%s", h);
+    if (h && h[0] == '/' && h[1] && strlen(h) < 400 && stat(h, &st) == 0 && S_ISDIR(st.st_mode) && access(h, W_OK) == 0) {
+        EN_EL_DISCO = true;
+        snprintf(CASA, sizeof CASA, "%s", h);
+        snprintf(DESCARGAS, sizeof DESCARGAS, "%s/Descargas", h);
+        snprintf(DOCUMENTOS, sizeof DOCUMENTOS, "%s/Documentos", h);
+        char c[600];
+        snprintf(c, sizeof c, "%s/.config", h);
+        (void)mkdir(c, 0755);
+        snprintf(DATOS, sizeof DATOS, "%s/.config/navegador", h);
+        snprintf(INICIO_PROPIO, sizeof INICIO_PROPIO, "file://%s/inicio.html", DATOS);
+    }
+}
 static constexpr char const* BUSCADOR = "https://duckduckgo.com/html/?q=";
 
 // los colores (como los de VENTANAS: lo activo se distingue por la luz)
@@ -118,6 +154,7 @@ static constexpr u32 ETQ_MARCADORES = 0x4E03;
 static constexpr u32 ETQ_HISTORIAL = 0x4E04;
 static constexpr u32 ETQ_SELECT = 0x4E05;
 static constexpr u32 ETQ_DESCARGAS = 0x4E06;
+static constexpr u32 ETQ_IMPRIMIR = 0x4E07;               // [etapa 11 a]
 static constexpr size_t MÁX_MENÚ = 32;              // (los de VENTANAS: 32 opciones como mucho)
 
 struct Pestaña {
@@ -152,6 +189,7 @@ enum class Acción {
     PestañaNueva, Inicio, Marcadores, Historial, Descargas, AbrirDescargas,
     Buscar, Ampliar, Reducir, Normal, CerrarPestaña,
     IrA, BorrarHistorial, OpciónSelect,
+    Imprimir, ImprimirPDF, ImprimirEn, ElegirImpresora,       // [etapa 11 a]
 };
 
 struct Opción {
@@ -163,7 +201,7 @@ struct Opción {
 };
 
 // [etapa 10 i] un cuadro que ha pedido una página (se atienden de uno en uno)
-enum class Cuadro { Aviso, Confirma, Pregunta, AntesDeSalir, Archivo };
+enum class Cuadro { Aviso, Confirma, Pregunta, AntesDeSalir, Archivo, Guardar, Impresora };
 struct Petición {
     Cuadro clase;
     u64 vista { 0 };
@@ -213,6 +251,9 @@ public:
     void descarga(Hub::DownloadState const&);
     void descarga_acabada(ByteString const& nombre, ByteString const& ruta);
     void avisa(ByteString texto, bool malo = false);
+    // [etapa 11 a] imprimir
+    bool imprimiendo() const { return m_imp_activo; }
+    void imprimir_falla(ByteString const& por_qué);
 
 private:
     ErrorOr<void> prepara_recursos();
@@ -245,6 +286,12 @@ private:
     void menú_marcadores();
     void menú_historial();
     void menú_descargas();
+    // [etapa 11 a] imprimir
+    void menú_imprimir();
+    void imprime(bool a_impresora, ByteString destino);
+    void captura_hecha(ByteString const& png);
+    void mira_imprimir();
+    ByteString impresora_de_siempre() const;
     void abre_busca();
     void cierra_busca();
     void busca(bool otra_vez, bool atrás);
@@ -305,6 +352,15 @@ private:
     Vector<Sitio> m_historial;              // el más nuevo, el primero
     Vector<Descarga> m_descargas;
     u64 m_siguiente_petición { 1 };
+    // [etapa 11 a] imprimir: la captura pedida al Hub, el PDF y IMPRIMIR
+    bool m_imp_activo { false };
+    bool m_imp_a_impresora { false };
+    ByteString m_imp_destino;               // el PDF
+    ByteString m_imp_png;                   // la captura (en /tmp/web)
+    ByteString m_imp_título;
+    pid_t m_imp_hijo { -1 };
+    RefPtr<Core::Timer> m_imp_reloj;
+    u64 m_imp_n { 0 };
 };
 
 static Interfaz* s_interfaz;
@@ -614,6 +670,11 @@ void Conexion::download_updated(Hub::DownloadState download)
 void Conexion::app_display_error_dialog(String message)
 {
     warnln("NAVEGADOR: {}", message);
+    // [etapa 11 a] (si se estaba imprimiendo, es de la captura: se deja)
+    if (m_interfaz.imprimiendo()) {
+        m_interfaz.imprimir_falla(message.to_byte_string());
+        return;
+    }
     m_interfaz.avisa(message.to_byte_string(), true);
 }
 
@@ -719,15 +780,20 @@ ErrorOr<void> Interfaz::prepara_recursos()
         if (!WIFEXITED(s) || WEXITSTATUS(s) != 0)
             return Error::from_string_literal("MWEB --prepara no ha podido dejar los recursos en /tmp/web");
     }
-    // (como MWEB: sin usuarios, la casa en /tmp/web)
+    // (como MWEB: sin usuarios, la casa en /tmp/web; [etapa 11 a] o la de HOME, en el disco)
+    elige_casa();
+    (void)mkdir("/tmp/web/casa", 0755);
     (void)mkdir(CASA, 0755);
     (void)mkdir(DESCARGAS, 0755);
+    (void)mkdir(DATOS, 0755);
     (void)mkdir("/tmp/web/run", 0700);
     setenv("XDG_DATA_DIRS", "/share", 1);
     setenv("HOME", CASA, 1);
-    setenv("XDG_CONFIG_HOME", "/tmp/web/casa/.config", 1);
-    setenv("XDG_DATA_HOME", "/tmp/web/casa/.local/share", 1);
+    setenv("XDG_CONFIG_HOME", ByteString::formatted("{}/.config", CASA).characters(), 1);
+    setenv("XDG_DATA_HOME", ByteString::formatted("{}/.local/share", CASA).characters(), 1);
+    // (la caché de Ladybird, siempre en la memoria: no hace falta guardarla)
     setenv("XDG_CACHE_HOME", "/tmp/web/casa/.cache", 1);
+    outln("NAVEGADOR: la casa, {}{}", CASA, EN_EL_DISCO ? " (en el disco)"sv : " (en la memoria: se pierde al apagar)"sv);
     setenv("XDG_RUNTIME_DIR", "/tmp/web/run", 1);
     setenv("XDG_DOWNLOAD_DIR", DESCARGAS, 1);
     m_tema = TRY(Gfx::load_system_theme("/tmp/web/share/Lagom/themes/Default.ini"sv));
@@ -1599,6 +1665,12 @@ void Interfaz::avisa(ByteString texto, bool malo)
 
 ByteString Interfaz::ruta_de_descarga(ByteString const& archivo)
 {
+    // [etapa 11 a] la captura de la página entera que se ha pedido para imprimir
+    if (m_imp_activo && m_imp_png.is_empty() && archivo.starts_with("screenshot-"sv)) {
+        m_imp_png = ByteString::formatted("/tmp/web/imprimir-{}-{}.png", getpid(), ++m_imp_n);
+        outln("NAVEGADOR: imprimir: la página pintada, a {}", m_imp_png);
+        return m_imp_png;
+    }
     (void)mkdir(DESCARGAS, 0755);
     // (el nombre, sin carpetas; si ya está, «nombre (2).ext»...)
     auto nombre = archivo;
@@ -1663,6 +1735,10 @@ void Interfaz::descarga(Hub::DownloadState const& d)
 
 void Interfaz::descarga_acabada(ByteString const& nombre, ByteString const& ruta)
 {
+    if (m_imp_activo && !m_imp_png.is_empty() && ruta == m_imp_png) {
+        captura_hecha(ruta);
+        return;
+    }
     // (el Hub lo dice para las capturas; las descargas avisan en descarga())
     for (auto& x : m_descargas) {
         if (x.destino == ruta && x.avisada)
@@ -1717,7 +1793,7 @@ static void guarda_lista(char const* ruta, Vector<Sitio> const& l)
 void Interfaz::lee_sitios()
 {
     struct stat st;
-    auto rm = ByteString::formatted("{}/marcadores.txt", CASA);
+    auto rm = ByteString::formatted("{}/marcadores.txt", DATOS);
     if (stat(rm.characters(), &st) != 0) {
         // (los de siempre, la primera vez)
         m_marcadores = {
@@ -1730,13 +1806,13 @@ void Interfaz::lee_sitios()
     } else {
         m_marcadores = lee_lista(rm.characters());
     }
-    m_historial = lee_lista(ByteString::formatted("{}/historial.txt", CASA).characters());
+    m_historial = lee_lista(ByteString::formatted("{}/historial.txt", DATOS).characters());
 }
 
 void Interfaz::guarda_sitios()
 {
-    guarda_lista(ByteString::formatted("{}/marcadores.txt", CASA).characters(), m_marcadores);
-    guarda_lista(ByteString::formatted("{}/historial.txt", CASA).characters(), m_historial);
+    guarda_lista(ByteString::formatted("{}/marcadores.txt", DATOS).characters(), m_marcadores);
+    guarda_lista(ByteString::formatted("{}/historial.txt", DATOS).characters(), m_historial);
     escribe_inicio();
 }
 
@@ -1821,7 +1897,7 @@ static ByteString html(StringView t)
 
 void Interfaz::escribe_inicio()
 {
-    auto ruta = ByteString::formatted("{}/inicio.html", CASA);
+    auto ruta = ByteString::formatted("{}/inicio.html", DATOS);
     auto tmp = ByteString::formatted("{}.nuevo", ruta);
     FILE* f = fopen(tmp.characters(), "w");
     if (!f)
@@ -2019,7 +2095,7 @@ void Interfaz::haz(Opción const& o)
         menú_descargas();
         break;
     case Acción::AbrirDescargas:
-        abre_pestaña(url_de("file:///tmp/web/casa/Descargas/"), true);
+        abre_pestaña(url_de(ByteString::formatted("file://{}/", DESCARGAS).characters()), true);
         break;
     case Acción::Buscar:
         abre_busca();
@@ -2048,7 +2124,186 @@ void Interfaz::haz(Opción const& o)
         if (m_menú_vista)
             m_hub->async_view_select_dropdown_closed(m_menú_vista, o.id);
         break;
+    // [etapa 11 a] imprimir
+    case Acción::Imprimir:
+        menú_imprimir();
+        break;
+    case Acción::ImprimirPDF: {
+        if (!p || m_imp_activo)
+            break;
+        // (el nombre, el título de la página, sin lo que no cabe en un nombre)
+        StringBuilder sb;
+        for (auto c : p->título.bytes_as_string_view()) {
+            if (sb.length() >= 80)
+                break;
+            sb.append(strchr("/\\:*?\"<>|", c) || (unsigned char)c < 32 ? '-' : c);
+        }
+        auto nombre = sb.to_byte_string().trim_whitespace();
+        if (nombre.is_empty())
+            nombre = "Página";
+        (void)mkdir(DOCUMENTOS, 0755);
+        pide_cuadro({ Cuadro::Guardar, p->vista, 0, {}, ByteString::formatted("{}.pdf", nombre) });
+        break;
     }
+    case Acción::ImprimirEn:
+        if (p && !m_imp_activo)
+            imprime(true, ByteString::formatted("/tmp/web/imprimir-{}.pdf", getpid()));
+        break;
+    case Acción::ElegirImpresora:
+        pide_cuadro({ Cuadro::Impresora, p ? p->vista : 0, 0,
+            "La dirección de la impresora de red (IPP Everywhere o AirPrint: casi todas las de hoy), como ipp://192.168.1.20/ipp/print. La dice la propia impresora en su pantalla o en su hoja de configuración.",
+            impresora_de_siempre() });
+        break;
+    }
+}
+
+// ---- [etapa 11 a] imprimir ----
+
+// el archivo de la impresora de siempre, el mismo que usan IMPRIMIR y la oficina
+static ByteString archivo_impresora()
+{
+    struct stat st;
+    char const* h = HOME_DE_ANTES;
+    if (h[0] == '/' && h[1] && stat(h, &st) == 0 && S_ISDIR(st.st_mode) && access(h, W_OK) == 0)
+        return ByteString::formatted("{}/.config/impresora.txt", h);
+    return "/tmp/.config/impresora.txt";
+}
+
+ByteString Interfaz::impresora_de_siempre() const
+{
+    FILE* f = fopen(archivo_impresora().characters(), "r");
+    if (!f)
+        return {};
+    char l[600] = {};
+    if (!fgets(l, sizeof l, f))
+        l[0] = 0;
+    fclose(f);
+    return ByteString(l, strlen(l)).trim_whitespace();
+}
+
+void Interfaz::menú_imprimir()
+{
+    auto* p = activa();
+    auto i = impresora_de_siempre();
+    Vector<Opción> ops;
+    ops.append({ "Guardar como PDF…", Acción::ImprimirPDF, !p });
+    if (i.is_empty())
+        ops.append({ "Imprimir en la impresora (aún no hay: elíjala abajo)", Acción::ImprimirEn, true });
+    else
+        ops.append({ ByteString::formatted("Imprimir en {}", corto(i, 50)), Acción::ImprimirEn, !p });
+    ops.append({ "-", Acción::Nada });
+    ops.append({ "Elegir la impresora…", Acción::ElegirImpresora });
+    abre_menú(x_menú(m_an) + ANCHO_BOTÓN - 340, ALTO_BARRA, ETQ_IMPRIMIR, move(ops));
+}
+
+// pide al Hub la página entera, pintada (llega a ruta_de_descarga y a descarga_acabada)
+void Interfaz::imprime(bool a_impresora, ByteString destino)
+{
+    auto* p = activa();
+    if (!p || m_imp_activo)
+        return;
+    m_imp_activo = true;
+    m_imp_a_impresora = a_impresora;
+    m_imp_destino = move(destino);
+    m_imp_png = {};
+    m_imp_título = p->título.to_byte_string();
+    if (m_imp_título.is_empty())
+        m_imp_título = p->dirección.to_byte_string();
+    outln("NAVEGADOR: imprimir «{}» {} {}", m_imp_título, a_impresora ? "en la impresora, por"sv : "a"sv, m_imp_destino);
+    avisa(a_impresora ? "Imprimiendo…" : "Haciendo el PDF…");
+    m_hub->async_view_take_and_save_screenshot(p->vista, WebView::ViewImplementation::ScreenshotType::Full);
+}
+
+void Interfaz::imprimir_falla(ByteString const& por_qué)
+{
+    if (!m_imp_activo)
+        return;
+    outln("NAVEGADOR: imprimir: no se ha podido: {}", por_qué);
+    avisa(ByteString::formatted("No se ha podido imprimir: {}", por_qué), true);
+    if (!m_imp_png.is_empty())
+        (void)unlink(m_imp_png.characters());
+    m_imp_activo = false;
+    m_imp_png = {};
+}
+
+void Interfaz::captura_hecha(ByteString const& png)
+{
+    char error[300] = {};
+    int hojas = 0;
+    if (nv_png_a_pdf(png.characters(), m_imp_destino.characters(), m_imp_título.characters(), &hojas, error, sizeof error) != 0) {
+        imprimir_falla(ByteString(error, strlen(error)));
+        return;
+    }
+    (void)unlink(png.characters());
+    m_imp_png = {};
+    struct stat st {};
+    (void)stat(m_imp_destino.characters(), &st);
+    outln("NAVEGADOR: PDF hecho {} ({} hojas, {} octetos)", m_imp_destino, hojas, (u64)st.st_size);
+    if (!m_imp_a_impresora) {
+        m_imp_activo = false;
+        avisa(ByteString::formatted("Guardado «{}» ({} hoja{}, {})", m_imp_destino, hojas, hojas == 1 ? ""sv : "s"sv, tamaño_de((u64)st.st_size)));
+        return;
+    }
+    // a la impresora: IMPRIMIR, con lo que diga en /tmp/web/imprimir.txt; se mira cada 250 ms
+    auto título = m_imp_título;
+    auto home = ByteString::formatted("HOME={}", HOME_DE_ANTES);
+    Vector<char const*> env;
+    for (char** e = environ; *e; e++) {
+        if (strncmp(*e, "HOME=", 5) != 0)
+            env.append(*e);
+    }
+    env.append(home.characters());
+    env.append(nullptr);
+    char const* av[] = { "/IMPRIMIR", "-t", título.characters(), m_imp_destino.characters(), nullptr };
+    posix_spawn_file_actions_t fa;
+    posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_addopen(&fa, 1, "/tmp/web/imprimir.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    posix_spawn_file_actions_adddup2(&fa, 1, 2);
+    int e = posix_spawn(&m_imp_hijo, av[0], &fa, nullptr, const_cast<char* const*>(av), const_cast<char* const*>(env.data()));
+    posix_spawn_file_actions_destroy(&fa);
+    if (e != 0) {
+        m_imp_hijo = -1;
+        imprimir_falla(ByteString::formatted("no se puede arrancar IMPRIMIR ({})", strerror(e)));
+        return;
+    }
+    if (!m_imp_reloj)
+        m_imp_reloj = Core::Timer::create_repeating(AK::Duration::from_milliseconds(250), [this] { mira_imprimir(); });
+    m_imp_reloj->start();
+}
+
+void Interfaz::mira_imprimir()
+{
+    int st = 0;
+    if (m_imp_hijo < 0)
+        return;
+    // (si ya lo ha recogido otro, ECHILD: ha acabado, y lo que ha dicho cuenta)
+    auto r = waitpid(m_imp_hijo, &st, WNOHANG);
+    if (r == 0 || (r < 0 && errno != ECHILD))
+        return;
+    bool recogido = r == m_imp_hijo;
+    m_imp_reloj->stop();
+    m_imp_hijo = -1;
+    int código = recogido ? (WIFEXITED(st) ? WEXITSTATUS(st) : -1) : -2;
+    // (lo que ha dicho: la última línea, sin «IMPRIMIR: »)
+    ByteString dice;
+    if (FILE* f = fopen("/tmp/web/imprimir.txt", "r")) {
+        char l[1024];
+        while (fgets(l, sizeof l, f)) {
+            auto t = ByteString(l, strlen(l)).trim_whitespace();
+            if (!t.is_empty())
+                dice = t.starts_with("IMPRIMIR: "sv) ? t.substring(10) : t;
+        }
+        fclose(f);
+    }
+    (void)unlink(m_imp_destino.characters());
+    m_imp_activo = false;
+    if (código == -2)
+        código = dice.starts_with("mandado a "sv) ? 0 : 1;
+    outln("NAVEGADOR: imprimir: {} (código {})", dice, código);
+    if (código == 0)
+        avisa(ByteString::formatted("Impreso: {}", dice));
+    else
+        avisa(ByteString::formatted("No se ha podido imprimir: {}", dice.is_empty() ? ByteString("IMPRIMIR ha fallado") : dice), true);
 }
 
 void Interfaz::menú_contextual(u64 vista, WebView::ContextMenuRequest const& r)
@@ -2093,6 +2348,7 @@ void Interfaz::menú_contextual(u64 vista, WebView::ContextMenuRequest const& r)
     ops.append({ es_marcador(p->dirección.bytes_as_string_view()) ? "Quitar de los marcadores  (Ctrl+D)" : "Añadir a los marcadores  (Ctrl+D)", Acción::Marcador });
     if (!r.is_editable && !hay_texto)
         ops.append({ "Seleccionar todo  (Ctrl+A)", Acción::SeleccionarTodo });
+    ops.append({ "Imprimir…  (Ctrl+P)", Acción::Imprimir, m_imp_activo });
     abre_menú(r.widget_position.x(), r.widget_position.y() + ALTO_BARRA, ETQ_CONTEXTO, move(ops));
 }
 
@@ -2136,6 +2392,7 @@ void Interfaz::menú_principal()
     ops.append({ "Descargas…", Acción::Descargas });
     ops.append({ "-", Acción::Nada });
     ops.append({ "Buscar en la página  (Ctrl+F)", Acción::Buscar, !p });
+    ops.append({ "Imprimir…  (Ctrl+P)", Acción::Imprimir, !p || m_imp_activo });
     ops.append({ "Ampliar  (Ctrl +)", Acción::Ampliar, !p });
     ops.append({ "Reducir  (Ctrl -)", Acción::Reducir, !p });
     ops.append({ "Tamaño normal  (Ctrl 0)", Acción::Normal, !p });
@@ -2242,10 +2499,16 @@ void Interfaz::siguiente_cuadro()
     case Cuadro::Archivo:
         nv_cuadro_abre(NV_C_ARCHIVO, "Elegir un archivo para subirlo a la página", nullptr, nullptr, m_carpeta_subir.characters());
         break;
+    case Cuadro::Guardar:
+        nv_cuadro_abre(NV_C_GUARDAR, "Guardar la página como PDF", nullptr, c.valor.characters(), DOCUMENTOS);
+        break;
+    case Cuadro::Impresora:
+        nv_cuadro_abre(NV_C_PREGUNTA, "Elegir la impresora", c.mensaje.characters(), c.valor.characters(), nullptr);
+        break;
     }
     m_cuadro_abierto = true;
     // (para las pruebas)
-    outln("NAVEGADOR: cuadro «{}»{}{}", c.clase == Cuadro::Aviso ? "aviso"sv : c.clase == Cuadro::Confirma ? "confirmar"sv : c.clase == Cuadro::Pregunta ? "pregunta"sv : c.clase == Cuadro::AntesDeSalir ? "salir"sv : "archivo"sv,
+    outln("NAVEGADOR: cuadro «{}»{}{}", c.clase == Cuadro::Aviso ? "aviso"sv : c.clase == Cuadro::Confirma ? "confirmar"sv : c.clase == Cuadro::Pregunta ? "pregunta"sv : c.clase == Cuadro::AntesDeSalir ? "salir"sv : c.clase == Cuadro::Guardar ? "guardar"sv : c.clase == Cuadro::Impresora ? "impresora"sv : "archivo"sv,
         c.mensaje.is_empty() ? ""sv : ": "sv, c.mensaje);
     if (p)
         m_hub->async_view_set_has_system_focus(p->vista, false);
@@ -2269,8 +2532,9 @@ void Interfaz::cuadro_suceso(nv_suceso const& s)
     if (r < 0 || m_cuadros.is_empty())
         return;
     auto c = m_cuadros.take_first();
-    outln("NAVEGADOR: cuadro cerrado ({}){}{}", r ? "aceptado"sv : "cancelado"sv, (r && (c.clase == Cuadro::Pregunta || c.clase == Cuadro::Archivo)) ? ": "sv : ""sv,
-        (r && (c.clase == Cuadro::Pregunta || c.clase == Cuadro::Archivo)) ? StringView { valor, strlen(valor) } : ""sv);
+    bool con_valor = c.clase == Cuadro::Pregunta || c.clase == Cuadro::Archivo || c.clase == Cuadro::Guardar || c.clase == Cuadro::Impresora;
+    outln("NAVEGADOR: cuadro cerrado ({}){}{}", r ? "aceptado"sv : "cancelado"sv, (r && con_valor) ? ": "sv : ""sv,
+        (r && con_valor) ? StringView { valor, strlen(valor) } : ""sv);
     switch (c.clase) {
     case Cuadro::Aviso:
         m_hub->async_view_alert_closed(c.vista);
@@ -2304,6 +2568,42 @@ void Interfaz::cuadro_suceso(nv_suceso const& s)
             }
         }
         m_hub->async_view_file_picker_closed(c.vista, move(elegidos));
+        break;
+    }
+    case Cuadro::Guardar: {
+        // [etapa 11 a] «Guardar como PDF»: con la extensión .pdf
+        if (r == 1) {
+            ByteString ruta { valor, strlen(valor) };
+            if (!ruta.to_lowercase().ends_with(".pdf"sv))
+                ruta = ByteString::formatted("{}.pdf", ruta);
+            imprime(false, ruta);
+        }
+        break;
+    }
+    case Cuadro::Impresora: {
+        if (r == 1) {
+            auto u = ByteString(valor, strlen(valor)).trim_whitespace();
+            if (!u.is_empty() && !u.starts_with("ipp://"sv) && !u.starts_with("http://"sv))
+                u = ByteString::formatted("ipp://{}{}", u, u.contains('/') ? ""sv : "/ipp/print"sv);
+            auto a = archivo_impresora();
+            auto carpeta = a.substring(0, *a.find_last('/'));
+            (void)mkdir(carpeta.characters(), 0755);
+            auto tmp = ByteString::formatted("{}.nuevo", a);
+            bool bien = false;
+            if (FILE* f = fopen(tmp.characters(), "w")) {
+                fprintf(f, "%s\n", u.characters());
+                bien = fclose(f) == 0 && rename(tmp.characters(), a.characters()) == 0;
+            }
+            if (u.is_empty()) {
+                (void)unlink(a.characters());
+                avisa("Ya no hay impresora de siempre");
+            } else if (bien) {
+                outln("NAVEGADOR: la impresora, {} (en {})", u, a);
+                avisa(ByteString::formatted("La impresora: {}", u));
+            } else {
+                avisa(ByteString::formatted("No se puede guardar la impresora en {}: {}", a, strerror(errno)), true);
+            }
+        }
         break;
     }
     }
@@ -2379,6 +2679,10 @@ void Interfaz::tecla(nv_suceso const& s)
             abre_busca();
         else
             busca(true, (s.mods & NV_CON_MAYUS) != 0);
+        return;
+    }
+    if (p && ctrl && (t == 16 || t == 'p')) {      // [etapa 11 a] Ctrl+P: imprimir
+        menú_imprimir();
         return;
     }
     if (ctrl && (t == 4 || t == 'd')) {            // Ctrl+D: a los marcadores (o fuera)

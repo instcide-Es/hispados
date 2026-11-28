@@ -223,6 +223,9 @@ static int parte_(const char *t, int ancho, char *d, int cabe)
 		if (ln > 0) {
 			char prueba[1800];
 
+			/* [etapa 11 a] (el renglón, acabado donde va: si no, se medía con lo
+			 * que quedaba detrás de uno más largo, y se partía antes de tiempo) */
+			linea[ln] = 0;
 			snprintf(prueba, sizeof prueba, "%s %s", linea, pal);
 			if (lz_ui_ancho(prueba) > ancho) {
 				linea[ln] = 0;
@@ -363,13 +366,18 @@ static void cuadro_archivo_(void)
 	control_(UC_ROTULO, 0, 14, 12 + H + 8 + lh + 10, 0, "&Nombre:");
 	c = control_(UC_CAMPO, ID_NOMBRE, 100, 12 + H + 8 + lh + 10, an - 114, NULL);
 	c->valor[0] = 0;
-	c = control_(UC_BOTON, B_ACEPTAR, an - 2 * 120 - 24, al - H - 12, 120, "&Abrir");
+	/* [etapa 11 a] guardar: con el nombre propuesto (o el escrito), y el foco en él */
+	if (clase_ == NV_C_GUARDAR) {
+		snprintf(c->valor, sizeof c->valor, "%s", valor_);
+		c->cursor = c->ancla = (int)utf8_cuenta(c->valor, largo(c->valor));
+	}
+	c = control_(UC_BOTON, B_ACEPTAR, an - 2 * 120 - 24, al - H - 12, 120, clase_ == NV_C_GUARDAR ? "&Guardar" : "&Abrir");
 	c->principal = 1;
 	c = control_(UC_BOTON, B_CANCELAR, an - 120 - 12, al - H - 12, 120, "Cancelar");
 	c->cancela = 1;
 	abre_q_();
-	/* (el foco, en la lista) */
-	Q_.foco = 2;
+	/* (el foco, en la lista; para guardar, en el nombre) */
+	Q_.foco = clase_ == NV_C_GUARDAR ? 4 : 2;
 }
 
 void nv_cuadro_abre(int clase, const char *titulo, const char *mensaje, const char *valor, const char *carpeta)
@@ -384,7 +392,7 @@ void nv_cuadro_abre(int clase, const char *titulo, const char *mensaje, const ch
 	memset(&Q_, 0, sizeof Q_);
 	snprintf(titulo_, sizeof titulo_, "%s", titulo ? titulo : "");
 	snprintf(valor_, sizeof valor_, "%s", valor ? valor : "");
-	if (clase == NV_C_ARCHIVO) {
+	if (clase == NV_C_ARCHIVO || clase == NV_C_GUARDAR) {
 		if (carpeta && carpeta[0])
 			snprintf(carpeta_, sizeof carpeta_, "%s", carpeta);
 		cuadro_archivo_();
@@ -442,10 +450,16 @@ static int archivo_elegido_(int id)
 	}
 	if (!n[0] && l && l->elegida >= 0 && l->elegida < n_ent_)
 		n = ent_[l->elegida];
+	/* [etapa 11 a] (guardar, con el foco en la lista: lo elegido en ella) */
+	if (clase_ == NV_C_GUARDAR && Q_.foco == 2 && l && l->elegida >= 0 && l->elegida < n_ent_)
+		n = ent_[l->elegida];
 	if (!n[0]) {
 		cuadro_archivo_();
 		return 0;
 	}
+	/* [etapa 11 a] (guardar: lo escrito se queda al cambiar de carpeta) */
+	if (clase_ == NV_C_GUARDAR && nom && nom->valor[0])
+		snprintf(valor_, sizeof valor_, "%s", nom->valor);
 	if (n[0] == '/')
 		snprintf(ruta, sizeof ruta, "%s", n);
 	else
@@ -454,6 +468,21 @@ static int archivo_elegido_(int id)
 		snprintf(carpeta_, sizeof carpeta_, "%s", ruta);
 		cuadro_archivo_();
 		return 0;
+	}
+	if (clase_ == NV_C_GUARDAR) {
+		/* [etapa 11 a] guardar: vale un nombre nuevo, en una carpeta que esté */
+		char c[2100], *b;
+
+		snprintf(c, sizeof c, "%s", ruta);
+		b = strrchr(c, '/');
+		if (b)
+			*(b == c ? b + 1 : b) = 0;
+		if (!b || stat(c, &st) != 0 || !S_ISDIR(st.st_mode)) {
+			cuadro_archivo_();
+			return 0;
+		}
+		snprintf(valor_, sizeof valor_, "%s", ruta);
+		return 1;
 	}
 	if (stat(ruta, &st) != 0) {
 		/* (no está: otra vez, con lo escrito) */
@@ -479,7 +508,7 @@ int nv_cuadro_suceso(int v, const nv_suceso *s, int dy, int an, int al)
 	if (Q_.cerrado != -9999 && resultado_ < 0) {
 		int id = Q_.cerrado;
 
-		if (clase_ == NV_C_ARCHIVO) {
+		if (clase_ == NV_C_ARCHIVO || clase_ == NV_C_GUARDAR) {
 			if (id == B_ACEPTAR || id == ID_SUBIR) {
 				if (archivo_elegido_(id))
 					resultado_ = 1;

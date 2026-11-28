@@ -792,14 +792,16 @@ int so_lanza(const char *programa, const char *args)
 }
 
 /* ---- [etapa 11 a] imprimir: con IMPRIMIR (castel/nucleo64/programas/imprimir) ---- */
+/* (la de IMPRIMIR: en la casa, si es de escribir; si no, en /tmp) */
 static const char *archivo_impresora(void)
 {
 	static char r[600];
 	const char *h = getenv("HOME");
 
-	if (!h || !h[0])
-		h = "/";
-	fmt(r, sizeof r, "%s%s.config/impresora.txt", h, h[largo(h) - 1] == '/' ? "" : "/");
+	if (casa_vale(h))
+		fmt(r, sizeof r, "%s/.config/impresora.txt", h);
+	else
+		copia(r, "/tmp/.config/impresora.txt", sizeof r);
 	return r;
 }
 

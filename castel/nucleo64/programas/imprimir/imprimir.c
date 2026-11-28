@@ -162,15 +162,18 @@ static int lee_uri(const char *u, destino *d)
 	return 0;
 }
 
-/* ---- la impresora de siempre ---- */
+/* ---- la impresora de siempre: en la casa ($HOME/.config/impresora.txt), si
+ * es una carpeta de escribir y no es «/»; si no, en /tmp/.config ---- */
 static const char *archivo_impresora(void)
 {
 	static char r[600];
 	const char *h = getenv("HOME");
+	struct stat st;
 
-	if (!h || !h[0])
-		h = "/";
-	snprintf(r, sizeof r, "%s%s.config/impresora.txt", h, h[strlen(h) - 1] == '/' ? "" : "/");
+	if (h && h[0] == '/' && h[1] && strlen(h) < 500 && !stat(h, &st) && S_ISDIR(st.st_mode) && !access(h, W_OK))
+		snprintf(r, sizeof r, "%s/.config/impresora.txt", h);
+	else
+		snprintf(r, sizeof r, "/tmp/.config/impresora.txt");
 	return r;
 }
 
@@ -996,6 +999,10 @@ static int busca_red(const char *dir)
 			i = dato + l;
 		}
 		if (ins[0]) {
+			char *c = strstr(ins, "._ipp._tcp.local");
+
+			if (c)
+				*c = 0;
 			printf("IMPRIMIR: en la red: «%s»: ipp://%s:%d%s\n", ins, ip[0] ? ip : objetivo, puerto, ruta);
 			vistas++;
 		}

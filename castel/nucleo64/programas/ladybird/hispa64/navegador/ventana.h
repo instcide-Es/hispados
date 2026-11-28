@@ -62,8 +62,10 @@ void nv_menu(int v, int x, int y, const char *opciones, uint32_t grises, uint32_
 
 /* [etapa 10 i] los cuadros de diálogo (los de la oficina, ui.c), uno a la
  * vez, dentro de la ventana, encima de la página: */
-enum { NV_C_AVISO, NV_C_CONFIRMA, NV_C_PREGUNTA, NV_C_SALIR, NV_C_ARCHIVO };
-/* el cuadro (con «valor»: lo escrito de PREGUNTA; con «carpeta»: dónde empieza ARCHIVO) */
+enum { NV_C_AVISO, NV_C_CONFIRMA, NV_C_PREGUNTA, NV_C_SALIR, NV_C_ARCHIVO, NV_C_GUARDAR };
+/* el cuadro (con «valor»: lo escrito de PREGUNTA, o el nombre propuesto de
+ * GUARDAR; con «carpeta»: dónde empiezan ARCHIVO y GUARDAR). [etapa 11 a]
+ * GUARDAR es el selector de archivos para guardar: vale un nombre nuevo. */
 void nv_cuadro_abre(int clase, const char *titulo, const char *mensaje, const char *valor, const char *carpeta);
 int nv_cuadro_abierto(void);
 /* un suceso de la ventana para el cuadro, que va en el trozo de abajo (desde

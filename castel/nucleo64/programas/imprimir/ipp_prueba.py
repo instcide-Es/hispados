@@ -13,7 +13,9 @@
 #     PWG raster, cada página (su cabecera, las filas descomprimidas, el
 #     tamaño A4 a su resolución, lo que no es blanco);
 #   - dice cada trabajo en una línea: «trabajo N: PDF bien: ...» o «... MAL: ...».
+#   - con --mdns, responde a la búsqueda de DNS-SD (_ipp._tcp.local) por unicast.
 # Uso: ipp_prueba.py CARPETA [--sinpdf] [--color RRGGBB]   (dice «listo PUERTO»)
+#      ipp_prueba.py --mdns PUERTO_IPP                     (en 127.0.0.1:5353)
 #      ipp_prueba.py --mira ARCHIVO [--color RRGGBB]       (comprueba un archivo)
 import re
 import socket
@@ -148,7 +150,7 @@ def mira_pdf(d):
     texto = re.sub(r"\s+", " ", "".join(textos)).strip()
     r = "PDF bien: %d página%s" % (páginas, "" if páginas == 1 else "s")
     if imágenes:
-        r += ", %d imagen%s (%s)" % (len(imágenes), "" if len(imágenes) == 1 else "es", " ".join("%dx%d" % (w, h) for w, h, _, _ in imágenes[:6]))
+        r += ", %d %s (%s)" % (len(imágenes), "imagen" if len(imágenes) == 1 else "imágenes", " ".join("%dx%d" % (w, h) for w, h, _, _ in imágenes[:6]))
         if COLOR is not None:
             c = bytes(COLOR)
             r += ", %d puntos del color %02X%02X%02X" % ((sum(datos.count(c) for w, h, comp, datos in imágenes if comp == 3),) + tuple(COLOR))
@@ -327,6 +329,31 @@ def conexión(s, imp):
         s.close()
 
 
+def mdns(puerto_ipp):
+    """un respondedor de DNS-SD de mentira (en 127.0.0.1:5353: para el invitado
+    de QEMU, 10.0.2.2:5353): contesta por unicast a _ipp._tcp.local con esta
+    impresora, en 10.0.2.2 y el puerto de IPP"""
+    def n(t):
+        return b"".join(bytes([len(x)]) + x.encode() for x in t.split(".")) + b"\0"
+
+    def rr(nom, tipo, d):
+        return nom + struct.pack(">HHIH", tipo, 1, 120, len(d)) + d
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.bind(("127.0.0.1", 5353))
+    print("listo 5353", flush=True)
+    ins = n("Impresora de prueba._ipp._tcp.local")
+    while True:
+        q, a = s.recvfrom(1500)
+        if len(q) < 12 or b"\x04_ipp\x04_tcp\x05local" not in q:
+            continue
+        txt = bytes([12]) + b"rp=ipp/print"
+        r = q[:2] + b"\x84\x00" + struct.pack(">HHHH", 0, 4, 0, 0) + rr(n("_ipp._tcp.local"), 12, ins) + \
+            rr(ins, 33, struct.pack(">HHH", 0, 0, puerto_ipp) + n("prueba.local")) + rr(ins, 16, txt) + \
+            rr(n("prueba.local"), 1, bytes([10, 0, 2, 2]))
+        s.sendto(r, a)
+        print("mDNS: contestado a %s:%d" % a, flush=True)
+
+
 def main():
     global COLOR
     args = sys.argv[1:]
@@ -334,6 +361,9 @@ def main():
         k = args.index("--color")
         COLOR = list(bytes.fromhex(args[k + 1]))
         del args[k:k + 2]
+    if args and args[0] == "--mdns":
+        mdns(int(args[1]))
+        return
     if args and args[0] == "--mira":
         d = open(args[1], "rb").read()
         print(mira_pwg(d) if d[:4] == b"RaS2" else mira_pdf(d))
