@@ -5091,6 +5091,18 @@ cargo resuelva el «workspace» van sin código: `terceros/rust-crates/resolver/
   la del navegador lleva NAVEGADOR (59 MB más) y la entrada «el escritorio
   con el Navegador».
 - Hispa-64 **0.11.8** (uname: «etapa 10 h (Ladybird con ventana)»).
+- **Probadas** (QEMU, KVM, 4 procesadores): la de siempre por UEFI (el
+  disco) y por la BIOS (el CD), hasta el escritorio; la del navegador por
+  UEFI con «el escritorio con el Navegador» (https://hispados.es/ en la
+  ventana) y su CD por la BIOS, hasta el escritorio.
+
+### Cómo se ha probado
+
+- **La batería entera: 143 de 143** (eran 142: la de la ventana), dos veces
+  enteras (la primera, antes de los arreglos de la auditoría; la última,
+  con todo). En medio, una vuelta con 142 y 1 mal (MRED6 con pérdidas: el
+  plazo de TCP, arriba). La de la Realtek con 8 procesadores, bien en
+  todas.
 
 ### Qué hace
 
