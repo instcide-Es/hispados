@@ -10,7 +10,7 @@ cueste un año.
 
 Este documento es el plan: lo que se quiere, las decisiones de arquitectura con su
 porqué, y las etapas, cada una con lo que se verá funcionar y cómo se prueba. Las
-**etapas 0 a 9 están hechas** (secciones 6 a 15), y la **10** y la **11**, en su base (secciones 16 a 25: la 10 h, la última, con **Ladybird con ventana en el escritorio de Hispa-64** —NAVEGADOR, nuestra interfaz sobre el Hub de Ladybird: pestañas, barra de direcciones, teclado, ratón y rueda; https://hispados.es/ y https://github.com/—, mmap compartido de escribir de archivos —sqlite en modo WAL: la base de datos de Ladybird— y dos esperas perdidas: la de la prueba del eco y la de epoll_ctl).
+**etapas 0 a 9 están hechas** (secciones 6 a 15), y la **10** y la **11**, en su base (secciones 16 a 25: la 10 h, la última, con **Ladybird con ventana en el escritorio de Hispa-64** —NAVEGADOR, nuestra interfaz sobre el Hub de Ladybird: pestañas, barra de direcciones, teclado, ratón y rueda; https://hispados.es/ y https://github.com/—, mmap compartido de escribir de archivos —sqlite en modo WAL: la base de datos de Ladybird— y dos esperas perdidas: la de la prueba del eco y la de epoll_ctl; y la vuelta 2 de la auditoría: SCM_RIGHTS, SCM_CREDENTIALS, los sellos de memfd, los candados OFD, recvmsg).
 
 ---
 
@@ -4951,6 +4951,50 @@ cargo resuelva el «workspace» van sin código: `terceros/rust-crates/resolver/
   antes de subir la cuenta (quien mira a la vez no ve uno a medias).
   Antes del arreglo, 2 de 9 vueltas de MWEB (con KVM y 4 procesadores) colgadas; después, 12 de 12 bien.
 
+### La auditoría de Claude 1 (vuelta 2, sobre la 0.11.6): los 5 medios y los 6 bajos
+
+- **M1, SCM_RIGHTS en ciclo** (unix64.cas): un socket que viaja en su propia
+  cola no se suelta (no hay recolector, como el `unix_gc` de Linux). Ahora
+  lo que eso puede gastar tiene el límite de Linux sin recolector
+  (`too_many_unix_fds`): los descriptores en vuelo (mandados y sin recibir),
+  como mucho el RLIMIT_NOFILE de quien manda; más, **ETOOMANYREFS**. Se
+  cuentan todos juntos (en Linux, por usuario; en Hispa-64 hay uno). El
+  recolector, más adelante.
+- **M2, SCM_CREDENTIALS sin validar**: el pid, el propio; el uid y el gid,
+  0 (los propios: no hay usuarios); si no, **EPERM** (Linux, igual salvo
+  privilegio).
+- **M3, los sellos de memfd** (disp64.cas, procesos.cas): F_SEAL_WRITE con
+  alguna página puesta por un mmap compartido, **EBUSY** (Linux cuenta todo
+  mapeo compartido hecho antes del sello, porque puede pasar a escribir); lo
+  que se ponga de un memfd ya sellado, de solo leer y `R_NUNCA_ESCRIBE`:
+  mprotect(PROT_WRITE), **EACCES** (como Linux: VM_MAYWRITE quitado).
+- **M4, candados OFD huérfanos** (candados64.cas, vfs64.cas): se miraba
+  `ab.refs <= 1` sin el mutex del VFS; dos cierres a la vez dejaban un
+  candado de un Abierto ya soltado. Ahora los OFD y los de flock los quita
+  `vfs_cierra`, con su mutex, cuando de verdad suelta lo abierto
+  (`Candados64.al_soltar`); `al_cierra` solo quita los de POSIX.
+- **M5, recvmsg con EFAULT** (unix64.cas): los descriptores se ponían
+  aunque no se pudiera escribir. Ahora, como Linux (`receive_fd_user`): se
+  apartan los números, se escriben en el búfer de control y solo entonces
+  se ponen; si el iov o el búfer de control no se pueden escribir, ninguno
+  se pone (se cierran) y EFAULT.
+- **Los bajos**: B6, uno solo no llena la tabla de candados de todos (la
+  cuarta parte, como mucho, de un mismo dueño: ENOLCK); B7, quitar de en
+  medio de uno sin sitio para el trozo de detrás, ENOLCK (antes lo perdía);
+  B8, execve sin memoria para las tablas: fuera, en vez de repetir la
+  página para siempre; B9, al fallar un fork, los descriptores del hijo se
+  cierran con su id (antes, con el del padre: perdía sus candados); B10, la
+  copia de la clave de ChaCha20 en la pila, borrada; B11, poner un candado
+  (bajar a leer, achicar) despierta a los que esperan. El EDEADLK de B11 ya
+  estaba (10 g). Y la prueba de «la tabla de arreglos» acepta también el
+  #GP de los QEMU que lo dan sin KVM.
+- **Las pruebas**: MUNIX (95, eran 85): EBUSY y EACCES de los sellos,
+  recvmsg con EFAULT sin poner el descriptor, SCM_CREDENTIALS de otro
+  (EPERM; en Linux como root, se deja), el límite de los descriptores en
+  vuelo (con RLIMIT_NOFILE en 16; sin ciclos, para que lo de la cola se
+  suelte al cerrar); MCANDADOS (49): 200 veces un descriptor y su dup
+  cerrados a la vez desde dos hilos con un candado OFD: no queda huérfano.
+
 ### NAVEGADOR: Ladybird con ventana (programas/ladybird/hispa64/navegador)
 
 - **`navegador.cpp`** (la interfaz): lanza el Hub (`/bin/Hub`, con
@@ -5041,10 +5085,11 @@ cargo resuelva el «workspace» van sin código: `terceros/rust-crates/resolver/
 
 | Archivo | Qué |
 |---|---|
-| `castel/nucleo64/pruebas.sh` | el cliente del eco, cuando el invitado escucha; la prueba de la ventana; MPOSIX 121, MCANDADOS 48 |
+| `castel/nucleo64/pruebas.sh` | el cliente del eco, cuando el invitado escucha; la prueba de la ventana; MPOSIX 121, MCANDADOS 49, MUNIX 95 |
 | `vfs64.cas`, `nodos64.cas` | las páginas compartidas de los archivos (`Comp`): read, write, ftruncate, fsync, sync |
 | `procesos.cas`, `sistema.cas` | `R_COMPARCH`, mmap MAP_SHARED de escribir, msync; epoll_ctl avisa; `trazaprog=`, `trazamata` |
 | `hispa64.cas` | `navegador` y `navegador=URL` con `escritorio` |
+| `unix64.cas`, `disp64.cas`, `candados64.cas`, `chacha64.cas` | la auditoría, vuelta 2: M1 a M5 y B6 a B11 |
 | `programas/musl/mposix.c`, `mcandados.c` | las pruebas del mmap compartido y de sqlite en WAL |
 | `programas/ladybird/hispa64/navegador/` | NAVEGADOR: `navegador.cpp`, `conexion.h`, `talones.py`, `ventana.c` y `.h`, su CMake |
 | `programas/ladybird/mweb.c`, `hazweb.sh` | `MWEB --prepara`, sin `--disable-sql-database`; NAVEGADOR, la DejaVu Sans entera, las autoridades de Mozilla |

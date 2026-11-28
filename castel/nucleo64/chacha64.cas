@@ -51,6 +51,12 @@ módulo Chacha64
         x[15] := 0x41363421                       ; «A64!»
         bloque_de(nat64(dirección(x[0])), nat64(dirección(sal[0])))
         cuenta := cuenta + 1
+        ; ([etapa 10 h] auditoría, vuelta 2, B10: la copia de la clave, borrada de la pila)
+        i := 0
+        mientras i < 16 hacer
+            x[i] := 0
+            i := i + 1
+        fin
     fin
 
     ; las 20 vueltas de ChaCha20 sobre xs (16 nat32), más xs, en d
@@ -333,6 +339,12 @@ módulo Chacha64
         i := 0
         mientras i < 8 hacer
             clave[i] := s[i] xob s[i + 8]
+            i := i + 1
+        fin
+        ; ([etapa 10 h] B10: y el bloque del que sale, también)
+        i := 0
+        mientras i < 16 hacer
+            s[i] := 0
             i := i + 1
         fin
     fin

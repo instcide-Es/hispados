@@ -43,6 +43,8 @@
 #define FUTEX_WAIT_PRIVATE 128
 #define FUTEX_WAKE_PRIVATE 129
 #endif
+#include <sys/resource.h>
+#include <sys/utsname.h>
 #include "comun.h"
 
 static volatile int sigpipes;
@@ -538,6 +540,107 @@ static void tmp(void)
 	printf("  /tmp: 100 KB escritos, leídos y borrados; pwritev, preadv, pwritev2, preadv2 y fchown; /proc/self/exe; close_range\n");
 }
 
+/* [etapa 10 h] lo de la auditoría (vuelta 2): M1, M2, M3 y M5 */
+static int es_hispa(void)
+{
+	struct utsname u;
+	return uname(&u) == 0 && !strcmp(u.sysname, "Hispa-64");
+}
+
+static void auditoria(void)
+{
+	/* M3: F_SEAL_WRITE con un mmap compartido puesto, EBUSY; sin él, sí; y uno
+	 * de solo leer hecho después del sello no pasa a escribir (EACCES). Como Linux. */
+	int m = memfd_create("sellos", MFD_ALLOW_SEALING);
+	MIRA(m >= 0 && ftruncate(m, 8192) == 0, "memfd para los sellos");
+	char *a = mmap(NULL, 8192, PROT_READ, MAP_SHARED, m, 0);
+	errno = 0;
+	MIRA(a != MAP_FAILED && fcntl(m, F_ADD_SEALS, F_SEAL_WRITE) == -1 && errno == EBUSY, "F_SEAL_WRITE con un mmap compartido puesto: EBUSY");
+	if (a != MAP_FAILED) munmap(a, 8192);
+	MIRA(fcntl(m, F_ADD_SEALS, F_SEAL_WRITE) == 0, "F_SEAL_WRITE sin mmap: bien");
+	a = mmap(NULL, 8192, PROT_READ, MAP_SHARED, m, 0);
+	errno = 0;
+	MIRA(a != MAP_FAILED && mprotect(a, 8192, PROT_READ | PROT_WRITE) == -1 && errno == EACCES, "sellado: mprotect(PROT_WRITE) de su mmap, EACCES");
+	if (a != MAP_FAILED) munmap(a, 8192);
+	close(m);
+	/* M5: recvmsg con el iov sin poder escribir (datagramas): EFAULT y el
+	 * descriptor que venía no se pone (el siguiente libre sigue siendo el mismo) */
+	int d[2];
+	MIRA(socketpair(AF_UNIX, SOCK_DGRAM, 0, d) == 0, "socketpair de datagramas");
+	int t[2];
+	MIRA(pipe(t) == 0 && manda_fds(d[0], "x", 1, &t[0], 1) == 1, "uno mandado con un descriptor");
+	close(t[0]);
+	close(t[1]);
+	int libre = dup(0);
+	close(libre);
+	struct msghdr mh;
+	struct iovec v = { (void *)1, 16 };
+	char c[CMSG_SPACE(sizeof(int))];
+	memset(&mh, 0, sizeof mh);
+	mh.msg_iov = &v;
+	mh.msg_iovlen = 1;
+	mh.msg_control = c;
+	mh.msg_controllen = sizeof c;
+	errno = 0;
+	ssize_t r = recvmsg(d[1], &mh, 0);
+	int otro = dup(0);
+	MIRA(r == -1 && errno == EFAULT && otro == libre, "recvmsg con el iov malo: EFAULT, y el descriptor no se pone");
+	close(otro);
+	/* M2: SCM_CREDENTIALS de otro pid: EPERM (en Linux, salvo privilegio: como root, se deja) */
+	{
+		struct ucred cr = { getppid(), 0, 0 };
+		char cc[CMSG_SPACE(sizeof cr)];
+		struct cmsghdr *h;
+		struct iovec w = { "y", 1 };
+		memset(&mh, 0, sizeof mh);
+		memset(cc, 0, sizeof cc);
+		mh.msg_iov = &w;
+		mh.msg_iovlen = 1;
+		mh.msg_control = cc;
+		mh.msg_controllen = sizeof cc;
+		h = CMSG_FIRSTHDR(&mh);
+		h->cmsg_level = SOL_SOCKET;
+		h->cmsg_type = SCM_CREDENTIALS;
+		h->cmsg_len = CMSG_LEN(sizeof cr);
+		memcpy(CMSG_DATA(h), &cr, sizeof cr);
+		errno = 0;
+		r = sendmsg(d[0], &mh, 0);
+		MIRA(es_hispa() ? (r == -1 && errno == EPERM) : (r == 1 || geteuid() != 0), "SCM_CREDENTIALS con el pid de otro: EPERM");
+		cr.pid = getpid();
+		memcpy(CMSG_DATA(h), &cr, sizeof cr);
+		MIRA(sendmsg(d[0], &mh, 0) == 1, "SCM_CREDENTIALS con el propio: bien");
+	}
+	close(d[0]);
+	close(d[1]);
+	/* M1: los descriptores en vuelo (mandados y aún sin recibir) tienen un
+	 * límite, el RLIMIT_NOFILE de quien manda (aquí, 16): más, ETOOMANYREFS.
+	 * Así un socket que viaja en su propia cola (un ciclo, que Hispa-64 no
+	 * recoge) no gasta el montón del núcleo sin fin. (En Linux, como root, no
+	 * hay límite: lo recoge su recolector, unix_gc.) Sin ciclos aquí: al
+	 * cerrar, lo de la cola se suelta. */
+	pid_t h = fork();
+	if (h == 0) {
+		struct rlimit rl = { 16, 16 };
+		int q[2], t2[2], malos = 0, k;
+		setrlimit(RLIMIT_NOFILE, &rl);
+		if (socketpair(AF_UNIX, SOCK_STREAM, 0, q) || pipe(t2)) _exit(3);
+		for (k = 0; k < 40; k++) {
+			errno = 0;
+			if (manda_fds(q[1], "c", 1, &t2[0], 1) < 0 && errno == ETOOMANYREFS) malos++;
+		}
+		close(q[0]);
+		close(q[1]);
+		/* (y al cerrarlos, la cuenta vuelve: se puede mandar otra vez) */
+		if (socketpair(AF_UNIX, SOCK_STREAM, 0, q)) _exit(4);
+		if (manda_fds(q[1], "d", 1, &t2[0], 1) != 1) _exit(5);
+		_exit(es_hispa() ? (malos > 0 && malos < 40 ? 0 : 1) : 0);
+	}
+	int st = -1;
+	waitpid(h, &st, 0);
+	MIRA(WIFEXITED(st) && WEXITSTATUS(st) == 0, "SCM_RIGHTS: el límite de los descriptores en vuelo (ETOOMANYREFS)");
+	printf("  la auditoría: F_SEAL_WRITE con un mmap puesto (EBUSY) y mprotect después (EACCES); recvmsg con EFAULT sin poner el descriptor; SCM_CREDENTIALS de otro; los descriptores en vuelo, con límite\n");
+}
+
 int main(void)
 {
 	setvbuf(stdout, NULL, _IOLBF, 0);
@@ -551,5 +654,6 @@ int main(void)
 	hilos();
 	carreras();
 	tmp();
+	auditoria();
 	return acaba("MUNIX");
 }

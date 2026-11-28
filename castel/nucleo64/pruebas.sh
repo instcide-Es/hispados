@@ -389,7 +389,7 @@ e7_bien() {   # SALIDA N [avx]
     && grep -q "^MDISP: todo bien (" <<< "$v" && grep -q "^Programa «MDISP»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^MRED: todo bien (126 pruebas)$" <<< "$v" && grep -q "^Programa «MRED»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^MRED6: todo bien (25 pruebas)$" <<< "$v" && grep -q "^Programa «MRED6»: acaba con el código 0, como debe" <<< "$v" \
-    && grep -q "^MUNIX: todo bien (85 pruebas)$" <<< "$v" && grep -q "^Programa «MUNIX»: acaba con el código 0, como debe" <<< "$v" \
+    && grep -q "^MUNIX: todo bien (95 pruebas)$" <<< "$v" && grep -q "^Programa «MUNIX»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^  SCM_RIGHTS a otro proceso (una tubería, un eventfd y un memfd hechos después del fork), MSG_CTRUNC; SCM_CREDENTIALS; memfd compartido y sus sellos; 300 pasados$" <<< "$v" \
     && grep -q "^  /tmp: 100 KB escritos, leídos y borrados; pwritev, preadv, pwritev2, preadv2 y fchown; /proc/self/exe; close_range$" <<< "$v" && grep -q "^  /tmp: FAT16 «TMP», 31,9 MB en 8179 cúmulos de 4 KB, .*; de leer y escribir$" <<< "$v" \
     && { [ -z "$MPX" ] || { grep -q "^MPOSIX: todo bien (121 pruebas)$" <<< "$v" && grep -q "^Programa «MPOSIX»: acaba con el código 0, como debe" <<< "$v" && mismas "$MPX" "$v"; }; } \
@@ -409,7 +409,7 @@ e7_bien() {   # SALIDA N [avx]
     && grep -q "^MAK: todo bien (" <<< "$v" && grep -qE "^Programa «MAK( todas)?»: acaba con el código 0, como debe" <<< "$v" && [ -n "$MAKL" ] && [ -n "$MAKT" ] && { grep -qxF "$MAKL" <<< "$v" || grep -qxF "$MAKT" <<< "$v"; } \
     && [ "$(grep -c "^MRELOJ: todo bien (20 pruebas)$" <<< "$v")" = 2 ] && grep -q "^Programa «MRELOJ»: acaba con el código 0, como debe" <<< "$v" && grep -q "^Programa «MRELOJD»: acaba con el código 0, como debe" <<< "$v" && mismas "$MRL" "$v" \
     && grep -q "^MRELOJ: el vDSO y la hora (dinámico: ld-musl en 0x7f0000000000, el programa en 0x555555554000)$" <<< "$v" \
-    && { [ -z "$MCD" ] || { grep -q "^MCANDADOS: todo bien (48 pruebas)$" <<< "$v" && grep -q "^Programa «MCANDADOS»: acaba con el código 0, como debe" <<< "$v" && mismas "$MCD" "$v"; }; } \
+    && { [ -z "$MCD" ] || { grep -q "^MCANDADOS: todo bien (49 pruebas)$" <<< "$v" && grep -q "^Programa «MCANDADOS»: acaba con el código 0, como debe" <<< "$v" && mismas "$MCD" "$v"; }; } \
     && grep -qE "^Después de musl: .*; [1-9][0-9]* páginas de la unidad prestadas a los programas, sin copiarlas$" <<< "$v" \
     && grep -q "^  hilos: 200 std::thread, thread_local (200 destruidos), condition_variable, async, promise, timed_mutex$" <<< "$v" \
     && [ "$(grep -cE "^Programa «(MHOLA|MHOLAD|MHOLAP) uno dos»: acaba con el código 0, como debe|^Programa «(MHILOS|MHILOSD|MSENALES|MSENALESD|MPROCESOS|MPROCESOSD|MMAPA|MMAPAD)»: acaba con el código 0, como debe|^Programa «LUA /PRUEBA.LUA uno dos»: acaba con el código 0, como debe" <<< "$v")" = 12 ] \
@@ -1197,7 +1197,9 @@ else ko "etapa 6, el intérprete no hace lo que debe (código $c): $(sed -n '/^O
 # TCG, QEMU deja pasar el iretq y el fallo llega ya en el anillo 3, al
 # ejecutar en esa dirección: también se cierra el programa, por el otro camino)
 K7=""; M7="^El programa MBUCLE \(proceso [0-9]*\) ha querido volver con unos registros que no valen \(CS, SS o RIP de su marco\): se cierra \(SIGSEGV\)\.$"
-if [ -w /dev/kvm ]; then K7="-enable-kvm"; else M7="$M7|^El programa MBUCLE \(proceso [0-9]*\) ha intentado ejecutar en la dirección 0x8000000000000000"; fi
+# ([etapa 10 h] auditoría, vuelta 2: hay QEMU que, sin KVM, dan #GP al
+# ejecutar en una dirección no canónica, y no #PF: también vale)
+if [ -w /dev/kvm ]; then K7="-enable-kvm"; else M7="$M7|^El programa MBUCLE \(proceso [0-9]*\) ha intentado ejecutar en la dirección 0x8000000000000000|^El programa MBUCLE \(proceso [0-9]*\) ha hecho algo que solo puede hacer el núcleo"; fi
 LINEA7="apagar sinpruebas escribir ordenes prueba=salida" con_interprete "$T/e7s.txt" 'MBUCLE{intro}{indicador}eco sigue{intro}{indicador}salir{intro}' $K7; c=$?
 v=$(serie "$T/e7s.txt")
 if [ $c = 85 ] && grep -qE "$M7" <<< "$v" \

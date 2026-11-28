@@ -640,11 +640,26 @@ módulo Vfs64
         abre_vfs()
     fin
 
+    ; [etapa 10 h] (Candados64.al_soltar) quien quita los candados OFD y de
+    ; flock de lo abierto que se suelta
+    público variable al_soltar_abierto: nat64
+
+    función llama1_(f: nat64, x: nat64)
+        ensamblador
+            push qword {x}
+            mov rax, {f}
+            call rax
+        fin
+    fin
+
     público función vfs_cierra(a: puntero a Abierto)
         cierra_vfs()
         si a.refs > 1 entonces
             a.refs := a.refs - 1
         sino
+            ; ([etapa 10 h] M4: sus candados OFD, fuera, con este mutex: solo
+            ; aquí se sabe de verdad que es la última referencia)
+            si al_soltar_abierto <> 0 entonces llama1_(al_soltar_abierto, nat64(a)) fin
             suelta(nodo(a.nodo))
             libera(puntero(a.ruta))
             libera(puntero(nat64(a)))

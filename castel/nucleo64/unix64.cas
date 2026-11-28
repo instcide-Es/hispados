@@ -34,7 +34,13 @@
 ;  archivo en el disco (es un nombre del núcleo: unlink lo quita, stat lo ve
 ;  como S_IFSOCK; se suelta también al cerrar el socket); no se recogen los
 ;  ciclos (un socket que viaja en su propia cola no se suelta nunca: Linux
-;  tiene su recolector, unix_gc).
+;  tiene su recolector, unix_gc). [etapa 10 h] (auditoría, vuelta 2, M1) Pero
+;  lo que eso puede gastar tiene un límite, el de Linux sin su recolector
+;  (too_many_unix_fds): los descriptores en vuelo (mandados y aún sin
+;  recibir), como mucho el RLIMIT_NOFILE de quien manda; más, ETOOMANYREFS.
+;  Se cuentan todos juntos: en Linux, por usuario, y en Hispa-64 hay uno.
+;  [etapa 10 h] (M2) SCM_CREDENTIALS, como Linux: el pid, el propio; el uid
+;  y el gid, los propios (0): si no, EPERM (en Linux, salvo privilegio).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Unix64
@@ -83,11 +89,12 @@ módulo Unix64
     constante EAFNOSUPPORT = -97
     constante EADDRINUSE = -98
     constante ENOBUFS = -105
+    constante EPERM = -1
+    constante ETOOMANYREFS = -109
     constante EISCONN = -106
     constante ENOTCONN = -107
     constante ECONNRESET = -104
     constante ECONNREFUSED = -111
-    constante EPERM = -1
     constante MSG_PEEK = 2
     constante MSG_CTRUNC = 8
     constante MSG_TRUNC = 0x20
@@ -201,12 +208,20 @@ módulo Unix64
         unix_hechos := unix_hechos + 1
     fin
 
+    ; [etapa 10 h] (M1) los descriptores en vuelo, de todos
+    público variable unix_en_vuelo: nat64
+
+    función en_vuelo_menos(n: nat64)
+        si n > 0 entonces suma_atómica(dirección(unix_en_vuelo), nob n + 1) fin
+    fin
+
     ; los descriptores de un mensaje, cerrados (sin el cerrojo: cerrar uno
     ; puede soltar otro socket de Unix)
     función suelta_fds(fds: nat64, n: nat64)
         variable i: nat64
         variable pf: puntero a nat64
         si fds = 0 entonces devolver fin
+        en_vuelo_menos(n)
         i := 0
         mientras i < n hacer
             pf := puntero(fds + i * 24)
@@ -993,6 +1008,8 @@ módulo Unix64
                     pid := nat64(m32(nat64(k) + off + 16))
                     uid := nat64(m32(nat64(k) + off + 20))
                     gid := nat64(m32(nat64(k) + off + 24))
+                    ; [etapa 10 h] (M2) los propios, como Linux (sin privilegios en Hispa-64)
+                    si pid <> nat64(p.id) o uid <> 0 o gid <> 0 entonces err := EPERM fin
                 fin
             sino
                 err := EINVAL
@@ -1000,6 +1017,10 @@ módulo Unix64
             off := off + ((len_ + 7) yb (nob nat64(7)))
         fin
         libera(k)
+        ; [etapa 10 h] (M1) en vuelo, contados; más que el RLIMIT_NOFILE de quien manda, ETOOMANYREFS
+        si n_fd > 0 entonces
+            si suma_atómica(dirección(unix_en_vuelo), n_fd) + n_fd > p.fd_lím y err = 0 entonces err := ETOOMANYREFS fin
+        fin
         si err < 0 entonces
             suelta_fds(fds, n_fd)
             fds := 0
@@ -1265,13 +1286,19 @@ módulo Unix64
     fin
 
     ; los descriptores que llegan, al programa, en el búfer de control c
-    ; (desde off, de cl): los que no caben, cerrados (y MSG_CTRUNC)
-    función pon_fds(p: puntero a Proceso, fds: nat64, n_fd: nat64, c: nat64, cl: nat64, ref off: nat64, cloexec: bool, ref ctrunc: bool)
+    ; (desde off, de cl): los que no caben, cerrados (y MSG_CTRUNC).
+    ; [etapa 10 h] (auditoría, vuelta 2, M5) como Linux (receive_fd_user):
+    ; los números se apartan, se escriben en el búfer del programa y solo
+    ; entonces se ponen; si el búfer no se puede escribir, ninguno se pone
+    ; (se cierran todos) y falso: recvmsg da EFAULT. Antes se ponían y el
+    ; programa no sabía qué números eran.
+    función pon_fds(p: puntero a Proceso, fds: nat64, n_fd: nat64, c: nat64, cl: nat64, ref off: nat64, cloexec: bool, ref ctrunc: bool): bool
         variable nums: arreglo [256] de nat32
         variable cab: arreglo [2] de nat64
         variable cabe_, i, puestos, largo: nat64
         variable fd: ent32
         variable pf: puntero a nat64
+        variable bien: bool
         cabe_ := 0
         si c <> 0 y cl > off + 16 entonces cabe_ := (cl - off - 16) div 4 fin
         si cabe_ > n_fd entonces cabe_ := n_fd fin
@@ -1283,15 +1310,31 @@ módulo Unix64
                 ctrunc := cierto
                 romper
             fin
-            pf := puntero(fds + i * 24)
-            p.fd_cloexec[nat32(fd)] := 0
-            si cloexec entonces p.fd_cloexec[nat32(fd)] := 1 fin
-            p.fd_nobloq[nat32(fd)] := nat32(pf[2])
-            llena_fd(p, fd, nat32(pf[0]), pf[1])
             nums[i] := nat32(fd)
             i := i + 1
         fin
         puestos := i
+        bien := cierto
+        si puestos > 0 entonces
+            largo := 16 + puestos * 4
+            cab[0] := largo
+            cab[1] := 1 ob (nat64(1) << 32)            ; SOL_SOCKET, SCM_RIGHTS
+            bien := copia_a(p, c + off, nat64(dirección(cab[0])), 16) y copia_a(p, c + off + 16, nat64(dirección(nums[0])), puestos * 4)
+        fin
+        i := 0
+        mientras i < puestos hacer
+            pf := puntero(fds + i * 24)
+            si bien entonces
+                p.fd_cloexec[nums[i]] := 0
+                si cloexec entonces p.fd_cloexec[nums[i]] := 1 fin
+                p.fd_nobloq[nums[i]] := nat32(pf[2])
+                llena_fd(p, ent32(nums[i]), nat32(pf[0]), pf[1])
+            sino
+                devuelve_fd(p, ent32(nums[i]))
+                cierra_fd_obj(nat32(pf[0]), pf[1])
+            fin
+            i := i + 1
+        fin
         ; los demás, cerrados
         mientras i < n_fd hacer
             pf := puntero(fds + i * 24)
@@ -1299,16 +1342,13 @@ módulo Unix64
             i := i + 1
         fin
         libera(puntero(fds))
-        si puestos > 0 entonces
-            largo := 16 + puestos * 4
-            cab[0] := largo
-            cab[1] := 1 ob (nat64(1) << 32)            ; SOL_SOCKET, SCM_RIGHTS
-            copia_a(p, c + off, nat64(dirección(cab[0])), 16)
-            copia_a(p, c + off + 16, nat64(dirección(nums[0])), puestos * 4)
-            largo := (largo + 7) yb (nob nat64(7))
+        en_vuelo_menos(n_fd)
+        si bien y puestos > 0 entonces
+            largo := (16 + puestos * 4 + 7) yb (nob nat64(7))
             si off + largo > cl entonces largo := cl - off fin
             off := off + largo
         fin
+        devolver bien
     fin
 
     ; recvmsg, readv (vm = 0) y lo demás: al iov del programa
@@ -1373,8 +1413,14 @@ módulo Unix64
             fin
         fin
         si n_fd > 0 entonces
-            si vm = 0 entonces c := 0 fin
-            pon_fds(p, fds, n_fd, c, cl, off, marcas_ yb MSG_CMSG_CLOEXEC <> 0, ctrunc)
+            ; ([etapa 10 h] M5: si lo del iov no se ha podido escribir, los
+            ; descriptores no se ponen: se cierran, y EFAULT)
+            si err < 0 entonces
+                suelta_fds(fds, n_fd)
+            sino
+                si vm = 0 entonces c := 0 fin
+                si no pon_fds(p, fds, n_fd, c, cl, off, marcas_ yb MSG_CMSG_CLOEXEC <> 0, ctrunc) entonces err := EFAULT fin
+            fin
         fin
         si ctrunc entonces fl := fl ob MSG_CTRUNC fin
         si err < 0 entonces devolver err fin

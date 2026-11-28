@@ -1245,6 +1245,8 @@ módulo Sistema
                 dc := p.fd_clase[nat32(fd)]
                 dob := p.fd_obj[nat32(fd)]
                 ext := R_DISP
+                ; [etapa 10 h] (M3) de un memfd sellado para escribir: nunca de escribir
+                si dc = F_SHM y compartida y shm_sin_escribir(dob) entonces ext := R_NUNCA_ESCRIBE fin
             sino si p.fd_clase[nat32(fd)] = F_TEXTO entonces
                 ; [etapa 10] un texto hecho al abrirlo (/etc/localtime: musl lo mapea): una copia, de solo leer
                 si desp yb 4095 <> 0 entonces devolver EINVAL fin

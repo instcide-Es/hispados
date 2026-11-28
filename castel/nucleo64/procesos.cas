@@ -76,6 +76,7 @@ módulo Procesos
     público constante R_VDSO = 5                ; [etapa 10 f] el vDSO (Vdso64): de solo leer, siempre
     público constante R_COMPARTIDA = 1          ; [etapa 7] (reg_ext) MAP_SHARED anónima
     público constante R_ARCHIVO = 2             ; [etapa 7] (reg_ext) de un archivo
+    público constante R_NUNCA_ESCRIBE = 5       ; [etapa 10 h] (reg_ext) un memfd sellado para escribir, puesto de solo leer: mprotect no lo sube (EACCES, como Linux)
     público constante R_COMPARCH = 4            ; [etapa 10 h] (reg_ext) MAP_SHARED de escribir de un archivo: sus páginas compartidas (Vfs64.Comp)
     público constante F_CONSOLA = 1             ; las clases de archivo abierto
     público constante F_ARCHIVO = 2             ; [etapa 5] uno del VFS (Vfs64.Abierto)
@@ -618,12 +619,14 @@ módulo Procesos
             si i < 0 entonces devolver -12 fin
             v := p.reg_fin[nat32(i)]
         fin
-        ; [etapa 10 f] el vDSO no se puede escribir (sus marcos son de todos)
+        ; [etapa 10 f] el vDSO no se puede escribir (sus marcos son de todos);
+        ; [etapa 10 h] (M3) ni un memfd sellado para escribir
         si prot yb ESCRIBE <> 0 entonces
             v := a
             mientras v < b hacer
                 i := región_de(p, v)
                 si p.reg_clase[nat32(i)] = R_VDSO entonces devolver -13 fin
+                si p.reg_ext[nat32(i)] = R_NUNCA_ESCRIBE entonces devolver -13 fin
                 v := p.reg_fin[nat32(i)]
             fin
         fin
@@ -1140,7 +1143,7 @@ módulo Procesos
         si al_acabar_proc <> 0 entonces llama2_(al_acabar_proc, p.id, 0) fin
         i := 0
         mientras nat64(i) < p.fd_cap hacer
-            si p.fd_clase[i] <> 0 entonces cierra_fd_obj(p.fd_clase[i], p.fd_obj[i]) fin
+            si p.fd_clase[i] <> 0 entonces cierra_fd_obj_de(p.id, p.fd_clase[i], p.fd_obj[i]) fin
             p.fd_clase[i] := 0
             p.fd_obj[i] := 0
             p.fd_cloexec[i] := 0
@@ -1153,7 +1156,7 @@ módulo Procesos
         ; ([etapa 10 c] lo aplazado de llamadas que ya no acabarán)
         mientras p.apl_n > 0 hacer
             p.apl_n := p.apl_n - 1
-            cierra_fd_obj(p.apl_clase[nat32(p.apl_n)], p.apl_obj[nat32(p.apl_n)])
+            cierra_fd_obj_de(p.id, p.apl_clase[nat32(p.apl_n)], p.apl_obj[nat32(p.apl_n)])
         fin
     fin
 
@@ -2209,7 +2212,10 @@ módulo Procesos
                 fo := f - (v - pág) - d                 ; (lo del archivo que va en el principio de la página)
                 si fís_d <> 0 y fo + 4096 <= tam y (no cola o pág + 4096 <= fin_seg) entonces
                     si no mapea_u(e, pág, fís_d + fo, (marcas(prot) yb (nob nat64(ESCRIBIR))) ob PRESTADA ob COPIAR) entonces
-                        ; (ya estaba: otra vuelta)
+                        ; (ya estaba: otra vuelta; [etapa 10 h] auditoría,
+                        ; vuelta 2, B8: si no está, es que no hay memoria para
+                        ; sus tablas: fuera, en vez de repetirla para siempre)
+                        si pte(e, pág) yb PRESENTE = 0 entonces devolver falso fin
                         seguir
                     fin
                     suma_atómica(dirección(páginas_prestadas), 1)
@@ -3131,11 +3137,16 @@ módulo Procesos
     fin
 
     público función cierra_fd_obj(clase: nat32, obj: nat64)
+        si mío() <> nulo entonces cierra_fd_obj_de(mío().id, clase, obj) sino cierra_fd_obj_de(0, clase, obj) fin
+    fin
+
+    ; [etapa 10 h] lo mismo, de un descriptor del proceso de id «pid» (sus
+    ; candados de POSIX, los de ese: auditoría, vuelta 2, B9: al fallar un
+    ; fork, el padre cerraba los del hijo con su propio id y perdía los suyos)
+    público función cierra_fd_obj_de(pid: nat64, clase: nat32, obj: nat64)
         si clase = F_APARTADO entonces devolver fin
         si clase = F_ARCHIVO y obj <> 0 entonces
-            si al_cierra_archivo <> 0 entonces
-                si mío() <> nulo entonces llama2_(al_cierra_archivo, mío().id, obj) sino llama2_(al_cierra_archivo, 0, obj) fin
-            fin
+            si al_cierra_archivo <> 0 entonces llama2_(al_cierra_archivo, pid, obj) fin
             vfs_cierra(puntero(obj))
         sino si clase > F_ARCHIVO y al_cierra_fd <> 0 entonces
             llama2_(al_cierra_fd, nat64(clase), obj)

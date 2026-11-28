@@ -253,6 +253,37 @@ static int prueba_wal(void)
 	return 0;
 }
 
+/* [etapa 10 h] auditoría, vuelta 2, M4: dos cierres a la vez de lo mismo
+ * (un descriptor y su dup, cada uno en su hilo) con un candado OFD puesto:
+ * después, el candado ya no está (otro open lo puede poner). 200 vueltas. */
+static int cierra_fd_hilo;
+static void *cierra_uno(void *x)
+{
+	(void)x;
+	close(cierra_fd_hilo);
+	return NULL;
+}
+
+static void ofd_cierres(void)
+{
+	int malos = 0, k;
+	for (k = 0; k < 200; k++) {
+		int a = open(RUTA, O_RDWR | O_CREAT, 0644);
+		int b = dup(a);
+		if (a < 0 || b < 0 || pon(a, F_OFD_SETLK, F_WRLCK, SEEK_SET, 0, 10) != 0) { malos++; continue; }
+		pthread_t h;
+		cierra_fd_hilo = b;
+		pthread_create(&h, NULL, cierra_uno, NULL);
+		close(a);
+		pthread_join(h, NULL);
+		int c = open(RUTA, O_RDWR);
+		if (c < 0 || pon(c, F_OFD_SETLK, F_WRLCK, SEEK_SET, 0, 10) != 0) malos++;
+		if (c >= 0) close(c);
+	}
+	MIRA(malos == 0, "OFD: dos cierres a la vez no dejan el candado huérfano");
+	printf("  OFD: 200 veces, un descriptor y su dup cerrados a la vez (dos hilos): el candado, fuera\n");
+}
+
 int main(void)
 {
 	struct flock f;
@@ -356,5 +387,7 @@ int main(void)
 	unlink(RUTA);
 	prueba_sqlite();
 	prueba_wal();
+	ofd_cierres();
+	unlink(RUTA);
 	return acaba("MCANDADOS");
 }

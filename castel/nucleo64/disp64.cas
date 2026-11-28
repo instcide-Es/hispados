@@ -1139,6 +1139,26 @@ módulo Disp64
         devolver r
     fin
 
+    ; [etapa 10 h] (con shm_mutex) ¿alguna de sus páginas puesta por un programa?
+    función shm_puesta_(s: puntero a Shm): bool
+        variable i: nat64
+        variable pm: puntero a nat64
+        i := 0
+        mientras i < s.n hacer
+            pm := puntero(s.marcos + i * 8)
+            si marco_en_uso(valor(pm)) entonces devolver cierto fin
+            i := i + 1
+        fin
+        devolver falso
+    fin
+
+    ; [etapa 10 h] (M3) ¿sellado para escribir? (lo que se ponga de él, nunca de escribir)
+    público función shm_sin_escribir(d: nat64): bool
+        variable s: puntero a Shm
+        s := puntero(d)
+        devolver s.sellos yb (F_SEAL_WRITE ob F_SEAL_FUTURE_WRITE) <> 0
+    fin
+
     ; [etapa 10 d] fcntl F_ADD_SEALS (1033) y F_GET_SEALS (1034)
     público función sellos_shm(d: nat64, orden: nat64, arg: nat64): ent64
         variable s: puntero a Shm
@@ -1152,6 +1172,12 @@ módulo Disp64
             r := EINVAL
         sino si s.sellos yb F_SEAL_SEAL <> 0 entonces
             r := EPERM
+        sino si arg yb F_SEAL_WRITE <> 0 y s.sellos yb F_SEAL_WRITE = 0 y shm_puesta_(s) entonces
+            ; [etapa 10 h] (auditoría, vuelta 2, M3) como Linux: F_SEAL_WRITE
+            ; con alguien que lo tiene puesto con mmap compartido (que podría
+            ; escribir: en Linux, todo mapeo compartido hecho antes del sello
+            ; puede pasar a escribir con mprotect), EBUSY
+            r := EBUSY
         sino
             s.sellos := s.sellos ob arg
         fin

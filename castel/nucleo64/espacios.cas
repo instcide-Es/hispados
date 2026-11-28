@@ -492,6 +492,13 @@ módulo Espacios
         fin
     fin
 
+    ; [etapa 10 h] ¿lo tiene puesto algún programa? (los de /dev/shm y memfd:
+    ; el objeto tiene la primera cuenta; cada página puesta, una más)
+    público función marco_en_uso(f: nat64): bool
+        si compartidos = 0 o f >> 12 >= n_compartidos entonces devolver falso fin
+        devolver valor(cuenta_de(f)) <> 0
+    fin
+
     ; uno más tiene el marco f ([etapa 8] público: /dev/shm y /dev/fb0, Disp64)
     público función comparte_marco(f: nat64)
         variable c: puntero a nat32

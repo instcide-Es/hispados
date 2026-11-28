@@ -157,12 +157,38 @@ módulo Candados64
         fin
     fin
 
+    ; [etapa 10 h] (con el cerrojo) los que tiene un dueño
+    función de_un_dueño(dueño: nat64): nat32
+        variable i, n: nat32
+        n := 0
+        i := 0
+        mientras i < MAX_CANDADOS hacer
+            si tabla[i].nodo <> 0 y tabla[i].dueño = dueño entonces n := n + 1 fin
+            i := i + 1
+        fin
+        devolver n
+    fin
+
+    ; [etapa 10 h] (con el cerrojo) ¿quitar [a, b) partiría en dos alguno de ese dueño?
+    función partiría(nodo: nat64, dueño: nat64, ofd: nat32, a: nat64, b: nat64): bool
+        variable i: nat32
+        i := 0
+        mientras i < MAX_CANDADOS hacer
+            si tabla[i].nodo = nodo y tabla[i].dueño = dueño y tabla[i].ofd = ofd y tabla[i].ini < a y tabla[i].fin_ > b entonces devolver cierto fin
+            i := i + 1
+        fin
+        devolver falso
+    fin
+
     ; (con el cerrojo) pone [a, b) de tipo t, ya sin estorbos; falso si no cabe (ENOLCK)
     función pon_trozo(nodo: nat64, dueño: nat64, ofd: nat32, t: nat32, a: nat64, b: nat64): bool
         variable i: nat32
         variable k: ent32
         ; (hacen falta dos libres como mucho: uno al partir y el nuevo)
         si libres() < 2 entonces devolver falso fin
+        ; ([etapa 10 h] auditoría, vuelta 2, B6: uno solo no llena la tabla de
+        ; todos: como mucho, la cuarta parte de un mismo dueño; más, ENOLCK)
+        si de_un_dueño(dueño) + 2 > MAX_CANDADOS div 4 entonces devolver falso fin
         quita_trozo(nodo, dueño, ofd, a, b)
         ; los suyos del mismo tipo justo al lado, juntos con este
         i := 0
@@ -276,9 +302,16 @@ módulo Candados64
                 apuntado := -1
             fin
             si t = F_UNLCK entonces
-                quita_trozo(nodo, dueño, ofd, a, b)
+                ; ([etapa 10 h] auditoría, vuelta 2, B7: quitar de en medio de
+                ; uno lo parte en dos; sin sitio para el segundo, ENOLCK, como
+                ; Linux, en vez de perder el trozo del final sin decirlo)
+                si partiría(nodo, dueño, ofd, a, b) y libres() < 1 entonces
+                    r := -37
+                sino
+                    quita_trozo(nodo, dueño, ofd, a, b)
+                    r := 0
+                fin
                 suelta_sin(dirección(cerrojo))
-                r := 0
                 romper
             fin
             k := el_que_estorba(nodo, dueño, ofd, t, a, b)
@@ -322,7 +355,9 @@ módulo Candados64
             suelta_sin(dirección(espera.cerrojo))
         fin
         restaura(bf)
-        si t = F_UNLCK entonces despierta_todos(dirección(espera)) fin
+        ; ([etapa 10 h] B11: también al poner: bajar de escribir a leer o
+        ; achicar uno deja sitio a los que esperan, como Linux)
+        si r = 0 entonces despierta_todos(dirección(espera)) fin
         devolver r
     fin
 
@@ -343,8 +378,11 @@ módulo Candados64
     fin
 
     ; al cerrar un descriptor de lo abierto ab en el proceso de id «pid»: sus
-    ; candados de POSIX en ese archivo, fuera; y, si es el último descriptor
-    ; de ab, los OFD de ab
+    ; candados de POSIX en ese archivo, fuera. ([etapa 10 h] Los OFD y los de
+    ; flock, en al_soltar: lo llama Vfs64 al soltar lo abierto, con su mutex,
+    ; cuando de verdad es la última referencia; antes se miraba aquí ab.refs
+    ; sin ese mutex, y dos cierres a la vez dejaban un candado cuyo dueño ya
+    ; no existía: auditoría, vuelta 2, M4)
     función al_cierra(pid: nat64, abv: nat64)
         variable ab: puntero a Abierto
         variable i: nat32
@@ -356,7 +394,28 @@ módulo Candados64
         b := toma(dirección(cerrojo))
         i := 0
         mientras i < MAX_CANDADOS hacer
-            si tabla[i].nodo = ab.nodo y ((tabla[i].ofd = 0 y tabla[i].dueño = pid) o ((tabla[i].ofd = 1 o tabla[i].ofd = 2) y tabla[i].dueño = abv y ab.refs <= 1)) entonces
+            si tabla[i].nodo = ab.nodo y tabla[i].ofd = 0 y tabla[i].dueño = pid entonces
+                quita_en(i)
+                quitado := cierto
+            fin
+            i := i + 1
+        fin
+        suelta(dirección(cerrojo), b)
+        si quitado entonces despierta_todos(dirección(espera)) fin
+    fin
+
+    ; [etapa 10 h] (desde Vfs64.vfs_cierra, con el mutex del VFS) lo abierto
+    ; abv se suelta: sus candados OFD y de flock, fuera
+    función al_soltar(abv: nat64)
+        variable i: nat32
+        variable b: nat64
+        variable quitado: bool
+        si n_candados = 0 entonces devolver fin
+        quitado := falso
+        b := toma(dirección(cerrojo))
+        i := 0
+        mientras i < MAX_CANDADOS hacer
+            si (tabla[i].ofd = 1 o tabla[i].ofd = 2) y tabla[i].dueño = abv entonces
                 quita_en(i)
                 quitado := cierto
             fin
@@ -367,6 +426,7 @@ módulo Candados64
     fin
 
     público función prepara_candados()
+        al_soltar_abierto := nat64(dirección(al_soltar))
         al_cierra_archivo := nat64(dirección(al_cierra))
     fin
 
