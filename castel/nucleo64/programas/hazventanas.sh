@@ -94,9 +94,16 @@ if [ "${SIN_OFICINA:-0}" != 1 ]; then
   done
   # shellcheck disable=SC2086
   "$M" -static -o "$S/PDF" $HPO "$O/hpdf_fuentesc.o" "$O/hpdf_so.o" -lm
-  compila "$AQUI/imprimir/imprimir.c" "$O/imprimir.o"
+  # (ipps://, con la BearSSL de hazred.sh, build/bearssl-obj; sin ella, solo ipp://)
+  BS=$R/build/bearssl-obj/libbearssl.a; TLS=""
+  if [ -f "$BS" ]; then TLS="$BS"; else TLS=""; fi
+  if [ -n "$TLS" ]; then
+    "$M" $CF $W -I"$R/terceros/bearssl/inc" -c "$AQUI/imprimir/imprimir.c" -o "$O/imprimir.o"
+  else
+    "$M" $CF $W -DSIN_TLS -c "$AQUI/imprimir/imprimir.c" -o "$O/imprimir.o"
+  fi
   # shellcheck disable=SC2086
-  "$M" -static -o "$S/IMPRIMIR" "$O/imprimir.o" $HPO "$O/hpdf_fuentesc.o" "$O/hpdf_so_sinmain.o" -lm
+  "$M" -static -o "$S/IMPRIMIR" "$O/imprimir.o" $HPO "$O/hpdf_fuentesc.o" "$O/hpdf_so_sinmain.o" $TLS -lm
   HECHOS="$HECHOS PDF IMPRIMIR"
 fi
 for f in $HECHOS; do strip --strip-unneeded "$S/$f"; done

@@ -13,6 +13,8 @@
  *     que diga la impresora (la más baja de 300 o más, o la más alta);
  *   - la impresora de cada uno, en $HOME/.config/impresora.txt (una línea:
  *     ipp://IP[:631]/ipp/print);
+ *   - ipps:// (IPP sobre TLS 1.2, con BearSSL): el certificado de la
+ *     impresora, de confianza la primera vez y comparado después (su huella);
  *   - [si el núcleo deja mandar a 224.0.0.251] buscarlas con mDNS/DNS-SD
  *     (_ipp._tcp.local), con la pregunta «de unicast antiguo» de la RFC 6762
  *     (6.7): desde un puerto que no es el 5353, la respuesta llega por
@@ -42,6 +44,7 @@
 #include <arpa/inet.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/random.h>
 #include "../../../nucleo32/pdf/hpdf.h"
 
 void hpdf_fuentes(void);
@@ -109,7 +112,8 @@ static void b_4(buf *b, uint32_t v)
 /* ---- la URI: ipp://NOMBRE[:PUERTO]/RUTA (o http://) ---- */
 typedef struct {
 	char nombre[256], ruta[512], puerto[8];
-	char uri[900];		/* la de printer-uri (ipp://...) */
+	char uri[900];		/* la de printer-uri (ipp://... o ipps://...) */
+	int tls;		/* ipps:// (IPP sobre TLS) */
 } destino;
 
 static int lee_uri(const char *u, destino *d)
@@ -122,6 +126,10 @@ static int lee_uri(const char *u, destino *d)
 	if (!strncmp(u, "ipp://", 6)) {
 		p = u + 6;
 		ipp = 1;
+	} else if (!strncmp(u, "ipps://", 7)) {
+		p = u + 7;
+		ipp = 1;
+		d->tls = 1;
 	} else if (!strncmp(u, "http://", 7))
 		p = u + 7;
 	else
@@ -157,7 +165,7 @@ static int lee_uri(const char *u, destino *d)
 	} else
 		snprintf(d->puerto, sizeof d->puerto, "%s", ipp ? "631" : "80");
 	snprintf(d->ruta, sizeof d->ruta, "%s", *b ? b : "/ipp/print");
-	snprintf(d->uri, sizeof d->uri, "ipp://%s%s%s:%s%s", strchr(d->nombre, ':') ? "[" : "", d->nombre,
+	snprintf(d->uri, sizeof d->uri, "%s://%s%s%s:%s%s", d->tls ? "ipps" : "ipp", strchr(d->nombre, ':') ? "[" : "", d->nombre,
 		 strchr(d->nombre, ':') ? "]" : "", d->puerto, d->ruta);
 	return 0;
 }
@@ -253,8 +261,308 @@ static int conecta(const destino *d)
 	return s;
 }
 
+#ifndef SIN_TLS
+/* ---- ipps://: TLS 1.2 con BearSSL (terceros/bearssl, MIT), como DESCARGA.
+ * Las impresoras traen un certificado hecho por ellas mismas (no hay una
+ * autoridad que lo firme): como CUPS, se confía la primera vez y se apunta
+ * su huella (SHA-256 del certificado) en impresoras-huellas.txt, junto a
+ * impresora.txt; si otro día no es la misma, no se le manda nada. ---- */
+#include "bearssl.h"
+
+void br_ssl_engine_fail(br_ssl_engine_context *cc, int err);
+
+br_prng_seeder br_prng_seeder_system(const char **nombre)
+{
+	if (nombre)
+		*nombre = "ninguno";
+	return 0;
+}
+
+static const char *archivo_impresora(void);
+
+struct confía {
+	const br_x509_class *vtable;
+	br_x509_decoder_context dc;
+	br_sha256_context h;
+	int n;
+	const destino *d;
+	int mala;		/* 1: la huella no es la apuntada */
+};
+
+static void cf_start_chain(const br_x509_class **c, const char *nombre)
+{
+	(void)nombre;
+	((struct confía *)(void *)c)->n = 0;
+}
+
+static void cf_start_cert(const br_x509_class **c, uint32_t n)
+{
+	struct confía *x = (void *)c;
+
+	(void)n;
+	if (x->n == 0) {
+		br_x509_decoder_init(&x->dc, 0, 0);
+		br_sha256_init(&x->h);
+	}
+}
+
+static void cf_append(const br_x509_class **c, const unsigned char *b, size_t n)
+{
+	struct confía *x = (void *)c;
+
+	if (x->n == 0) {
+		br_x509_decoder_push(&x->dc, b, n);
+		br_sha256_update(&x->h, b, n);
+	}
+}
+
+static void cf_end_cert(const br_x509_class **c)
+{
+	((struct confía *)(void *)c)->n++;
+}
+
+/* la huella, con la apuntada para «nombre:puerto»: 0 si es la misma (o la
+ * primera vez, y se apunta) */
+static int huella(const destino *d, const char *hx)
+{
+	char f[640], l[700], clave[300], t[660];
+	const char *a = archivo_impresora();
+	FILE *e;
+	char *b;
+
+	snprintf(f, sizeof f, "%s", a);
+	b = strrchr(f, '/');
+	if (b)
+		snprintf(b + 1, sizeof f - (size_t)(b + 1 - f), "impresoras-huellas.txt");
+	snprintf(clave, sizeof clave, "%s:%s ", d->nombre, d->puerto);
+	e = fopen(f, "r");
+	if (e) {
+		while (fgets(l, sizeof l, e))
+			if (!strncmp(l, clave, strlen(clave))) {
+				fclose(e);
+				l[strcspn(l, "\r\n")] = 0;
+				if (!strcmp(l + strlen(clave), hx))
+					return 0;
+				fprintf(stderr, "IMPRIMIR: el certificado de %s no es el de siempre (su huella: %s): no se le manda nada; si ha cambiado de verdad (una impresora nueva o restaurada), borre su línea de %s\n",
+					d->nombre, hx, f);
+				return -1;
+			}
+		fclose(e);
+	}
+	snprintf(t, sizeof t, "%s", f);
+	b = strrchr(t, '/');
+	if (b) {
+		*b = 0;
+		mkdir(t, 0755);
+	}
+	e = fopen(f, "a");
+	if (e) {
+		fprintf(e, "%s%s\n", clave, hx);
+		fclose(e);
+	}
+	printf("IMPRIMIR: el certificado de %s, la primera vez: se confía en él y se apunta su huella (SHA-256 %.23s…)\n", d->nombre, hx);
+	return 0;
+}
+
+static unsigned cf_end_chain(const br_x509_class **c)
+{
+	struct confía *x = (void *)c;
+	unsigned char h[32];
+	char hx[100];
+	int i;
+
+	if (!x->n || !br_x509_decoder_get_pkey(&x->dc))
+		return BR_ERR_X509_EMPTY_CHAIN;
+	br_sha256_out(&x->h, h);
+	for (i = 0; i < 32; i++)
+		snprintf(hx + i * 3, 4, "%02X%s", h[i], i < 31 ? ":" : "");
+	if (huella(x->d, hx)) {
+		x->mala = 1;
+		return BR_ERR_X509_NOT_TRUSTED;
+	}
+	return 0;
+}
+
+static const br_x509_pkey *cf_get_pkey(const br_x509_class *const *c, unsigned *usos)
+{
+	struct confía *x = (void *)c;
+
+	if (usos)
+		*usos = BR_KEYTYPE_KEYX | BR_KEYTYPE_SIGN;
+	return br_x509_decoder_get_pkey(&x->dc);
+}
+
+static const br_x509_class cf_vtable = {
+	sizeof(struct confía), cf_start_chain, cf_start_cert, cf_append, cf_end_cert, cf_end_chain, cf_get_pkey
+};
+
+static struct {
+	int activo;
+	br_ssl_client_context cc;
+	struct confía cf;
+	unsigned char iobuf[BR_SSL_BUFSIZE_BIDI];
+} T;
+
+static int azar(unsigned char *b, size_t n)
+{
+	int fd;
+
+	if (getrandom(b, n, 0) == (ssize_t)n)
+		return 0;
+	fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		return -1;
+	if (read(fd, b, n) != (ssize_t)n) {
+		close(fd);
+		return -1;
+	}
+	close(fd);
+	return 0;
+}
+
+static int bombea(int s, unsigned quiero)
+{
+	br_ssl_engine_context *e = &T.cc.eng;
+
+	for (;;) {
+		unsigned st = br_ssl_engine_current_state(e);
+		unsigned char *b;
+		size_t n;
+		ssize_t k;
+
+		if (st & BR_SSL_CLOSED)
+			return -1;
+		if (st & BR_SSL_SENDREC) {
+			b = br_ssl_engine_sendrec_buf(e, &n);
+			k = send(s, b, n, MSG_NOSIGNAL);
+			if (k < 0 && errno == EINTR)
+				continue;
+			if (k <= 0) {
+				br_ssl_engine_fail(e, BR_ERR_IO);
+				return -1;
+			}
+			br_ssl_engine_sendrec_ack(e, (size_t)k);
+			continue;
+		}
+		if (st & quiero)
+			return 0;
+		if (st & BR_SSL_RECVAPP)
+			return -1;
+		if (st & BR_SSL_RECVREC) {
+			b = br_ssl_engine_recvrec_buf(e, &n);
+			k = recv(s, b, n, 0);
+			if (k < 0 && errno == EINTR)
+				continue;
+			if (k <= 0) {
+				br_ssl_engine_fail(e, BR_ERR_IO);
+				return -1;
+			}
+			br_ssl_engine_recvrec_ack(e, (size_t)k);
+			continue;
+		}
+		br_ssl_engine_flush(e, 0);
+	}
+}
+
+static int tls_empieza(int s, const destino *d)
+{
+	static const uint16_t suites[] = {
+		BR_TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256, BR_TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+		BR_TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, BR_TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+		BR_TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, BR_TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+	};
+	br_ssl_engine_context *e = &T.cc.eng;
+	unsigned char az[32];
+
+	/* (el perfil de DESCARGA: TLS 1.2, ECDHE con ChaCha20-Poly1305 o AES-GCM) */
+	br_ssl_client_zero(&T.cc);
+	br_ssl_engine_set_versions(e, BR_TLS12, BR_TLS12);
+	br_ssl_engine_set_suites(e, suites, sizeof suites / sizeof suites[0]);
+	br_ssl_engine_set_default_rsavrfy(e);
+	br_ssl_engine_set_default_ecdsa(e);
+	br_ssl_engine_set_ec(e, &br_ec_all_m31);
+	br_ssl_engine_set_hash(e, br_sha256_ID, &br_sha256_vtable);
+	br_ssl_engine_set_hash(e, br_sha384_ID, &br_sha384_vtable);
+	br_ssl_engine_set_prf_sha256(e, &br_tls12_sha256_prf);
+	br_ssl_engine_set_prf_sha384(e, &br_tls12_sha384_prf);
+	br_ssl_engine_set_chacha20(e, &br_chacha20_ct_run);
+	br_ssl_engine_set_poly1305(e, &br_poly1305_ctmul32_run);
+	br_ssl_engine_set_chapol(e, &br_sslrec_in_chapol_vtable, &br_sslrec_out_chapol_vtable);
+	br_ssl_engine_set_aes_ctr(e, &br_aes_big_ctr_vtable);
+	br_ssl_engine_set_ghash(e, &br_ghash_ctmul32);
+	br_ssl_engine_set_gcm(e, &br_sslrec_in_gcm_vtable, &br_sslrec_out_gcm_vtable);
+	memset(&T.cf, 0, sizeof T.cf);
+	T.cf.vtable = &cf_vtable;
+	T.cf.d = d;
+	br_ssl_engine_set_x509(e, &T.cf.vtable);
+	br_ssl_engine_set_buffer(e, T.iobuf, sizeof T.iobuf, 1);
+	if (azar(az, sizeof az)) {
+		fprintf(stderr, "IMPRIMIR: no hay azar para TLS\n");
+		return -1;
+	}
+	br_ssl_engine_inject_entropy(e, az, sizeof az);
+	/* (sin el nombre en SNI si es una IP) */
+	if (!br_ssl_client_reset(&T.cc, strspn(d->nombre, "0123456789.:abcdefABCDEF") == strlen(d->nombre) ? NULL : d->nombre, 0)) {
+		fprintf(stderr, "IMPRIMIR: TLS no arranca\n");
+		return -1;
+	}
+	if (bombea(s, BR_SSL_SENDAPP)) {
+		int er = br_ssl_engine_last_error(e);
+
+		if (T.cf.mala)
+			return -2;
+		fprintf(stderr, "IMPRIMIR: no se puede hablar en TLS con %s (error %d de BearSSL)\n", d->nombre, er);
+		return -1;
+	}
+	T.activo = 1;
+	return 0;
+}
+
+static int tls_manda(int s, const unsigned char *d, size_t n)
+{
+	br_ssl_engine_context *e = &T.cc.eng;
+
+	while (n) {
+		unsigned char *b;
+		size_t q;
+
+		if (bombea(s, BR_SSL_SENDAPP))
+			return -1;
+		b = br_ssl_engine_sendapp_buf(e, &q);
+		if (q > n)
+			q = n;
+		memcpy(b, d, q);
+		br_ssl_engine_sendapp_ack(e, q);
+		d += q;
+		n -= q;
+	}
+	br_ssl_engine_flush(e, 0);
+	return bombea(s, BR_SSL_SENDAPP);
+}
+
+static ssize_t tls_recibe(int s, unsigned char *d, size_t n)
+{
+	br_ssl_engine_context *e = &T.cc.eng;
+	unsigned char *b;
+	size_t q;
+
+	if (bombea(s, BR_SSL_RECVAPP))
+		return 0;	/* (cerrado: el final de la respuesta) */
+	b = br_ssl_engine_recvapp_buf(e, &q);
+	if (q > n)
+		q = n;
+	memcpy(d, b, q);
+	br_ssl_engine_recvapp_ack(e, q);
+	return (ssize_t)q;
+}
+#endif
+
 static int manda_todo(int s, const unsigned char *d, size_t n)
 {
+#ifndef SIN_TLS
+	if (T.activo)
+		return tls_manda(s, d, n);
+#endif
 	while (n) {
 		ssize_t k = send(s, d, n, MSG_NOSIGNAL);
 
@@ -282,6 +590,23 @@ static int post(const destino *d, const buf *ipp, const unsigned char *doc, size
 	s = conecta(d);
 	if (s < 0)
 		return -1;
+#ifndef SIN_TLS
+	T.activo = 0;
+	if (d->tls) {
+		int e = tls_empieza(s, d);
+
+		if (e) {
+			close(s);
+			return e;
+		}
+	}
+#else
+	if (d->tls) {
+		fprintf(stderr, "IMPRIMIR: este IMPRIMIR no tiene TLS (ipps://): use ipp://\n");
+		close(s);
+		return -1;
+	}
+#endif
 	n = snprintf(cab, sizeof cab,
 		     "POST %s HTTP/1.1\r\nHost: %s:%s\r\nContent-Type: application/ipp\r\nContent-Length: %zu\r\n"
 		     "User-Agent: IMPRIMIR (Hispa-64)\r\nConnection: close\r\n\r\n",
@@ -294,7 +619,14 @@ static int post(const destino *d, const buf *ipp, const unsigned char *doc, size
 	}
 	for (;;) {
 		unsigned char t[16384];
-		ssize_t k = recv(s, t, sizeof t, 0);
+		ssize_t k;
+
+#ifndef SIN_TLS
+		if (T.activo)
+			k = tls_recibe(s, t, sizeof t);
+		else
+#endif
+			k = recv(s, t, sizeof t, 0);
 
 		if (k < 0 && errno == EINTR)
 			continue;
@@ -534,7 +866,7 @@ static int mira(const destino *d, respuesta *x)
 	free(b.d);
 	if (h < 0) {
 		free(r.d);
-		return 3;
+		return h == -2 ? 4 : 3;	/* (-2: el certificado no es el de siempre) */
 	}
 	if (h != 200) {
 		fprintf(stderr, "IMPRIMIR: %s contesta con HTTP %d (¿es una impresora IPP? la ruta suele ser /ipp/print)\n", d->nombre, h);
@@ -1022,7 +1354,7 @@ static void uso(void)
 		"     IMPRIMIR -m [-i URI]     lo que dice la impresora\n"
 		"     IMPRIMIR -g URI          la guarda como la de siempre (%s)\n"
 		"     IMPRIMIR -b [DIRECCIÓN]  la busca en la red (mDNS)\n"
-		"La URI: ipp://IP[:631]/ipp/print\n",
+		"La URI: ipp://IP[:631]/ipp/print (o ipps://, con TLS)\n",
 		archivo_impresora());
 }
 

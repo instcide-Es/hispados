@@ -13,12 +13,14 @@
 #     PWG raster, cada página (su cabecera, las filas descomprimidas, el
 #     tamaño A4 a su resolución, lo que no es blanco);
 #   - dice cada trabajo en una línea: «trabajo N: PDF bien: ...» o «... MAL: ...».
+#   - con --tls CERT CLAVE, por TLS (ipps://);
 #   - con --mdns, responde a la búsqueda de DNS-SD (_ipp._tcp.local) por unicast.
 # Uso: ipp_prueba.py CARPETA [--sinpdf] [--color RRGGBB]   (dice «listo PUERTO»)
 #      ipp_prueba.py --mdns PUERTO_IPP                     (en 127.0.0.1:5353)
 #      ipp_prueba.py --mira ARCHIVO [--color RRGGBB]       (comprueba un archivo)
 import re
 import socket
+import ssl
 import struct
 import sys
 import threading
@@ -368,6 +370,12 @@ def main():
         d = open(args[1], "rb").read()
         print(mira_pwg(d) if d[:4] == b"RaS2" else mira_pdf(d))
         return
+    ctx = None
+    if "--tls" in args:
+        k = args.index("--tls")
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(args[k + 1], args[k + 2])
+        del args[k:k + 3]
     imp = Impresora(args[0], "--sinpdf" in args)
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -376,6 +384,15 @@ def main():
     print("listo %d" % srv.getsockname()[1], flush=True)
     while True:
         s, _ = srv.accept()
+        if ctx:
+            try:
+                s.settimeout(30)
+                s = ctx.wrap_socket(s, server_side=True)
+            except (ssl.SSLError, OSError) as e:
+                print("TLS: %s" % e, flush=True)
+                s.close()
+                continue
+            print("TLS: %s" % s.version(), flush=True)
         threading.Thread(target=conexión, args=(s, imp), daemon=True).start()
 
 

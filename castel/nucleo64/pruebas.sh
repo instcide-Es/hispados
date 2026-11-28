@@ -2091,11 +2091,16 @@ else ko "etapa 11, el sonido (ich9-intel-hda) no sale (código $c): $(serie "$T/
 # raster, y otra solo con PWG raster), que comprueba cada trabajo (el PDF entero:
 # la tabla xref, los flujos, las páginas, el texto y las imágenes; el PWG raster,
 # cada fila) ----
-RP=$T/imprimir; rm -rf "$RP"; mkdir -p "$RP/pdf" "$RP/pwg"; IPPS=$AQUI/programas/imprimir/ipp_prueba.py
+RP=$T/imprimir; rm -rf "$RP"; mkdir -p "$RP/pdf" "$RP/pwg" "$RP/tls"; IPPS=$AQUI/programas/imprimir/ipp_prueba.py
 (exec python3 -I "$IPPS" "$RP/pdf" --color C81E3C) > "$RP/srv1.txt" 2>&1 & PIP1=$!
 (exec python3 -I "$IPPS" "$RP/pwg" --sinpdf) > "$RP/srv2.txt" 2>&1 & PIP2=$!
 for i in $(seq 1 50); do grep -q '^listo' "$RP/srv1.txt" 2> /dev/null && grep -q '^listo' "$RP/srv2.txt" 2> /dev/null && break; sleep 0.2; done
 PI1=$(grep -o '^listo [0-9]*' "$RP/srv1.txt" | grep -o '[0-9]*$'); PI2=$(grep -o '^listo [0-9]*' "$RP/srv2.txt" | grep -o '[0-9]*$')
+# (y otra por TLS, ipps://, con un certificado hecho por ella: el de servidores.py)
+python3 -I "$AQUI/programas/red/servidores.py" certs "$RP/certs" impresora.prueba > /dev/null 2>&1
+(exec python3 -I "$IPPS" "$RP/tls" --tls "$RP/certs/servidor.pem" "$RP/certs/servidor.key") > "$RP/srv4.txt" 2>&1 & PIP4=$!
+for i in $(seq 1 50); do grep -q '^listo' "$RP/srv4.txt" 2> /dev/null && break; sleep 0.2; done
+PI4=$(grep -o '^listo [0-9]*' "$RP/srv4.txt" | grep -o '[0-9]*$')
 # (y la búsqueda con DNS-SD, por unicast al anfitrión, en 127.0.0.1:5353, si está libre)
 PIP3=""; MDNS=0
 if [ -n "$PI1" ]; then
@@ -2107,7 +2112,7 @@ fi
 # la de PWG raster (pintado por Hispa-PDF a 300 ppp), a la de siempre (-g, en
 # /tmp/.config: HOME es «/»); sin impresora que conteste (código 3); un archivo
 # que no está (6); lo que dice la impresora (-m); y PDF INFO del PDF de Cuentas
-if [ -x "$T/prog/IMPRIMIR" ] && [ -x "$T/prog/CUENTAS" ] && [ -n "$PI1" ] && [ -n "$PI2" ]; then
+if [ -x "$T/prog/IMPRIMIR" ] && [ -x "$T/prog/CUENTAS" ] && [ -n "$PI1" ] && [ -n "$PI2" ] && [ -n "$PI4" ]; then
   printf 'Concepto;Importe\nCuota de noviembre;25,50\nBingo del jueves;61,90\nTotal;=B2+B3\n' > "$RP/PRUEBA.CSV"
   {
     echo "CUENTAS --convierte /PRUEBA.CSV /tmp/PRUEBA.PDF"
@@ -2122,6 +2127,8 @@ if [ -x "$T/prog/IMPRIMIR" ] && [ -x "$T/prog/CUENTAS" ] && [ -n "$PI1" ] && [ -
     echo "=3 IMPRIMIR -i ipp://10.0.2.2:1/ipp/print /tmp/PRUEBA.PDF"
     echo "=6 IMPRIMIR -i ipp://10.0.2.2:$PI1/ipp/print /NOESTA.PDF"
     [ $MDNS = 1 ] && echo "IMPRIMIR -b 10.0.2.2"
+    echo "IMPRIMIR -i ipps://10.0.2.2:$PI4/ipp/print -t TLS1 /tmp/PRUEBA.PDF"
+    echo "IMPRIMIR -i ipps://10.0.2.2:$PI4/ipp/print -t TLS2 /tmp/PRUEBA.PDF"
   } > "$RP/RED.PRB"
   m="$RP/RED.PRB,$RP/PRUEBA.CSV"; for f in "$T"/prog/*; do m="$m,$f"; done
   rm -f "$RP/mb.txt"
@@ -2139,11 +2146,14 @@ if [ -x "$T/prog/IMPRIMIR" ] && [ -x "$T/prog/CUENTAS" ] && [ -n "$PI1" ] && [ -
      && grep -q "^IMPRIMIR: no se puede llegar a 10.0.2.2:1: no contesta en ese puerto" <<< "$vp" \
      && grep -q "^IMPRIMIR: /NOESTA.PDF: no está$" <<< "$vp" \
      && { [ $MDNS = 0 ] || grep -q "^IMPRIMIR: en la red: «Impresora de prueba»: ipp://10.0.2.2:$PI1/ipp/print$" <<< "$vp"; } \
+     && [ "$(grep -c "^IMPRIMIR: el certificado de 10.0.2.2, la primera vez: se confía en él y se apunta su huella (SHA-256 " <<< "$vp")" = 1 ] \
+     && grep -q "^IMPRIMIR: mandado a ipps://10.0.2.2:$PI4/ipp/print: trabajo 1, en PDF (" <<< "$vp" && grep -q "^IMPRIMIR: mandado a ipps://10.0.2.2:$PI4/ipp/print: trabajo 2, en PDF (" <<< "$vp" \
+     && grep -q "^trabajo 2 («TLS2», application/pdf, [0-9]* octetos): PDF bien: 1 página" "$RP/srv4.txt" && grep -q "^TLS: TLSv1.2$" "$RP/srv4.txt" \
      && ! grep -q "^Programa «.*»: acaba con el código [0-9]*$" <<< "$vp" && ! grep -q "  MAL: " <<< "$vp" \
      && grep -q "^trabajo 1 («Cuentas», application/pdf, [0-9]* octetos): PDF bien: 1 página, texto «ConceptoImporteCuota de noviembre25,5Bingo del jueves61,9Total87,4PRUEBAPágina 1 de 1»$" <<< "$s1" \
      && grep -q "^trabajo 2 («Siempre», application/pdf, " <<< "$s1" \
      && grep -q "^trabajo 1 («Raster», image/pwg-raster, [0-9]* octetos): PWG bien: 1 página, 2480x3508 a 300 ppp, en sRGB; puntos oscuros: [0-9][0-9][0-9][0-9]*$" <<< "$s2"; then
-    ok "[etapa 11 a] imprimir sin CUPS: Cuentas a PDF (--convierte; PDF INFO lo lee) e IMPRIMIR por IPP a una impresora de mentira: lo que admite (Get-Printer-Attributes), el PDF (llega entero, con el texto de las celdas: «Cuota de noviembre 25,5…»), a PWG raster si no admite PDF (pintado por Hispa-PDF: $(grep -o '2480x3508 a 300 ppp, en sRGB; puntos oscuros: [0-9]*' <<< "$s2")), la impresora de siempre (-g, en /tmp/.config), y los errores (sin impresora, 2; no contesta, 3; el archivo no está, 6)$( [ $MDNS = 1 ] && echo '; y buscarla con DNS-SD (_ipp._tcp.local, por unicast al anfitrión: la multidifusión, cuando el núcleo la tenga)')"
+    ok "[etapa 11 a] imprimir sin CUPS: Cuentas a PDF (--convierte; PDF INFO lo lee) e IMPRIMIR por IPP a una impresora de mentira: lo que admite (Get-Printer-Attributes), el PDF (llega entero, con el texto de las celdas: «Cuota de noviembre 25,5…»), a PWG raster si no admite PDF (pintado por Hispa-PDF: $(grep -o '2480x3508 a 300 ppp, en sRGB; puntos oscuros: [0-9]*' <<< "$s2")), la impresora de siempre (-g, en /tmp/.config), y los errores (sin impresora, 2; no contesta, 3; el archivo no está, 6); por TLS (ipps://, TLS 1.2 con BearSSL: el certificado de la impresora, apuntado la primera vez y comparado la segunda)$( [ $MDNS = 1 ] && echo '; y buscarla con DNS-SD (_ipp._tcp.local, por unicast al anfitrión: la multidifusión, cuando el núcleo la tenga)')"
   else ko "[etapa 11 a] imprimir sin CUPS no hace lo que debe (código $c): $(grep -E '^cuentas|^IMPRIMIR|^Programa «(IMPRIMIR|CUENTAS|PDF)|  MAL|parado' <<< "$vp" | head -14 | cut -c1-150 | paste -sd '|'); la impresora: $(grep '^trabajo\|mal hecha' "$RP"/srv?.txt | cut -c1-200 | paste -sd '|')"; fi
 fi
 # (2) NAVEGADOR (con la imagen del navegador de la 10 h, KVM y 3 GB): Ctrl+P y «Elegir la
@@ -2187,7 +2197,7 @@ if [ -c /dev/kvm ] && [ -x "$T/progweb/NAVEGADOR" ] && [ -x "$T/prog/IMPRIMIR" ]
     ok "[etapa 11 a] «Imprimir…» de NAVEGADOR (Ctrl+P): la impresora elegida (en /tmp/.config, la de IMPRIMIR y la oficina), la página entera pintada por Ladybird a un PDF de hojas A4 y por IPP a la de mentira ($(sed 's/.*: PDF bien: //; s/, texto.*//' <<< "$tp")), y «Guardar como PDF…» con el selector para guardar (el título de la página de nombre: 2 hojas)"
   else ko "[etapa 11 a] «Imprimir…» de NAVEGADOR no hace lo que debe: falta ${faltap#|}; la impresora: ${tp:-nada}; $(grep -E '^NAVEGADOR: (imprimir|PDF|cuadro|la impresora|aviso)|parado' <<< "$vn" | tail -8 | cut -c1-160 | paste -sd '|')"; fi
 fi
-kill $PIP1 $PIP2 $PIP3 2> /dev/null; wait $PIP1 $PIP2 $PIP3 2> /dev/null
+kill $PIP1 $PIP2 $PIP3 $PIP4 2> /dev/null; wait $PIP1 $PIP2 $PIP3 $PIP4 2> /dev/null
 
 echo "== Hispa-64: $BIEN bien, $MAL mal =="
 [ $MAL = 0 ]
