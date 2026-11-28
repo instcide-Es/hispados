@@ -2013,7 +2013,7 @@ PY
     esperai "^NAVEGADOR: título «Archivo: descarga.txt (80): Hola desde Hispa-64: un archivo para descargar y subir.»$" 30
     ratoni 121 252 clic; esperai "^VENTANAS: menú emergente de «.*» (3 opciones)$" 20 && sleep 0.5
     teclasi '{abajo}{abajo}{intro}'; esperai "^NAVEGADOR: título «Elegido: dos»$" 20
-    ratoni 79 355 der; esperai "^VENTANAS: menú emergente de «.*» (11 opciones)$" 20 && sleep 0.5; fotoi 3
+    ratoni 79 355 der; esperai "^VENTANAS: menú emergente de «.*» (12 opciones)$" 20 && sleep 0.5; fotoi 3
     ratoni 217 372 clic; esperai "^NAVEGADOR: cargada file:///tmp/web/paginas/otra.html$" 60 && sleep 1
     teclasi '{ctrl-w}'; sleep 1.5
     teclasi '{ctrl-f}'; sleep 0.5; teclasi 'pingüino'; esperai "^NAVEGADOR: buscar: 1 de 4$" 20
@@ -2024,9 +2024,9 @@ PY
     teclasi '{ctrl-d}'; esperai "^NAVEGADOR: aviso «Añadido a los marcadores: «Elegido: dos»" 20 && sleep 0.8; fotoi 6
     teclasi '{ctrl-b}'; esperai "^VENTANAS: menú emergente de «.*» (7 opciones)$" 20 && sleep 0.3; teclasi '{esc}'
     teclasi '{ctrl-h}'; esperai "^VENTANAS: menú emergente de «.*» ([5-9] opciones)$" 20 && sleep 0.3; teclasi '{esc}'
-    ratoni 125 77 clic; esperai "^NAVEGADOR: cargada file:///tmp/web/casa/inicio.html$" 30 && sleep 1.5; fotoi 7
+    ratoni 125 77 clic; esperai "^NAVEGADOR: cargada file://\(/tmp/web/casa\|/casa/.config/navegador\)/inicio.html$" 30 && sleep 1.5; fotoi 7
     teclasi '{ctrl-l}'; teclasi "http://10.0.2.2:$PHI/descarga.bin{intro}"
-    esperai "^NAVEGADOR: descargado /tmp/web/casa/Descargas/descarga.bin (300000 octetos)$" 90 && sleep 0.8; fotoi 8
+    esperai "^NAVEGADOR: descargado \(/tmp/web/casa\|/casa\)/Descargas/descarga.bin (300000 octetos)$" 90 && sleep 0.8; fotoi 8
     kill $qi 2> /dev/null; wait $qi 2> /dev/null
     kill $PSI 2> /dev/null; wait $PSI 2> /dev/null
     vi=$(serie "$SI")
@@ -2341,21 +2341,21 @@ if [ -c /dev/kvm ] && [ -x "$T/progweb/NAVEGADOR" ] && [ -x "$T/prog/IMPRIMIR" ]
   esperap "^NAVEGADOR: cargada file:///tmp/web/paginas/imprimir.html$" 240 && sleep 1.5
   teclasp '{ctrl-p}'; esperap "^VENTANAS: menú emergente de «.*» (4 opciones)$" 20 && sleep 0.5
   teclasp '{abajo}{abajo}{intro}'; esperap "^NAVEGADOR: cuadro «impresora»" 20 && sleep 0.5
-  teclasp "ipp://10.0.2.2:$PI1/ipp/print{intro}"; esperap "^NAVEGADOR: la impresora, ipp://10.0.2.2:$PI1/ipp/print (en /tmp/.config/impresora.txt)$" 20
+  teclasp "ipp://10.0.2.2:$PI1/ipp/print{intro}"; esperap "^NAVEGADOR: la impresora, ipp://10.0.2.2:$PI1/ipp/print (en \(/tmp\|/casa\)/.config/impresora.txt)$" 20
   teclasp '{ctrl-p}'; esperap "^VENTANAS: menú emergente de «.*» (4 opciones)$" 20 && sleep 0.5
   teclasp '{abajo}{abajo}{intro}'; esperap "^NAVEGADOR: imprimir: mandado a ipp://10.0.2.2:$PI1/ipp/print: trabajo [0-9]*, en PDF (.*) (código 0)$" 120
   teclasp '{ctrl-p}'; sleep 1; teclasp '{abajo}{intro}'; esperap "^NAVEGADOR: cuadro «guardar»" 20 && sleep 0.8
-  teclasp '{intro}'; esperap "^NAVEGADOR: PDF hecho /tmp/web/casa/Hoja para imprimir.pdf ([0-9]* hojas, [0-9]* octetos)$" 120
+  teclasp '{intro}'; esperap "^NAVEGADOR: PDF hecho \(/tmp/web/casa\|/casa/Documentos\)/Hoja para imprimir.pdf ([0-9]* hojas, [0-9]* octetos)$" 120
   sleep 1
   kill $qp 2> /dev/null; wait $qp 2> /dev/null
   mcopy -o -i "$T/uefi-nav/hispa64.img@@$OFI" "$RP/grub-antes.cfg" ::boot/grub/grub.cfg 2> /dev/null
   mdel -i "$T/uefi-nav/hispa64.img@@$OFI" ::boot/prog/IMPRIMIR 2> /dev/null
   vn=$(serie "$SP"); s1=$(cat "$RP/srv1.txt")
   tp=$(grep "^trabajo [0-9]* («Hoja para imprimir», application/pdf, " <<< "$s1" | tail -1)
-  hp=$(grep -o "^NAVEGADOR: PDF hecho /tmp/web/casa/Hoja para imprimir.pdf ([0-9]* hojas" <<< "$vn" | grep -o '[0-9]* hojas' | grep -o '[0-9]*')
+  hp=$(grep -o "^NAVEGADOR: PDF hecho \(/tmp/web/casa\|/casa/Documentos\)/Hoja para imprimir.pdf ([0-9]* hojas" <<< "$vn" | grep -o '[0-9]* hojas' | grep -o '[0-9]*')
   rp=$(sed -n 's/.*, \([0-9]*\) puntos del color C81E3C.*/\1/p' <<< "$tp")
   if [ "$bienp" = 1 ] && grep -q ": PDF bien: 2 páginas, 2 imágenes (" <<< "$tp" && [ "${rp:-0}" -gt 1000000 ] && [ "$hp" = 2 ] \
-     && grep -q "^NAVEGADOR: la casa, /tmp/web/casa (en la memoria: se pierde al apagar)$" <<< "$vn"; then
+     && grep -q "^NAVEGADOR: la casa, \(/tmp/web/casa (en la memoria: se pierde al apagar)\|/casa (en el disco)\)$" <<< "$vn"; then
     ok "[etapa 11 a] «Imprimir…» de NAVEGADOR (Ctrl+P): la impresora elegida (en /tmp/.config, la de IMPRIMIR y la oficina), la página entera pintada por Ladybird a un PDF de hojas A4 y por IPP a la de mentira ($(sed 's/.*: PDF bien: //; s/, texto.*//' <<< "$tp")), y «Guardar como PDF…» con el selector para guardar (el título de la página de nombre: 2 hojas)"
   else ko "[etapa 11 a] «Imprimir…» de NAVEGADOR no hace lo que debe: falta ${faltap#|}; la impresora: ${tp:-nada}; $(grep -E '^NAVEGADOR: (imprimir|PDF|cuadro|la impresora|aviso)|parado' <<< "$vn" | tail -8 | cut -c1-160 | paste -sd '|')"; fi
 fi

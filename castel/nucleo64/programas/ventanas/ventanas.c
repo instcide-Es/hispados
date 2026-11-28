@@ -812,7 +812,6 @@ static int inicio_y(void)
 
 	for (k = 0; k < N_PROGS; k++)
 		n += prog_hay[k] != 0;
-	n += en.suspender == 1;		/* [etapa 11 a] */
 	return AL - BARRA - 8 - 40 * (n + 1) - 48;
 }
 
@@ -825,17 +824,24 @@ static void pinta_inicio(void)
 	lz_rect(&L, x + 1, y + 1, an - 2, 40, C_INICIO);
 	lz_ui_negrita(&L, x + 14, y + 27, "Hispa-64", 0xFFFFFF);
 	y += 48;
+	/* [etapa 11 a] «Suspender», a la derecha de la cabecera (si el equipo
+	 * sabe): así el menú no cambia de sitio */
+	if (en.suspender == 1) {
+		int sx = x + an - 12 - lz_ui_ancho("Suspender");
+
+		lz_redondeado(&L, sx - 8, y - 48 + 8, lz_ui_ancho("Suspender") + 16, 26, 6, inicio_sel == I_SUSPENDER ? 0xFFFFFF : 0x2E8B3E);
+		lz_ui(&L, sx, y - 48 + 26, "Suspender", inicio_sel == I_SUSPENDER ? 0x1A1E24 : 0xFFFFFF);
+	}
 	for (k = 0; k <= I_CONSOLA; k++) {
 		const char *t;
 
 		if (k < N_PROGS && !prog_hay[k])
 			continue;
-		if (k == I_SUSPENDER && en.suspender != 1)
+		if (k == I_SUSPENDER)
 			continue;
-		/* [etapa 10 d] la consola: se sale al intérprete de órdenes (ORDENES);
-		 * [etapa 11 a] suspender el equipo (a la memoria: S3) */
-		t = k == I_CONSOLA ? "Consola (salir a las órdenes)" : k == I_SUSPENDER ? "Suspender el equipo" : progs[k].nombre;
-		if (k == I_CONSOLA || (k == I_SUSPENDER))
+		/* [etapa 10 d] la consola: se sale al intérprete de órdenes (ORDENES) */
+		t = k == I_CONSOLA ? "Consola (salir a las órdenes)" : progs[k].nombre;
+		if (k == I_CONSOLA)
 			lz_raya_h(&L, x + 8, y - 4, an - 16, 0xB0B6BE);
 		if (inicio_sel == k) {
 			lz_rect(&L, x + 4, y, an - 8, 36, C_MENU_SEL);
@@ -856,10 +862,13 @@ static int en_inicio(int x, int y)
 
 	if (x < 4 || x >= 304)
 		return -1;
+	/* [etapa 11 a] «Suspender», en la cabecera */
+	if (en.suspender == 1 && y >= yy - 48 + 8 && y < yy - 48 + 34 && x >= 304 - 24 - lz_ui_ancho("Suspender"))
+		return I_SUSPENDER;
 	for (k = 0; k <= I_CONSOLA; k++) {
 		if (k < N_PROGS && !prog_hay[k])
 			continue;
-		if (k == I_SUSPENDER && en.suspender != 1)
+		if (k == I_SUSPENDER)
 			continue;
 		if (y >= yy && y < yy + 36)
 			return k;
