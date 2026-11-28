@@ -27,7 +27,12 @@
  *     sqlite en modo WAL): dos mmap del mismo archivo se ven, write y read
  *     con lo mapeado, un hijo que escribe (lo ve el padre), msync (y sus
  *     errores), lo de más allá del final, ftruncate (a cero al crecer), lo
- *     escrito en el archivo al soltarlo, EACCES de solo leer.
+ *     escrito en el archivo al soltarlo, EACCES de solo leer;
+ *   - [etapa 10 i] pidfd (pidfd_open y pidfd_send_signal: el Hub de Ladybird
+ *     vigila así a la interfaz): sin acabar, poll no lo da listo; al acabar el
+ *     hijo, poll (sin plazo) y epoll despiertan enseguida (sin mirar de vez en
+ *     cuando); de un zombi, listo ya; read, EINVAL; O_CLOEXEC; los errores
+ *     (EINVAL, ESRCH, EBADF); una señal por el pidfd; después de wait, ESRCH.
  * Al final, «MPOSIX: todo bien (N pruebas)» y código 0. Corre igual en Linux. */
 #define _GNU_SOURCE
 #include <stdlib.h>
@@ -53,6 +58,7 @@
 #include "comun.h"
 
 #define D "/tmp/mposix"
+#define PIDFD_NONBLOCK_ O_NONBLOCK
 
 static void borra_todo(const char *c)
 {
@@ -537,6 +543,90 @@ static void compartido_archivo(void)
 	printf("  mmap MAP_SHARED de escribir de un archivo: dos mmap, read y write, un hijo, msync, ftruncate, al archivo al soltarlo: bien\n");
 }
 
+/* [etapa 10 i] pidfd */
+static long ahora_ms(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static int pidfd_abre(pid_t pid, unsigned marcas)
+{
+	return (int)syscall(434, pid, marcas);
+}
+
+static void pidfd_(void)
+{
+	/* un hijo que acaba a los 300 ms: poll sin plazo despierta enseguida */
+	pid_t h = fork();
+	if (h == 0) { usleep(300000); _exit(7); }
+	int fd = pidfd_abre(h, 0);
+	MIRA(fd >= 0, "pidfd_open de un hijo");
+	MIRA(fcntl(fd, F_GETFD) == FD_CLOEXEC, "con O_CLOEXEC (siempre)");
+	struct pollfd pf = { .fd = fd, .events = POLLIN };
+	MIRA(poll(&pf, 1, 0) == 0 && pf.revents == 0, "sin acabar, poll no lo da listo");
+	char c;
+	errno = 0;
+	MIRA(read(fd, &c, 1) == -1 && errno == EINVAL, "read de un pidfd: EINVAL");
+	long t0 = ahora_ms();
+	pf.revents = 0;
+	int r = poll(&pf, 1, -1);
+	long dt = ahora_ms() - t0;
+	MIRA(r == 1 && (pf.revents & POLLIN) && dt >= 200 && dt < 1000, "al acabar el hijo, poll sin plazo despierta enseguida");
+	int st = -1;
+	MIRA(waitpid(h, &st, 0) == h && WIFEXITED(st) && WEXITSTATUS(st) == 7, "y el hijo, recogido (código 7)");
+	pf.revents = 0;
+	MIRA(poll(&pf, 1, 0) == 1 && (pf.revents & POLLIN), "recogido, sigue listo");
+	close(fd);
+	/* epoll, con otro hijo */
+	h = fork();
+	if (h == 0) { usleep(200000); _exit(0); }
+	fd = pidfd_abre(h, PIDFD_NONBLOCK_);
+	int ep = epoll_create1(EPOLL_CLOEXEC);
+	struct epoll_event e = { .events = EPOLLIN, .data.u64 = 42 }, sal;
+	epoll_ctl(ep, EPOLL_CTL_ADD, fd, &e);
+	MIRA(fd >= 0 && (fcntl(fd, F_GETFL) & O_NONBLOCK), "PIDFD_NONBLOCK");
+	t0 = ahora_ms();
+	r = epoll_wait(ep, &sal, 1, 5000);
+	dt = ahora_ms() - t0;
+	MIRA(r == 1 && sal.data.u64 == 42 && (sal.events & EPOLLIN) && dt < 1000, "epoll con un pidfd: despierta al acabar");
+	waitpid(h, &st, 0);
+	close(ep);
+	close(fd);
+	/* de un zombi: listo ya */
+	h = fork();
+	if (h == 0) _exit(0);
+	usleep(100000);
+	fd = pidfd_abre(h, 0);
+	pf.fd = fd;
+	pf.revents = 0;
+	MIRA(fd >= 0 && poll(&pf, 1, 0) == 1 && (pf.revents & POLLIN), "de un zombi: listo ya");
+	close(fd);
+	waitpid(h, &st, 0);
+	errno = 0;
+	MIRA(pidfd_abre(h, 0) == -1 && errno == ESRCH, "después de recogerlo: ESRCH");
+	/* una señal por el pidfd */
+	h = fork();
+	if (h == 0) { for (;;) pause(); }
+	fd = pidfd_abre(h, 0);
+	MIRA(syscall(424, fd, SIGTERM, NULL, 0) == 0 && waitpid(h, &st, 0) == h && WIFSIGNALED(st) && WTERMSIG(st) == SIGTERM, "pidfd_send_signal: SIGTERM");
+	errno = 0;
+	MIRA(syscall(424, fd, SIGTERM, NULL, 0) == -1 && errno == ESRCH, "pidfd_send_signal a uno ya acabado: ESRCH");
+	close(fd);
+	/* los errores */
+	errno = 0;
+	MIRA(pidfd_abre(0, 0) == -1 && errno == EINVAL, "pidfd_open(0): EINVAL");
+	errno = 0;
+	MIRA(pidfd_abre(getpid(), 0x1) == -1 && errno == EINVAL, "marcas que no son: EINVAL");
+	errno = 0;
+	MIRA(syscall(424, 0, SIGTERM, NULL, 0) == -1 && errno == EBADF, "pidfd_send_signal de uno que no es pidfd: EBADF");
+	fd = pidfd_abre(getpid(), 0);
+	MIRA(fd >= 0, "pidfd_open de uno mismo");
+	close(fd);
+	printf("  pidfd: poll y epoll despiertan al acabar el proceso, de un zombi listo ya, read EINVAL, O_CLOEXEC, pidfd_send_signal, ESRCH y EINVAL: bien\n");
+}
+
 int main(void)
 {
 	setvbuf(stdout, NULL, _IOLBF, 0);
@@ -551,5 +641,6 @@ int main(void)
 	getcpu_();
 	mas_cosas();
 	compartido_archivo();
+	pidfd_();
 	return acaba("MPOSIX");
 }

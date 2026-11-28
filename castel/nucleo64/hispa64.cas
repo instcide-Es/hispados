@@ -781,6 +781,7 @@ módulo Hispa64
     función etapa4()
         etapa9_hora()
         prepara_procesos()
+        prepara_pidfd()                         ; [etapa 10 i] el hilo «pidfd» (Objet64)
         prepara_sistema()
         si tiene("sinpruebas") entonces
             escribir("(sinpruebas: sin las pruebas de los programas)\n")

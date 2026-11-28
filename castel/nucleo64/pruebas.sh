@@ -392,7 +392,7 @@ e7_bien() {   # SALIDA N [avx]
     && grep -q "^MUNIX: todo bien (95 pruebas)$" <<< "$v" && grep -q "^Programa «MUNIX»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^  SCM_RIGHTS a otro proceso (una tubería, un eventfd y un memfd hechos después del fork), MSG_CTRUNC; SCM_CREDENTIALS; memfd compartido y sus sellos; 300 pasados$" <<< "$v" \
     && grep -q "^  /tmp: 100 KB escritos, leídos y borrados; pwritev, preadv, pwritev2, preadv2 y fchown; /proc/self/exe; close_range$" <<< "$v" && grep -q "^  /tmp: FAT16 «TMP», 31,9 MB en 8179 cúmulos de 4 KB, .*; de leer y escribir$" <<< "$v" \
-    && { [ -z "$MPX" ] || { grep -q "^MPOSIX: todo bien (121 pruebas)$" <<< "$v" && grep -q "^Programa «MPOSIX»: acaba con el código 0, como debe" <<< "$v" && mismas "$MPX" "$v"; }; } \
+    && { [ -z "$MPX" ] || { grep -q "^MPOSIX: todo bien (138 pruebas)$" <<< "$v" && grep -q "^Programa «MPOSIX»: acaba con el código 0, como debe" <<< "$v" && mismas "$MPX" "$v"; }; } \
     && grep -q "^MIPC: todo bien (9 pruebas)$" <<< "$v" && grep -q "^Programa «MIPC»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^  dos mapas de 256 x 256 compartidos (memfd): 60 cuadros pintados por el otro proceso, la suma bien, en " <<< "$v" \
     && [ "$(grep -c "^MCXX: todo bien (35 pruebas)$" <<< "$v")" = 2 ] && grep -q "^Programa «MCXX»: acaba con el código 0, como debe" <<< "$v" \

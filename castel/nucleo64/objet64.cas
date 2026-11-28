@@ -13,6 +13,15 @@
 ;   - los archivos de texto que hace el núcleo (/etc/resolv.conf,
 ;     /etc/hosts, /proc/net/route...): los hace quien los sabe (Red64) y
 ;     aquí se leen (y lseek al principio).
+;  [etapa 10 i] (docs/64/HISPA-64.md, sección 26) y pidfd (pidfd_open, 434;
+;  pidfd_send_signal, 424): un descriptor de un proceso, que se pone listo
+;  para leer (POLLIN) cuando el proceso acaba, como en Linux (el Hub de
+;  Ladybird vigila así a la interfaz, en vez de mirar cada segundo con
+;  kill). Quien despierta a los que esperan en poll y epoll es un hilo del
+;  núcleo, «pidfd» (desde el arranque, con los procesos: prepara_pidfd):
+;  espera en Procesos a que acabe alguno (espera_acabado) y, si hay algún
+;  pidfd abierto, avisa (Sondeo64.avisa; Procesos no puede importar
+;  Sondeo64: lo importa a él).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Objet64
@@ -24,6 +33,7 @@ módulo Objet64
     público constante F_TEMPO = 13
     público constante F_AZAR = 14
     público constante F_TEXTO = 15
+    público constante F_PIDFD = 18              ; [etapa 10 i] (la 16 es /dev/dsp, la 17 los sockets de Unix)
     constante EAGAIN = -11
     constante ENOMEM = -12
     constante EFAULT = -14
@@ -47,11 +57,64 @@ módulo Objet64
         datos: nat64
     fin
 
+    ; [etapa 10 i] un pidfd: el proceso (los pid no se repiten: crecen siempre)
+    público tipo Pidfd = estructura
+        refs, pid: nat64
+    fin
+
     público variable eventos_vivos, tempos_vivos, textos_vivos: nat64
+    público variable pidfds_vivos, avisos_pidfd: nat64     ; [etapa 10 i]
+    variable vigía_puesto: nat64
     variable cerrojo_o: nat64
 
     público función es_objeto(c: nat32): bool
-        devolver c >= F_EVENTO y c <= F_TEXTO
+        devolver (c >= F_EVENTO y c <= F_TEXTO) o c = F_PIDFD
+    fin
+
+    función pf_(d: nat64): puntero a Pidfd
+        devolver puntero(d)
+    fin
+
+    ; [etapa 10 i] el hilo «pidfd»: cada vez que acaba un proceso, si hay
+    ; algún pidfd, a mirar otra vez
+    función vigía_pidfd(nada: nat64)
+        variable v, w: nat64
+        v := acabados
+        mientras cierto hacer
+            w := espera_acabado(v)
+            si w <> v y pidfds_vivos > 0 entonces
+                suma_atómica(dirección(avisos_pidfd), 1)
+                Sondeo64.avisa()
+            fin
+            v := w
+        fin
+    fin
+
+    ; [etapa 10 i] (al arrancar, con los procesos) el hilo «pidfd»
+    público función prepara_pidfd()
+        si vigía_puesto = 0 entonces
+            vigía_puesto := 1
+            crea(nat64(dirección(vigía_pidfd)), 0, "pidfd", NORMAL, CUALQUIERA)
+        fin
+    fin
+
+    ; [etapa 10 i] un pidfd del proceso pid (que está: lo mira quien llama)
+    ; (si el proceso acaba antes de que haya un pidfd vivo, no hay aviso, pero
+    ; no hace falta: poll mira lo listo antes de dormir)
+    público función nuevo_pidfd(pid: nat64): nat64
+        variable f: puntero a Pidfd
+        f := puntero(nat64(reserva(tamaño(Pidfd))))
+        si f = nulo entonces devolver 0 fin
+        f.refs := 1
+        f.pid := pid
+        suma_atómica(dirección(pidfds_vivos), 1)
+        devolver nat64(f)
+    fin
+
+    ; [etapa 10 i] el proceso de un pidfd (0 si no lo es)
+    público función pid_de_pidfd(clase: nat32, d: nat64): nat64
+        si clase <> F_PIDFD o d = 0 entonces devolver 0 fin
+        devolver pf_(d).pid
     fin
 
     función ev_(d: nat64): puntero a Evento
@@ -114,6 +177,7 @@ módulo Objet64
         si clase = F_EVENTO entonces suma_atómica(dirección(ev_(d).refs), 1) fin
         si clase = F_TEMPO entonces suma_atómica(dirección(tp_(d).refs), 1) fin
         si clase = F_TEXTO entonces suma_atómica(dirección(tx_(d).refs), 1) fin
+        si clase = F_PIDFD entonces suma_atómica(dirección(pf_(d).refs), 1) fin
     fin
 
     público función cierra_objeto(clase: nat64, d: nat64)
@@ -133,6 +197,11 @@ módulo Objet64
                 libera(puntero(tx_(d).datos))
                 libera(puntero(d))
                 suma_atómica(dirección(textos_vivos), nob nat64(0))
+            fin
+        sino si clase = F_PIDFD entonces
+            si suma_atómica(dirección(pf_(d).refs), nob nat64(0)) = 1 entonces
+                libera(puntero(d))
+                suma_atómica(dirección(pidfds_vivos), nob nat64(0))
             fin
         fin
         Sondeo64.avisa()
@@ -251,6 +320,7 @@ módulo Objet64
             fin
             devolver ent64(k)
         fin
+        si clase = F_PIDFD entonces devolver EINVAL fin        ; [etapa 10 i] (como Linux)
         si n < 8 entonces devolver EINVAL fin
         mientras cierto hacer
             g := Sondeo64.gen
@@ -325,6 +395,11 @@ módulo Objet64
         variable t: puntero a Tempo
         r := 0
         si clase = F_AZAR o clase = F_TEXTO entonces devolver ev yb 0x145 fin
+        ; [etapa 10 i] un pidfd: listo para leer cuando el proceso ha acabado
+        si clase = F_PIDFD entonces
+            si pid_vivo(pf_(d).pid) entonces devolver 0 fin
+            devolver ev yb 0x41
+        fin
         b := toma(dirección(cerrojo_o))
         si clase = F_EVENTO entonces
             e := ev_(d)

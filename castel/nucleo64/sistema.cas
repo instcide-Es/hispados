@@ -2185,6 +2185,32 @@ módulo Sistema
         devolver fd_de_objeto(p, F_TEMPO, d, marcas_)
     fin
 
+    ; [etapa 10 i] pidfd_open(pid, marcas): un descriptor del proceso (con
+    ; O_CLOEXEC siempre, como Linux; PIDFD_NONBLOCK, el de O_NONBLOCK). El
+    ; proceso tiene que estar (vivo o zombi): si no, ESRCH
+    función pidfd_abre(p: puntero a Proceso, pid: nat64, marcas_: nat64): ent64
+        variable d: nat64
+        si marcas_ yb (nob nat64(0x800)) <> 0 entonces devolver EINVAL fin
+        si ent32(nat32(pid yb 0xFFFFFFFF)) <= 0 o pid > 0x7FFFFFFF entonces devolver EINVAL fin
+        si no pid_está(pid) entonces devolver ESRCH fin
+        d := nuevo_pidfd(pid)
+        si d = 0 entonces devolver ENOMEM fin
+        devolver fd_de_objeto(p, F_PIDFD, d, marcas_ ob 0x80000)
+    fin
+
+    ; [etapa 10 i] pidfd_send_signal(fd, señal, info, marcas): como kill al
+    ; proceso del pidfd (info, nulo; marcas, 0); si ya ha acabado, ESRCH
+    función pidfd_señal(p: puntero a Proceso, fd: nat64, s: nat64, info: nat64, marcas_: nat64): ent64
+        variable pid: nat64
+        si marcas_ <> 0 o info <> 0 entonces devolver EINVAL fin
+        si no fd_bien(p, fd) entonces devolver EBADF fin
+        pid := pid_de_pidfd(p.fd_clase[nat32(fd)], p.fd_obj[nat32(fd)])
+        si pid = 0 entonces devolver EBADF fin
+        si s > 64 entonces devolver EINVAL fin
+        si no pid_vivo(pid) entonces devolver ESRCH fin
+        devolver mata(p, ent64(pid), s)
+    fin
+
     ; timerfd_settime (pon) y timerfd_gettime
     función con_tempo(p: puntero a Proceso, fd: nat64, marcas_: nat64, v1: nat64, v2: nat64, pon: bool): ent64
         si no fd_bien(p, fd) entonces devolver EBADF fin
@@ -2635,6 +2661,8 @@ módulo Sistema
                 si es_unix(p, a1) entonces r := getsockopt_unix(p, a1, a2, a3, a4, a5) sino r := getsockopt_(p, a1, a2, a3, a4, a5) fin
             caso 319: r := memfd_(p, a1, a2)                      ; [etapa 10 d] memfd_create
             caso 157: r := prctl_(p, h, a1, a2)                    ; [etapa 10 d] prctl (lo que piden musl y Ladybird)
+            caso 434: r := pidfd_abre(p, a1, a2)                  ; [etapa 10 i] pidfd_open
+            caso 424: r := pidfd_señal(p, a1, a2, a3, a4)          ; [etapa 10 i] pidfd_send_signal
             caso 284: r := evento_(p, a1, 0)
             caso 290: r := evento_(p, a1, a2)
             caso 283: r := tempo_(p, a1, a2)

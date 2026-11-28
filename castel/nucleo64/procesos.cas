@@ -245,6 +245,7 @@ módulo Procesos
     público variable en_tabla: nat64            ; los que hay en ella
     público variable zombis_recogidos, huérfanos_n, forks, execs: nat64
     variable hijos_espera: Espera               ; los que esperan en wait4 (se despiertan todos al acabar uno)
+    público variable acabados: nat64            ; [etapa 10 i] los procesos que han acabado (para pidfd)
 
     ; ---- lo de bajo nivel ----
     función l8(d: nat64): nat32
@@ -1436,8 +1437,70 @@ módulo Procesos
             i := i + 1
         fin
         si suelto_ entonces libera_proceso(p) fin
+        ; ([etapa 10 i] para pidfd: uno más que ha acabado; quien espera en
+        ; espera_acabado lo ve con el cerrojo de hijos_espera, que toma
+        ; despierta_todos: no se pierde)
+        suma_atómica(dirección(acabados), 1)
         despierta_todos(dirección(hijos_espera))
         termina()
+    fin
+
+    ; ---- [etapa 10 i] pidfd (Objet64): si un proceso sigue, y esperar a que acabe alguno ----
+    ; ¿está el proceso pid en la tabla (vivo o zombi)? (pidfd_open: si no, ESRCH)
+    público función pid_está(pid: nat64): bool
+        variable b: nat64
+        variable i: nat32
+        variable q: puntero a Proceso
+        variable hay: bool
+        hay := falso
+        b := toma(dirección(procs_cerrojo))
+        i := 0
+        mientras i < MAX_PROC hacer
+            si tabla[i] <> 0 entonces
+                q := puntero(tabla[i])
+                si q.id = pid entonces hay := cierto fin
+            fin
+            i := i + 1
+        fin
+        suelta(dirección(procs_cerrojo), b)
+        devolver hay
+    fin
+
+    ; ¿sigue el proceso pid sin acabar? (un zombi ya ha acabado: el pidfd, listo)
+    público función pid_vivo(pid: nat64): bool
+        variable b: nat64
+        variable i: nat32
+        variable q: puntero a Proceso
+        variable vivo: bool
+        vivo := falso
+        b := toma(dirección(procs_cerrojo))
+        i := 0
+        mientras i < MAX_PROC hacer
+            si tabla[i] <> 0 entonces
+                q := puntero(tabla[i])
+                si q.id = pid y q.terminado = 0 entonces vivo := cierto fin
+            fin
+            i := i + 1
+        fin
+        suelta(dirección(procs_cerrojo), b)
+        devolver vivo
+    fin
+
+    ; (un hilo del núcleo) duerme hasta que acabe algún proceso después de
+    ; «visto» (lo que había en «acabados»); devuelve lo que hay ahora. Con un
+    ; plazo de 5 s por si acaso (nada se pierde: «acabados» sube antes de
+    ; despierta_todos, que toma el cerrojo con el que se mira aquí)
+    público función espera_acabado(visto: nat64): nat64
+        variable b, r: nat64
+        b := toma(dirección(hijos_espera.cerrojo))
+        si acabados = visto entonces
+            duerme_en_hasta(dirección(hijos_espera), ahora_ns() + 5000000000)
+            toma_sin(dirección(hijos_espera.cerrojo))
+        fin
+        sal_de(dirección(hijos_espera))
+        r := acabados
+        suelta(dirección(hijos_espera.cerrojo), b)
+        devolver r
     fin
 
     ; ---- [etapa 7] las señales ----
