@@ -5422,6 +5422,20 @@ Hispa-64 0.11.10 (uname: «etapa 11 a (la casa, la batería y suspender)»).
 | `programas/ventanas/ventanas.c` | la batería en la barra, el aviso, el brillo, «Suspender el equipo» en el menú Inicio |
 | `tests/acpi/haz_tapa.py`, `tapa-qemu.aml` | la tapa de mentira y los Notify del brillo |
 
+### Las imágenes
+
+- Hispa-64 **0.11.10**. La de siempre (512 MB: la casa, unos 374 MB) y la
+  **con navegador** (1,75 GB: la casa, unos 634 MB); en VirtualBox, el .vdi
+  no crece por lo vacío.
+- **Probadas** (QEMU, KVM, 4 procesadores): la de siempre por UEFI (el
+  disco, con /casa) y por la BIOS (el CD, sin casa), hasta el escritorio;
+  la del navegador igual, y por UEFI «el escritorio con el Navegador»
+  («NAVEGADOR: la casa, /casa (en el disco)», https://hispados.es/).
+- En `Pendientes/VirtualBox/Hispa-64-etapa-11a/` (la 10 i, quitada) y la
+  del navegador como memoria USB en `ASUS-GL553V` y `ThinkPad-E14`
+  `/Hispa-64-primer-arranque/`, con lo que hay que mirar de la batería, la
+  tapa y el brillo.
+
 ### Cómo se ha probado
 
 - **La batería entera: 156 de 157** (eran 145: la casa, el corte de luz en
