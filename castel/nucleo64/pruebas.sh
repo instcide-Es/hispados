@@ -2197,6 +2197,38 @@ if [ -c /dev/kvm ] && [ -x "$T/progweb/NAVEGADOR" ] && [ -x "$T/prog/IMPRIMIR" ]
     ok "[etapa 11 a] «Imprimir…» de NAVEGADOR (Ctrl+P): la impresora elegida (en /tmp/.config, la de IMPRIMIR y la oficina), la página entera pintada por Ladybird a un PDF de hojas A4 y por IPP a la de mentira ($(sed 's/.*: PDF bien: //; s/, texto.*//' <<< "$tp")), y «Guardar como PDF…» con el selector para guardar (el título de la página de nombre: 2 hojas)"
   else ko "[etapa 11 a] «Imprimir…» de NAVEGADOR no hace lo que debe: falta ${faltap#|}; la impresora: ${tp:-nada}; $(grep -E '^NAVEGADOR: (imprimir|PDF|cuadro|la impresora|aviso)|parado' <<< "$vn" | tail -8 | cut -c1-160 | paste -sd '|')"; fi
 fi
+# (3) Cuentas en el escritorio (la misma imagen, con el intérprete: «VENTANAS CUENTAS»): lo
+# escrito en A1 y Ctrl+P: el cuadro «Imprimir» (la impresora, escrita) y la hoja, a la de PDF
+if [ -c /dev/kvm ] && [ -x "$T/prog/IMPRIMIR" ] && [ -x "$T/prog/CUENTAS" ] && [ -f $OVMF_C ] && [ -f "$T/uefi-nav/hispa64.img" ] && [ -n "$PI1" ]; then
+  OFI=$(( 2048 * 512 ))
+  mcopy -o -i "$T/uefi-nav/hispa64.img@@$OFI" ::boot/grub/grub.cfg "$RP/grub-antes.cfg" 2> /dev/null
+  mcopy -o -i "$T/uefi-nav/hispa64.img@@$OFI" "$T/prog/IMPRIMIR" ::boot/prog/IMPRIMIR 2> /dev/null
+  mcopy -o -i "$T/uefi-nav/hispa64.img@@$OFI" "$T/prog/CUENTAS" ::boot/prog/CUENTAS 2> /dev/null
+  sed 's|escritorio navegador=file:///tmp/web/paginas/ventana.html ||; s|^\(  module2 /boot/HISPA64.SIM HISPA64.SIM\)$|\1\n  module2 /boot/prog/IMPRIMIR IMPRIMIR\n  module2 /boot/prog/CUENTAS CUENTAS|' "$RP/grub-antes.cfg" > "$RP/grub-cu.cfg"
+  mcopy -o -i "$T/uefi-nav/hispa64.img@@$OFI" "$RP/grub-cu.cfg" ::boot/grub/grub.cfg 2> /dev/null
+  SP="$RP/cu.txt"; MP="$RP/moncu.sock"; rm -f "$SP" "$MP"; cp $OVMF_V "$RP/varscu.fd"
+  timeout 600 qemu-system-x86_64 -enable-kvm -cpu host -machine q35 -m 3072 -smp 4 -drive if=pflash,format=raw,readonly=on,file=$OVMF_C \
+    -drive if=pflash,format=raw,file="$RP/varscu.fd" -drive file="$T/uefi-nav/hispa64.img",format=raw,if=none,id=d0,snapshot=on -device ide-hd,drive=d0,bus=ide.0 \
+    -device qemu-xhci,id=xhci -device usb-tablet,bus=xhci.0 -display none -serial file:"$SP" \
+    -monitor unix:"$MP",server,nowait -no-reboot -nic user,model=e1000 > /dev/null 2>&1 &
+  qp=$!
+  bienp=1; faltap=""
+  esperap() { local i; for i in $(seq 1 $(( $2 * 5 ))); do serie "$SP" | grep -q -- "$1" && return 0; sleep 0.2; done; bienp=0; faltap="$faltap|$1"; echo "  (etapa 11 a: no llega «$1»)"; return 1; }
+  teclasp() { python3 -I "$AQUI/programas/teclas.py" --serie "$SP" "$MP" "$@" 2> /dev/null; sleep 0.3; }
+  esperap "^/.*> " 240 && sleep 1
+  teclasp 'VENTANAS CUENTAS{intro}'; esperap "cuentas: lista (" 90 && sleep 2
+  teclasp 'Hola, Hispa-64{intro}'; sleep 1
+  teclasp '{ctrl-p}'; esperap "^cuentas: cuadro «Imprimir»" 20 && sleep 1
+  teclasp "ipp://10.0.2.2:$PI1/ipp/print{intro}"; esperap "^cuentas: imprimir: " 60 && sleep 1
+  kill $qp 2> /dev/null; wait $qp 2> /dev/null
+  mcopy -o -i "$T/uefi-nav/hispa64.img@@$OFI" "$RP/grub-antes.cfg" ::boot/grub/grub.cfg 2> /dev/null
+  mdel -i "$T/uefi-nav/hispa64.img@@$OFI" ::boot/prog/IMPRIMIR ::boot/prog/CUENTAS 2> /dev/null
+  vc=$(serie "$SP"); tc=$(grep "^trabajo [0-9]* («Libro de Cuentas», application/pdf, " "$RP/srv1.txt" | tail -1)
+  if [ "$bienp" = 1 ] && grep -q "^cuentas: imprimir: mandado a ipp://10.0.2.2:$PI1/ipp/print: trabajo [0-9]*, en PDF (" <<< "$vc" \
+     && grep -q ": PDF bien: 1 página, texto «Hola, Hispa-64Hoja1Página 1 de 1»$" <<< "$tc"; then
+    ok "[etapa 11 a] Cuentas imprime (en el escritorio, Ctrl+P: el cuadro «Imprimir» con la impresora escrita; la hoja, en PDF por IPP: $(sed 's/.*: PDF bien: //' <<< "$tc"))"
+  else ko "[etapa 11 a] Cuentas no imprime: falta ${faltap#|}; la impresora: ${tc:-nada}; $(grep -E '^cuentas|parado' <<< "$vc" | tail -5 | cut -c1-160 | paste -sd '|')"; fi
+fi
 kill $PIP1 $PIP2 $PIP3 $PIP4 2> /dev/null; wait $PIP1 $PIP2 $PIP3 $PIP4 2> /dev/null
 
 echo "== Hispa-64: $BIEN bien, $MAL mal =="
