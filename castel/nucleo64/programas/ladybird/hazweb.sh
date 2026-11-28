@@ -19,7 +19,9 @@
 #  - hispa64/pila.c (la pila del hilo principal con musl), sinopenssl.c,
 #    sindbus.c y singl.c (lo de OpenSSL, D-Bus y EGL/GLES que se nombra), en
 #    libh64capa.a, que va en cada programa.
-# Y dos programas de prueba para Hispa-64:
+# Y tres programas de prueba para Hispa-64:
+#  - [etapa 10 i] MCRIPTO (mcripto.c): las funciones de OpenSSL de la WebCrypto
+#    (hispa64/webcripto), con los vectores de las normas;
 #  - MJS (mjs.c): las pruebas de LibJS. Se compila con el cruzado de C
 #    (estático) junto con js.tar (terceros/ladybird/Tests/LibJS/Runtime, en
 #    un tar con .incbin: haz_mjs); corre test-js-runtime, que tiene que estar
@@ -81,11 +83,35 @@ haz_mweb() {
   "$CC" -O2 -Wall -fno-stack-protector -static -o "$S/MWEB" "$AQUI/mweb.c" "$O/webtar.s"
   "$X-strip" --strip-unneeded "$S/MWEB"
 }
+# [etapa 10 i] la WebCrypto (hispa64/webcripto, sobre BearSSL y monocypher; ver su
+# LEEME.txt) en build/web-obj/cripto: sinopenssl.c, webcripto/*.c, monocypher,
+# lo que pide de más de BearSSL (terceros/bearssl/src64w) y, para que no falte
+# nada al enlazar (libh64capa va la última, detrás de libbearssl.a), los
+# objetos de BearSSL de build/bearssl64-obj (hazcurl.sh). Va en libh64capa.a.
+haz_cripto() {
+  local C2=$O/cripto f
+  mkdir -p "$C2"
+  local OPC="-O2 -fno-stack-protector -I$T/bearssl/inc -I$T/bearssl/src -I$T/monocypher -I$AQUI/hispa64"
+  # shellcheck disable=SC2086
+  for f in "$AQUI"/hispa64/sinopenssl.c "$AQUI"/hispa64/webcripto/*.c "$T"/monocypher/monocypher.c "$T"/monocypher/monocypher-ed25519.c "$T"/bearssl/src64w/*.c; do
+    "$CC" $OPC -c "$f" -o "$C2/$(basename "$f" .c).o"
+  done
+  for f in "$B"/bearssl64-obj/*.o; do
+    [ -f "$C2/$(basename "$f")" ] || cp "$f" "$C2/"
+  done
+}
+# MCRIPTO (mcripto.c): las pruebas de la WebCrypto, con lo mismo que va en libh64capa
+haz_mcripto() {
+  "$CC" -O2 -Wall -fno-stack-protector -static -I"$AQUI" -o "$S/MCRIPTO" "$AQUI/mcripto.c" "$O"/cripto/*.o
+  "$X-strip" --strip-unneeded "$S/MCRIPTO"
+}
 if [ -z "$CARGO" ] || [ -z "$CMAKE" ] || [ -z "$NINJA" ] || [ ! -x "$CC" ]; then
   # sin Rust o sin cmake: lo ya hecho
   if [ -f "$O/sal/Hub" ] && [ -x "$CC" ]; then
     for p in $PROGS; do [ -f "$O/sal/$p" ] && cp "$O/sal/$p" "$S/"; done
     [ -f "$S/Navegador" ] && mv "$S/Navegador" "$S/NAVEGADOR"
+    haz_cripto
+    haz_mcripto
     haz_mjs
     haz_mweb
     echo "hechos: $(cd "$S" && ls | tr '\n' ' ')"
@@ -120,10 +146,10 @@ if [ ! -f "$O/libicusin.a" ] || [ "$B/icu-obj/libicu.a" -nt "$O/libicusin.a" ]; 
 fi
 # lo nuestro de cada programa
 "$CC" -O2 -c "$AQUI/hispa64/pila.c" -o "$O/pila.o"
-"$CC" -O2 -c "$AQUI/hispa64/sinopenssl.c" -o "$O/sinopenssl.o"
 "$CC" -O2 -I"$AQUI/hispa64/incluir" -c "$AQUI/hispa64/sindbus.c" -o "$O/sindbus.o"
 "$CC" -O2 -DEGL_NO_X11 -I"$T/angle-cabeceras" -c "$AQUI/hispa64/singl.c" -o "$O/singl.o"
-rm -f "$O/libh64capa.a"; "$X-ar" rcs "$O/libh64capa.a" "$O/pila.o" "$O/sinopenssl.o" "$O/sindbus.o" "$O/singl.o"
+haz_cripto
+rm -f "$O/libh64capa.a"; "$X-ar" rcs "$O/libh64capa.a" "$O/pila.o" "$O/sindbus.o" "$O/singl.o" "$O"/cripto/*.o
 # ---- 2. las crates de crates.io, de terceros/rust-crates, sin red (como
 # hazlb.sh: crates.py las comprueba con el Cargo.lock y las abre en V; cargo
 # las toma de ahí por la configuración de CARGO_HOME) ----
@@ -159,6 +185,7 @@ for p in $PROGS; do
 done
 # ([etapa 10 h] la interfaz, NAVEGADOR: con mayúsculas, como los demás programas de Hispa-64)
 mv "$S/Navegador" "$S/NAVEGADOR"
+haz_mcripto
 haz_mjs
 haz_mweb
 echo "hechos: $(cd "$S" && ls | tr '\n' ' ')"

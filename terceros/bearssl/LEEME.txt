@@ -26,3 +26,15 @@ nada del mismo bearssl-0.6.tar.gz: los 43 archivos que enlaza curl y no
 están en src/. Solo los compila hazcurl.sh (castel/nucleo64/programas), con
 musl, en build/bearssl64-obj: el Makefile, hazred.sh y los de Hispa-Pentium
 siguen con src/ solo, como antes.
+
+src64w/ (Hispa-64, etapa 10 i, docs/64/HISPA-64.md sección 26): lo que pide
+además la WebCrypto de Ladybird en Hispa-64 (castel/nucleo64/programas/
+ladybird/hispa64/webcripto: GCM, generar claves EC y RSA, firmar con ECDSA,
+las operaciones privadas de RSA con i62 e i31), copiado sin cambiar nada del
+mismo bearssl-0.6.tar.gz (la suma de arriba): aead/gcm.c, ec/ec_keygen.c,
+ec/ecdsa_i31_sign_raw.c, rsa/rsa_default_keygen.c, rsa/rsa_default_priv.c,
+rsa/rsa_i31_keygen.c, rsa/rsa_i31_keygen_inner.c, rsa/rsa_i31_priv.c,
+rsa/rsa_i62_keygen.c, rsa/rsa_i62_priv.c, int/i31_decred.c, int/i31_moddiv.c,
+int/i31_mulacc.c e int/i31_reduce.c. Solo los compila hazweb.sh (en
+libh64capa.a, con los de build/bearssl64-obj, para que no falte nada al
+enlazar: libh64capa va la última).

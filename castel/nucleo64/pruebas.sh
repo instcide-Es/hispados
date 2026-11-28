@@ -141,6 +141,11 @@
 #     de TestAK (las pruebas de AK de Ladybird), y los 85 en el de KVM
 #     («ak=todas»); MUNIX con preadv, pwritev, fchown, /proc/self/exe y
 #     close_range.
+#   - [etapa 10 i] en cada arranque con musl, MCRIPTO (la WebCrypto de Ladybird:
+#     las funciones de OpenSSL de hispa64/webcripto sobre BearSSL y monocypher,
+#     con los vectores de las RFC y de NIST); y con KVM, las pruebas de la
+#     WebCrypto de Ladybird (Tests/LibWeb/Text/input/Crypto) en el navegador
+#     sin ventana (MWEB --cripto), igual que en Linux.
 # Uso: nucleo64/pruebas.sh [CARPETA_DE_TRABAJO]   (unos 8 minutos)
 AQUI=$(cd "$(dirname "$0")" && pwd)
 C=$(dirname "$AQUI")
@@ -245,6 +250,9 @@ MCD=$( [ -x "$T/prog/MCANDADOS" ] && cd "$T/prog" && ./MCANDADOS 2> /dev/null | 
 # [etapa 10 g] MPOSIX (los enlaces, 65.536 descriptores, el otro lado cerrado,
 # un memfd grande, madvise, mremap, EDEADLK, getcpu) en Linux: lo mismo en Hispa-64
 MPX=$( [ -x "$T/prog/MPOSIX" ] && cd "$T/prog" && ./MPOSIX 2> /dev/null | grep '^  ')
+# [etapa 10 i] MCRIPTO (la WebCrypto de Ladybird: las funciones de OpenSSL de
+# hispa64/webcripto, con los vectores de las normas) en Linux: lo mismo en Hispa-64
+MCR=$( [ -x "$T/prog/MCRIPTO" ] && cd "$T/prog" && ./MCRIPTO 2> /dev/null | grep '^MCRIPTO: todo bien (')
 # skia_bien TEXTO: MSKIA en Hispa-64 frente a MSKIA en Linux: las mismas
 # líneas (menos la de lo dibujado y la huella); si el camino es el mismo, lo
 # dibujado igual (el crc32 de los píxeles y del PNG); y la huella (la media de
@@ -409,6 +417,7 @@ e7_bien() {   # SALIDA N [avx]
     && grep -q "^MAK: todo bien (" <<< "$v" && grep -qE "^Programa «MAK( todas)?»: acaba con el código 0, como debe" <<< "$v" && [ -n "$MAKL" ] && [ -n "$MAKT" ] && { grep -qxF "$MAKL" <<< "$v" || grep -qxF "$MAKT" <<< "$v"; } \
     && [ "$(grep -c "^MRELOJ: todo bien (20 pruebas)$" <<< "$v")" = 2 ] && grep -q "^Programa «MRELOJ»: acaba con el código 0, como debe" <<< "$v" && grep -q "^Programa «MRELOJD»: acaba con el código 0, como debe" <<< "$v" && mismas "$MRL" "$v" \
     && grep -q "^MRELOJ: el vDSO y la hora (dinámico: ld-musl en 0x7f0000000000, el programa en 0x555555554000)$" <<< "$v" \
+    && { [ -z "$MCR" ] || { grep -qxF "$MCR" <<< "$v" && grep -q "^Programa «MCRIPTO»: acaba con el código 0, como debe" <<< "$v"; }; } \
     && { [ -z "$MCD" ] || { grep -q "^MCANDADOS: todo bien (49 pruebas)$" <<< "$v" && grep -q "^Programa «MCANDADOS»: acaba con el código 0, como debe" <<< "$v" && mismas "$MCD" "$v"; }; } \
     && grep -qE "^Después de musl: .*; [1-9][0-9]* páginas de la unidad prestadas a los programas, sin copiarlas$" <<< "$v" \
     && grep -q "^  hilos: 200 std::thread, thread_local (200 destruidos), condition_variable, async, promise, timed_mutex$" <<< "$v" \
@@ -421,7 +430,7 @@ e7_bien() {   # SALIDA N [avx]
 e7_ok() {   # SALIDA N QUÉ [avx]
   local v; v=$(serie "$1")
   if e7_bien "$1" "$2" "${4:-}"; then
-    ok "etapa 7 $3: musl (MHOLA estático, dinámico con ld-musl y libsaludo.so, y PIE; MHILOS, MSENALES, MPROCESOS y MMAPA, estáticos y dinámicos), Lua, [etapa 10] C++ (MCXX: 200 hilos, excepciones, flujos, regex; [etapa 10 c] con el compilador cruzado, estático y dinámico, MCXXD) y la letra (MTEXTO: HarfBuzz y FreeType, lo mismo que en Linux) y [etapa 10 b] ICU (MICU: 28 pruebas, lo mismo que en Linux; la zona, Europe/Madrid, por readlink de /etc/localtime) y libcurl (MCURL: 20 pruebas por 127.0.0.1, 16 a la vez con «multi») y [etapa 10 c] IPv6 (MRED6: TCP, UDP e ICMPv6 por ::1, los dos a la vez e IPV6_V6ONLY) y [etapa 10 d] los sockets de Unix (MUNIX: 85 pruebas, SCM_RIGHTS, SCM_CREDENTIALS, memfd, las carreras de H4 y H11, /tmp) y el IPC de Ladybird (MIPC: dos procesos, 60 cuadros por memfd) y [etapa 10 e] las bibliotecas de Ladybird (MIMG: zlib, libpng, libjpeg-turbo y libwebp; MLIBS: 12 más) y Skia (MSKIA: $(grep -o "el camino: [A-Z0-9]*" <<< "$v" | head -1), lo dibujado como en Linux) y AK de Ladybird (MAK: $(grep -o "^  [0-9]* grupos, [0-9]* casos" <<< "$v" | head -1 | sed "s/^  //") de TestAK)$( [ -n "$MRS" ] && echo " y [etapa 10 f] Rust (MRUST: $(grep -o "^MRUST: todo bien ([0-9]* pruebas" <<< "$v" | head -1 | grep -o "[0-9]* pruebas"), lo mismo que en Linux)") y [etapa 10 f] el vDSO (MRELOJ y MRELOJD: $(grep -o "^MRELOJ: en Hispa-64, el vDSO [a-z ]*" <<< "$v" | head -1 | sed "s/^MRELOJ: en Hispa-64, el vDSO //")) y los cerrojos de fcntl (MCANDADOS: 44 pruebas, sqlite con su VFS de Unix), todo bien; $(grep '^Después de musl:' <<< "$v" | cut -d';' -f2 | sed 's/^ //'); $(grep '^Después de musl:' <<< "$v" | cut -d';' -f3 | sed 's/^ //' | cut -d' ' -f1) páginas prestadas de la unidad$( [ "${4:-}" = avx ] && echo '; los registros de AVX de 8 hilos, intactos')"
+    ok "etapa 7 $3: musl (MHOLA estático, dinámico con ld-musl y libsaludo.so, y PIE; MHILOS, MSENALES, MPROCESOS y MMAPA, estáticos y dinámicos), Lua, [etapa 10] C++ (MCXX: 200 hilos, excepciones, flujos, regex; [etapa 10 c] con el compilador cruzado, estático y dinámico, MCXXD) y la letra (MTEXTO: HarfBuzz y FreeType, lo mismo que en Linux) y [etapa 10 b] ICU (MICU: 28 pruebas, lo mismo que en Linux; la zona, Europe/Madrid, por readlink de /etc/localtime) y libcurl (MCURL: 20 pruebas por 127.0.0.1, 16 a la vez con «multi») y [etapa 10 c] IPv6 (MRED6: TCP, UDP e ICMPv6 por ::1, los dos a la vez e IPV6_V6ONLY) y [etapa 10 d] los sockets de Unix (MUNIX: 85 pruebas, SCM_RIGHTS, SCM_CREDENTIALS, memfd, las carreras de H4 y H11, /tmp) y el IPC de Ladybird (MIPC: dos procesos, 60 cuadros por memfd) y [etapa 10 e] las bibliotecas de Ladybird (MIMG: zlib, libpng, libjpeg-turbo y libwebp; MLIBS: 12 más) y Skia (MSKIA: $(grep -o "el camino: [A-Z0-9]*" <<< "$v" | head -1), lo dibujado como en Linux) y AK de Ladybird (MAK: $(grep -o "^  [0-9]* grupos, [0-9]* casos" <<< "$v" | head -1 | sed "s/^  //") de TestAK)$( [ -n "$MRS" ] && echo " y [etapa 10 f] Rust (MRUST: $(grep -o "^MRUST: todo bien ([0-9]* pruebas" <<< "$v" | head -1 | grep -o "[0-9]* pruebas"), lo mismo que en Linux)") y [etapa 10 f] el vDSO (MRELOJ y MRELOJD: $(grep -o "^MRELOJ: en Hispa-64, el vDSO [a-z ]*" <<< "$v" | head -1 | sed "s/^MRELOJ: en Hispa-64, el vDSO //")) y los cerrojos de fcntl (MCANDADOS: 44 pruebas, sqlite con su VFS de Unix)$( [ -n "$MCR" ] && echo " y [etapa 10 i] la WebCrypto (MCRIPTO: $(grep -o '[0-9]* pruebas' <<< "$MCR") con los vectores de las normas, lo mismo que en Linux)"), todo bien; $(grep '^Después de musl:' <<< "$v" | cut -d';' -f2 | sed 's/^ //'); $(grep '^Después de musl:' <<< "$v" | cut -d';' -f3 | sed 's/^ //' | cut -d' ' -f1) páginas prestadas de la unidad$( [ "${4:-}" = avx ] && echo '; los registros de AVX de 8 hilos, intactos')"
   else ko "etapa 7 $3 no dice lo que debe: $(grep -E '^Programa «[ML]|^M[A-Z]*: [0-9]* mal|^LUA:|^Después de musl|^  la memoria|MAL|parado' <<< "$v" | cut -c1-110 | paste -sd '|' | cut -c1-1500)"; fi
 }
 e3_dice() {   # SALIDA: lo que dice, para cuando sale mal

@@ -1,0 +1,48 @@
+La WebCrypto de Hispa-64 (etapa 10 i, docs/64/HISPA-64.md, sección 26)
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+La WebCrypto de Ladybird (crypto.subtle) está en Rust (Libraries/LibWeb/
+Bindings/Rust/src/crypto) y hace todo lo de cifrar con su LibCrypto de Rust
+(terceros/ladybird/Libraries/LibCrypto/Rust/src), que llama a unas 120
+funciones de OpenSSL 3 (sys.rs). Hispa-64 no lleva OpenSSL: aquí están esas
+funciones, con los mismos nombres y la misma forma de llamarlas, hechas sobre
+lo que ya hay en terceros/:
+  - BearSSL 0.6 (MIT): SHA-1 y SHA-2, AES (con AES-NI si lo hay; si no, el
+    de tiempo constante), GCM, ECDSA y ECDH con P-256, P-384 y P-521
+    (ec_all_m31, con el número de RFC 6979), RSA (generar con i62 o i31, y las
+    operaciones privadas con el CRT, de tiempo constante). Lo que faltaba de
+    BearSSL va en terceros/bearssl/src64w, sin cambiar.
+  - monocypher 4 (BSD-2 o CC0): Ed25519, X25519, ChaCha20, Poly1305, Argon2.
+  - lo nuestro: SHA-3, SHAKE y el Keccak de KMAC (Keccak-f[1600]), HMAC de
+    todos los resúmenes, KMAC128/256, HKDF, PBKDF2, AES-CTR con el contador
+    entero de 128 bits, AES-KW, AES-OCB, la unión de ChaCha20 y Poly1305 de
+    RFC 8439, PKCS #1 v1.5, PSS y OAEP (también con SHA-3), los números grandes
+    (bn.c) para las comprobaciones de las claves (las de OpenSSL: SP 800-56B),
+    los puntos comprimidos de EC y las claves RSA que vienen sin el CRT, y el
+    DER (SPKI, PKCS #8, RSAPrivateKey, ECPrivateKey, Ecdsa-Sig-Value).
+
+Los archivos:
+  interno.h    los tipos (EVP_PKEY, BIGNUM... son nuestros; el Rust solo los
+               ve como punteros) y lo que se usan entre ellos
+  bn.c         BIGNUM y las funciones BN_ de OpenSSL
+  resumen.c    los resúmenes, HMAC, KMAC; EVP_MD, EVP_Q_digest, EVP_MAC
+  kdf.c        HKDF, PBKDF2 y Argon2: EVP_KDF
+  cifra.c      AES-CBC, CTR, GCM, KW y OCB, ChaCha20-Poly1305: EVP_CIPHER
+  claves.c     las claves (EVP_PKEY, EVP_PKEY_CTX), firmar, comprobar,
+               cifrar, descifrar, derivar; EC_GROUP, EC_POINT, ECDSA_SIG
+  der.c        d2i_ e i2d_ (SPKI, PKCS #8, firmas de ECDSA)
+  mdctx.h      EVP_MD_CTX (resumir o firmar)
+  ../sinopenssl.c  OSSL_PARAM y OSSL_PARAM_BLD, RAND_bytes, OPENSSL_cleanse
+  herramientas/vectores.py  hace ../../mcripto-vectores.h (en el anfitrión)
+
+Lo que no hay (falla como OpenSSL cuando no puede: nulo o 0, y la WebCrypto
+dice NotSupportedError u OperationError): Ed448 y X448 (no hay quien los haga
+en terceros/), ML-DSA y ML-KEM (los de FIPS 203 y 204: más adelante), y las
+claves RSA de más de 16384 bits; generar RSA, de 512 a 4096 bits (BearSSL),
+con el exponente de 32 bits como mucho.
+
+Las pruebas: MCRIPTO (../../mcripto.c) en cada arranque con musl, y las de la
+WebCrypto de Ladybird (Tests/LibWeb/Text/input/Crypto) con MWEB --cripto.
+
+Se compila en hazweb.sh (en libh64capa.a, que va en cada programa de Ladybird)
+y en hazmusl.sh (MCRIPTO).

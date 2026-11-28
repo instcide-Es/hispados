@@ -21,6 +21,7 @@
 #   PING IFCONFIG DESCARGA NTP ECO MRED   los de red (hazred.sh, etapa 9)
 #   CURL MCURL                  curl y libcurl con BearSSL (hazcurl.sh, etapa 10 b)
 #   MCXX                        la prueba de C++ (cxx/hazcxx.sh, etapa 10)
+#   MCRIPTO                     [etapa 10 i] la WebCrypto de Ladybird (ladybird/mcripto.c)
 # Uso: hazmusl.sh SALIDA   (dice en la última línea los que ha hecho; si no
 # hay gcc, no hace nada)
 set -e
@@ -83,4 +84,18 @@ if [ -f "$B/sqlite-obj/libsqlite.a" ]; then
   strip --strip-unneeded "$S/MCANDADOS"
   CAND=" MCANDADOS"
 fi
-echo "hechos: MHOLA MHOLAP MHOLAD MHILOS MHILOSD MSENALES MSENALESD MPROCESOS MPROCESOSD MMAPA MMAPAD MRELOJ MRELOJD MBUCLE MDISP MSONIDO MUNIX MPOSIX ld-musl-x86_64.so.1 libsaludo.so LUA PRUEBA.LUA $RED $CURLS $CXX$CAND"
+# [etapa 10 i] la WebCrypto de Ladybird (MCRIPTO: ladybird/mcripto.c, con
+# ladybird/hispa64/webcripto y sinopenssl.c, monocypher, terceros/bearssl/src64w
+# y el BearSSL de hazcurl.sh), con los vectores de las normas
+CRIP=""
+if [ -f "$B/bearssl64-obj/libbearssl.a" ]; then
+  L=$AQUI/ladybird
+  TB=$R/terceros
+  # shellcheck disable=SC2086
+  "$M" $CF -static -I"$L" -I"$L/hispa64" -I"$TB/bearssl/inc" -I"$TB/bearssl/src" -I"$TB/monocypher" -o "$S/MCRIPTO" \
+    "$L/mcripto.c" "$L/hispa64/sinopenssl.c" "$L"/hispa64/webcripto/*.c "$TB/monocypher/monocypher.c" "$TB/monocypher/monocypher-ed25519.c" \
+    "$TB"/bearssl/src64w/*.c "$B/bearssl64-obj/libbearssl.a"
+  strip --strip-unneeded "$S/MCRIPTO"
+  CRIP=" MCRIPTO"
+fi
+echo "hechos: MHOLA MHOLAP MHOLAD MHILOS MHILOSD MSENALES MSENALESD MPROCESOS MPROCESOSD MMAPA MMAPAD MRELOJ MRELOJD MBUCLE MDISP MSONIDO MUNIX MPOSIX ld-musl-x86_64.so.1 libsaludo.so LUA PRUEBA.LUA $RED $CURLS $CXX$CAND$CRIP"
