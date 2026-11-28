@@ -25,7 +25,7 @@
 ; =============================================================================
 módulo Pant64
 
-    importar Letra, Cerrojo, Excep64, Hilos64, Sinc64
+    importar Letra, Cerrojo, Excep64, Hilos64, Sinc64, Es64
 
     constante CASILLAS = 65000
     constante MAX_FILAS = 2048
@@ -539,6 +539,42 @@ módulo Pant64
         si no abierta o con_hilo entonces devolver fin
         dib_hay := falso
         si crea(nat64(dirección(hilo_pantalla)), 0, "pantalla", NORMAL, CUALQUIERA) <> nulo entonces con_hilo := cierto fin
+    fin
+
+    ; [etapa 11 a] de vuelta de S3: la tarjeta de Bochs (la de QEMU y la
+    ; VBoxVGA de VirtualBox: sus registros DISPI, 0x1CE y 0x1CF) ha vuelto al
+    ; modo de texto: se pone otra vez el de la GOP (el mismo búfer); y la
+    ; consola, pintada entera. Con otra tarjeta, nada: si la pantalla se queda
+    ; negra, es eso (falta su driver)
+    función dispi(r: nat32, v: nat32)
+        sale16(0x1CE, r)
+        sale16(0x1CF, v)
+    fin
+
+    público función reanuda_pantalla(): bool
+        variable id: nat32
+        variable bochs: bool
+        si no abierta entonces devolver falso fin
+        sale16(0x1CE, 0)
+        id := entra16(0x1CF)
+        bochs := id >= 0xB0C0 y id <= 0xB0C5
+        si bochs entonces
+            dispi(4, 0)
+            dispi(1, ancho)
+            dispi(2, alto)
+            dispi(3, octetos * 8)
+            dispi(6, salto div octetos)
+            dispi(7, alto)
+            dispi(8, 0)
+            dispi(9, 0)
+            dispi(4, 0xC1)                  ; encendida, con el búfer lineal, sin borrarlo
+        fin
+        si no modo_gráfico entonces
+            limpia := cierto
+            todo_ := cierto
+            hay_algo := cierto
+        fin
+        devolver bochs
     fin
 
     ; todo lo escrito, ya en la pantalla (al apagar, antes de un pantallazo)

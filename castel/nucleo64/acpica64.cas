@@ -44,6 +44,8 @@ módulo Acpica64
     constante H64_APAGA = 6
     constante H64_BRILLO = 7
     constante H64_PRUEBA = 9
+    constante H64_DORMIR = 10                  ; [etapa 11 a] _PTS(3)
+    constante H64_DESPIERTA = 11               ; [etapa 11 a] _WAK(3)
 
     público tipo Inicio = estructura
         versión, opciones: nat32
@@ -63,6 +65,9 @@ módulo Acpica64
         ca_ruta: arreglo [32] de byte
         ec_ruta: arreglo [32] de byte
         brillo_ruta: arreglo [48] de byte
+        ; [etapa 11 a] la tapa, las teclas del brillo y \_S3
+        tapa_hay, tapa, tapa_avisos, brillo_sube, brillo_baja, s3, s3_a, s3_b: nat32
+        tapa_ruta: arreglo [32] de byte
     fin
 
     público constante MAX_RUTAS = 128
@@ -81,6 +86,13 @@ módulo Acpica64
     variable m: Mutex
     variable rutas_: Rutas
     variable botones_vistos: nat32
+    ; [etapa 11 a] lo que se hace con la batería, la tapa y las teclas del brillo
+    público variable aviso_bat: nat32           ; 0 nada; 1 queda poca (10 % o menos, sin el cable); 2 se apaga (3 % o menos)
+    público variable apaga_por_bat: bool        ; se ha pedido apagar por la batería
+    público variable pide_suspender: bool       ; la tapa cerrada (o el menú): que se suspenda (Suspende64)
+    público variable tapa_cerrada: bool
+    público variable n_tapa, n_brillo: nat64
+    variable tapa_vista, sube_visto, baja_visto: nat32
 
     ; ---- lo que le da el núcleo (las llama con castel0..castel5) ----
     función k_escribe(p: nat64, n: nat64)
@@ -246,6 +258,16 @@ módulo Acpica64
         al_día()
         escribe_estado()
         botones_vistos := est.botones
+        tapa_vista := est.tapa_avisos
+        sube_visto := est.brillo_sube
+        baja_visto := est.brillo_baja
+        tapa_cerrada := est.tapa_hay <> 0 y est.tapa = 0
+        si est.tapa_hay <> 0 entonces
+            escribir("  la tapa: ", dirección(est.tapa_ruta[0]))
+            si tapa_cerrada entonces escribir(", cerrada") sino escribir(", abierta") fin
+            escribir("\n")
+        fin
+        política()
         crea(nat64(dirección(hilo_acpi)), 0, "acpi", NORMAL, CUALQUIERA)
     fin
 
@@ -291,14 +313,111 @@ módulo Acpica64
                 botón := cierto
                 n_botón := n_botón + 1
             fin
+            política()
+            avisos_11a()
         fin
     fin
 
-    ; una lectura ya (y lo que se sabe, al día)
+    ; [etapa 11 a] la batería: sin el cable y descargando, al 10 % o menos,
+    ; el aviso (lo enseña el escritorio, /dev/energia); al 3 % o menos, se
+    ; apaga el equipo en orden (como con el botón: los discos y la casa,
+    ; cerrados bien, y \_S5) antes de que se apague solo a medias
+    función política()
+        variable antes: nat32
+        antes := aviso_bat
+        si est.nbat = 0 o est.pct = 0xFF o est.ca = 1 o est.estado = 3 entonces
+            aviso_bat := 0
+        sino si est.pct <= 3 entonces
+            aviso_bat := 2
+        sino si est.pct <= 10 entonces
+            aviso_bat := 1
+        sino
+            aviso_bat := 0
+        fin
+        si aviso_bat <> antes entonces
+            si aviso_bat = 1 entonces escribir("Batería: al ", est.pct, " % y sin el cable: queda poca (el escritorio lo avisa)\n") fin
+            si aviso_bat = 0 y antes <> 0 entonces escribir("Batería: al ", est.pct, " %") fin
+            si aviso_bat = 0 y antes <> 0 entonces
+                si est.ca = 1 entonces escribir(", con el cable: sin aviso\n") sino escribir(": sin aviso\n") fin
+            fin
+        fin
+        si aviso_bat = 2 y no apaga_por_bat entonces
+            apaga_por_bat := cierto
+            escribir("Batería: al ", est.pct, " % y sin el cable: se apaga el equipo en orden (antes de que se apague solo)\n")
+            botón := cierto
+        fin
+    fin
+
+    ; [etapa 11 a] la tapa y las teclas del brillo (los Notify que ha visto ACPICA)
+    función avisos_11a()
+        variable b: ent64
+        si est.tapa_avisos <> tapa_vista entonces
+            tapa_vista := est.tapa_avisos
+            n_tapa := n_tapa + 1
+            tapa_cerrada := est.tapa = 0
+            si tapa_cerrada entonces
+                escribir("Tapa: cerrada")
+                si est.s3 <> 0 y puede_suspender entonces
+                    escribir(": se suspende el equipo\n")
+                    pide_suspender := cierto
+                sino
+                    escribir(" (sin suspender: ")
+                    si est.s3 = 0 entonces escribir("el equipo no tiene \\_S3)\n") sino escribir("no se sabe suspender en este equipo)\n") fin
+                fin
+            sino
+                escribir("Tapa: abierta\n")
+            fin
+        fin
+        si est.brillo_sube <> sube_visto o est.brillo_baja <> baja_visto entonces
+            b := ent64(est.brillo)
+            si b < 0 o b > 100 entonces b := 50 fin
+            b := b + 10 * (ent64(est.brillo_sube) - ent64(sube_visto)) - 10 * (ent64(est.brillo_baja) - ent64(baja_visto))
+            si b < 10 entonces b := 10 fin           ; (nunca negra del todo)
+            si b > 100 entonces b := 100 fin
+            sube_visto := est.brillo_sube
+            baja_visto := est.brillo_baja
+            n_brillo := n_brillo + 1
+            b := brillo(b)
+            al_día()
+            escribir("Brillo: con las teclas, al ", b, " %\n")
+        fin
+    fin
+
+    ; [etapa 11 a] (Suspende64 lo pone si sabe suspender aquí)
+    público variable puede_suspender: bool
+
+    ; [etapa 11 a] suspender: _PTS(3) (falso si no se puede) y SLP_TYP de \_S3
+    público función dormir_acpica(ref a: nat32, ref b: nat32): bool
+        variable r: ent64
+        si no en_marcha_acpica entonces devolver falso fin
+        r := llama(H64_DORMIR, 3, 0)
+        si r < 0 entonces devolver falso fin
+        a := nat32(r) yb 0xFF
+        b := (nat32(r) >> 8) yb 0xFF
+        devolver cierto
+    fin
+
+    público función despierta_acpica()
+        si no en_marcha_acpica entonces devolver fin
+        llama(H64_DESPIERTA, 3, 0)
+        al_día()
+        tapa_vista := est.tapa_avisos
+        tapa_cerrada := est.tapa_hay <> 0 y est.tapa = 0
+    fin
+
+    ; [etapa 11 a] (pruebas) ejecuta un método sin argumentos (con sus Notify)
+    público función ejecuta_método(nombre: puntero a byte): bool
+        si no en_marcha_acpica entonces devolver falso fin
+        devolver llama(H64_PRUEBA, 2, nat64(nombre)) = 0
+    fin
+
+    ; una lectura ya (y lo que se sabe, al día; [etapa 11 a] y lo que se hace con ello)
     público función lee_ya()
         si no en_marcha_acpica entonces devolver fin
         si no sin_baterías entonces llama(H64_LEE, 0, 0) fin
         al_día()
+        política()
+        avisos_11a()
     fin
 
     ; las rutas del _PRT del dispositivo de esa ruta, resueltas por ACPICA: cuántas (-1: no)
@@ -350,6 +469,8 @@ módulo Acpica64
 
     público función prueba_acpica()
         variable b: ent64
+        variable t1: nat32
+        variable c1, ps: bool
         si no en_marcha_acpica entonces
             mal("prueba=acpica sin ACPICA en marcha")
             devolver
@@ -387,7 +508,55 @@ módulo Acpica64
             b := brillo(77)
             escribir("; pedido el 77 %: ", b, " (el nivel de _BCL más cercano)\n")
             si b <> 80 entonces mal("el brillo pedido al 77 % no va al nivel de _BCL más cercano (80)") fin
+            ; [etapa 11 a] las teclas del brillo (Fn): Notify 86h y 87h (lo que hace el firmware)
+            si ejecuta_método("\\_SB_.HBSU") entonces
+                lee_ya()
+                b := ent64(est.brillo)
+                ejecuta_método("\\_SB_.HBBA")
+                ejecuta_método("\\_SB_.HBBA")
+                lee_ya()
+                escribir("Prueba de ACPICA: Fn y subir el brillo (Notify 86h): al ", b, " %; dos veces Fn y bajar (87h): al ", est.brillo, " %\n")
+                si b <> 90 entonces mal("Fn y subir el brillo no lo sube al 90 %") fin
+                si est.brillo <> 70 entonces mal("Fn y bajar el brillo dos veces no lo baja al 70 %") fin
+            fin
         fin
+        ; [etapa 11 a] la tapa (tests/acpi/tapa-qemu.aml: su _LID lee la CMOS 63h)
+        si est.tapa_hay <> 0 entonces
+            ps := puede_suspender
+            puede_suspender := falso          ; (que la prueba no suspenda el equipo)
+            pon_cmos(0x63, 1)
+            ejecuta_método("\\_SB_.HTAV")
+            lee_ya()
+            t1 := est.tapa
+            c1 := tapa_cerrada y n_tapa > 0
+            pon_cmos(0x63, 0)
+            ejecuta_método("\\_SB_.HTAV")
+            lee_ya()
+            puede_suspender := ps
+            pide_suspender := falso
+            escribir("Prueba de ACPICA: la tapa, ", dirección(est.tapa_ruta[0]), ": cerrada (Notify 80h, _LID = ", t1, "); abierta (_LID = ", est.tapa, ")\n")
+            si no c1 entonces mal("la tapa cerrada no se ve") fin
+            si tapa_cerrada o n_tapa < 2 entonces mal("la tapa abierta no se ve") fin
+        fin
+    fin
+
+    ; [etapa 11 a] (pruebas) prueba=bateriabaja: la batería de mentira al 9 %
+    ; sin el cable (el aviso) y luego al 2 % (se apaga en orden)
+    público función prueba_batería_baja()
+        si no en_marcha_acpica o sin_baterías entonces
+            mal("prueba=bateriabaja sin la batería de mentira")
+            devolver
+        fin
+        pon_cmos(0x60, 9)
+        pon_cmos(0x61, 2)
+        lee_ya()
+        escribir("Prueba de la batería baja: al 9 % sin el cable: aviso ", aviso_bat, "\n")
+        si aviso_bat <> 1 entonces mal("al 9 % sin el cable no avisa") fin
+        duerme_ms(3000)          ; (para que el escritorio lo vea)
+        pon_cmos(0x60, 2)
+        lee_ya()
+        escribir("Prueba de la batería baja: al 2 %: aviso ", aviso_bat, "\n")
+        si aviso_bat <> 2 o no apaga_por_bat entonces mal("al 2 % no se apaga") fin
     fin
 
     función escribe_bat()

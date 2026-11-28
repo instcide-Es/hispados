@@ -135,15 +135,20 @@ menuentry "Apagar" {
 CFG
   } > "$S/grub.cfg"
 fi
-# el disco: 128 MB, GPT, la partición EFI (80 MB) y la de pruebas (el resto)
-I="$S/hispa64.img"; P="$S/esp.part"; Q="$S/pruebas.part"
-rm -f "$I" "$P" "$Q"
-TAM=128; ESP=80
-[ "${WEB:-0}" = 1 ] && { TAM=1280; ESP=1100; }
+# el disco: 512 MB, GPT, la partición EFI (80 MB), la de pruebas (40 MB) y
+# [etapa 11 a] la casa (el resto: FAT32 con el diario en los sectores
+# reservados y la marca de Casa64, hazcasa.py): /casa, de escribir de
+# verdad. Con WEB=1, 1,75 GB (la EFI de 1100 MB). Las particiones se copian
+# sin los ceros (dd sparse): el .img y el .vdi no crecen por lo vacío.
+I="$S/hispa64.img"; P="$S/esp.part"; Q="$S/pruebas.part"; K="$S/casa.part"
+rm -f "$I" "$P" "$Q" "$K"
+TAM=512; ESP=80; PRB=40
+[ "${WEB:-0}" = 1 ] && { TAM=1792; ESP=1100; }
 truncate -s ${TAM}M "$I"
-sgdisk -n 1:2048:+${ESP}M -t 1:ef00 -c 1:HISPA64 -n 2:0:0 -t 2:0700 -c 2:PRUEBAS "$I" > /dev/null
+sgdisk -n 1:2048:+${ESP}M -t 1:ef00 -c 1:HISPA64 -n 2:0:+${PRB}M -t 2:0700 -c 2:PRUEBAS -n 3:0:0 -t 3:0700 -c 3:CASA "$I" > /dev/null
 SECT=$(( ESP * 2048 ))
 read -r I2 F2 <<< "$(sgdisk -i 2 "$I" | awk '/First sector/ {a=$3} /Last sector/ {b=$3} END {print a, b}')"
+read -r I3 F3 <<< "$(sgdisk -i 3 "$I" | awk '/First sector/ {a=$3} /Last sector/ {b=$3} END {print a, b}')"
 mkfs.fat -F 32 -n HISPA64 -C "$P" $(( SECT / 2 )) > /dev/null
 mmd -i "$P" ::EFI ::EFI/BOOT ::boot ::boot/grub
 mcopy -i "$P" "$S/BOOTX64.EFI" ::EFI/BOOT/BOOTX64.EFI
@@ -152,7 +157,7 @@ mcopy -i "$P" "$S/HISPA64.BIN" ::boot/HISPA64.BIN
 mcopy -i "$P" "$S/HISPA64.SIM" ::boot/HISPA64.SIM
 mmd -i "$P" ::boot/prog
 for f in $PROGS; do mcopy -i "$P" "$S/prog/$f" "::boot/prog/$f"; done
-dd if="$P" of="$I" bs=512 seek=2048 conv=notrunc status=none
+dd if="$P" of="$I" bs=512 seek=2048 conv=notrunc,sparse status=none
 rm -f "$P"
 # [etapa 5] la de pruebas: FAT32 con cúmulos de 512 octetos, la marca y unos archivos
 mkfs.fat -F 32 -s 1 -n PRUEBAS -C "$Q" $(( (F2 - I2 + 1) / 2 )) > /dev/null
@@ -167,8 +172,16 @@ mcopy -i "$Q" "$S/leeme.txt" ::LEEME.TXT
 mcopy -i "$Q" "$S/patron.bin" ::PATRON.BIN
 mmd -i "$Q" "::Carpeta con nombre largo"
 mcopy -i "$Q" "$S/largo.txt" "::Carpeta con nombre largo/Canción de cuna ñandú.txt"
-dd if="$Q" of="$I" bs=512 seek="$I2" conv=notrunc status=none
+dd if="$Q" of="$I" bs=512 seek="$I2" conv=notrunc,sparse status=none
 rm -f "$Q" "$S/marca.txt" "$S/leeme.txt" "$S/largo.txt" "$S/patron.bin"
+# [etapa 11 a] la casa: FAT32 de cúmulos de 4 KB, 32.832 sectores reservados
+# (el diario, del 64 al 32.831: 16 MB) y la marca en el 32
+mkfs.fat -F 32 -s 8 -R 32832 -n CASA -C "$K" $(( (F3 - I3 + 1) / 2 )) > /dev/null
+python3 -I "$AQUI/programas/hazcasa.py" "$K"
+printf 'Esta es la casa de Hispa-64: lo que se guarda en /casa (Documentos,\r\nDescargas, lo del navegador...) queda aqu\xc3\xad, en esta partici\xc3\xb3n.\r\n' > "$S/casa.txt"
+mcopy -i "$K" "$S/casa.txt" "::LEEME.TXT"
+dd if="$K" of="$I" bs=512 seek="$I3" conv=notrunc,sparse status=none
+rm -f "$K" "$S/casa.txt"
 if [ "$MODO" != prueba ] || [ "${VDI:-0}" = 1 ]; then
   rm -f "$S/hispa64.vdi"
   qemu-img convert -f raw -O vdi "$I" "$S/hispa64.vdi"

@@ -1240,4 +1240,217 @@ módulo Fat64
         devolver cb_vacía(x.disco)
     fin
 
+    ; ---- [etapa 11 a] comprobar y arreglar (como fsck.fat), para la casa ----
+    ; Lo que se arregla (FAT32; con el volumen sin usar, al arrancar):
+    ;   - las cadenas de los archivos: rota (un cúmulo fuera, libre o ya de
+    ;     otro), se corta ahí y el tamaño baja a lo que queda; más larga que su
+    ;     tamaño, se corta (lo de más, libre); más corta, el tamaño baja;
+    ;   - las carpetas: su cadena, igual (cortada si se cruza con otra); una
+    ;     entrada de carpeta que empieza mal, quitada;
+    ;   - los cúmulos perdidos (ocupados en la FAT y de nadie), libres;
+    ;   - los libres del FSInfo, contados otra vez.
+    público variable fk_archivos, fk_carpetas, fk_cortadas, fk_tamaños, fk_quitadas, fk_perdidos, fk_libres: nat64
+
+    función fk_marcado(t: nat64, c: nat64): bool
+        devolver m8(t + c div 8) yb (1 << nat32(c mod 8)) <> 0
+    fin
+
+    función fk_marca(t: nat64, c: nat64)
+        pon_m8(t + c div 8, m8(t + c div 8) ob (1 << nat32(c mod 8)))
+    fin
+
+    ; marca la cadena de una carpeta desde c (cortándola si se cruza o se
+    ; rompe); falso si el primero ya no vale
+    función fk_cadena_carpeta(x: puntero a Montaje, t: nat64, c: nat64): bool
+        variable ant, v, n: nat64
+        si c < 2 o c >= x.cúmulos + 2 o fk_marcado(t, c) entonces devolver falso fin
+        si lee_fat(x, c) = 0 entonces devolver falso fin
+        ant := 0
+        n := 0
+        mientras cierto hacer
+            fk_marca(t, c)
+            n := n + 1
+            v := lee_fat(x, c)
+            si v >= FIN_CADENA entonces devolver cierto fin
+            si v < 2 o v >= x.cúmulos + 2 o fk_marcado(t, v) o lee_fat(x, v) = 0 o n > x.cúmulos entonces
+                pon_fat(x, c, MARCA_FIN)
+                fk_cortadas := fk_cortadas + 1
+                devolver cierto
+            fin
+            c := v
+        fin
+        devolver cierto
+    fin
+
+    ; un archivo: su cadena desde «primero», marcada y ajustada a «tamaño»;
+    ; cambia (en la entrada) el primero y el tamaño si hace falta; cierto si
+    ; ha cambiado algo
+    función fk_archivo(x: puntero a Montaje, t: nat64, ref primero: nat64, ref tamaño_: nat64): bool
+        variable hacen, k, c, ant, v: nat64
+        variable cambia: bool
+        cambia := falso
+        hacen := (tamaño_ + x.oct_cúmulo - 1) div x.oct_cúmulo
+        si hacen = 0 entonces
+            si primero <> 0 entonces
+                primero := 0         ; (la cadena queda de nadie: perdida, libre después)
+                cambia := cierto
+            fin
+            devolver cambia
+        fin
+        k := 0
+        c := primero
+        ant := 0
+        mientras k < hacen hacer
+            si c < 2 o c >= x.cúmulos + 2 o fk_marcado(t, c) entonces romper fin
+            v := lee_fat(x, c)
+            si v = 0 entonces romper fin
+            fk_marca(t, c)
+            k := k + 1
+            ant := c
+            si v >= FIN_CADENA entonces
+                c := 0
+                romper
+            fin
+            c := v
+        fin
+        si k = hacen entonces
+            ; (entera; si sigue más allá, se corta)
+            si c <> 0 entonces
+                pon_fat(x, ant, MARCA_FIN)
+                fk_cortadas := fk_cortadas + 1
+            fin
+            devolver cambia
+        fin
+        ; más corta, o rota en c
+        si c <> 0 y ant <> 0 entonces
+            pon_fat(x, ant, MARCA_FIN)
+            fk_cortadas := fk_cortadas + 1
+        fin
+        si k = 0 entonces primero := 0 fin
+        tamaño_ := k * x.oct_cúmulo
+        fk_tamaños := fk_tamaños + 1
+        devolver cierto
+    fin
+
+    ; comprueba (y arregla) el volumen FAT32 del montaje m; falso si no se
+    ; ha podido (sin memoria, un error del disco, no es FAT32)
+    público función fat_comprueba(m: nat32): bool
+        variable x: puntero a Montaje
+        variable t, pila, cab, c, i, pos, por, primero, tam, v, n, cuántas: nat64
+        variable e: arreglo [32] de byte
+        variable carpeta, acaba: bool
+        x := mm(m)
+        fk_archivos := 0
+        fk_carpetas := 0
+        fk_cortadas := 0
+        fk_tamaños := 0
+        fk_quitadas := 0
+        fk_perdidos := 0
+        fk_libres := 0
+        si x.bits_fat <> 32 entonces devolver falso fin
+        t := nat64(reserva((x.cúmulos + 2) div 8 + 8))
+        si t = 0 entonces devolver falso fin
+        ceros_k(t, (x.cúmulos + 2) div 8 + 8)
+        cab := 16384
+        pila := nat64(reserva(cab * 8))
+        si pila = 0 entonces
+            libera(puntero(t))
+            devolver falso
+        fin
+        fat_error := 0
+        ; la raíz
+        n := 0
+        si fk_cadena_carpeta(x, t, x.raíz_cúmulo) entonces
+            pon_m64(pila, x.raíz_cúmulo)
+            n := 1
+        fin
+        por := x.oct_cúmulo div 32
+        mientras n > 0 hacer
+            n := n - 1
+            c := m64(pila + n * 8)
+            fk_carpetas := fk_carpetas + 1
+            acaba := falso
+            cuántas := 0
+            mientras no acaba y c >= 2 y c < x.cúmulos + 2 y cuántas <= x.cúmulos hacer
+                i := 0
+                mientras i < por hacer
+                    pos := pos_cúmulo(x, c) + i * 32
+                    si no cb_lee(x.disco, pos, nat64(dirección(e[0])), 32) entonces
+                        libera(puntero(t))
+                        libera(puntero(pila))
+                        devolver falso
+                    fin
+                    si e[0] = 0 entonces
+                        acaba := cierto
+                        romper
+                    fin
+                    si e[0] <> 0xE5 y e[11] yb 0x3F <> A_LARGO y e[11] yb A_ETIQUETA = 0 y no (e[0] = '.' y (e[1] = ' ' o (e[1] = '.' y e[2] = ' '))) entonces
+                        primero := nat64(l16(dirección(e[0]), 26)) ob (nat64(l16(dirección(e[0]), 20)) << 16)
+                        carpeta := e[11] yb A_CARPETA <> 0
+                        si carpeta entonces
+                            si fk_cadena_carpeta(x, t, primero) entonces
+                                si n < cab entonces
+                                    pon_m64(pila + n * 8, primero)
+                                    n := n + 1
+                                fin
+                            sino
+                                ; (una carpeta que empieza mal: fuera)
+                                e[0] := 0xE5
+                                cb_escribe(x.disco, pos, nat64(dirección(e[0])), 32)
+                                fk_quitadas := fk_quitadas + 1
+                            fin
+                        sino
+                            fk_archivos := fk_archivos + 1
+                            tam := nat64(l32(dirección(e[0]), 28))
+                            si fk_archivo(x, t, primero, tam) entonces
+                                p16(dirección(e[0]), 26, nat32(primero))
+                                p16(dirección(e[0]), 20, nat32(primero >> 16))
+                                p32(dirección(e[0]), 28, nat32(tam))
+                                cb_escribe(x.disco, pos, nat64(dirección(e[0])), 32)
+                            fin
+                        fin
+                    fin
+                    i := i + 1
+                fin
+                si no acaba entonces
+                    v := lee_fat(x, c)
+                    si v >= FIN_CADENA entonces acaba := cierto sino c := v fin
+                fin
+                cuántas := cuántas + 1
+            fin
+        fin
+        ; los perdidos, libres; y contar los libres
+        c := 2
+        mientras c < x.cúmulos + 2 hacer
+            v := lee_fat(x, c)
+            si v <> 0 y v <> 0x0FFFFFF7 y no fk_marcado(t, c) entonces
+                pon_fat(x, c, 0)
+                fk_perdidos := fk_perdidos + 1
+                v := 0
+            fin
+            si v = 0 entonces fk_libres := fk_libres + 1 fin
+            c := c + 1
+        fin
+        x.libres := fk_libres
+        x.próximo := 2
+        x.libres_cambiado := 1
+        libera(puntero(t))
+        libera(puntero(pila))
+        devolver fat_error = 0
+    fin
+
+    ; (después de repetir el diario) el FSInfo, leído otra vez
+    público función fat_relee_info(m: nat32)
+        variable x: puntero a Montaje
+        variable b: arreglo [512] de byte
+        x := mm(m)
+        si x.fsinfo = 0 entonces devolver fin
+        si cb_lee(x.disco, x.fsinfo, nat64(dirección(b[0])), 512) entonces
+            si l32(dirección(b[0]), 0) = 0x41615252 y l32(dirección(b[0]), 484) = 0x61417272 entonces
+                si nat64(l32(dirección(b[0]), 488)) <= x.cúmulos entonces x.libres := l32(dirección(b[0]), 488) fin
+                si l32(dirección(b[0]), 492) >= 2 y nat64(l32(dirección(b[0]), 492)) < x.cúmulos + 2 entonces x.próximo := l32(dirección(b[0]), 492) fin
+            fin
+        fin
+    fin
+
 fin Fat64.

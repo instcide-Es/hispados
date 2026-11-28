@@ -50,6 +50,8 @@ módulo Discos64
     variable dk_nombre: arreglo [MAX_DISCOS] de arreglo [16] de byte
     variable dk_tipo: arreglo [MAX_DISCOS] de puntero a byte        ; lo que dice su tabla («EFI», «datos de Windows»...)
     variable dk_escribe: arreglo [MAX_DISCOS] de bool
+    variable dk_esc_parte: arreglo [MAX_DISCOS] de bool              ; [etapa 11 a] esa partición sola, de escribir (la casa)
+    variable dk_algo_esc: arreglo [MAX_DISCOS] de bool               ; [etapa 11 a] (los de abajo) alguna partición suya lo es
     variable dk_tabla: arreglo [MAX_DISCOS] de nat32                 ; (los de abajo) 0 ninguna, 1 MBR, 2 GPT, 3 un volumen sin tabla
     público variable dk_errores: nat64
     ; [etapa 10 d] el disco en memoria (/tmp): sus páginas (0: aún sin escribir, ceros)
@@ -66,7 +68,7 @@ módulo Discos64
         disco: nat32                ; el disco de abajo, o NADA
         sig: nat32                  ; el siguiente en su cubo
         usado: nat32
-        nada: nat32
+        diario: nat32               ; [etapa 11 a] 1: sucio y del diario (solo lo escribe la confirmación)
     fin
     variable cajas: puntero a Caja
     público variable cb_n: nat32                ; cuántas
@@ -137,6 +139,8 @@ módulo Discos64
         dk_padre[d] := d
         dk_tipo[d] := ""
         dk_escribe[d] := falso
+        dk_esc_parte[d] := falso
+        dk_algo_esc[d] := falso
         devolver d
     fin
 
@@ -181,7 +185,14 @@ módulo Discos64
     fin
 
     público función escribible(d: nat32): bool
-        devolver dk_escribe[dk_padre[d]]
+        devolver dk_escribe[dk_padre[d]] o dk_esc_parte[d]
+    fin
+
+    ; [etapa 11 a] se da por escribible solo esa partición (la de la casa),
+    ; no el disco entero ni las demás
+    público función deja_escribir_parte(d: nat32)
+        dk_esc_parte[d] := cierto
+        dk_algo_esc[dk_padre[d]] := cierto
     fin
 
     ; se da por escribible (o no) un disco de abajo y sus particiones
@@ -345,7 +356,7 @@ módulo Discos64
     ; (también de una partición), sin pasar por la caché
     público función es_directo(d: nat32, lba: nat64, n: nat64, fís: nat64, escribe: bool): bool
         si lba + n > dk_sectores[d] o lba + n < lba entonces devolver falso fin
-        si escribe y no dk_escribe[dk_padre[d]] entonces devolver falso fin
+        si escribe y no escribible(d) entonces devolver falso fin
         devolver es_abajo(dk_padre[d], dk_base[d] + lba, n, fís, escribe)
     fin
 
@@ -459,9 +470,21 @@ módulo Discos64
             si manilla >= cb_n entonces manilla := 0 fin
             c := caja(i)
             si c.disco = NADA entonces romper fin
-            si c.usado = 0 entonces romper fin
-            c.usado := 0
-            vueltas := vueltas + 1
+            ; [etapa 11 a] las del diario no se escriben en su sitio: solo al
+            ; confirmar. Si no hay otras (tres vueltas sin ninguna), se confirma
+            ; ya, a medias de una operación (y al arrancar se comprobará)
+            si c.diario <> 0 entonces
+                vueltas := vueltas + 1
+                si vueltas > cb_n * 3 entonces
+                    dj_medias := cierto
+                    si no confirma_() entonces devolver NADA fin
+                    vueltas := 0
+                fin
+            sino
+                si c.usado = 0 entonces romper fin
+                c.usado := 0
+                vueltas := vueltas + 1
+            fin
         fin
         si c.disco <> NADA entonces
             si c.sucio_desde <> 0 entonces
@@ -480,6 +503,7 @@ módulo Discos64
         c.bloque := b
         c.usado := 1
         c.sucio_desde := 0
+        c.diario := 0
         c.sig := cubo[k]
         cubo[k] := i
         devolver i
@@ -522,7 +546,7 @@ módulo Discos64
         variable c: puntero a Caja
         si pos + n > octetos_dk(d) o pos + n < pos entonces devolver falso fin
         ab := dk_padre[d]
-        si no dk_escribe[ab] entonces devolver falso fin
+        si no dk_escribe[ab] y no dk_esc_parte[d] entonces devolver falso fin
         pos := pos + dk_base[d] * dk_sector[ab]
         cierra_mutex(dirección(cb_mutex))
         mientras n > 0 hacer
@@ -543,6 +567,11 @@ módulo Discos64
                 c.sucio_desde := ahora_ns() ob 1
                 cb_sucios := cb_sucios + 1
             fin
+            ; [etapa 11 a] un bloque de la casa: va por el diario
+            si c.diario = 0 y ab = dj_disco y b >= dj_p_ini y b < dj_p_fin entonces
+                c.diario := 1
+                dj_sucios := dj_sucios + 1
+            fin
             si de <> 0 entonces de := de + trozo fin
             pos := pos + trozo
             n := n - trozo
@@ -562,11 +591,16 @@ módulo Discos64
         n := 0
         mal := falso
         cierra_mutex(dirección(cb_mutex))
+        ; [etapa 11 a] fsync y sync (los llama el VFS entre dos operaciones): lo
+        ; del diario, confirmado (y en su sitio)
+        si del_todo y dj_disco <> NADA y (d = NADA o d = dj_disco) entonces
+            si no confirma_() entonces mal := cierto fin
+        fin
         ; (por orden de bloque, más o menos: de cubo en cubo no; de caja en caja)
         i := 0
         mientras i < cb_n hacer
             c := caja(i)
-            si c.disco <> NADA y c.sucio_desde <> 0 y (d = NADA o c.disco = d) y (antes = 0 o c.sucio_desde < antes) entonces
+            si c.disco <> NADA y c.sucio_desde <> 0 y c.diario = 0 y (d = NADA o c.disco = d) y (antes = 0 o c.sucio_desde < antes) entonces
                 si escribe_caja(i) entonces n := n + 1 sino mal := cierto fin
             fin
             i := i + 1
@@ -574,7 +608,7 @@ módulo Discos64
         si del_todo entonces
             k := 0
             mientras k < n_dk hacer
-                si dk_clase[k] <> D_PARTE y dk_escribe[k] y (d = NADA o d = k) entonces
+                si dk_clase[k] <> D_PARTE y (dk_escribe[k] o dk_algo_esc[k]) y (d = NADA o d = k) entonces
                     si no vacía_abajo(k) entonces mal := cierto fin
                 fin
                 k := k + 1
@@ -624,6 +658,328 @@ módulo Discos64
                 si a > 5000000000 entonces vacía_(NADA, a - 5000000000, falso) fin
             fin
         fin
+    fin
+
+    ; ---- [etapa 11 a] el diario de la casa ----
+    ; Una partición (la casa: FAT32 con la marca de Casa64) lleva en sus
+    ; sectores reservados un diario: todo lo que se escribe en ella (la FAT,
+    ; las carpetas, los datos y el FSInfo) va primero ahí y, cuando está
+    ; entero en el disco, a su sitio. Así un corte de luz deja el volumen
+    ; como estaba antes de una confirmación o como después: nunca a medias.
+    ; Las confirmaciones se hacen entre dos operaciones del VFS (con su mutex
+    ; tomado: fsync, sync, el hilo «diario» de Vfs64 cada 5 s, o cuando lo
+    ; sucio llega al umbral), así que lo confirmado es siempre un estado de
+    ; después de una operación entera.
+    ; En el diario (bloques de 4 KB del disco de abajo, desde dj_ini):
+    ;   [0, D)       el descriptor: «H64DIAR1», la secuencia, n, D, y desde el
+    ;                octeto 64, por cada bloque, su número (desde el principio
+    ;                de la partición, en bloques) y el CRC32 de su contenido
+    ;   [D, D + n)   los bloques, tal cual
+    ;   D + n        la confirmación: «H64CONF1», la secuencia, n, D y el CRC32
+    ;                del descriptor entero
+    ; y una sola orden de vaciar la caché del disco al final: si el corte llega
+    ; antes, algún CRC no casa y no se repite nada (lo de antes ya estaba en
+    ; su sitio). Después, cada bloque a su sitio y otra orden de vaciar.
+    ; Repetir una transacción que ya estaba en su sitio no cambia nada; al
+    ; apagar bien, el descriptor se borra (y no se repite).
+    constante DJ_DESC = 16                      ; bloques del descriptor (4.092 entradas)
+    público variable dj_disco: nat32            ; el disco de abajo de la casa (NADA: no hay diario)
+    variable dj_parte: nat32
+    variable dj_ini, dj_n: nat64                ; el diario: su primer bloque (del disco de abajo) y cuántos
+    variable dj_p_ini, dj_p_fin: nat64          ; los bloques de la partición (del disco de abajo)
+    variable dj_cabe: nat32                     ; cuántos bloques caben en una transacción
+    variable dj_desc: arreglo [DJ_DESC] de nat64   ; las páginas del descriptor
+    variable dj_conf: nat64                     ; la de la confirmación
+    variable dj_lista: puntero a nat32          ; las cajas de la transacción
+    público variable dj_seq: nat64
+    público variable dj_sucios: nat64           ; cajas sucias del diario ahora
+    público variable dj_medias: bool            ; se ha confirmado a medias de una operación (o en varias transacciones)
+    público variable dj_confirmadas, dj_bloques, dj_repetidos: nat64
+    público variable dj_prueba: nat32           ; (pruebas) 1: pararse antes de la confirmación; 2: después, antes de ponerlo en su sitio
+    público variable dj_aviso: nat64            ; (pruebas) la función que dice dónde se ha parado
+    variable crc_t: arreglo [256] de nat32
+    variable crc_hecha: bool
+
+    ; el CRC32 de n octetos desde d, con su tabla (el mismo que crc32)
+    público función crc32r(d: nat64, n: nat64): nat32
+        variable c, k, j: nat32
+        variable i: nat64
+        si no crc_hecha entonces
+            j := 0
+            mientras j < 256 hacer
+                c := j
+                k := 0
+                mientras k < 8 hacer
+                    si c yb 1 <> 0 entonces c := (c >> 1) xob 0xEDB88320 sino c := c >> 1 fin
+                    k := k + 1
+                fin
+                crc_t[j] := c
+                j := j + 1
+            fin
+            crc_hecha := cierto
+        fin
+        c := 0xFFFFFFFF
+        i := 0
+        mientras i < n hacer
+            c := crc_t[(c xob m8(d + i)) yb 255] xob (c >> 8)
+            i := i + 1
+        fin
+        devolver c xob 0xFFFFFFFF
+    fin
+
+    función llama_aviso(f: nat64)
+        ensamblador
+            mov rax, {f}
+            call rax
+        fin
+    fin
+
+    ; el diario de la partición p: los sectores [ini, ini + n) de ella (la
+    ; partición, de sectores de 512 y empezando en un bloque de 4 KB); falso
+    ; si no se puede
+    público función cb_diario_pon(p: nat32, ini: nat64, n: nat64): bool
+        variable ab, k: nat32
+        variable b: nat64
+        ab := dk_padre[p]
+        si dk_sector[ab] <> 512 o dk_base[p] yb 7 <> 0 o ini yb 7 <> 0 o n < (DJ_DESC + 8) * 8 entonces devolver falso fin
+        si ini + n > dk_sectores[p] entonces devolver falso fin
+        si dj_disco <> NADA entonces devolver falso fin
+        k := 0
+        mientras k < DJ_DESC hacer
+            dj_desc[k] := pide()
+            si dj_desc[k] = 0 entonces devolver falso fin
+            k := k + 1
+        fin
+        dj_conf := pide()
+        si dj_conf = 0 entonces devolver falso fin
+        b := n div 8
+        dj_cabe := nat32(b - DJ_DESC - 1)
+        si dj_cabe > 252 + (DJ_DESC - 1) * 256 entonces dj_cabe := 252 + (DJ_DESC - 1) * 256 fin
+        dj_lista := puntero(nat64(reserva(nat64(dj_cabe) * 4)))
+        si dj_lista = nulo entonces devolver falso fin
+        dj_parte := p
+        dj_ini := (dk_base[p] + ini) div 8
+        dj_n := b
+        dj_p_ini := dk_base[p] div 8
+        dj_p_fin := (dk_base[p] + dk_sectores[p]) div 8
+        dj_sucios := 0
+        dj_disco := ab
+        devolver cierto
+    fin
+
+    público función cb_diario_cabe(): nat32
+        devolver dj_cabe
+    fin
+
+    ; ¿hay que confirmar ya? (lo sucio del diario llega a la mitad de lo que
+    ; cabe, o a la cuarta parte de la caché)
+    público función cb_diario_lleno(): bool
+        si dj_disco = NADA entonces devolver falso fin
+        devolver dj_sucios >= nat64(dj_cabe) div 2 o dj_sucios >= nat64(cb_n) div 4
+    fin
+
+    ; (con el mutex) escribe la página fís en el bloque b del diario
+    función dj_es(b: nat64, fís: nat64, escribe: bool): bool
+        devolver es_abajo(dj_disco, (dj_ini + b) * 8, 8, fís, escribe)
+    fin
+
+    ; (con el mutex) una transacción con las n cajas de dj_lista
+    función transacción(n: nat32): bool
+        variable j, d, k: nat32
+        variable pos, seq: nat64
+        variable c: puntero a Caja
+        variable crc: nat32
+        seq := dj_seq + 1
+        d := nat32((64 + nat64(n) * 16 + 4095) div 4096)
+        k := 0
+        mientras k < d hacer
+            ceros(virt(dj_desc[k]), 4096)
+            k := k + 1
+        fin
+        pon_m32(virt(dj_desc[0]), 0x52494448)        ; «HDIR» (H64DIAR1)
+        pon_m32(virt(dj_desc[0]) + 4, 0x31524149)
+        pon_m64(virt(dj_desc[0]) + 8, seq)
+        pon_m32(virt(dj_desc[0]) + 16, n)
+        pon_m32(virt(dj_desc[0]) + 20, d)
+        j := 0
+        mientras j < n hacer
+            c := caja(dj_lista[j])
+            pos := 64 + nat64(j) * 16
+            pon_m64(virt(dj_desc[nat32(pos div 4096)]) + pos mod 4096, c.bloque - dj_p_ini)
+            pon_m32(virt(dj_desc[nat32(pos div 4096)]) + pos mod 4096 + 8, crc32r(virt(c.fís), 4096))
+            j := j + 1
+        fin
+        crc := 0
+        k := 0
+        mientras k < d hacer
+            si no dj_es(nat64(k), dj_desc[k], cierto) entonces devolver falso fin
+            k := k + 1
+        fin
+        j := 0
+        mientras j < n hacer
+            si no dj_es(nat64(d) + nat64(j), caja(dj_lista[j]).fís, cierto) entonces devolver falso fin
+            j := j + 1
+        fin
+        si dj_prueba = 1 y n >= 50 entonces
+            ; (la prueba: el corte, con todo menos la confirmación; en una
+            ; transacción de las grandes, las del programa de la prueba)
+            si no vacía_abajo(dj_disco) entonces devolver falso fin
+            si dj_aviso <> 0 entonces llama_aviso(dj_aviso) fin
+        fin
+        ceros(virt(dj_conf), 4096)
+        pon_m32(virt(dj_conf), 0x43343648)            ; «H64CONF1»
+        pon_m32(virt(dj_conf) + 4, 0x31464E4F)
+        pon_m64(virt(dj_conf) + 8, seq)
+        pon_m32(virt(dj_conf) + 16, n)
+        pon_m32(virt(dj_conf) + 20, d)
+        pon_m32(virt(dj_conf) + 24, crc_desc(d))
+        si no dj_es(nat64(d) + nat64(n), dj_conf, cierto) entonces devolver falso fin
+        si no vacía_abajo(dj_disco) entonces devolver falso fin
+        si dj_prueba = 2 y n >= 50 entonces
+            ; (la prueba: el corte, confirmado y sin poner en su sitio)
+            si dj_aviso <> 0 entonces llama_aviso(dj_aviso) fin
+        fin
+        ; en su sitio
+        j := 0
+        mientras j < n hacer
+            c := caja(dj_lista[j])
+            si no escribe_caja(dj_lista[j]) entonces devolver falso fin
+            c.diario := 0
+            dj_sucios := dj_sucios - 1
+            j := j + 1
+        fin
+        si no vacía_abajo(dj_disco) entonces devolver falso fin
+        dj_seq := seq
+        dj_confirmadas := dj_confirmadas + 1
+        dj_bloques := dj_bloques + nat64(n)
+        devolver cierto
+    fin
+
+    ; el CRC32 de las d páginas del descriptor, seguidas
+    función crc_desc(d: nat32): nat32
+        variable k: nat32
+        variable c: nat32
+        variable t: nat64
+        ; (el CRC de lo seguido: el de cada página, encadenado como un texto
+        ; de 8 octetos por página: así no hace falta tenerlas juntas)
+        t := nat64(reserva(nat64(d) * 4))
+        si t = 0 entonces devolver 0 fin
+        k := 0
+        mientras k < d hacer
+            pon_m32(t + nat64(k) * 4, crc32r(virt(dj_desc[k]), 4096))
+            k := k + 1
+        fin
+        c := crc32r(t, nat64(d) * 4)
+        libera(puntero(t))
+        devolver c
+    fin
+
+    ; (con el mutex) lo sucio del diario, confirmado y en su sitio
+    función confirma_(): bool
+        variable i, n: nat32
+        variable c: puntero a Caja
+        si dj_disco = NADA o dj_sucios = 0 entonces devolver cierto fin
+        n := 0
+        i := 0
+        mientras i < cb_n hacer
+            c := caja(i)
+            si c.disco = dj_disco y c.diario <> 0 y c.sucio_desde <> 0 entonces
+                si n = dj_cabe entonces
+                    ; (no cabe en una: en varias, y al arrancar se comprobará)
+                    dj_medias := cierto
+                    si no transacción(n) entonces devolver falso fin
+                    n := 0
+                fin
+                dj_lista[n] := i
+                n := n + 1
+            fin
+            i := i + 1
+        fin
+        si n > 0 entonces
+            si no transacción(n) entonces devolver falso fin
+        fin
+        devolver cierto
+    fin
+
+    público función cb_diario_confirma(): bool
+        variable r: bool
+        cierra_mutex(dirección(cb_mutex))
+        r := confirma_()
+        abre_mutex(dirección(cb_mutex))
+        devolver r
+    fin
+
+    ; al montar: la última transacción del diario, si está entera, otra vez
+    ; en su sitio; cuántos bloques (0: ninguna; -1: no se ha podido leer o
+    ; escribir)
+    público función cb_diario_repite(): ent64
+        variable n, d, k, j: nat32
+        variable seq, pos, b, t: nat64
+        variable bien: bool
+        si dj_disco = NADA entonces devolver -1 fin
+        t := pide()
+        si t = 0 entonces devolver -1 fin
+        cierra_mutex(dirección(cb_mutex))
+        bien := dj_es(0, dj_desc[0], falso)
+        n := 0
+        si bien y m32(virt(dj_desc[0])) = 0x52494448 y m32(virt(dj_desc[0]) + 4) = 0x31524149 entonces
+            seq := m64(virt(dj_desc[0]) + 8)
+            n := m32(virt(dj_desc[0]) + 16)
+            d := m32(virt(dj_desc[0]) + 20)
+            si n = 0 o n > dj_cabe o d = 0 o d > DJ_DESC o nat64(d) <> (64 + nat64(n) * 16 + 4095) div 4096 entonces n := 0 fin
+            k := 1
+            mientras n > 0 y k < d hacer
+                si no dj_es(nat64(k), dj_desc[k], falso) entonces bien := falso fin
+                k := k + 1
+            fin
+            ; la confirmación
+            si n > 0 y bien entonces
+                si no dj_es(nat64(d) + nat64(n), dj_conf, falso) entonces bien := falso fin
+                si bien y (m32(virt(dj_conf)) <> 0x43343648 o m32(virt(dj_conf) + 4) <> 0x31464E4F o m64(virt(dj_conf) + 8) <> seq o m32(virt(dj_conf) + 16) <> n o m32(virt(dj_conf) + 20) <> d o m32(virt(dj_conf) + 24) <> crc_desc(d)) entonces n := 0 fin
+            fin
+            ; cada bloque, con su CRC
+            j := 0
+            mientras n > 0 y bien y j < n hacer
+                pos := 64 + nat64(j) * 16
+                b := m64(virt(dj_desc[nat32(pos div 4096)]) + pos mod 4096)
+                si dj_p_ini + b >= dj_p_fin o (dj_p_ini + b >= dj_ini y dj_p_ini + b < dj_ini + dj_n) entonces n := 0
+                sino si no dj_es(nat64(d) + nat64(j), t, falso) entonces bien := falso
+                sino si crc32r(virt(t), 4096) <> m32(virt(dj_desc[nat32(pos div 4096)]) + pos mod 4096 + 8) entonces n := 0 fin
+                j := j + 1
+            fin
+            ; entera: a su sitio
+            j := 0
+            mientras n > 0 y bien y j < n hacer
+                pos := 64 + nat64(j) * 16
+                b := m64(virt(dj_desc[nat32(pos div 4096)]) + pos mod 4096)
+                si no dj_es(nat64(d) + nat64(j), t, falso) entonces bien := falso
+                sino si no es_abajo(dj_disco, (dj_p_ini + b) * 8, 8, t, cierto) entonces bien := falso fin
+                j := j + 1
+            fin
+            si n > 0 y bien entonces
+                si no vacía_abajo(dj_disco) entonces bien := falso fin
+                dj_seq := seq
+                dj_repetidos := nat64(n)
+            fin
+        fin
+        abre_mutex(dirección(cb_mutex))
+        devuelve(t)
+        si no bien entonces devolver -1 fin
+        devolver ent64(n)
+    fin
+
+    ; al apagar bien (ya confirmado todo): el descriptor, a cero (no se repite)
+    público función cb_diario_cierra(): bool
+        variable bien: bool
+        si dj_disco = NADA entonces devolver cierto fin
+        cierra_mutex(dirección(cb_mutex))
+        bien := confirma_()
+        si bien entonces
+            ceros(virt(dj_desc[0]), 4096)
+            bien := dj_es(0, dj_desc[0], cierto) y vacía_abajo(dj_disco)
+        fin
+        abre_mutex(dirección(cb_mutex))
+        devolver bien
     fin
 
     ; ---- las particiones ----
@@ -822,6 +1178,7 @@ módulo Discos64
     público función prepara_bloques(escribir_: bool, con_tmp: bool): bool
         variable i, d, n_abajo, bloques, tmp: nat32
         variable m: nat64
+        si cb_n = 0 entonces dj_disco := NADA fin
         i := 0
         mientras i < nv_n_discos hacer
             d := nuevo_disco(D_NVME, i, nvme_sector(i), nvme_sectores(i))

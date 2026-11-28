@@ -27,6 +27,12 @@
  * [etapa 10 i] (docs/64/HISPA-64.md, sección 26) Control llega también con
  * las teclas que no son letras (Ctrl + y Ctrl - del zoom del Navegador), y
  * los menús emergentes se llevan con el teclado (↑ ↓, Inicio, Fin, Intro).
+ * [etapa 11 a] (sección 27) La energía, de /dev/energia (cada 2 s): la
+ * batería en la barra (un icono con lo que queda, en verde, ámbar o rojo, el
+ * rayo si carga, y el tanto por ciento), el aviso de «queda poca batería» al
+ * 10 % (y el de «se apaga» al 3 %, que apaga el núcleo), el brillo cuando
+ * cambia (con las teclas Fn) y «Suspender» en el menú Inicio si el equipo
+ * sabe.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -139,6 +145,8 @@ static struct {
 };
 #define N_PROGS 4
 static int prog_hay[N_PROGS];
+#define I_SUSPENDER N_PROGS		/* [etapa 11 a] (si el equipo sabe) */
+#define I_CONSOLA (N_PROGS + 1)
 static int emerg = -1;			/* la ventana del menú emergente abierto */
 static int em_x, em_y, em_an, em_n, em_sel = -1;
 static char em_op[32][120];
@@ -146,6 +154,16 @@ static u32 em_grises, em_etiqueta;
 static void mueve_emerg(u32 t);		/* [etapa 10 i] */
 static int saliendo;
 static int reloj_min = -1;
+
+/* ---- [etapa 11 a] la energía (/dev/energia) ---- */
+static struct {
+	int hay, baterias, pct, cable, cargando, minutos, aviso, tapa, brillo, suspender;
+} en;
+static time_t en_leido;
+static int aviso_oculto = -1;		/* el aviso que se ha quitado con un clic (su nivel) */
+static time_t brillo_hasta;		/* hasta cuándo se ve «Brillo: N %» */
+#define AVISO_AN 400
+#define AVISO_AL 62
 
 /* ---- lo que hay que volver a componer: rectángulos ---- */
 #define MAX_DANO 24
@@ -593,6 +611,151 @@ static void pinta_ventana(int i)
 
 static char reloj_dicho[8];
 
+/* [etapa 11 a] la batería, a la izquierda del reloj (acaba en x1): el icono
+ * (lo que queda, en verde; en ámbar al 20 % o menos, en rojo al 10 %), el
+ * rayo si carga, y el tanto por ciento */
+static char bat_dicha[80];
+
+static void pinta_bateria(int x1, int y)
+{
+	char t[16], d[80];
+	int an, x, lleno, bx, by = y + 10;
+	u32 c;
+
+	if (!en.hay || en.baterias <= 0 || en.pct < 0)
+		return;
+	fmt(t, sizeof t, "%d %%", en.pct);
+	an = lz_ui_ancho(t);
+	x = x1 - an;
+	lz_ui(&L, x, y + 22, t, 0xFFFFFF);
+	bx = x - 36;
+	c = en.pct <= 10 ? 0xE04848 : en.pct <= 20 ? 0xF0A030 : 0x58C060;
+	lz_marco(&L, bx, by, 26, 14, 0xFFFFFF);
+	lz_rect(&L, bx + 26, by + 4, 3, 6, 0xFFFFFF);
+	lleno = (22 * en.pct + 50) / 100;
+	if (lleno > 0)
+		lz_rect(&L, bx + 2, by + 2, lleno, 10, c);
+	if (en.cargando || en.cable == 1) {
+		/* el rayo (dieciseisavos) */
+		int r[] = { (bx + 15) * 16, (by - 1) * 16, (bx + 8) * 16, (by + 8) * 16, (bx + 12) * 16, (by + 8) * 16,
+			    (bx + 10) * 16, (by + 15) * 16, (bx + 18) * 16, (by + 5) * 16, (bx + 14) * 16, (by + 5) * 16 };
+
+		lz_poligono(&L, r, 6, 0x202428);
+		{
+			int q[] = { (bx + 14) * 16, (by + 1) * 16, (bx + 10) * 16, (by + 7) * 16, (bx + 13) * 16, (by + 7) * 16,
+				    (bx + 11) * 16, (by + 13) * 16, (bx + 16) * 16, (by + 6) * 16, (bx + 13) * 16, (by + 6) * 16 };
+
+			lz_poligono(&L, q, 6, 0xFFE060);
+		}
+	}
+	fmt(d, sizeof d, "%d %%%s%s", en.pct, en.cable == 1 ? ", con el cable" : ", sin el cable", en.cargando ? ", cargando" : "");
+	if (strcmp(d, bat_dicha)) {
+		strcpy(bat_dicha, d);
+		di("la barra: la batería, %s", d);
+	}
+}
+
+/* [etapa 11 a] el aviso de la batería (encima de la barra, a la derecha) y
+ * el brillo (lo mismo, un momento) */
+static void caja_aviso(int *x, int *y)
+{
+	*x = AN - AVISO_AN - 10;
+	*y = AL - BARRA - AVISO_AL - 10;
+}
+
+static int aviso_visible(void)
+{
+	return en.hay && en.aviso > 0 && aviso_oculto != en.aviso;
+}
+
+static void pinta_aviso(void)
+{
+	int x, y;
+	char t[120];
+
+	caja_aviso(&x, &y);
+	if (aviso_visible()) {
+		u32 c = en.aviso >= 2 ? 0xB02828 : 0xC07818;
+
+		lz_redondeado(&L, x, y, AVISO_AN, AVISO_AL, 10, c);
+		lz_marco_redondeado(&L, x, y, AVISO_AN, AVISO_AL, 10, 0xFFFFFF);
+		if (en.aviso >= 2) {
+			fmt(t, sizeof t, "Batería al %d %%: se apaga el equipo", en.pct);
+			lz_ui_negrita(&L, x + 16, y + 24, t, 0xFFFFFF);
+			lz_ui(&L, x + 16, y + 46, "Todo lo guardado queda en el disco.", 0xFFFFFF);
+		} else {
+			fmt(t, sizeof t, "Queda poca batería (%d %%)", en.pct);
+			lz_ui_negrita(&L, x + 16, y + 24, t, 0xFFFFFF);
+			lz_ui(&L, x + 16, y + 46, "Enchufe el cargador. (Un clic aquí lo quita.)", 0xFFFFFF);
+		}
+	} else if (en.hay && en.brillo >= 0 && time(NULL) < brillo_hasta) {
+		int an = 220;
+
+		x = AN - an - 10;
+		lz_redondeado(&L, x, y + AVISO_AL - 40, an, 40, 10, 0x2C3946);
+		fmt(t, sizeof t, "Brillo: %d %%", en.brillo);
+		lz_ui_negrita(&L, x + 16, y + AVISO_AL - 14, t, 0xFFFFFF);
+		lz_rect(&L, x + 130, y + AVISO_AL - 24, 74, 8, 0x55606C);
+		lz_rect(&L, x + 130, y + AVISO_AL - 24, 74 * en.brillo / 100, 8, 0xFFE060);
+	}
+}
+
+static int valor_de(const char *t, const char *k)
+{
+	char c[24];
+	const char *p;
+
+	fmt(c, sizeof c, "%s=", k);
+	for (p = t; (p = strstr(p, c)); p++)
+		if (p == t || p[-1] == ' ')
+			return atoi(p + strlen(c));
+	return -1;
+}
+
+/* lee /dev/energia; ¿ha cambiado algo que se vea? */
+static int lee_energia(void)
+{
+	char t[300];
+	int fd = open("/dev/energia", O_RDONLY), n, cambia = 0, antes_aviso = en.aviso, antes_brillo = en.brillo;
+
+	if (fd < 0)
+		return 0;
+	n = (int)read(fd, t, sizeof t - 1);
+	close(fd);
+	if (n <= 0)
+		return 0;
+	t[n] = 0;
+#define PON(campo, clave) do { int v_ = valor_de(t, clave); if (v_ != en.campo) { en.campo = v_; cambia = 1; } } while (0)
+	PON(baterias, "baterias");
+	PON(pct, "bateria");
+	PON(cable, "cable");
+	PON(cargando, "cargando");
+	PON(minutos, "minutos");
+	PON(aviso, "aviso");
+	PON(tapa, "tapa");
+	PON(brillo, "brillo");
+	PON(suspender, "suspender");
+#undef PON
+	if (!en.hay)
+		cambia = 1, antes_brillo = en.brillo;
+	en.hay = 1;
+	if (en.aviso != antes_aviso) {
+		if (en.aviso == 1)
+			di("aviso: queda poca batería (%d %%)", en.pct);
+		else if (en.aviso >= 2)
+			di("aviso: batería al %d %%, se apaga el equipo", en.pct);
+		else
+			di("aviso: la batería, sin aviso (%d %%)", en.pct);
+		if (en.aviso == 0)
+			aviso_oculto = -1;
+	}
+	if (en.brillo != antes_brillo && en.brillo >= 0) {
+		brillo_hasta = time(NULL) + 3;
+		di("el brillo: %d %%", en.brillo);
+	}
+	return cambia;
+}
+
 static void pinta_barra(void)
 {
 	int y = AL - BARRA, x, k, an;
@@ -639,6 +802,7 @@ static void pinta_barra(void)
 		di("la barra: el reloj, las %s", t);
 	}
 	lz_ui_negrita(&L, AN - 12 - lz_ui_ancho_negrita(t), y + 22, t, 0xFFFFFF);
+	pinta_bateria(AN - 24 - lz_ui_ancho_negrita("00:00"), y);
 }
 
 /* ([etapa 10 h] con los que hay: sin NAVEGADOR, el menú de siempre) */
@@ -648,6 +812,7 @@ static int inicio_y(void)
 
 	for (k = 0; k < N_PROGS; k++)
 		n += prog_hay[k] != 0;
+	n += en.suspender == 1;		/* [etapa 11 a] */
 	return AL - BARRA - 8 - 40 * (n + 1) - 48;
 }
 
@@ -660,15 +825,17 @@ static void pinta_inicio(void)
 	lz_rect(&L, x + 1, y + 1, an - 2, 40, C_INICIO);
 	lz_ui_negrita(&L, x + 14, y + 27, "Hispa-64", 0xFFFFFF);
 	y += 48;
-	for (k = 0; k <= N_PROGS; k++) {
+	for (k = 0; k <= I_CONSOLA; k++) {
 		const char *t;
-		int hay = k == N_PROGS ? 1 : prog_hay[k];
 
-		if (k < N_PROGS && !hay)
+		if (k < N_PROGS && !prog_hay[k])
 			continue;
-		/* [etapa 10 d] la consola: se sale al intérprete de órdenes (ORDENES) */
-		t = k == N_PROGS ? "Consola (salir a las órdenes)" : progs[k].nombre;
-		if (k == N_PROGS)
+		if (k == I_SUSPENDER && en.suspender != 1)
+			continue;
+		/* [etapa 10 d] la consola: se sale al intérprete de órdenes (ORDENES);
+		 * [etapa 11 a] suspender el equipo (a la memoria: S3) */
+		t = k == I_CONSOLA ? "Consola (salir a las órdenes)" : k == I_SUSPENDER ? "Suspender el equipo" : progs[k].nombre;
+		if (k == I_CONSOLA || (k == I_SUSPENDER))
 			lz_raya_h(&L, x + 8, y - 4, an - 16, 0xB0B6BE);
 		if (inicio_sel == k) {
 			lz_rect(&L, x + 4, y, an - 8, 36, C_MENU_SEL);
@@ -689,8 +856,10 @@ static int en_inicio(int x, int y)
 
 	if (x < 4 || x >= 304)
 		return -1;
-	for (k = 0; k <= N_PROGS; k++) {
+	for (k = 0; k <= I_CONSOLA; k++) {
 		if (k < N_PROGS && !prog_hay[k])
+			continue;
+		if (k == I_SUSPENDER && en.suspender != 1)
 			continue;
 		if (y >= yy && y < yy + 36)
 			return k;
@@ -773,6 +942,7 @@ static void compone(int x, int y, int an, int al)
 		pinta_inicio();
 	if (emerg >= 0)
 		pinta_emerg();
+	pinta_aviso();			/* [etapa 11 a] */
 	pinta_puntero();
 	lz_sin_recorte(&L);
 	r[0] = (u32)x;
@@ -908,9 +1078,17 @@ static void abre_inicio(void)
 static void elige_inicio(int k)
 {
 	cierra_inicio();
-	if (k == N_PROGS) {
+	if (k == I_CONSOLA) {
 		saliendo = 1;
 		di("salir del escritorio");
+	} else if (k == I_SUSPENDER) {
+		int fd = open("/dev/energia", O_WRONLY);
+
+		di("suspender el equipo");
+		if (fd < 0 || write(fd, "suspender", 9) != 9)
+			di("no se puede suspender (%s)", strerror(errno));
+		if (fd >= 0)
+			close(fd);
 	} else if (k >= 0) {
 		lanza(progs[k].ruta);
 	}
@@ -956,6 +1134,17 @@ static void pulsa(int b)
 			return;
 		}
 		cierra_emerg(-1);
+	}
+	if (aviso_visible()) {		/* [etapa 11 a] un clic en el aviso lo quita */
+		int ax_, ay_;
+
+		caja_aviso(&ax_, &ay_);
+		if (x >= ax_ && x < ax_ + AVISO_AN && y >= ay_ && y < ay_ + AVISO_AL) {
+			aviso_oculto = en.aviso;
+			dana(ax_, ay_, AVISO_AN, AVISO_AL);
+			di("aviso de la batería, quitado");
+			return;
+		}
 	}
 	if (inicio_abierto) {
 		if (x < 304 && y >= inicio_y() && y < AL - BARRA) {
@@ -1462,6 +1651,19 @@ int ofi_principal(const char *args)
 			if ((int)(t / 60) != reloj_min) {
 				reloj_min = (int)(t / 60);
 				dana(AN - 90, AL - BARRA, 90, BARRA);
+			}
+			/* [etapa 11 a] la energía, cada 2 s (y el brillo, que se quite) */
+			if (t - en_leido >= 2 || t < en_leido) {
+				int x, y, ah = brillo_hasta;
+
+				en_leido = t;
+				if (lee_energia() || (ah && t >= ah)) {
+					if (ah && t >= ah)
+						brillo_hasta = 0;
+					caja_aviso(&x, &y);
+					dana(AN - 220, AL - BARRA, 220, BARRA);
+					dana(x, y, AVISO_AN, AVISO_AL);
+				}
 			}
 			hubo += compone_lo_danado();
 			if (!hubo && visto == ctl->aviso)

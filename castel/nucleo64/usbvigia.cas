@@ -16,6 +16,7 @@ módulo Usbvigia
 
     variable vigía: puntero a Hilo
     variable parar: bool
+    variable en_pausa, pausado: bool            ; [etapa 11 a] (S3) el vigía, quieto mientras se reinician las controladoras
     público variable uv_vueltas, uv_enchufados, uv_quitados: nat64
 
     ; lo que hay en los puertos de las controladoras (al arrancar)
@@ -68,6 +69,21 @@ módulo Usbvigia
         escribe_alm()
         parar := falso
         vigía := crea(nat64(dirección(vigía_)), 0, "vigía USB", NORMAL, CUALQUIERA)
+    fin
+
+    ; [etapa 11 a] de vuelta de S3: las controladoras, otra vez (con el vigía
+    ; quieto); lo enchufado lo vuelve a ver él, como si se hubiera enchufado
+    ; otra vez (los teclados y ratones; las memorias USB, como nuevas)
+    público función usb_reanuda(): nat32
+        variable n: nat32
+        variable t0: nat64
+        si xh_n = 0 entonces devolver 0 fin
+        en_pausa := cierto
+        t0 := ahora_ns()
+        mientras vigía <> nulo y no pausado y ahora_ns() - t0 < 1000000000 hacer duerme_ms(5) fin
+        n := xhci_reanuda()
+        en_pausa := falso
+        devolver n
     fin
 
     ; ---- el vigía ----
@@ -189,6 +205,11 @@ módulo Usbvigia
         variable c, p, cambios: nat32
         variable con: bool
         mientras no parar hacer
+            mientras en_pausa hacer
+                pausado := cierto
+                duerme_ms(10)
+            fin
+            pausado := falso
             uv_vueltas := uv_vueltas + 1
             con := falso
             c := 0

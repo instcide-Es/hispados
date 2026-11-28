@@ -2583,6 +2583,8 @@ módulo Procesos
 
     ; la pila de un programa que arranca el núcleo: los argumentos, las
     ; palabras de su línea (16 como mucho), y el entorno HOME=/ y PATH=/
+    público variable casa_home: arreglo [24] de byte     ; [etapa 11 a] HOME de los programas (vacío: «/»)
+
     función pon_pila(p: puntero a Proceso): bool
         variable t: arreglo [400] de byte
         variable i, k, n: nat32
@@ -2602,13 +2604,27 @@ módulo Procesos
             k := k + 1
             n := n + 1
         fin
-        e := "HOME=/"
+        ; [etapa 11 a] HOME: la casa (/casa) si la hay; si no, «/»
+        e := "HOME="
         i := 0
-        mientras i < 7 hacer
+        mientras i < 5 hacer
             t[k + i] := e[i]
             i := i + 1
         fin
-        k := k + 7
+        k := k + 5
+        si casa_home[0] = 0 entonces
+            t[k] := '/'
+            k := k + 1
+        sino
+            i := 0
+            mientras casa_home[i] <> 0 y i < 23 hacer
+                t[k] := casa_home[i]
+                k := k + 1
+                i := i + 1
+            fin
+        fin
+        t[k] := 0
+        k := k + 1
         e := "PATH=/"
         i := 0
         mientras i < 7 hacer

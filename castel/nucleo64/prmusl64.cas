@@ -67,8 +67,12 @@ módulo PrMusl64
         fin
     fin
 
-    público función pruebas_musl()
+    público variable mcasa: arreglo [210] de byte          ; [etapa 11 a] «mcasa=...»
+    variable mcasa_línea: arreglo [48] de byte
+
+        público función pruebas_musl()
         variable mem0, montón0, pilas0, t0: nat64
+        variable i: nat32
         pon_color(14, 0)
         escribir("musl: los programas de C de hoy, con la biblioteca de C de musl (estáticos, dinámicos con ld-musl y PIE)")
         pon_color(7, 0)
@@ -82,6 +86,23 @@ módulo PrMusl64
         si busca_archivo("MHOLA") < 0 entonces
             escribir("(Sin los programas de musl en la unidad: sin sus pruebas.)\n")
             devolver
+        fin
+        ; [etapa 11 a] con «mcasa=escribe» o «mcasa=comprueba» (la prueba del corte de luz), antes que nada
+        si mcasa[0] <> 0 y busca_archivo("MCASA") >= 0 entonces
+            mcasa_línea[0] := 'M'
+            mcasa_línea[1] := 'C'
+            mcasa_línea[2] := 'A'
+            mcasa_línea[3] := 'S'
+            mcasa_línea[4] := 'A'
+            mcasa_línea[5] := ' '
+            i := 0
+            mientras mcasa[i] <> 0 y i < 31 hacer
+                mcasa_línea[6 + i] := mcasa[i]
+                i := i + 1
+            fin
+            mcasa_línea[6 + i] := 0
+            corre(dirección(mcasa_línea[0]), 0)
+            devolver        ; (las pruebas de la casa: solo eso)
         fin
         mem0 := memoria_ahora()
         montón0 := en_uso
@@ -101,6 +122,8 @@ módulo PrMusl64
         si busca_archivo("MRED") >= 0 entonces corre("MRED", 0) fin            ; [etapa 9] los sockets por 127.0.0.1, eventfd, timerfd, el azar
         si busca_archivo("MRED6") >= 0 entonces corre("MRED6", 0) fin          ; [etapa 10 c] IPv6 por ::1
         si busca_archivo("MUNIX") >= 0 entonces corre("MUNIX", 0) fin          ; [etapa 10 d] AF_UNIX, SCM_RIGHTS y memfd
+        si busca_archivo("MCASA") >= 0 entonces corre("MCASA", 0) fin          ; [etapa 11 a] la casa (/casa), si la hay
+        si busca_archivo("MENERGIA") >= 0 entonces corre("MENERGIA", 0) fin    ; [etapa 11 a] /dev/energia
         si busca_archivo("MPOSIX") >= 0 entonces corre("MPOSIX", 0) fin        ; [etapa 10 g] enlaces, descriptores, memfd, madvise, mremap, EDEADLK
         si busca_archivo("MRELOJ") >= 0 entonces corre("MRELOJ", 0) fin        ; [etapa 10 f] el vDSO y la hora
         si busca_archivo("MRELOJD") >= 0 entonces corre("MRELOJD", 0) fin      ; [etapa 10 f] lo mismo, dinámico (el vDSO, una biblioteca más)

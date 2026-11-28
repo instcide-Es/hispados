@@ -69,11 +69,11 @@ módulo Hispa64
     importar Es64, Acpi64, Reloj64, Apic64, Pci64, PorCpu64, Cerrojo, Hilos64, Smp64, PrSmp64
     importar Entradas, Espacios, Unidad64, Procesos, Sistema, PrProc64
     importar Msi64, Nvme64, Ahci64, Discos64, Nodos64, Fat64, Exfat64, Vfs64, PrDisc64
-    importar Raton64, Usbvigia, Usbhid64
+    importar Raton64, Usbvigia, Usbhid64, Xhci64
     importar Tty64, Teclas64
     importar I2chid64
     importar PrMusl64
-    importar Hda64, Disp64
+    importar Hda64, Disp64, Casa64, Suspende64
     importar Acpica64
     importar Registro64
     importar Sondeo64, Chacha64, Hora64, Objet64, Redcom64, Prt64, Intel64, Rtl64, Virtio64, Usbred64, Ip64, Tcp64, Red64, PrRed64
@@ -523,6 +523,7 @@ módulo Hispa64
 
     ; ---- [etapa 5] los discos y los archivos ----
     función etapa5()
+        variable v: arreglo [210] de byte
         escribir("Discos:\n")
         prepara_nvme(tiene("sinmsix"))
         prepara_ahci(tiene("sinmsi"))
@@ -534,6 +535,13 @@ módulo Hispa64
         escribir("), con escritura diferida (a los 5 s, o al vaciar)\n")
         escribe_discos()
         prepara_vfs()
+        ; [etapa 11 a] la casa (/casa, con su diario), antes de que se use nada
+        si no tiene("sincasa") entonces
+            valor_de("casa=", dirección(v[0]))
+            prepara_casa(dirección(v[0]))
+            si tiene("prueba=cortediario1") entonces prepara_corte(1) fin
+            si tiene("prueba=cortediario2") entonces prepara_corte(2) fin
+        fin
         escribir("Archivos (el VFS): ", n_montajes, " montajes\n")
         escribe_montajes()
         ; [etapa 10 e] el registro, ya (si se queda después, queda esto)
@@ -732,7 +740,7 @@ módulo Hispa64
     fin
 
     ; [etapa 5] antes de apagar: lo que quede sin escribir, al disco (sync)
-    función al_apagar()
+    función al_apagar(cerrar: bool)
         variable n: nat64
         variable r: ent64
         pant_al_día()                       ; [etapa 8] lo que quede por dibujar
@@ -743,6 +751,96 @@ módulo Hispa64
             escribir("Al apagar: ", n, " bloques sin escribir en la caché; vaciados (sync): ")
             si r < 0 entonces escribir("¡alguno ha fallado!\n") sino escribir(r, " escritos\n") fin
         fin
+        si cerrar entonces cierra_casa() fin   ; [etapa 11 a] la casa, cerrada bien (solo al apagar de verdad)
+    fin
+
+    ; [etapa 11 a] (Suspende64.s3_aparatos) de vuelta de S3: los aparatos otra vez
+    función reanuda_aparatos()
+        si reanuda_pantalla() entonces escribir("Suspender: la pantalla (la de Bochs), otra vez en su modo\n") fin
+        repinta_fb()
+        si nv_n_ctl + sa_n_ctl > 0 entonces escribir("Suspender: los discos, otra vez: ", nvme_reanuda(), " de ", nv_n_ctl, " NVMe y ", ahci_reanuda(), " de ", sa_n_discos, " SATA\n") fin
+        si xh_n > 0 entonces escribir("Suspender: el USB, otra vez: ", usb_reanuda(), " de ", xh_n, " controladoras (lo enchufado, otra vez enumerado)\n") fin
+        si in_n > 0 entonces escribir("Suspender: la red, otra vez: ", in_reanuda(), " de ", in_n, " tarjetas Intel\n") fin
+    fin
+
+    ; [etapa 11 a] prueba=suspender: se suspende (QEMU: «system_wakeup» desde el
+    ; monitor, o el reloj) y, de vuelta, que todo siga: los procesadores con su
+    ; tic, la hora
+    función prueba_suspender()
+        variable v0, t0, s0: nat64
+        variable i: nat32
+        si no sabe entonces
+            fallos := fallos + 1
+            escribir("  MAL: prueba=suspender, y no se sabe suspender aquí\n")
+            devolver
+        fin
+        v0 := veces
+        s0 := real_s()
+        pide_suspender := cierto
+        t0 := ahora_ns()
+        mientras veces = v0 y ahora_ns() - t0 < 120000000000 hacer duerme_ms(50) fin
+        si veces = v0 entonces
+            fallos := fallos + 1
+            escribir("  MAL: prueba=suspender: no ha vuelto\n")
+            devolver
+        fin
+        ; un hilo en cada procesador, que corre allí; y dormir
+        t0 := ahora_ns()
+        duerme_ms(200)
+        i := prueba_procesadores()
+        escribir("Prueba de suspender: de vuelta; un hilo en cada procesador: ", i, " de ", n_cpus, "; dormir 200 ms: ", (ahora_ns() - t0) div 1000000 - 0, " ms con lo de los hilos; la hora real, ", real_s() - s0, " s más\n")
+        si i <> n_cpus o aps_vueltos + 1 <> nat32(n_en_marcha) entonces
+            fallos := fallos + 1
+            escribir("  MAL: prueba=suspender: no todos los procesadores han vuelto\n")
+        fin
+        ; el disco de la casa, de vuelta: escribir, fsync, leer y borrar
+        si casa_m <> 0xFFFFFFFF entonces
+            si prueba_disco_s3() entonces
+                escribir("Prueba de suspender: el disco de la casa, de vuelta: 256 KB escritos con fsync, leídos y bien\n")
+            sino
+                fallos := fallos + 1
+                escribir("  MAL: prueba=suspender: el disco de la casa no va después de volver\n")
+            fin
+        fin
+    fin
+
+    función prueba_disco_s3(): bool
+        variable a: puntero a Abierto
+        variable err: ent64
+        variable b: nat64
+        variable i: nat64
+        variable bien: bool
+        b := nat64(reserva(262144))
+        si b = 0 entonces devolver falso fin
+        i := 0
+        mientras i < 262144 hacer
+            pon_m8(b + i, nat32((i * 7 + (i >> 10)) yb 255))
+            i := i + 1
+        fin
+        bien := falso
+        a := vfs_abre(nulo, "/casa/.s3-prueba", O_RDWR ob O_CREAT ob O_TRUNC, err)
+        si a <> nulo entonces
+            si vfs_escribe(a, 0, b, 262144) = 262144 y vfs_fsync(a) = 0 entonces
+                Nodos64.ceros_k(b, 262144)
+                si vfs_lee(a, 0, b, 262144) = 262144 entonces
+                    bien := cierto
+                    i := 0
+                    mientras i < 262144 y bien hacer
+                        si m8(b + i) <> nat32((i * 7 + (i >> 10)) yb 255) entonces bien := falso fin
+                        i := i + 1
+                    fin
+                fin
+            fin
+            vfs_cierra(a)
+            vfs_borra(nulo, "/casa/.s3-prueba", falso)
+        fin
+        libera(puntero(b))
+        devolver bien
+    fin
+
+    función hilo_batería_baja(arg: nat64)
+        duerme_ms(8000)
+        prueba_batería_baja()
     fin
 
     ; ---- [etapa 9] la hora, el azar y la red ----
@@ -1398,7 +1496,7 @@ módulo Hispa64
         si tic_va y va entonces
             si intérprete() entonces
                 escribir("\nSe apaga el equipo.\n")
-                al_apagar()
+                al_apagar(cierto)
                 apaga_todo()
                 escribir("No se ha podido apagar: mantenga pulsado el botón.\n")
             fin
@@ -1407,7 +1505,7 @@ módulo Hispa64
         mientras cierto hacer
             si botón entonces
                 escribir("\nBotón de encendido pulsado: se apaga el equipo.\n")
-                al_apagar()
+                al_apagar(cierto)
                 apaga_todo()
                 escribir("No se ha podido apagar: mantenga pulsado el botón.\n")
                 apaga()
@@ -1583,18 +1681,31 @@ módulo Hispa64
         etapa6()
         ; [etapa 7] musl: los programas de C de hoy
         ak_todas := tiene("ak=todas")
+        valor_de("mcasa=", dirección(mcasa[0]))   ; [etapa 11 a] (como mucho 200)
         con_ladybird := tiene("ladybird")      ; [etapa 10 g]
         medidas := tiene("medidas")             ; [etapa 10 f]
         si no tiene("sinpruebas") y no tiene("sinmusl") y tic_va entonces pruebas_musl() fin
         ; [etapa 9] la red
         si no tiene("sinpruebas") y no tiene("sinred") y tic_va entonces pruebas_red() fin
+        ; [etapa 11 a] suspender (S3): si el equipo sabe; «sins3», no
+        si no tiene("sins3") y tic_va entonces
+            s3_aparatos := nat64(dirección(reanuda_aparatos))
+            s3_traza := tiene("s3=traza")
+            sin_mtrr := tiene("s3=sinmtrr")
+            si prepara_suspender() entonces
+                escribir("Suspender: se puede (\\_S3 y la FACS; ", n_cpus, " procesadores; la tapa o el menú Inicio)\n")
+            sino
+                escribir("Suspender: no se puede (", fallo, ")\n")
+            fin
+            si tiene("prueba=suspender") entonces prueba_suspender() fin
+        fin
         si fallos + fallos_proc + fallos_disco + fallos6 + fallos7 + fallos9 + fallos_acpica > 0 entonces
             pon_color(12, 0)
             escribir("Hispa-64 etapa 11: con fallos (los «MAL» de arriba).\n")
             pon_color(7, 0)
             registro("(el arranque, entero)")         ; [etapa 10 e]
             si apagar_al_fallar entonces
-                al_apagar()
+                al_apagar(cierto)
                 devolver 43
             fin
         sino
@@ -1603,14 +1714,20 @@ módulo Hispa64
             pon_color(7, 0)
         fin
         si fallos + fallos_proc + fallos_disco + fallos6 + fallos7 + fallos9 + fallos_acpica = 0 entonces registro("(el arranque, entero)") fin   ; [etapa 10 e]
-        al_apagar()
+        al_apagar(falso)
         ; [etapa 6] con «ordenes» (las pruebas): el intérprete, y al salir, se apaga
         si apagar_al_fallar y tiene("ordenes") entonces
             intérprete()
-            al_apagar()
+            al_apagar(cierto)
             devolver 42
         fin
-        si apagar_al_fallar entonces devolver 42 fin
+        si apagar_al_fallar entonces
+            al_apagar(cierto)
+            devolver 42
+        fin
+        ; [etapa 11 a] prueba=bateriabaja (sin «apagar»): con el intérprete o el
+        ; escritorio ya en marcha, la batería de mentira baja al 9 % y luego al 2 %
+        si tiene("prueba=bateriabaja") entonces crea(nat64(dirección(hilo_batería_baja)), 0, "prueba-bateria", NORMAL, CUALQUIERA) fin
         en_marcha()
         devolver 0
     fin

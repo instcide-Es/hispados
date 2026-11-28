@@ -32,14 +32,19 @@ módulo Pci64
         devolver ecam + (nat64(b) << 20) + (nat64(d) << 15) + (nat64(f) << 12)
     fin
 
+    ; [etapa 11 a] (Suspende64, de vuelta de S3) por los puertos 0xCF8 y
+    ; 0xCFC, aunque haya ECAM: el firmware puede no haber puesto otra vez la
+    ; ventana de ECAM (PCIEXBAR del Q35, con SeaBIOS)
+    público variable por_puertos: bool
+
     público función lee32(b: nat32, d: nat32, f: nat32, r: nat32): nat32
-        si ecam <> 0 entonces devolver m32(dir(b, d, f) + (r yb 0xFFC)) fin
+        si ecam <> 0 y no por_puertos entonces devolver m32(dir(b, d, f) + (r yb 0xFFC)) fin
         sale32(0xCF8, 0x80000000 ob (b << 16) ob (d << 11) ob (f << 8) ob (r yb 0xFC))
         devolver entra32(0xCFC)
     fin
 
     público función pon32(b: nat32, d: nat32, f: nat32, r: nat32, v: nat32)
-        si ecam <> 0 entonces
+        si ecam <> 0 y no por_puertos entonces
             pon_m32(dir(b, d, f) + (r yb 0xFFC), v)
             devolver
         fin

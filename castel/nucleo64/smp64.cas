@@ -552,6 +552,46 @@ módulo Smp64
         devolver nat32(n_en_marcha)
     fin
 
+    ; ---- [etapa 11 a] para volver de S3 (Suspende64) ----
+    ; el trampolín (lo pide si no lo hay: con un solo procesador no se pidió),
+    ; con la pila y adónde saltar; su física (para el vector de despertar de
+    ; la FACS o el SIPI), o 0
+    público función trampolín_para(pila: nat64, salto: nat64): nat64
+        variable t, efer: nat64
+        si trampolín = 0 entonces
+            trampolín := pide_bajo()
+            si trampolín = 0 entonces devolver 0 fin
+            copia_trampolín()
+        fin
+        prepara_tablas()
+        t := virt(trampolín)
+        p32(t + 42, nat32(trampolín + 8))
+        p32(t + 48, nat32(nat64(dirección(tr_pml4)) - base_núcleo()))
+        efer := 0x100
+        si nx entonces efer := efer ob 0x800 fin
+        p32(t + 52, nat32(efer))
+        p64(t + 56, pila)
+        p64(t + 64, salto)
+        devolver trampolín
+    fin
+
+    ; enciende otra vez el procesador del APIC «a» (después de S3), con esa
+    ; pila y entrando en «salto»; espera a que *llegó deje de ser 0 (3 s)
+    público función reenciende(a: nat32, pila: nat64, salto: nat64, llegó: nat64): bool
+        variable t: nat64
+        variable pág: nat32
+        si trampolín_para(pila, salto) = 0 entonces devolver falso fin
+        pág := nat32(trampolín >> 12)
+        ipi(a, 0x4500)                                     ; INIT
+        espera_ns(10000000)
+        ipi(a, 0x4600 ob pág)                              ; SIPI
+        espera_ns(200000)
+        si l64(llegó) = 0 entonces ipi(a, 0x4600 ob pág) fin
+        t := ahora_ns()
+        mientras l64(llegó) = 0 y ahora_ns() - t < 3000000000 hacer pausa() fin
+        devolver l64(llegó) <> 0
+    fin
+
     función copia_trampolín()
         variable d, oc: nat64
         variable i: nat32

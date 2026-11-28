@@ -342,6 +342,82 @@ módulo Intel64
         devolver cierto
     fin
 
+    ; [etapa 11 a] de vuelta de S3 (Suspende64; la configuración PCI, con su
+    ; MSI, ya está otra vez): cada tarjeta, como al ponerla (el reinicio, la
+    ; MAC, el enlace, los anillos de antes a cero con los mismos búferes),
+    ; sin darla de alta otra vez; cuántas vuelven
+    público función in_reanuda(): nat32
+        variable i, k, n: nat32
+        variable t: puntero a Tarjeta
+        variable v: nat32
+        variable d: nat64
+        n := 0
+        i := 0
+        mientras i < in_n hacer
+            t := tj(i)
+            w(t, IMC, 0xFFFFFFFF)
+            w(t, RCTL, 0)
+            w(t, TCTL, 0)
+            espera_us(10000)
+            w(t, CTRL, r(t, CTRL) ob 0x04000000)    ; RST
+            espera_us(20000)
+            k := 0
+            mientras r(t, CTRL) yb 0x04000000 <> 0 y k < 100 hacer
+                espera_us(1000)
+                k := k + 1
+            fin
+            w(t, IMC, 0xFFFFFFFF)
+            v := r(t, ICR)
+            w(t, RAL0, nat32(t.mac[0]) ob (nat32(t.mac[1]) << 8) ob (nat32(t.mac[2]) << 16) ob (nat32(t.mac[3]) << 24))
+            w(t, RAH0, nat32(t.mac[4]) ob (nat32(t.mac[5]) << 8) ob 0x80000000)
+            v := r(t, CTRL)
+            v := (v ob 0x60) yb (nob nat32(0x80000088))
+            v := v yb (nob nat32(0x40000000))
+            w(t, CTRL, v)
+            k := 0
+            mientras k < 128 hacer
+                w(t, MTA + k * 4, 0)
+                k := k + 1
+            fin
+            ceros_mem_(virt(t.rx_anillo), 4096)
+            ceros_mem_(virt(t.tx_anillo), 4096)
+            k := 0
+            mientras k < N_RX hacer
+                d := virt(t.rx_anillo) + nat64(k) * 16
+                pon_m64(d, t.rx_buf[k])
+                k := k + 1
+            fin
+            w(t, RXCSUM, 0)
+            si t.familia <> CLÁSICA entonces w(t, RFCTL, r(t, RFCTL) yb (nob nat32(0x8000))) fin
+            w(t, RDBAL, nat32(t.rx_anillo yb 0xFFFFFFFF))
+            w(t, RDBAH, nat32(t.rx_anillo >> 32))
+            w(t, RDLEN, N_RX * 16)
+            w(t, RDH, 0)
+            w(t, RDT, N_RX - 1)
+            w(t, RDTR, 0)
+            w(t, RADV, 0)
+            t.rx_sig := 0
+            w(t, RCTL, 0x04008012)
+            w(t, TDBAL, nat32(t.tx_anillo yb 0xFFFFFFFF))
+            w(t, TDBAH, nat32(t.tx_anillo >> 32))
+            w(t, TDLEN, N_TX * 16)
+            w(t, TDH, 0)
+            w(t, TDT, 0)
+            t.tx_sig := 0
+            t.tx_limpio := 0
+            si t.familia <> CLÁSICA entonces
+                w(t, TXDCTL, (r(t, TXDCTL) yb 0xFFC0C0C0) ob 0x01400000 ob 0x1F)
+            fin
+            w(t, TIPG, 0x0060200A)
+            w(t, TCTL, 0x010400FA)
+            w(t, ITR, 0)
+            w(t, IMS, 0x80 ob 0x40 ob 0x10 ob 0x04 ob 0x01)
+            n := n + 1
+            i := i + 1
+        fin
+        devolver n
+    fin
+
     función ceros_mem_(d: nat64, n: nat64)
         ensamblador
             mov rdi, {d}

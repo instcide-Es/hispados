@@ -388,7 +388,23 @@ módulo Nodos64
     fin
 
     público función abre_vfs()
+        ; [etapa 11 a] al acabar una operación (con el mutex aún tomado: un
+        ; estado entero), si lo sucio del diario de la casa llega al umbral,
+        ; se confirma (Casa64)
+        si al_soltar_vfs <> 0 y cb_diario_lleno() entonces llama_n(al_soltar_vfs) fin
         abre_mutex(dirección(vfs_mutex))
+    fin
+
+    ; [etapa 11 a] la función de Casa64 que confirma el diario (o 0), y el
+    ; montaje de la casa (0xFFFFFFFF: no hay)
+    público variable al_soltar_vfs: nat64
+    público variable casa_montaje: nat32
+
+    función llama_n(f: nat64)
+        ensamblador
+            mov rax, {f}
+            call rax
+        fin
     fin
 
     ; [etapa 10 f] ¿nadie tiene el mutex del VFS? (ARRANQUE.TXT al pararse)

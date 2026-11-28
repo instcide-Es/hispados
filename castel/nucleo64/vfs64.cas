@@ -933,15 +933,50 @@ módulo Vfs64
         si pos < 0 entonces
             p := a.pos
             si a.marcas yb O_APPEND <> 0 entonces p := nd.tamaño fin
-            r := fs_escribe(nd, p, k, n)
-            si r > 0 entonces a.pos := p + nat64(r) fin
         sino
             p := nat64(pos)
+        fin
+        si nd.montaje = casa_montaje y n > TROZO_CASA entonces
+            r := escribe_a_trozos(nd, p, k, n)
+        sino
             r := fs_escribe(nd, p, k, n)
         fin
+        si pos < 0 y r > 0 entonces a.pos := p + nat64(r) fin
         si r > 0 y nd.comp <> 0 entonces comp_escribe_(nd, p, k, nat64(r)) fin  ; [etapa 10 h]
         abre_vfs()
         devolver r
+    fin
+
+    ; [etapa 11 a] en la casa, lo grande a trozos de 1 MB: cada trozo es una
+    ; escritura entera (el tamaño al día), y entre dos se confirma el diario si
+    ; hace falta (lo confirmado, siempre después de un trozo: un archivo
+    ; cortado ahí, nunca la FAT a medias); lo escrito, o el error si no se
+    ; ha escrito nada
+    constante TROZO_CASA = 1048576
+    función escribe_a_trozos(nd: puntero a Nodo, p: nat64, k: nat64, n: nat64): ent64
+        variable hecho, t: nat64
+        variable r: ent64
+        hecho := 0
+        mientras hecho < n hacer
+            t := n - hecho
+            si t > TROZO_CASA entonces t := TROZO_CASA fin
+            r := fs_escribe(nd, p + hecho, k + hecho, t)
+            si r <= 0 entonces
+                si hecho > 0 entonces devolver ent64(hecho) fin
+                devolver r
+            fin
+            hecho := hecho + nat64(r)
+            si nat64(r) < t entonces devolver ent64(hecho) fin
+            si al_soltar_vfs <> 0 y cb_diario_lleno() entonces llama_v(al_soltar_vfs) fin
+        fin
+        devolver ent64(hecho)
+    fin
+
+    función llama_v(f: nat64)
+        ensamblador
+            mov rax, {f}
+            call rax
+        fin
     fin
 
     público función vfs_sitúa(a: puntero a Abierto, d: ent64, de_dónde: nat64): ent64
@@ -1780,6 +1815,7 @@ módulo Vfs64
         variable m, d: nat32
         variable r: puntero a Nodo
         variable ruta: arreglo [32] de byte
+        casa_montaje := 0xFFFFFFFF
         m := nuevo_montaje("/", 0xFFFFFFFF)
         r := nuevo_nodo(m, 0, N_CARPETA)
         montajes[m].raíz := nat64(r)

@@ -1,0 +1,735 @@
+; =============================================================================
+;  suspende64.cas - Hispa-64, etapa 11 a (docs/64/HISPA-64.md, sección 27):
+;  suspender a la memoria (S3) y volver con todo.
+;
+;  Lo pide la tapa al cerrarse (Acpica64.pide_suspender), «Suspender el
+;  equipo» del menú Inicio (/dev/energia) o «prueba=suspender». El hilo
+;  «suspender» (fijo en el procesador 0, el del arranque: el firmware vuelve
+;  por él) lo hace así:
+;   1. lo de los discos, al disco (sync; la casa, confirmada) y el VFS
+;      tomado (nada se escribe mientras);
+;   2. ACPI: _PTS(3) y _SST (Acpica64.dormir_acpica) y SLP_TYP de \_S3;
+;   3. los demás procesadores, «congelados»: un aviso (V_S3) que cada uno
+;      atiende guardando su estado (los registros que guarda quien llama, su
+;      pila, CR3, FS, KERNEL_GS, RSP0 de su TSS, los de coma flotante con
+;      xsave) y se queda parado sin interrupciones;
+;   4. en este: lo mismo, y además lo que el equipo pierde (las entradas de
+;      los IOAPIC, la configuración PCI de cada aparato con su MSI y la
+;      entrada 0 de su tabla de MSI-X, los MTRR), la hora (el reloj del
+;      núcleo y la del CMOS), el vector de despertar de la FACS (el trampolín
+;      de Smp64, que va de 16 a 64 bits) y SLP_TYP | SLP_EN en PM1;
+;   5. al volver (el firmware salta al vector en modo real): el trampolín, y
+;      vuelve_bsp pone otra vez lo de este procesador (las tablas, GS, la
+;      GDT y la TSS, la IDT, syscall, el APIC local) y salta adonde se quedó;
+;      se pone lo de los IOAPIC, PCI, el 8259 tapado, el reloj (el TSC
+;      empieza de cero: el monótono sigue donde estaba; la hora real suma lo
+;      dormido, del CMOS; el vDSO, al día), el HPET, el tic; _WAK(3); la
+;      pantalla (Pant64: la de Bochs/QEMU, su modo otra vez); los discos
+;      (NVMe y AHCI, sus colas otra vez en las mismas páginas), el USB (las
+;      controladoras otra vez y lo enchufado, enumerado de nuevo) y la red
+;      (la tarjeta otra vez, con su dirección); los demás procesadores,
+;      encendidos otra vez (INIT-SIPI) con vuelve_ap, que pone lo suyo y
+;      vuelve al aviso en el que se quedaron; y el VFS, suelto.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Suspende64
+
+    importar Cifras64, Es64, Cpu64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Gdt64, Acpi64, Reloj64, Apic64, Hilos64, Smp64, Entradas, Pci64, Hora64, Vdso64, Nodos64, Vfs64, Acpica64, Pant64
+
+    público constante V_S3 = 0xF3
+
+    ; lo guardado de cada procesador
+    tipo Guarda = estructura
+        rsp, rip: nat64             ; dónde se quedó (la pila con lo que guarda quien llama)
+        cr3, fs, kgs, rsp0: nat64
+        fpu: nat64                  ; 4 KB (alineados a 64) para xsave
+        congelado: nat64            ; 1: parado, esperando
+        llegó: nat64                ; (al volver) 1: ha llegado al núcleo
+        pila: nat64                 ; la pila para volver (la del trampolín)
+    fin
+    variable gu: arreglo [MAX_CPUS] de Guarda
+
+    público variable sabe: bool                 ; se puede suspender aquí (\_S3, la FACS, el trampolín)
+    público variable veces: nat64               ; cuántas veces se ha suspendido y vuelto
+    público variable vuelto: bool
+    público variable dormido_ms: nat64          ; lo que ha estado dormida la última vez (del CMOS)
+    público variable fallo: puntero a byte
+    variable facs: nat64                        ; la FACS (virtual), o 0
+    variable slp_a, slp_b: nat32
+    variable pila_bsp: arreglo [4096] de nat64 alineado 64      ; (32 KB) la pila de volver del procesador 0
+    variable hilo: puntero a Hilo
+    variable congelados: nat64
+    variable vuelve_núm: nat32                  ; el procesador que se está encendiendo otra vez
+    ; los IOAPIC (hasta 4 de 120 entradas)
+    variable io_guarda: arreglo [960] de nat32
+    ; PCI: 64 palabras de cada aparato y la entrada 0 de su MSI-X
+    constante MAX_PCI = 64
+    variable pci_guarda: arreglo [4096] de nat32
+    variable msix_guarda: arreglo [256] de nat32
+    ; los MTRR (del procesador 0)
+    variable mtrr_n: nat32
+    variable mtrr_msr: arreglo [40] de nat32
+    variable mtrr_val: arreglo [40] de nat64
+    ; la hora
+    variable mono_antes, cmos_antes: nat64
+    ; (las pruebas) al volver, cuántos procesadores han vuelto
+    público variable aps_vueltos: nat32
+    público variable sin_mtrr: bool             ; «s3=sinmtrr»: sin copiar los MTRR a los demás
+    público variable s3_traza: bool             ; «s3=traza»: cada paso, por el puerto serie
+
+    función g(n: nat32): puntero a Guarda
+        devolver dirección(gu[n])
+    fin
+
+    ; ---- lo de cada procesador ----
+    función lee_cr3(): nat64
+        variable v: nat64
+        ensamblador
+            db 0x0F, 0x20, 0xD8         ; mov rax, cr3
+            mov {v}, rax
+        fin
+        devolver v
+    fin
+
+    función pon_cr3(v: nat64)
+        ensamblador
+            mov rax, {v}
+            db 0x0F, 0x22, 0xD8         ; mov cr3, rax
+        fin
+    fin
+
+    función xsave_(d: nat64)
+        si con_xsave entonces
+            ensamblador
+                mov rdi, {d}
+                mov eax, 0xFFFFFFFF
+                mov edx, 0xFFFFFFFF
+                db 0x48, 0x0F, 0xAE, 0x27       ; xsave64 [rdi]
+            fin
+        sino
+            ensamblador
+                mov rdi, {d}
+                db 0x48, 0x0F, 0xAE, 0x07       ; fxsave64 [rdi]
+            fin
+        fin
+    fin
+
+    función xrstor_(d: nat64)
+        si con_xsave entonces
+            ensamblador
+                mov rdi, {d}
+                mov eax, 0xFFFFFFFF
+                mov edx, 0xFFFFFFFF
+                db 0x48, 0x0F, 0xAE, 0x2F       ; xrstor64 [rdi]
+            fin
+        sino
+            ensamblador
+                mov rdi, {d}
+                db 0x48, 0x0F, 0xAE, 0x0F       ; fxrstor64 [rdi]
+            fin
+        fin
+    fin
+
+    función wbinvd_()
+        ensamblador
+            db 0x0F, 0x09               ; wbinvd
+        fin
+    fin
+
+    ; (con las interrupciones quitadas) lo que se pierde de este procesador, a gu
+    función guarda_este(x: puntero a Guarda, c: puntero a Cpu)
+        x.cr3 := lee_cr3()
+        x.fs := lee_msr(0xC0000100)
+        x.kgs := lee_msr(0xC0000102)
+        x.rsp0 := m64(c.tss + 4)
+        xsave_(x.fpu)
+    fin
+
+    ; (al volver, sin interrupciones) lo de este procesador otra vez: el
+    ; trampolín ha puesto el modo largo con sus tablas
+    función pon_este(x: puntero a Guarda, c: puntero a Cpu)
+        prepara_este()                  ; la PAT, WP, las tablas del núcleo, las páginas globales
+        pon_gs(c)
+        monta(c.gdt, c.tss, c.ist1, c.ist2, c.ist3)
+        pon_m64(c.tss + 4, x.rsp0)
+        carga_idt()
+        prepara_cpu()                   ; syscall, SMEP, SMAP, PCID, SSE, xsave
+        pon_msr(0xC0000100, x.fs)
+        pon_msr(0xC0000102, x.kgs)
+        pv_este(c.número)
+        pon_tsc_aux(c.número)
+        pon_lapic()
+        pon_cr3(x.cr3)
+        xrstor_(x.fpu)
+        c.tsc_tic := 0                  ; (el TSC ha vuelto a empezar)
+    fin
+
+    ; los MTRR del procesador 0, a este (con la caché apagada, como dice Intel)
+    función pon_mtrr()
+        variable i: nat32
+        variable cr0: nat64
+        si mtrr_n = 0 entonces devolver fin
+        ensamblador
+            db 0x0F, 0x20, 0xC0         ; mov rax, cr0
+            mov {cr0}, rax
+            or rax, 0x40000000          ; CD
+            db 0x0F, 0x22, 0xC0         ; mov cr0, rax
+            db 0x0F, 0x09               ; wbinvd
+        fin
+        pon_msr(0x2FF, mtrr_val[0] yb (nob nat64(0x800)))       ; (apagados mientras)
+        i := 1
+        mientras i < mtrr_n hacer
+            pon_msr(mtrr_msr[i], mtrr_val[i])
+            i := i + 1
+        fin
+        pon_msr(0x2FF, mtrr_val[0])
+        ensamblador
+            db 0x0F, 0x09               ; wbinvd
+            mov rax, {cr0}
+            db 0x0F, 0x22, 0xC0         ; mov cr0, rax
+        fin
+    fin
+
+    función guarda_mtrr()
+        variable cap: nat64
+        variable i, n: nat32
+        mtrr_n := 0
+        cpuid(1, 0)
+        si rd yb 0x1000 = 0 entonces devolver fin
+        cap := lee_msr(0xFE)
+        mtrr_msr[0] := 0x2FF
+        n := 1
+        si cap yb 0x100 <> 0 entonces
+            mtrr_msr[1] := 0x250
+            mtrr_msr[2] := 0x258
+            mtrr_msr[3] := 0x259
+            n := 4
+            i := 0
+            mientras i < 8 hacer
+                mtrr_msr[n] := 0x268 + i
+                n := n + 1
+                i := i + 1
+            fin
+        fin
+        i := 0
+        mientras i < nat32(cap yb 0xFF) y n + 2 <= 40 hacer
+            mtrr_msr[n] := 0x200 + i * 2
+            mtrr_msr[n + 1] := 0x201 + i * 2
+            n := n + 2
+            i := i + 1
+        fin
+        i := 0
+        mientras i < n hacer
+            mtrr_val[i] := lee_msr(mtrr_msr[i])
+            i := i + 1
+        fin
+        mtrr_n := n
+    fin
+
+    ; ---- los demás procesadores: congelarlos y volver ----
+    ; (en el aviso V_S3, sin interrupciones) se guarda y se queda parado; al
+    ; volver (vuelve_ap salta a .vuelve), sigue: vuelve del aviso
+    función congela_este()
+        variable c: puntero a Cpu
+        variable x: puntero a Guarda
+        variable d: nat64
+        c := yo()
+        x := g(c.número)
+        guarda_este(x, c)
+        eoi()
+        d := nat64(x)
+        ensamblador
+            mov rdi, {d}
+            push rbx
+            push rbp
+            push r12
+            push r13
+            push r14
+            push r15
+            mov [rdi], rsp
+            mov rax, .vuelve
+            mov [rdi + 8], rax
+            db 0x0F, 0x09               ; wbinvd
+            mov qword [rdi + 56], 1     ; congelado
+        .quieto:
+            cli
+            hlt
+            jmp .quieto
+        .vuelve:
+            pop r15
+            pop r14
+            pop r13
+            pop r12
+            pop rbp
+            pop rbx
+        fin
+    fin
+
+    interrupción función aviso_s3()
+        congela_este()
+    fin
+
+    ; (desde el trampolín, con su pila) un procesador que vuelve
+    función vuelve_ap()
+        variable c: puntero a Cpu
+        variable x: puntero a Guarda
+        variable d: nat64
+        ; (quién es: lo dice el que lo enciende, de uno en uno; su APIC aún está
+        ; como al encender, en xAPIC: con x2APIC, leer su número fallaría)
+        c := nulo
+        si vuelve_núm < n_cpus entonces c := cpu(vuelve_núm) fin
+        si c = nulo entonces
+            mientras cierto hacer
+                ensamblador
+                    cli
+                    hlt
+                fin
+            fin
+        fin
+        x := g(c.número)
+        si s3_traza entonces escribir("Suspender: (", c.número, ": los MTRR)\n") fin
+        si no sin_mtrr entonces pon_mtrr() fin
+        si s3_traza entonces escribir("Suspender: (", c.número, ": lo suyo)\n") fin
+        pon_este(x, c)
+        si s3_traza entonces escribir("Suspender: (", c.número, ": el tic)\n") fin
+        si tic_va entonces pon_tic() fin
+        x.congelado := 0
+        pon_atómico(dirección(x.llegó), 1)
+        d := nat64(x)
+        ensamblador
+            mov rdi, {d}
+            mov rsp, [rdi]
+            mov rax, [rdi + 8]
+            jmp rax
+        fin
+    fin
+
+    función cuenta_congelados(): nat64
+        variable i: nat32
+        variable n: nat64
+        n := 0
+        i := 1
+        mientras i < n_cpus hacer
+            si gu[i].congelado <> 0 entonces n := n + 1 fin
+            i := i + 1
+        fin
+        devolver n
+    fin
+
+    ; ---- el procesador 0 ----
+    ; (sin interrupciones) se guarda, escribe SLP_TYP y SLP_EN y espera; al
+    ; volver (vuelve_bsp salta a .vuelve), cierto; si no se duerme, falso
+    función duerme_bsp(): bool
+        variable c: puntero a Cpu
+        variable x: puntero a Guarda
+        variable d, a1, b1, v1, v2: nat64
+        c := yo()
+        x := g(0)
+        guarda_este(x, c)
+        vuelto := falso
+        d := nat64(x)
+        a1 := nat64(pm1a_cnt)
+        b1 := nat64(pm1b_cnt)
+        v1 := nat64((entra16(pm1a_cnt) yb 0xC3FF) ob (slp_a << 10))
+        v2 := 0
+        si pm1b_cnt <> 0 entonces v2 := nat64((entra16(pm1b_cnt) yb 0xC3FF) ob (slp_b << 10)) fin
+        ; (WAK_STS, borrado: se borra escribiendo un 1)
+        sale16(pm1a_evt, 0x8000)
+        si pm1b_evt <> 0 entonces sale16(pm1b_evt, 0x8000) fin
+        ensamblador
+            mov rdi, {d}
+            mov r8, {a1}
+            mov r9, {b1}
+            mov r10, {v1}
+            mov r11, {v2}
+            push rbx
+            push rbp
+            push r12
+            push r13
+            push r14
+            push r15
+            mov [rdi], rsp
+            mov rax, .vuelve
+            mov [rdi + 8], rax
+            db 0x0F, 0x09               ; wbinvd
+            ; SLP_TYP, y luego SLP_TYP | SLP_EN (PM1a y PM1b)
+            mov edx, r8d
+            mov eax, r10d
+            out dx, ax
+            test r9d, r9d
+            jz .sinb
+            mov edx, r9d
+            mov eax, r11d
+            out dx, ax
+        .sinb:
+            mov edx, r8d
+            mov eax, r10d
+            or eax, 0x2000
+            out dx, ax
+            test r9d, r9d
+            jz .espera
+            mov edx, r9d
+            mov eax, r11d
+            or eax, 0x2000
+            out dx, ax
+        .espera:
+            ; (si sigue aquí, no se ha dormido: unos 3.000 millones de ciclos)
+            rdtsc
+            shl rdx, 32
+            or rax, rdx
+            mov rcx, rax
+        .otra:
+            db 0xF3, 0x90               ; pause
+            rdtsc
+            shl rdx, 32
+            or rax, rdx
+            sub rax, rcx
+            cmp rax, 2000000000
+            jb .otra
+        .vuelve:
+            pop r15
+            pop r14
+            pop r13
+            pop r12
+            pop rbp
+            pop rbx
+        fin
+        devolver vuelto
+    fin
+
+    ; (desde el trampolín, con pila_bsp) el procesador 0 vuelve de S3
+    función vuelve_bsp()
+        variable c: puntero a Cpu
+        variable x: puntero a Guarda
+        variable d: nat64
+        c := cpu(0)
+        x := g(0)
+        pon_mtrr()
+        pon_este(x, c)
+        vuelto := cierto
+        d := nat64(x)
+        ensamblador
+            mov rdi, {d}
+            mov rsp, [rdi]
+            mov rax, [rdi + 8]
+            jmp rax
+        fin
+    fin
+
+    ; ---- lo del equipo ----
+    función guarda_io()
+        variable i, k, n: nat32
+        n := 0
+        i := 0
+        mientras i < n_ioapic y i < 4 hacer
+            k := 0
+            mientras k < entradas(i) y k < 120 hacer
+                io_guarda[n] := io_lee_e(i, 0x10 + k * 2)
+                io_guarda[n + 1] := io_lee_e(i, 0x11 + k * 2)
+                n := n + 2
+                k := k + 1
+            fin
+            i := i + 1
+        fin
+    fin
+
+    función pon_io()
+        variable i, k, n: nat32
+        n := 0
+        i := 0
+        mientras i < n_ioapic y i < 4 hacer
+            k := 0
+            mientras k < entradas(i) y k < 120 hacer
+                io_pon_e(i, 0x10 + k * 2, 0x10000)
+                io_pon_e(i, 0x11 + k * 2, io_guarda[n + 1])
+                io_pon_e(i, 0x10 + k * 2, io_guarda[n])
+                n := n + 2
+                k := k + 1
+            fin
+            i := i + 1
+        fin
+    fin
+
+    función guarda_pci()
+        variable i, r, c, tab, bir: nat32
+        variable base, t: nat64
+        i := 0
+        mientras i < pci_n y i < MAX_PCI hacer
+            r := 0
+            mientras r < 64 hacer
+                pci_guarda[i * 64 + r] := conf(i, r * 4)
+                r := r + 1
+            fin
+            c := capacidad(i, 0x11)
+            msix_guarda[i * 4 + 3] := 1
+            si c <> 0 entonces
+                tab := conf(i, c + 4)
+                bir := tab yb 7
+                base := bar_mem(i, bir)
+                si base <> 0 entonces
+                    t := mapea_disp(base + (tab yb 0xFFFFFFF8), 16, sin_caché())
+                    msix_guarda[i * 4] := m32(t)
+                    msix_guarda[i * 4 + 1] := m32(t + 4)
+                    msix_guarda[i * 4 + 2] := m32(t + 8)
+                    msix_guarda[i * 4 + 3] := m32(t + 12)
+                fin
+            fin
+            i := i + 1
+        fin
+    fin
+
+    ; como Linux (pci_restore_state): la cabecera de arriba abajo (la orden,
+    ; la 1, la última), solo lo que haya cambiado; luego MSI y MSI-X
+    función pon_pci()
+        variable i, r, c, v, tab, bir: nat32
+        variable base, t: nat64
+        ; la ventana de ECAM del Q35 (PCIEXBAR, 0x60 y 0x64 del 00:00.0), por
+        ; los puertos, si el firmware no la ha puesto
+        por_puertos := cierto
+        si pci_n > 0 y pci_guarda[0] = 0x29C08086 y conf(0, 0) = 0x29C08086 entonces
+            si conf(0, 0x60) <> pci_guarda[24] o conf(0, 0x64) <> pci_guarda[25] entonces
+                pon_conf(0, 0x64, pci_guarda[25])
+                pon_conf(0, 0x60, pci_guarda[24])
+                escribir("Suspender: la ventana de ECAM del Q35 (PCIEXBAR), otra vez\n")
+            fin
+        fin
+        por_puertos := falso
+        i := 0
+        mientras i < pci_n y i < MAX_PCI hacer
+            r := 15
+            mientras r >= 1 hacer
+                v := pci_guarda[i * 64 + r]
+                si conf(i, r * 4) <> v entonces pon_conf(i, r * 4, v) fin
+                r := r - 1
+            fin
+            ; MSI: la dirección, los datos y el control
+            c := capacidad(i, 0x05)
+            si c <> 0 entonces
+                r := c div 4
+                pon_conf(i, c + 4, pci_guarda[i * 64 + r + 1])
+                pon_conf(i, c + 8, pci_guarda[i * 64 + r + 2])
+                pon_conf(i, c + 12, pci_guarda[i * 64 + r + 3])
+                pon_conf(i, c, pci_guarda[i * 64 + r])
+            fin
+            ; MSI-X: la entrada 0 y el control
+            c := capacidad(i, 0x11)
+            si c <> 0 entonces
+                r := c div 4
+                pon_conf(i, c, (pci_guarda[i * 64 + r] yb 0xFFFF) ob (((pci_guarda[i * 64 + r] >> 16) ob 0x4000) << 16))
+                tab := conf(i, c + 4)
+                bir := tab yb 7
+                base := bar_mem(i, bir)
+                si base <> 0 entonces
+                    t := mapea_disp(base + (tab yb 0xFFFFFFF8), 16, sin_caché())
+                    pon_m32(t, msix_guarda[i * 4])
+                    pon_m32(t + 4, msix_guarda[i * 4 + 1])
+                    pon_m32(t + 8, msix_guarda[i * 4 + 2])
+                    pon_m32(t + 12, msix_guarda[i * 4 + 3])
+                fin
+                pon_conf(i, c, pci_guarda[i * 64 + r])
+            fin
+            pon_conf(i, 4, pci_guarda[i * 64 + 1])
+            i := i + 1
+        fin
+    fin
+
+    ; los segundos del CMOS (UTC o local: da igual, es para restar)
+    función segundos_cmos(): nat64
+        variable d, me, a, h, mi, s: nat32
+        lee_fecha(d, me, a, h, mi, s)
+        devolver nat64(días_de(d, me, a)) * 86400 + nat64(h) * 3600 + nat64(mi) * 60 + nat64(s)
+    fin
+
+    ; ---- todo ----
+    ; ¿se puede suspender aquí? (al arrancar, con ACPICA ya en marcha)
+    público función prepara_suspender(): bool
+        variable f: nat64
+        variable i: nat32
+        sabe := falso
+        si no en_marcha_acpica o est.s3 = 0 entonces
+            fallo := "el equipo no tiene \\_S3"
+            devolver falso
+        fin
+        si pm1a_cnt = 0 o pm1a_evt = 0 entonces
+            fallo := "sin los registros PM1 de la FADT"
+            devolver falso
+        fin
+        ; la FACS: X_FIRMWARE_CTRL (si la FADT lo tiene) o FIRMWARE_CTRL
+        f := 0
+        si fadt_largo >= 140 entonces f := m64(fadt + 132) fin
+        si f = 0 entonces f := nat64(m32(fadt + 36)) fin
+        si f = 0 entonces
+            fallo := "sin la FACS"
+            devolver falso
+        fin
+        facs := mapea_disp(f yb (nob nat64(0xFFF)), 0x2000, sin_caché()) + (f yb 0xFFF)
+        si m32(facs) <> 0x53434146 entonces
+            fallo := "la FACS no dice «FACS»"
+            facs := 0
+            devolver falso
+        fin
+        i := 0
+        mientras i < n_cpus hacer
+            gu[i].fpu := nat64(reserva(8192))
+            gu[i].pila := pila_nueva()
+            si gu[i].fpu = 0 o gu[i].pila = 0 entonces
+                fallo := "sin memoria"
+                devolver falso
+            fin
+            gu[i].fpu := (gu[i].fpu + 63) yb (nob nat64(63))
+            i := i + 1
+        fin
+        pon_vector(V_S3, nat64(dirección(aviso_s3)))
+        sabe := cierto
+        puede_suspender := cierto
+        hilo := crea(nat64(dirección(hilo_)), 0, "suspender", NORMAL, 0)
+        devolver cierto
+    fin
+
+    ; (pruebas) un hilo fijo en el procesador arg: dice que ha corrido ahí
+    público variable corrió: arreglo [MAX_CPUS] de nat64
+    función hilo_prueba(arg: nat64)
+        si yo().número = nat32(arg) entonces corrió[nat32(arg)] := 1 fin
+    fin
+
+    público función prueba_procesadores(): nat32
+        variable i, n: nat32
+        variable t0: nat64
+        i := 0
+        mientras i < n_cpus hacer
+            corrió[i] := 0
+            crea(nat64(dirección(hilo_prueba)), nat64(i), "s3-prueba", NORMAL, i)
+            i := i + 1
+        fin
+        t0 := ahora_ns()
+        n := 0
+        mientras ahora_ns() - t0 < 2000000000 hacer
+            n := 0
+            i := 0
+            mientras i < n_cpus hacer
+                n := n + nat32(corrió[i])
+                i := i + 1
+            fin
+            si n = n_cpus entonces devolver n fin
+            duerme_ms(10)
+        fin
+        devolver n
+    fin
+
+    función hilo_(arg: nat64)
+        mientras cierto hacer
+            duerme_ms(100)
+            si pide_suspender entonces
+                pide_suspender := falso
+                suspende()
+            fin
+        fin
+    fin
+
+    ; suspender ya (en el procesador 0); cierto si ha vuelto
+    público función suspende(): bool
+        variable i: nat32
+        variable b, t0: nat64
+        variable bien: bool
+        si no sabe entonces devolver falso fin
+        escribir("Suspender: lo de los discos, al disco...\n")
+        vfs_sync()
+        cierra_vfs()
+        si no dormir_acpica(slp_a, slp_b) entonces
+            abre_vfs()
+            escribir("Suspender: ACPI no deja (_PTS(3)); no se suspende\n")
+            devolver falso
+        fin
+        ; los demás, congelados
+        congelados := 0
+        i := 1
+        mientras i < n_cpus hacer
+            gu[i].congelado := 0
+            gu[i].llegó := 0
+            i := i + 1
+        fin
+        si n_en_marcha > 1 entonces ipi_a_los_demás(0x4000 ob V_S3) fin
+        t0 := ahora_ns()
+        mientras cuenta_congelados() + 1 < n_en_marcha y ahora_ns() - t0 < 2000000000 hacer pausa() fin
+        congelados := cuenta_congelados()
+        si congelados + 1 < n_en_marcha entonces escribir("Suspender: ¡solo ", congelados, " de ", n_en_marcha - 1, " procesadores se han parado!\n") fin
+        escribir("Suspender: a dormir (S3, SLP_TYP ", slp_a, "); ", congelados, " procesadores parados\n")
+        para_tic()
+        b := sin_ints()
+        mono_antes := ahora_ns()
+        cmos_antes := segundos_cmos()
+        guarda_io()
+        guarda_pci()
+        guarda_mtrr()
+        pon_m32(facs + 12, nat32(trampolín_para(nat64(dirección(pila_bsp[4095])), nat64(dirección(vuelve_bsp)))))
+        si m32(facs + 4) >= 32 entonces pon_m64(facs + 24, 0) fin
+        bien := duerme_bsp()
+        si no bien entonces
+            restaura(b)
+            escribir("Suspender: el equipo no se ha dormido (SLP_EN)\n")
+        fin
+        ; ---- de vuelta (o no se ha dormido) ----
+        si bien entonces
+            sale8(0x21, 0xFF)                       ; el 8259, tapado
+            sale8(0xA1, 0xFF)
+            pon_io()
+            pon_pci()
+            dormido_ms := (segundos_cmos() - cmos_antes) * 1000
+            tras_s3(mono_antes)
+            pon_real_ns(real_ns() + dormido_ms * 1000000)
+        fin
+        si tic_va entonces pon_tic() fin
+        restaura(b)
+        despierta_acpica()
+        si bien entonces
+            escribir("Suspender: de vuelta (unos ", dormido_ms div 1000, " s dormido)\n")
+            reanuda_aparatos()
+            si s3_traza entonces escribir("Suspender: (los aparatos, otra vez)\n") fin
+        fin
+        ; los demás, otra vez
+        aps_vueltos := 0
+        i := 1
+        mientras i < n_cpus hacer
+            si gu[i].congelado <> 0 entonces
+                si s3_traza entonces escribir("Suspender: (el procesador ", i, ", APIC ", cpu(i).apic, ", otra vez)\n") fin
+                vuelve_núm := i
+                si bien entonces
+                    si reenciende(cpu(i).apic, gu[i].pila, nat64(dirección(vuelve_ap)), nat64(dirección(gu[i].llegó))) entonces aps_vueltos := aps_vueltos + 1 fin
+                sino
+                    ; (no se ha dormido: siguen con su estado; un INIT y otra vez)
+                    si reenciende(cpu(i).apic, gu[i].pila, nat64(dirección(vuelve_ap)), nat64(dirección(gu[i].llegó))) entonces aps_vueltos := aps_vueltos + 1 fin
+                fin
+            fin
+            i := i + 1
+        fin
+        abre_vfs()
+        si bien entonces
+            veces := veces + 1
+            si s3_traza entonces
+                escribir("Suspender: (el reloj: antes ", mono_antes div 1000000, " ms, ahora ", ahora_ns() div 1000000, " ms; con el TSC ", con_tsc, ", con KVM ", con_pv, ")\n")
+                duerme_ms(20)
+                escribir("Suspender: (dormir 20 ms, bien: ", ahora_ns() div 1000000, " ms; los tics del 0: ", cpu(0).tics, ")\n")
+
+            fin
+            escribir("Suspender: todo en marcha otra vez: ", aps_vueltos + 1, " procesadores")
+            escribir("; la hora, ")
+            escribe_local()
+            escribir("\n")
+        fin
+        devolver bien
+    fin
+
+    ; los aparatos, otra vez (Hispa64 lo pone: los drivers no son de aquí)
+    público variable s3_aparatos: nat64
+    función reanuda_aparatos()
+        si s3_aparatos <> 0 entonces llama_(s3_aparatos) fin
+    fin
+
+    función llama_(f: nat64)
+        ensamblador
+            mov rax, {f}
+            call rax
+        fin
+    fin
+
+fin Suspende64.

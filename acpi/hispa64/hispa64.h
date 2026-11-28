@@ -28,7 +28,10 @@
 #define H64_APAGA 6	/* _PTS(5), \_S5 y SLP_EN: no vuelve si se apaga -> el código de ACPICA */
 #define H64_BRILLO 7	/* a: el nivel (0-100) o -1 para solo leerlo -> el nivel (_BQC), -1 si no hay */
 #define H64_REGISTRO 8	/* a: búfer, b: su tamaño -> octetos (se van del registro) */
-#define H64_PRUEBA 9	/* (pruebas) a: 1 evalúa un método de nombre b (texto) y devuelve el entero */
+#define H64_PRUEBA 9	/* (pruebas) a: 1 evalúa un método de nombre b (texto) y devuelve el entero; 2, lo ejecuta (sin argumentos) */
+/* [etapa 11 a] suspender (S3) */
+#define H64_DORMIR 10	/* a: el estado (3): _PTS(3), _SST (AcpiEnterSleepStatePrep) -> SLP_TYPa | SLP_TYPb << 8 (-1: no hay \_S3) */
+#define H64_DESPIERTA 11	/* a: el estado (3): _WAK, _SST (AcpiLeaveSleepStatePrep y AcpiLeaveSleepState) -> 0 */
 
 /* opciones (h64_inicio.opciones) */
 #define H64_OP_DETALLE 1	/* el registro de cada octeto del controlador embebido */
@@ -73,6 +76,13 @@ struct h64_estado {
 	u32 errores, memoria_kb, memoria_max_kb;
 	u32 avisos;		/* los Notify del equipo */
 	char bat_ruta[32], modelo[20], ca_ruta[32], ec_ruta[32], brillo_ruta[48];
+	/* [etapa 11 a] la tapa (PNP0C0D), las teclas del brillo (los Notify 86h y
+	 * 87h al dispositivo de _BCM) y \_S3 */
+	u32 tapa_hay, tapa;	/* tapa: 1 abierta, 0 cerrada (_LID) */
+	u32 tapa_avisos;	/* los Notify (80h) a la tapa */
+	u32 brillo_sube, brillo_baja;	/* los Notify 86h (y 85h) y 87h */
+	u32 s3, s3_a, s3_b;	/* \_S3: hay; SLP_TYPa y SLP_TYPb */
+	char tapa_ruta[32];
 };
 
 /* las rutas de un _PRT, resueltas */

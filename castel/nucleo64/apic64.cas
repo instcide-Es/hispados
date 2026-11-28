@@ -130,6 +130,15 @@ módulo Apic64
         pon_m32(io_v[i] + 0x10, v)
     fin
 
+    ; [etapa 11 a] (Suspende64) una entrada de un IOAPIC, leída o puesta
+    público función io_lee_e(i: nat32, r: nat32): nat32
+        devolver io_lee(i, r)
+    fin
+
+    público función io_pon_e(i: nat32, r: nat32, v: nat32)
+        io_pon(i, r, v)
+    fin
+
     público función entradas(i: nat32): nat32
         devolver io_n[i]
     fin

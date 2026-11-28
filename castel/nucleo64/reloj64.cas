@@ -345,6 +345,30 @@ módulo Reloj64
         restaura(b)
     fin
 
+    ; [etapa 11 a] (Suspende64, sin interrupciones) de vuelta de S3: el TSC, el
+    ; HPET y el reloj de ACPI han vuelto a empezar; el monótono sigue en
+    ; «antes» (lo dormido no cuenta, como CLOCK_MONOTONIC de Linux)
+    público función tras_s3(antes: nat64)
+        si hpet <> 0 entonces
+            pon_m64(hpet + 0x10, m64(hpet + 0x10) yb (nob nat64(3)))
+            pon_m64(hpet + 0xF0, 0)
+            pon_m64(hpet + 0x10, m64(hpet + 0x10) ob 1)
+        fin
+        si fuente = HPET y hpet <> 0 entonces hpet_antes := m32(hpet + 0xF0) fin
+        si fuente = PM entonces pm_antes := lee_pm() fin
+        si con_pv entonces
+            pv_desfase := antes - lee_pv()
+        sino si con_tsc entonces
+            ns0 := antes
+            tsc0 := tsc()
+        sino
+            ; (con el HPET o el de ACPI: la cuenta sigue sumando desde donde iba)
+        fin
+        ensamblador
+            db 0x0F, 0xAE, 0xF0         ; mfence
+        fin
+    fin
+
     público función prepara_reloj()
         variable t0, c0, c1: nat64
         si pon_hpet() entonces

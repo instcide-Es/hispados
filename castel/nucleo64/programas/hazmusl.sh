@@ -66,12 +66,14 @@ done
 "$M" $CF -static -o "$S/MSONIDO" "$P/msonido.c" -lm  # [etapa 11] el sonido (/dev/dsp)
 "$M" $CF -static -pthread -o "$S/MUNIX" "$P/munix.c"  # [etapa 10 d] AF_UNIX y memfd
 "$M" $CF -static -pthread -o "$S/MPOSIX" "$P/mposix.c"  # [etapa 10 g] lo de POSIX que pide Ladybird
+"$M" $CF -static -o "$S/MCASA" "$P/mcasa.c"          # [etapa 11 a] la casa en el disco (y la prueba del corte)
+"$M" $CF -static -o "$S/MENERGIA" "$P/menergia.c"    # [etapa 11 a] /dev/energia (la batería, la tapa, el brillo)
 cp "$T/libsaludo.so" "$S/libsaludo.so"
 cp "$B/musl/lib/libc.so" "$S/ld-musl-x86_64.so.1"
 cp "$B/lua-obj/lua" "$S/LUA"
 cp "$P/prueba.lua" "$S/PRUEBA.LUA"
 rm -rf "$T"
-for f in MHOLA MHOLAP MHOLAD MHILOS MHILOSD MSENALES MSENALESD MPROCESOS MPROCESOSD MMAPA MMAPAD MRELOJ MRELOJD MBUCLE MDISP MSONIDO MUNIX MPOSIX LUA libsaludo.so ld-musl-x86_64.so.1; do
+for f in MHOLA MHOLAP MHOLAD MHILOS MHILOSD MSENALES MSENALESD MPROCESOS MPROCESOSD MMAPA MMAPAD MRELOJ MRELOJD MBUCLE MDISP MSONIDO MUNIX MPOSIX MCASA MENERGIA LUA libsaludo.so ld-musl-x86_64.so.1; do
   strip --strip-unneeded "$S/$f"
 done
 RED=$("$AQUI/hazred.sh" "$S"); RED=${RED##*hechos: }   # [etapa 9] los programas de red (programas/red/)
@@ -98,4 +100,4 @@ if [ -f "$B/bearssl64-obj/libbearssl.a" ]; then
   strip --strip-unneeded "$S/MCRIPTO"
   CRIP=" MCRIPTO"
 fi
-echo "hechos: MHOLA MHOLAP MHOLAD MHILOS MHILOSD MSENALES MSENALESD MPROCESOS MPROCESOSD MMAPA MMAPAD MRELOJ MRELOJD MBUCLE MDISP MSONIDO MUNIX MPOSIX ld-musl-x86_64.so.1 libsaludo.so LUA PRUEBA.LUA $RED $CURLS $CXX$CAND$CRIP"
+echo "hechos: MHOLA MHOLAP MHOLAD MHILOS MHILOSD MSENALES MSENALESD MPROCESOS MPROCESOSD MMAPA MMAPAD MRELOJ MRELOJD MBUCLE MDISP MSONIDO MUNIX MPOSIX MCASA MENERGIA ld-musl-x86_64.so.1 libsaludo.so LUA PRUEBA.LUA $RED $CURLS $CXX$CAND$CRIP"

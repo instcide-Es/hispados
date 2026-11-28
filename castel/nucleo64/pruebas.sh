@@ -574,7 +574,7 @@ else ko "etapa 11 b, apagar por ACPICA no apaga (código $c): $(serie "$T/acpiap
 A11="$(dirname "$C")/tests/acpi"
 for maq in pc q35; do
   mb1 "apagar sinmusl sinred acpi=registro prueba=acpica" "$T/acpica-$maq.txt" 256 -machine $maq -smp 2 \
-    -acpitable file="$A11/bateria-qemu.aml" -acpitable file="$A11/brillo-qemu.aml"; c=$?
+    -acpitable file="$A11/bateria-qemu.aml" -acpitable file="$A11/brillo-qemu.aml" -acpitable file="$A11/tapa-qemu.aml"; c=$?
   S=$T/acpica-$maq.txt
   if [ $c = 85 ] && hay $S "^ACPICA: ACPICA64.BIN, [0-9]* KB (" && hay $S "^ACPICA: en marcha ([0-9]* KB de su montón; 0 avisos o errores de ACPICA); \\\\_S5 ([0-9]*, [0-9]*); el brillo, \\\\_SB_.HLCD (50 %)$" \
      && hay $S "^Batería 1: \\\\_SB_.HBAT$" && hay $S "^Adaptador de corriente: \\\\_SB_.HACA$" \
@@ -582,10 +582,32 @@ for maq in pc q35; do
      && hay $S "^  y al 41 % sin el cable: 1 puesta(s), al 41 %, 2050 de 5000 mAh (de fábrica 7350), sin el cable" \
      && hay $S "^  y quitada: 0 baterías puestas$" \
      && hay $S "^Prueba de ACPICA: el brillo, \\\\_SB_.HLCD, 10 niveles: a 30 % (_BCM) y leído (_BQC): 30; pedido el 77 %: 80 (el nivel de _BCL más cercano)$" \
+     && hay $S "^Prueba de ACPICA: Fn y subir el brillo (Notify 86h): al 90 %; dos veces Fn y bajar (87h): al 70 %$" \
+     && hay $S "^  la tapa: \\\\_SB_.HTAP, abierta$" && hay $S "^Tapa: cerrada" && hay $S "^Tapa: abierta$" \
+     && hay $S "^Prueba de ACPICA: la tapa, \\\\_SB_.HTAP: cerrada (Notify 80h, _LID = 0); abierta (_LID = 1)$" \
      && ! hay $S "  MAL:" && hay $S "^Hispa-64 etapa 11: todo en orden.$"; then
-    ok "etapa 11 b, ACPICA en «$maq»: las tablas y el espacio de nombres, la batería de mentira por _BIF, _BIX y _BST (73 % cargando, 41 % sin el cable, quitada) y el adaptador (_PSR); el brillo por _BCL, _BCM y _BQC; $(serie $S | grep -o '[0-9]* KB de su montón')"
+    ok "etapa 11 b, ACPICA en «$maq»: las tablas y el espacio de nombres, la batería de mentira por _BIF, _BIX y _BST (73 % cargando, 41 % sin el cable, quitada) y el adaptador (_PSR); el brillo por _BCL, _BCM y _BQC; [etapa 11 a] las teclas del brillo (Notify 86h y 87h: al 90 % y al 70 %) y la tapa (tapa-qemu.aml: Notify 80h y _LID, cerrada y abierta; «$(serie $S | grep '^Tapa: cerrada' | head -1)»); $(serie $S | grep -o '[0-9]* KB de su montón')"
   else ko "etapa 11 b, ACPICA en «$maq» no sale (código $c): $(serie $S | grep -E '^ACPICA|^Prueba de ACPICA|^  y |MAL|parado|ACPI: falla' | head -8 | cut -c1-140 | paste -sd '|')"; fi
 done
+# [etapa 11 a] la batería baja: al 9 % sin el cable, el aviso; al 2 %, se apaga
+# en orden (sin «apagar»: con el intérprete en marcha, como el botón; QEMU
+# acaba con 0 por \_S5); y /dev/energia (MENERGIA: lo que dice, y el brillo
+# puesto por él)
+mb1 "sinmusl sinred prueba=bateriabaja" "$T/batbaja.txt" 256 -machine q35 -smp 2 \
+  -acpitable file="$A11/bateria-qemu.aml" -acpitable file="$A11/brillo-qemu.aml" -acpitable file="$A11/tapa-qemu.aml"; c=$?
+S=$T/batbaja.txt
+if [ $c = 0 ] && hay $S "Batería: al 9 % y sin el cable: queda poca (el escritorio lo avisa)$" && hay $S "^Prueba de la batería baja: al 9 % sin el cable: aviso 1$" \
+   && hay $S "^Batería: al 2 % y sin el cable: se apaga el equipo en orden (antes de que se apague solo)$" && hay $S "^Prueba de la batería baja: al 2 %: aviso 2$" \
+   && hay $S "^Apagar: por ACPICA" && ! hay $S "  MAL:"; then
+  ok "[etapa 11 a] la batería baja: al 9 % sin el cable, el aviso; al 2 %, «se apaga el equipo en orden» (como el botón: los discos vaciados y \\_S5; QEMU acaba con 0)"
+else ko "[etapa 11 a] la batería baja no sale (código $c): $(serie $S | grep -E '^Batería|^Prueba de la bat|^Apagar|MAL|parado' | head -8 | cut -c1-140 | paste -sd '|')"; fi
+mb1 "apagar sinred" "$T/energia.txt" 512 -machine q35 -smp 2 \
+  -acpitable file="$A11/bateria-qemu.aml" -acpitable file="$A11/brillo-qemu.aml" -acpitable file="$A11/tapa-qemu.aml"; c=$?
+S=$T/energia.txt
+if [ $c = 85 ] && hay $S "^MENERGIA: /dev/energia: baterias=[01] bateria=-\?[0-9]* cable=-\?[01] cargando=[01] minutos=-\?[0-9]* aviso=0 tapa=1 brillo=50 suspender=[01]$" \
+   && hay $S "^MENERGIA: brillo=30 escrito; leído: 30$" && hay $S "^MENERGIA: todo bien (" && hay $S "^Hispa-64 etapa 11: todo en orden.$"; then
+  ok "[etapa 11 a] /dev/energia (MENERGIA): «$(serie $S | grep '^MENERGIA: /dev/energia' | cut -c25-)»; el brillo puesto desde un programa (30 %)"
+else ko "[etapa 11 a] /dev/energia no sale (código $c): $(serie $S | grep -E '^MENERGIA|MAL|parado' | head -6 | cut -c1-160 | paste -sd '|')"; fi
 mb1 "apagar sinmusl" "$T/mb3g.txt" 3G -cpu max; c=$?
 S=$T/mb3g.txt
 if [ $c = 85 ] && hay $S "^Memoria: 2,9 GB libres" && hay $S "en páginas de 1 GB: [1-9]" && hay $S "; de 1 GB, también$" \
@@ -2064,6 +2086,110 @@ PY
 else
   echo "  (sin /dev/kvm: sin las vueltas con KVM)"
 fi
+# ---- [etapa 11 a] la casa: /casa en el disco, con el diario y la comprobación (Casa64) ----
+# Un disco NVMe con GPT y la casa (FAT32 de cúmulos de 512 octetos, el diario
+# en los sectores reservados y la marca de hazcasa.py), por multiboot con
+# «casa=nvme0p1» (no arranca de un disco) y KVM si lo hay: MCASA (crear,
+# escribir con fsync, leer, renombrar, borrar); el corte de luz (QEMU matado a
+# mitad de MCASA escribe; y en los dos momentos del diario: escrito sin la
+# confirmación, y confirmado sin poner en su sitio: prueba=cortediario1 y 2),
+# y al arrancar otra vez, lo del diario repetido (o no), la comprobación y
+# MCASA comprueba (lo guardado con fsync, entero; lo de después, entero, a
+# medias o sin estar; lo borrado, sin estar); un volumen estropeado como sin
+# diario (hazcasa.py --estropea: cúmulos perdidos y un tamaño de más),
+# arreglado; y fsck.fat sin quejas después de cada uno. Y por UEFI, la imagen
+# (imagen.sh): /casa es la partición CASA del disco del que ha arrancado.
+HC=$AQUI/programas/hazcasa.py
+KV=""; [ -w /dev/kvm ] && KV="-enable-kvm -cpu host"
+haz_casa() {   # IMAGEN
+  local i f
+  rm -f "$1" "$T/casa.part"; truncate -s 128M "$1"
+  sgdisk -n 1:2048:0 -t 1:0700 -c 1:CASA "$1" > /dev/null
+  read -r i f <<< "$(sgdisk -i 1 "$1" | awk '/First sector/ {a=$3} /Last sector/ {b=$3} END {print a, b}')"
+  mkfs.fat -F 32 -s 1 -R 32832 -n CASA -C "$T/casa.part" $(( (f - i + 1) / 2 )) > /dev/null && python3 -I "$HC" "$T/casa.part" \
+    && dd if="$T/casa.part" of="$1" bs=512 seek="$i" conv=notrunc,sparse status=none
+  rm -f "$T/casa.part"
+}
+casa_part() { dd if="$1" of="$T/casa.part" bs=512 skip=2048 count=260063 status=none; }
+casa_fsck() {   # IMAGEN: fsck.fat sin nada que decir, y la marca «cerrada bien»
+  casa_part "$1"
+  fsck.fat -n "$T/casa.part" > "$T/casafsck.txt" 2>&1 && [ "$(grep -vc -e '^fsck.fat ' -e 'files, [0-9]*/[0-9]* clusters$' "$T/casafsck.txt")" = 0 ] \
+    && python3 -I "$HC" --mira "$T/casa.part" | grep -q ', cerrada bien, '
+}
+casa_mb() {   # SALIDA IMAGEN LÍNEA (por multiboot, con la casa en NVMe)
+  rm -f "$1"
+  # shellcheck disable=SC2086
+  timeout 400 qemu-system-x86_64 $KV -smp 2 -m 1024 -kernel "$T/HISPA64.BIN" -initrd "$MODS" -append "casa=nvme0p1 sinred $3" -display none -serial file:"$1" \
+    -monitor none $DBG -no-reboot -nic none -drive file="$2",if=none,id=n0,format=raw -device nvme,drive=n0,serial=casa > /dev/null 2>&1
+}
+casa_corta() {   # SALIDA IMAGEN LÍNEA ESPERA: con «mcasa=escribe», QEMU matado al ver ESPERA
+  local p i
+  rm -f "$1"
+  # (QEMU mismo, sin timeout delante: el que se mata es él; 400 s como mucho)
+  # shellcheck disable=SC2086
+  qemu-system-x86_64 $KV -smp 2 -m 1024 -kernel "$T/HISPA64.BIN" -initrd "$MODS" -append "casa=nvme0p1 sinred mcasa=escribe $3 apagar" -display none -serial file:"$1" \
+    -monitor none $DBG -no-reboot -nic none -drive file="$2",if=none,id=n0,format=raw -device nvme,drive=n0,serial=casa > /dev/null 2>&1 &
+  p=$!
+  for i in $(seq 1 800); do sleep 0.5; serie "$1" | grep -q -- "$4" && break; kill -0 $p 2> /dev/null || break; done
+  sleep 0.$((RANDOM % 9)); kill -9 $p 2> /dev/null; wait $p 2> /dev/null
+}
+casa_vuelve() {   # SALIDA IMAGEN: después del corte, «mcasa=comprueba»; ¿todo bien y cerrada bien?
+  casa_mb "$1" "$2" "mcasa=comprueba apagar"; local c=$?
+  [ $c = 85 ] && hay "$1" "^Casa: la última vez no se apagó bien (van [0-9]*): comprobada: [0-9]* carpetas y [0-9]* archivos; todo bien;" \
+    && hay "$1" "^MCASA: comprobado después del corte: guardado hasta el [0-9]* (el último, el [0-9]*): [0-9]* enteros, [0-9]* a medias (de después de lo guardado), [0-9]* sin estar (borrados o de después), 0 mal$" \
+    && hay "$1" "^Programa «MCASA comprueba»: acaba con el código 0, como debe" && hay "$1" "^Casa: cerrada bien (" && casa_fsck "$2"
+}
+casa_dice() { serie "$1" | grep -E '^Casa|^MCASA|  MAL|parado' | cut -c1-160 | paste -sd '|'; }
+CI=$T/casa1.img; haz_casa "$CI"
+casa_mb "$T/casa1.txt" "$CI" "mcasa=sola apagar"; c=$?
+if [ $c = 85 ] && hay "$T/casa1.txt" "^Casa: /casa es nvme0p1 (FAT32, 109,2 MB, 109,2 MB libres), con diario (16,0 MB, 4079 bloques por transacción); montada 1 veces$" \
+   && hay "$T/casa1.txt" "^  /casa: FAT32 «CASA», 109,2 MB en 223704 cúmulos de 512 octetos, .*; de leer y escribir$" \
+   && hay "$T/casa1.txt" "^MCASA: la casa (/casa), bien: escribir con fsync, leer, renombrar con un nombre largo, borrar; " \
+   && hay "$T/casa1.txt" "^Casa: cerrada bien (" && ! hay "$T/casa1.txt" "^Casa: la última vez" && casa_fsck "$CI" \
+   && casa_part "$CI" && mdir -i "$T/casa.part" -b :: | grep -qx '::/Documentos/' && mdir -i "$T/casa.part" -b :: | grep -qx '::/Descargas/'; then
+  ok "[etapa 11 a] la casa: «$(serie "$T/casa1.txt" | grep '^Casa: /casa' | cut -c7-)»; MCASA (fsync, leer, renombrar, borrar); Documentos y Descargas hechas; cerrada bien; fsck.fat, bien"
+else ko "[etapa 11 a] la casa no sale (código $c): $(casa_dice "$T/casa1.txt"); $(tail -3 "$T/casafsck.txt" 2> /dev/null | paste -sd '|')"; fi
+# el corte de luz a mitad de MCASA escribe (en un momento cualquiera)
+casa_corta "$T/casa2.txt" "$CI" "" "^MCASA: hecho 30"
+if hay "$T/casa2.txt" "^MCASA: hecho 30" && casa_part "$CI" && python3 -I "$HC" --mira "$T/casa.part" | grep -q 'EN USO' && casa_vuelve "$T/casa3.txt" "$CI"; then
+  ok "[etapa 11 a] la casa, con un corte de luz a mitad de escribir (QEMU matado después de «$(serie "$T/casa2.txt" | grep '^MCASA: hecho' | tail -1)»): $(serie "$T/casa3.txt" | grep -o 'del diario, [0-9]* bloques puestos otra vez en su sitio' | head -1); comprobada, todo bien; «$(serie "$T/casa3.txt" | grep '^MCASA: comprobado' | sed 's/^MCASA: comprobado después del corte: //')»; fsck.fat, bien"
+else ko "[etapa 11 a] la casa, después de un corte de luz: $(casa_dice "$T/casa2.txt" | tail -c 300) || $(casa_dice "$T/casa3.txt"); $(tail -3 "$T/casafsck.txt" 2> /dev/null | paste -sd '|')"; fi
+# los dos momentos del diario
+for k in 1 2; do
+  haz_casa "$CI"
+  casa_corta "$T/casa4$k.txt" "$CI" "prueba=cortediario$k" "esperando el corte"
+  if [ "$k" = 1 ]; then q="el diario escrito, sin la confirmación"; else q="confirmado, sin poner en su sitio"; fi
+  if hay "$T/casa4$k.txt" "^Casa: prueba del corte: $q ([0-9]* bloques); esperando el corte$" && casa_vuelve "$T/casa5$k.txt" "$CI" \
+     && { { [ "$k" = 1 ] && ! hay "$T/casa5$k.txt" "puestos otra vez en su sitio"; } || { [ "$k" = 2 ] && hay "$T/casa5$k.txt" "^Casa: /casa es .*; del diario, [0-9]* bloques puestos otra vez en su sitio (la transacción [0-9]*)$"; }; }; then
+    ok "[etapa 11 a] la casa, el corte con $q: $(serie "$T/casa4$k.txt" | grep -o '([0-9]* bloques)'); al arrancar, $( [ "$k" = 1 ] && echo 'la transacción a medias no se repite (lo de antes, entero)' || serie "$T/casa5$k.txt" | grep -o 'del diario, [0-9]* bloques puestos otra vez en su sitio'); «$(serie "$T/casa5$k.txt" | grep '^MCASA: comprobado' | sed 's/^MCASA: comprobado después del corte: //')»; fsck.fat, bien"
+  else ko "[etapa 11 a] la casa, el corte con $q: $(casa_dice "$T/casa4$k.txt" | tail -c 300) || $(casa_dice "$T/casa5$k.txt"); $(tail -3 "$T/casafsck.txt" 2> /dev/null | paste -sd '|')"; fi
+done
+# un volumen estropeado como si no hubiera diario: la comprobación lo arregla
+casa_part "$CI"; mcopy -i "$T/casa.part" "$AQUI/programas/saludo.txt" ::HOLA.TXT
+python3 -I "$HC" --estropea "$T/casa.part" > /dev/null; dd if="$T/casa.part" of="$CI" bs=512 seek=2048 conv=notrunc status=none
+casa_mb "$T/casa6.txt" "$CI" "sinmusl apagar"; c=$?
+if [ $c = 85 ] && hay "$T/casa6.txt" "^Casa: la última vez no se apagó bien (van [0-9]*): comprobada: [0-9]* carpetas y [0-9]* archivos; arreglado: 0 cadenas cortadas, 1 tamaños, 0 entradas quitadas, 3 cúmulos perdidos, libres; " \
+   && casa_fsck "$CI"; then
+  ok "[etapa 11 a] la casa estropeada (3 cúmulos perdidos y un archivo más largo que su cadena), arreglada al arrancar: «$(serie "$T/casa6.txt" | grep -o 'arreglado: [^;]*')»; fsck.fat, bien"
+else ko "[etapa 11 a] la casa estropeada no se arregla (código $c): $(casa_dice "$T/casa6.txt"); $(tail -3 "$T/casafsck.txt" 2> /dev/null | paste -sd '|')"; fi
+# por UEFI, con la imagen: la casa del disco del arranque (SATA), y lo que queda en ella
+if [ -f $OVMF_C ] && [ -f "$T/uefi/hispa64.img" ]; then
+  cp --sparse=always "$T/uefi/hispa64.img" "$T/ucasa.img"; rm -f "$T/ucasa.txt"; cp $OVMF_V "$T/varsc.fd"
+  # shellcheck disable=SC2086
+  timeout 400 qemu-system-x86_64 $KV -machine q35 -drive if=pflash,format=raw,readonly=on,file=$OVMF_C -drive if=pflash,format=raw,file="$T/varsc.fd" \
+    -drive file="$T/ucasa.img",if=none,id=b0,format=raw -device ide-hd,drive=b0,bus=ide.0 -m 1024 -smp 4 \
+    -display none -serial file:"$T/ucasa.txt" -monitor none $DBG -no-reboot -nic none > /dev/null 2>&1; c=$?
+  read -r r3 g3 <<< "$(sgdisk -i 3 "$T/ucasa.img" | awk '/First sector/ {a=$3} /Last sector/ {b=$3} END {print a, b}')"
+  dd if="$T/ucasa.img" of="$T/casa.part" bs=512 skip="$r3" count=$(( g3 - r3 + 1 )) status=none
+  if [ $c = 85 ] && hay "$T/ucasa.txt" "^Casa: /casa es sata0p3 (FAT32, [0-9]*,[0-9] MB, [0-9]*,[0-9] MB libres), con diario (16,0 MB, 4079 bloques por transacción); montada 1 veces$" \
+     && hay "$T/ucasa.txt" "^MCASA: la casa (/casa), bien: " && hay "$T/ucasa.txt" "^Hispa-64 etapa 11: todo en orden.$" && hay "$T/ucasa.txt" "^Casa: cerrada bien (" \
+     && fsck.fat -n "$T/casa.part" > /dev/null 2>&1 && python3 -I "$HC" --mira "$T/casa.part" | grep -q ', cerrada bien, montada 1 veces' \
+     && mdir -i "$T/casa.part" -b :: | grep -qx '::/LEEME.TXT' && mdir -i "$T/casa.part" -b :: | grep -qx '::/Documentos/'; then
+    ok "[etapa 11 a] por UEFI, la casa de la imagen: «$(serie "$T/ucasa.txt" | grep '^Casa: /casa' | cut -c7-)»; MCASA; todo en orden; cerrada bien (LEEME.TXT y Documentos, desde el anfitrión; fsck.fat, bien)"
+  else ko "[etapa 11 a] por UEFI, la casa de la imagen no sale (código $c): $(casa_dice "$T/ucasa.txt")"; fi
+  rm -f "$T/ucasa.img"
+fi
+rm -f "$CI" "$T/casa.part"
 # ---- [etapa 11] el sonido: HD Audio y /dev/dsp (MSONIDO), lo que graba QEMU ----
 OYE="$C/nucleo32/sonido/oye.py"
 sonido_bien() {   # SALIDA GRABACIÓN: dos ráfagas, de 440 Hz (1 s) y de 1000 Hz (0,5 s), sin cortes

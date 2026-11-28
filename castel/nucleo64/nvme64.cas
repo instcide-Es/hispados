@@ -436,6 +436,74 @@ módulo Nvme64
         devolver cierto
     fin
 
+    ; [etapa 11 a] de vuelta de S3 (Suspende64; la configuración PCI, con su
+    ; MSI-X, ya está otra vez, y no hay órdenes en marcha: el VFS está tomado):
+    ; cada controladora parada, sus colas de administración (las mismas
+    ; páginas, a cero), en marcha, cuántas colas, y las de E/S otra vez en sus
+    ; páginas; cuántas controladoras vuelven
+    función cola_otra_vez(x: puntero a Ctl, q: nat32): bool
+        variable ord: arreglo [16] de nat32
+        variable r: nat32
+        ceros(virt(x.sq[q]), 4096)
+        ceros(virt(x.cq[q]), 4096)
+        x.sq_cola[q] := 0
+        x.cq_cabeza[q] := 0
+        x.cq_fase[q] := 1
+        vacía(ord)
+        ord[0] := 0x05
+        ord[6] := nat32(x.cq[q])
+        ord[7] := nat32(x.cq[q] >> 32)
+        ord[10] := ((ENTRADAS - 1) << 16) ob q
+        ord[11] := 1
+        si x.modo <> NINGUNA entonces ord[11] := 3 fin
+        si admin(x, ord, r) <> 0 entonces devolver falso fin
+        vacía(ord)
+        ord[0] := 0x01
+        ord[6] := nat32(x.sq[q])
+        ord[7] := nat32(x.sq[q] >> 32)
+        ord[10] := ((ENTRADAS - 1) << 16) ob q
+        ord[11] := (q << 16) ob 1
+        devolver admin(x, ord, r) = 0
+    fin
+
+    público función nvme_reanuda(): nat32
+        variable c, q, r, n: nat32
+        variable x: puntero a Ctl
+        variable cap: nat64
+        variable ord: arreglo [16] de nat32
+        n := 0
+        c := 0
+        mientras c < nv_n_ctl hacer
+            x := ctl(c)
+            cap := r64(x, 0)
+            si r32(x, 0x14) yb 1 <> 0 entonces p32(x, 0x14, r32(x, 0x14) yb 0xFFFFFFFE) fin
+            si espera_listo(x, 0, 500 * ((cap >> 24) yb 0xFF) + 1000) entonces
+                ceros(virt(x.sq[0]), 4096)
+                ceros(virt(x.cq[0]), 4096)
+                x.sq_cola[0] := 0
+                x.cq_cabeza[0] := 0
+                x.cq_fase[0] := 1
+                p32(x, 0x24, ((ENTRADAS - 1) << 16) ob (ENTRADAS - 1))
+                p64(x, 0x28, x.sq[0])
+                p64(x, 0x30, x.cq[0])
+                si x.modo = CON_INTX entonces p32(x, 0x10, 0xFFFFFFFF) fin
+                p32(x, 0x14, (4 << 20) ob (6 << 16) ob 1)
+                si espera_listo(x, 1, 500 * ((cap >> 24) yb 0xFF) + 1000) entonces
+                    vacía(ord)
+                    ord[0] := 0x09
+                    ord[10] := 7
+                    ord[11] := ((x.colas - 1) << 16) ob (x.colas - 1)
+                    admin(x, ord, r)
+                    q := 1
+                    mientras q <= x.colas y cola_otra_vez(x, q) hacer q := q + 1 fin
+                    si q > x.colas entonces n := n + 1 fin
+                fin
+            fin
+            c := c + 1
+        fin
+        devolver n
+    fin
+
     ; todas las controladoras NVMe de PCI (clase 01, 08, 02)
     público función prepara_nvme(sin_msix: bool)
         variable i: nat32

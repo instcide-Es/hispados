@@ -1,0 +1,300 @@
+; =============================================================================
+;  casa64.cas - Hispa-64, etapa 11 a (docs/64/HISPA-64.md, sección 27): la
+;  casa, la carpeta de los usuarios guardada de verdad en el disco.
+;
+;  La casa es una partición FAT32 del disco del que se ha arrancado (el que
+;  tiene la partición con /boot/HISPA64.BIN: la memoria USB, el disco SATA o
+;  el NVMe; imagen.sh la pone en la imagen, «CASA»), con una marca en el
+;  sector 32 (dentro de sus sectores reservados, que Windows y Linux no
+;  tocan):
+;     0   «HISPA64 CASA» (12 octetos) y 4 ceros
+;     16  la versión (1)
+;     20  el primer sector del diario (dentro de la partición) y 24 cuántos
+;     28  el estado: 0 cerrada bien, 1 en uso (montada; si se encuentra así
+;         al arrancar, no se apagó bien)
+;     40  cuántas veces se ha montado y 48 cuántas se ha encontrado sin cerrar
+;     508 el CRC32 de lo de antes
+;  Solo esa partición se da por escribible (no el disco entero: lo demás
+;  sigue de solo leer, como siempre); se ve como /casa, y los programas
+;  arrancan con HOME=/casa (Documentos, Descargas y .config, hechas si no
+;  están). Todo lo que se escribe en ella pasa por el diario de Discos64:
+;  al montarla, la última transacción entera se repite, y si no se cerró
+;  bien, se comprueba y se arregla (Fat64.fat_comprueba, como fsck.fat); el
+;  hilo «casa» confirma lo sucio cada 5 s (y el VFS al llegar al umbral, y
+;  fsync y sync); al apagar se cierra (todo confirmado, el diario vacío y la
+;  marca «cerrada bien»).
+;  Con «sincasa» no se monta; con «casa=NOMBRE» (nvme0p3...), esa partición
+;  (con la marca) aunque no sea del disco del arranque (para las pruebas por
+;  multiboot, que no arrancan de un disco).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Casa64
+
+    importar Cifras64, Es64, Monton64, Fisica64, Hilos64, Reloj64, Discos64, Nodos64, Fat64, Vfs64, Procesos
+
+    constante NADA = 0xFFFFFFFF
+
+    público variable casa_m: nat32              ; el montaje de la casa (NADA: no hay)
+    público variable casa_disco: nat32
+    variable sb: nat64                          ; la página de la marca (física)
+    variable hilo_casa: puntero a Hilo
+    variable parar: bool
+    variable última_ns: nat64
+    público variable casa_repetidos: ent64      ; los bloques del diario repetidos al montar (-1: error)
+    público variable casa_comprobada: bool      ; se ha comprobado al montar (no se cerró bien)
+    público variable casa_arreglos: nat64       ; lo que ha arreglado la comprobación
+    público variable casa_veces, casa_cortes: nat64
+
+    función mm(m: nat32): puntero a Montaje
+        devolver montaje(m)
+    fin
+
+    ; ¿está ese archivo (RUTA del montaje m + resto)?
+    función está(m: nat32, resto: puntero a byte): bool
+        variable t: arreglo [96] de byte
+        variable st: arreglo [18] de nat64
+        copia_texto(dirección(t[0]), dirección(montajes[m].ruta[0]), 64)
+        junta(dirección(t[0]), resto, 96)
+        devolver vfs_stat(nulo, dirección(t[0]), nat64(dirección(st[0]))) = 0
+    fin
+
+    función junta(a: puntero a byte, b: puntero a byte, cabe: nat32)
+        variable i, j: nat32
+        i := 0
+        mientras a[i] <> 0 hacer i := i + 1 fin
+        j := 0
+        mientras b[j] <> 0 y i + 1 < cabe hacer
+            a[i] := b[j]
+            i := i + 1
+            j := j + 1
+        fin
+        a[i] := 0
+    fin
+
+    función igual(a: puntero a byte, b: puntero a byte): bool
+        variable i: nat32
+        i := 0
+        mientras a[i] = b[i] y a[i] <> 0 hacer i := i + 1 fin
+        devolver a[i] = b[i]
+    fin
+
+    ; la marca del disco d (partición), leída en sb; ¿está bien?
+    función lee_marca(d: nat32): bool
+        variable k: nat64
+        si sector_dk(d) <> 512 o sectores_dk(d) < 40 entonces devolver falso fin
+        si no es_directo(d, 32, 1, sb, falso) entonces devolver falso fin
+        k := virt(sb)
+        si m32(k) <> 0x50534948 o m32(k + 4) <> 0x20343641 o m32(k + 8) <> 0x41534143 o m32(k + 12) <> 0 entonces devolver falso fin
+        si m32(k + 16) <> 1 entonces devolver falso fin
+        devolver crc32r(k, 508) = m32(k + 508)
+    fin
+
+    función escribe_marca(d: nat32): bool
+        pon_m32(virt(sb) + 508, crc32r(virt(sb), 508))
+        devolver es_directo(d, 32, 1, sb, cierto)
+    fin
+
+    ; el montaje de la casa (con la marca), o NADA: el de «casa=NOMBRE», o
+    ; el FAT32 del disco del arranque que la tenga
+    función busca(nombre: puntero a byte): nat32
+        variable m, k, arranque: nat32
+        k := 0
+        mientras k < n_montajes hacer
+            si montajes[k].en_uso <> 0 y montajes[k].clase = FS_FAT y montajes[k].bits_fat = 32 entonces
+                si nombre[0] <> 0 entonces
+                    si igual(nombre_dk(montajes[k].disco), nombre) y lee_marca(montajes[k].disco) entonces devolver k fin
+                fin
+            fin
+            k := k + 1
+        fin
+        si nombre[0] <> 0 entonces devolver NADA fin
+        arranque := NADA
+        m := 0
+        mientras m < n_montajes y arranque = NADA hacer
+            si montajes[m].en_uso <> 0 y montajes[m].clase = FS_FAT y está(m, "/boot/HISPA64.BIN") entonces arranque := m fin
+            m := m + 1
+        fin
+        si arranque = NADA entonces devolver NADA fin
+        k := 0
+        mientras k < n_montajes hacer
+            si montajes[k].en_uso <> 0 y montajes[k].clase = FS_FAT y montajes[k].bits_fat = 32 y es_parte(montajes[k].disco) y padre_dk(montajes[k].disco) = padre_dk(montajes[arranque].disco) entonces
+                si lee_marca(montajes[k].disco) entonces devolver k fin
+            fin
+            k := k + 1
+        fin
+        devolver NADA
+    fin
+
+    ; (Nodos64.al_soltar_vfs y el hilo; con el mutex del VFS tomado) lo sucio
+    ; de la casa, confirmado: el FSInfo al día y el diario
+    función confirma()
+        si casa_m = NADA entonces devolver fin
+        fat_vacía(casa_m)
+        última_ns := ahora_ns()
+    fin
+
+    ; el hilo «casa»: cada segundo mira; lo que lleve 5 s sucio, confirmado
+    función hilo_(arg: nat64)
+        mientras no parar hacer
+            duerme_ms(1000)
+            si dj_sucios > 0 y ahora_ns() - última_ns >= 5000000000 entonces
+                cierra_vfs()
+                si casa_m <> NADA y no parar entonces confirma() fin
+                abre_vfs()
+            fin
+        fin
+    fin
+
+    ; (nombre, con su «/» delante)
+    función carpeta(nombre: puntero a byte)
+        variable t: arreglo [64] de byte
+        copia_texto(dirección(t[0]), "/casa", 64)
+        junta(dirección(t[0]), nombre, 64)
+        si no está(casa_m, nombre) entonces vfs_mkdir(nulo, dirección(t[0])) fin
+    fin
+
+    ; al arrancar, con los discos ya montados (Vfs64.prepara_vfs)
+    público función prepara_casa(nombre: puntero a byte)
+        variable m: nat32
+        variable d: nat32
+        variable k, ini, n: nat64
+        variable estado: nat32
+        casa_m := NADA
+        casa_repetidos := 0
+        sb := pide()
+        si sb = 0 entonces devolver fin
+        m := busca(nombre)
+        si m = NADA entonces
+            escribir("Casa: no hay partición de casa en el disco del arranque (los programas guardan en /tmp: se pierde al apagar)\n")
+            devolver
+        fin
+        d := montajes[m].disco
+        k := virt(sb)
+        ini := nat64(m32(k + 20))
+        n := nat64(m32(k + 24))
+        estado := m32(k + 28)
+        casa_veces := m64(k + 40)
+        casa_cortes := m64(k + 48)
+        ; el diario, dentro de los sectores reservados (antes de la FAT)
+        si ini < 40 o ini + n > mm(m).fat_ini div 512 entonces
+            escribir("Casa: ", nombre_dk(d), " tiene la marca, pero el diario no está en los sectores reservados: no se usa\n")
+            devolver
+        fin
+        deja_escribir_parte(d)
+        si no cb_diario_pon(d, ini, n) entonces
+            escribir("Casa: ", nombre_dk(d), ": no se puede poner el diario (la partición no empieza en un bloque de 4 KB, o sin memoria): no se usa\n")
+            devolver
+        fin
+        casa_disco := d
+        ; la última transacción entera, otra vez en su sitio
+        casa_repetidos := cb_diario_repite()
+        si casa_repetidos < 0 entonces
+            escribir("Casa: ", nombre_dk(d), ": el diario no se puede leer: no se usa\n")
+            devolver
+        fin
+        si casa_repetidos > 0 entonces
+            cb_olvida(d)
+            fat_relee_info(m)
+        fin
+        mm(m).solo_leer := 0
+        ; no se apagó bien: se comprueba y se arregla
+        casa_comprobada := falso
+        si estado <> 0 entonces
+            casa_cortes := casa_cortes + 1
+            casa_comprobada := cierto
+            cierra_vfs()
+            si fat_comprueba(m) entonces
+                casa_arreglos := fk_cortadas + fk_tamaños + fk_quitadas + fk_perdidos
+            sino
+                escribir("Casa: ¡la comprobación no ha podido acabar! (", fk_carpetas, " carpetas vistas)\n")
+            fin
+            fat_vacía(m)
+            abre_vfs()
+        fin
+        ; en uso
+        casa_veces := casa_veces + 1
+        pon_m32(k + 28, 1)
+        pon_m64(k + 40, casa_veces)
+        pon_m64(k + 48, casa_cortes)
+        si no escribe_marca(d) o cb_vacía(d) < 0 entonces
+            escribir("Casa: ", nombre_dk(d), ": no se puede escribir la marca: no se usa\n")
+            mm(m).solo_leer := 1
+            devolver
+        fin
+        ; /casa
+        copia_texto(dirección(montajes[m].ruta[0]), "/casa", 32)
+        casa_m := m
+        casa_montaje := m
+        carpeta("/Documentos")
+        carpeta("/Descargas")
+        carpeta("/.config")
+        copia_texto(dirección(casa_home[0]), "/casa", 24)
+        última_ns := ahora_ns()
+        al_soltar_vfs := nat64(dirección(confirma))
+        parar := falso
+        hilo_casa := crea(nat64(dirección(hilo_)), 0, "casa", NORMAL, CUALQUIERA)
+        escribir("Casa: /casa es ", nombre_dk(d), " (FAT32, ")
+        tamaño_legible(mm(m).cúmulos * mm(m).oct_cúmulo)
+        escribir(", ")
+        tamaño_legible(mm(m).libres * mm(m).oct_cúmulo)
+        escribir(" libres), con diario (")
+        tamaño_legible(n * 512)
+        escribir(", ", cb_diario_cabe(), " bloques por transacción); montada ", casa_veces, " veces")
+        si casa_repetidos > 0 entonces escribir("; del diario, ", casa_repetidos, " bloques puestos otra vez en su sitio (la transacción ", dj_seq, ")") fin
+        escribir("\n")
+        si casa_comprobada entonces
+            escribir("Casa: la última vez no se apagó bien (van ", casa_cortes, "): comprobada: ", fk_carpetas, " carpetas y ", fk_archivos, " archivos; ")
+            si casa_arreglos = 0 entonces
+                escribir("todo bien")
+            sino
+                escribir("arreglado: ", fk_cortadas, " cadenas cortadas, ", fk_tamaños, " tamaños, ", fk_quitadas, " entradas quitadas, ", fk_perdidos, " cúmulos perdidos, libres")
+            fin
+            escribir("; ")
+            tamaño_legible(fk_libres * mm(m).oct_cúmulo)
+            escribir(" libres\n")
+        fin
+    fin
+
+    ; al apagar (después de sync): todo confirmado, el diario vacío y la marca
+    ; «cerrada bien»
+    público función cierra_casa()
+        variable bien: bool
+        si casa_m = NADA entonces devolver fin
+        cierra_vfs()
+        parar := cierto
+        fat_vacía(casa_m)
+        bien := cb_diario_cierra()
+        pon_m32(virt(sb) + 28, 0)
+        si bien entonces bien := escribe_marca(casa_disco) fin
+        si bien y cb_vacía(casa_disco) < 0 entonces bien := falso fin
+        al_soltar_vfs := 0
+        abre_vfs()
+        si bien entonces
+            escribir("Casa: cerrada bien (", dj_confirmadas, " confirmaciones del diario, ", dj_bloques, " bloques)\n")
+        sino
+            escribir("Casa: ¡no se ha podido cerrar bien! (al arrancar se comprobará)\n")
+        fin
+        casa_m := NADA
+    fin
+
+    ; [prueba=cortediario1|2] dice que se ha parado ahí y espera (a que
+    ; QEMU se mate desde fuera)
+    función aviso_corte()
+        si dj_prueba = 1 entonces
+            escribir("Casa: prueba del corte: el diario escrito, sin la confirmación (", dj_sucios, " bloques); esperando el corte\n")
+        sino
+            escribir("Casa: prueba del corte: confirmado, sin poner en su sitio (", dj_sucios, " bloques); esperando el corte\n")
+        fin
+        mientras cierto hacer
+            ensamblador
+                pause
+            fin
+        fin
+    fin
+
+    público función prepara_corte(cuál: nat32)
+        dj_prueba := cuál
+        dj_aviso := nat64(dirección(aviso_corte))
+    fin
+
+fin Casa64.

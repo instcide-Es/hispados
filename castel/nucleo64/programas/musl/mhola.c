@@ -50,7 +50,7 @@ int main(int argc, char **argv)
 	printf("MHOLA: hola desde musl (printf); %s\n", cómo());
 	MIRA(argc == 3 && !strcmp(argv[1], "uno") && !strcmp(argv[2], "dos"), "argv");
 	e = getenv("HOME");
-	MIRA(e && !strcmp(e, "/"), "getenv(HOME)");
+	MIRA(e && (!strcmp(e, "/") || !strcmp(e, "/casa")), "getenv(HOME)");   /* [etapa 11 a] la casa, si la hay */
 	/* printf y compañía */
 	snprintf(t, sizeof t, "%d|%x|%s|%5.2f|%e|%c|%-4s|%05d", -42, 255, "ñandú", 3.14159, 12345.678, 'Z', "ab", 42);
 	MIRA(!strcmp(t, "-42|ff|ñandú| 3.14|1.234568e+04|Z|ab  |00042"), "snprintf");

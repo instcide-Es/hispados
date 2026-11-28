@@ -32,6 +32,11 @@ static ACPI_HANDLE brillo_h;
 static u32 brillo_niveles[101], brillo_n;
 static int s5_hay;
 static u8 s5_a, s5_b;
+/* [etapa 11 a] la tapa, las teclas del brillo y \_S3 */
+static ACPI_HANDLE tapa_h;
+static u32 tapa_abierta = 1, tapa_avisos, brillo_sube, brillo_baja;
+static int s3_hay;
+static u8 s3_a, s3_b;
 static char texto[512];
 
 /* ---- el registro, al puerto serie del núcleo ---- */
@@ -43,12 +48,15 @@ static void vacia_registro(void)
 		castel2(h64.t.escribe, (u64)texto, n);
 }
 
+static void aviso_11a(ACPI_HANDLE h, UINT32 valor);
+
 /* [bateria.c] los demás avisos del equipo */
 void nucleo_aviso(ACPI_HANDLE h, UINT32 valor)
 {
 	ACPI_DEVICE_INFO *di;
 
 	avisos_n++;
+	aviso_11a(h, valor);
 	if (valor != 0x80 && valor != 0x02)
 		return;
 	if (ACPI_FAILURE(AcpiGetObjectInfo(h, &di)))
@@ -58,6 +66,47 @@ void nucleo_aviso(ACPI_HANDLE h, UINT32 valor)
 		reg("ACPI: el botón de encendido (Notify %02Xh)\n", valor);
 	}
 	AcpiOsFree(di);
+}
+
+/* [etapa 11 a] la tapa (_LID): 1 abierta, 0 cerrada */
+static void tapa_lee(void)
+{
+	ACPI_BUFFER b = { ACPI_ALLOCATE_BUFFER, NULL };
+
+	if (!tapa_h)
+		return;
+	if (ACPI_SUCCESS(AcpiEvaluateObjectTyped(tapa_h, "_LID", NULL, &b, ACPI_TYPE_INTEGER))) {
+		tapa_abierta = ((ACPI_OBJECT *)b.Pointer)->Integer.Value != 0;
+		AcpiOsFree(b.Pointer);
+	}
+}
+
+static ACPI_STATUS tapa_hallada(ACPI_HANDLE h, UINT32 nivel, void *ctx, void **ret)
+{
+	if (!tapa_h)
+		tapa_h = h;
+	return AE_OK;
+}
+
+/* [etapa 11 a] los avisos que no son del botón ni de la batería: la tapa
+ * (80h) y las teclas del brillo al dispositivo de la pantalla (86h subir,
+ * 87h bajar, 85h «el siguiente»: como subir); los llama nucleo_aviso */
+static void aviso_11a(ACPI_HANDLE h, UINT32 valor)
+{
+	if (tapa_h && h == tapa_h && valor == 0x80) {
+		tapa_avisos++;
+		tapa_lee();
+		reg("ACPI: la tapa (Notify 80h): %s\n", tapa_abierta ? "abierta" : "cerrada");
+	}
+	if (brillo_h && h == brillo_h) {
+		if (valor == 0x86 || valor == 0x85) {
+			brillo_sube++;
+			reg("ACPI: subir el brillo (Notify %02Xh)\n", valor);
+		} else if (valor == 0x87) {
+			brillo_baja++;
+			reg("ACPI: bajar el brillo (Notify 87h)\n");
+		}
+	}
 }
 
 /* ---- el brillo ---- */
@@ -161,7 +210,14 @@ static int arranca(void)
 	if (ACPI_SUCCESS(AcpiGetSleepTypeData(ACPI_STATE_S5, &s5_a, &s5_b)))
 		s5_hay = 1;
 	reg("ACPI: para apagar, \\_S5 %s(%u, %u)\n", s5_hay ? "" : "no está ", s5_a, s5_b);
+	if (ACPI_SUCCESS(AcpiGetSleepTypeData(ACPI_STATE_S3, &s3_a, &s3_b)))
+		s3_hay = 1;
+	reg("ACPI: para suspender, \\_S3 %s(%u, %u)\n", s3_hay ? "" : "no está ", s3_a, s3_b);
 	prepara_brillo();
+	AcpiGetDevices("PNP0C0D", tapa_hallada, NULL, NULL);
+	tapa_lee();
+	if (tapa_h)
+		reg("ACPI: la tapa (PNP0C0D): %s\n", tapa_abierta ? "abierta" : "cerrada");
 	return r;
 }
 
@@ -309,6 +365,19 @@ static u32 copia(struct h64_estado *e, u32 tam)
 
 		AcpiGetName(brillo_h, ACPI_FULL_PATHNAME, &n);
 	}
+	x.tapa_hay = tapa_h != NULL;
+	x.tapa = tapa_abierta;
+	x.tapa_avisos = tapa_avisos;
+	x.brillo_sube = brillo_sube;
+	x.brillo_baja = brillo_baja;
+	x.s3 = s3_hay;
+	x.s3_a = s3_a;
+	x.s3_b = s3_b;
+	if (tapa_h) {
+		ACPI_BUFFER n = { sizeof x.tapa_ruta, x.tapa_ruta };
+
+		AcpiGetName(tapa_h, ACPI_FULL_PATHNAME, &n);
+	}
 	if (tam > sizeof x)
 		tam = sizeof x;
 	memcpy(e, &x, tam);
@@ -321,8 +390,15 @@ static long prueba(u64 que, const char *nombre)
 	ACPI_BUFFER b = { ACPI_ALLOCATE_BUFFER, NULL };
 	long v = -1;
 
-	if (que != 1 || arrancado != 1)
+	if ((que != 1 && que != 2) || arrancado != 1)
 		return -1;
+	if (que == 2) {
+		/* (el método se ejecuta; sus Notify, al acabar: AcpiOsWaitEventsComplete) */
+		ACPI_STATUS s = AcpiEvaluateObject(NULL, (char *)nombre, NULL, NULL);
+
+		AcpiOsWaitEventsComplete();
+		return ACPI_SUCCESS(s) ? 0 : -1;
+	}
 	if (ACPI_SUCCESS(AcpiEvaluateObjectTyped(NULL, (char *)nombre, NULL, &b, ACPI_TYPE_INTEGER))) {
 		v = (long)((ACPI_OBJECT *)b.Pointer)->Integer.Value;
 		AcpiOsFree(b.Pointer);
@@ -390,6 +466,25 @@ long nucleo64_llamada(u64 f, u64 a, u64 b)
 		return reg_saca((char *)a, (u32)b);
 	case H64_PRUEBA:
 		r = prueba(a, (const char *)b);
+		break;
+	case H64_DORMIR:
+		/* [etapa 11 a] _PTS(3) y _SST; lo demás (los registros, SLP_EN, el
+		 * vector de despertar) lo hace el núcleo */
+		if (arrancado == 1 && a == 3 && s3_hay) {
+			ACPI_STATUS s = AcpiEnterSleepStatePrep(ACPI_STATE_S3);
+
+			reg("ACPI: suspender: _PTS(3) (AcpiEnterSleepStatePrep): %s\n", AcpiFormatException(s));
+			r = ACPI_SUCCESS(s) ? (long)(s3_a | (u32)s3_b << 8) : -1;
+		}
+		break;
+	case H64_DESPIERTA:
+		if (arrancado == 1 && a == 3) {
+			ACPI_STATUS s1 = AcpiLeaveSleepStatePrep(ACPI_STATE_S3), s2 = AcpiLeaveSleepState(ACPI_STATE_S3);
+
+			reg("ACPI: de vuelta de S3: %s y _WAK(3): %s\n", AcpiFormatException(s1), AcpiFormatException(s2));
+			tapa_lee();
+			r = 0;
+		}
 		break;
 	}
 	vacia_registro();

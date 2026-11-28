@@ -453,6 +453,54 @@ módulo Ahci64
         devolver cierto
     fin
 
+    ; [etapa 11 a] de vuelta de S3 (Suspende64; la configuración PCI ya está
+    ; otra vez, y nada en marcha: el VFS está tomado): cada controladora, en
+    ; AHCI otra vez, y cada puerto con un disco, con sus tablas de antes (la
+    ; misma página), encendido y con su interrupción; cuántos discos vuelven
+    público función ahci_reanuda(): nat32
+        variable c, d, p, n: nat32
+        n := 0
+        c := 0
+        mientras c < sa_n_ctl hacer
+            pon(c, GHC, lee(c, GHC) ob 0x80000000)
+            pon(c, IS, 0xFFFFFFFF)
+            c := c + 1
+        fin
+        d := 0
+        mientras d < sa_n_discos hacer
+            c := d_ctl[d]
+            p := d_puerto[d]
+            si enciende_puerto(c, p) entonces espera_enlace(c, p, 1000) fin
+            para_puerto(c, p)
+            pon(c, pu(p, P_CLB), nat32(d_tablas[d]))
+            pon(c, pu(p, P_CLB + 4), nat32(d_tablas[d] >> 32))
+            pon(c, pu(p, P_FB), nat32(d_tablas[d] + 0x400))
+            pon(c, pu(p, P_FB + 4), nat32((d_tablas[d] + 0x400) >> 32))
+            pon(c, pu(p, P_IE), 0)
+            pon(c, pu(p, P_CMD), lee(c, pu(p, P_CMD)) ob CMD_FRE)
+            espera(c, pu(p, P_CMD), CMD_FR, CMD_FR, 500)
+            pon(c, pu(p, P_SERR), 0xFFFFFFFF)
+            pon(c, pu(p, P_IS), 0xFFFFFFFF)
+            si no espera(c, pu(p, P_TFD), 0x88, 0, 500) entonces
+                reinicia_puerto(c, p)
+                pon(c, pu(p, P_SERR), 0xFFFFFFFF)
+                pon(c, pu(p, P_IS), 0xFFFFFFFF)
+            fin
+            espera(c, pu(p, P_TFD), 0x88, 0, 5000)
+            pon(c, pu(p, P_SERR), 0xFFFFFFFF)
+            pon(c, pu(p, P_CMD), lee(c, pu(p, P_CMD)) ob CMD_ST)
+            si c_modo[c] <> NINGUNA entonces pon(c, pu(p, P_IE), IE_PUERTO) fin
+            si lee(c, pu(p, P_SSTS)) yb 0x0F = 3 entonces n := n + 1 fin
+            d := d + 1
+        fin
+        c := 0
+        mientras c < sa_n_ctl hacer
+            si c_modo[c] <> NINGUNA entonces pon(c, GHC, lee(c, GHC) ob 2) fin
+            c := c + 1
+        fin
+        devolver n
+    fin
+
     ; todas las controladoras AHCI de PCI (clase 01, 06, 01)
     público función prepara_ahci(sin_msi: bool)
         variable i, d, antes: nat32

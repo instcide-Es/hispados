@@ -629,6 +629,70 @@ módulo Xhci64
         devolver cierto
     fin
 
+    ; [etapa 11 a] de vuelta de S3 (la configuración PCI, con su MSI o MSI-X,
+    ; ya está otra vez): cada controladora, reiniciada y puesta como al
+    ; arrancar, en las mismas páginas (la DCBAA a cero, salvo la lista de las
+    ; de borrador; el anillo de órdenes y el de sucesos, vacíos). Lo que había
+    ; enchufado sale como un cambio de sus puertos: el vigía lo quita y lo
+    ; enumera otra vez. Cuántas vuelven
+    público función xhci_reanuda(): nat32
+        variable c, k, n: nat32
+        variable x: puntero a Ctl
+        variable t, p0: nat64
+        n := 0
+        c := 0
+        mientras c < xh_n hacer
+            x := ctl(c)
+            pon(x, USBCMD, lee(x, USBCMD) yb nob nat32(1))
+            espera_reg(x, USBSTS, 1, 1, 20)
+            pon(x, USBCMD, 2)
+            espera_ms(1)
+            si espera_reg(x, USBCMD, 2, 0, 1000) y espera_reg(x, USBSTS, 0x800, 0, 1000) entonces
+                p0 := m64(virt(x.dcbaa))
+                ceros(virt(x.dcbaa), 4096)
+                pon64(virt(x.dcbaa), p0)
+                ceros(virt(x.sucesos), 4096)
+                k := 0
+                mientras k < MAX_RANURAS * 32 hacer
+                    x.ext[k] := 0
+                    k := k + 1
+                fin
+                nuevo_anillo(x, x.órdenes)
+                pon(x, CONFIG, (lee(x, CONFIG) yb nob nat32(0xFF)) ob x.ranuras)
+                pon64(x.reg + DCBAAP, x.dcbaa)
+                pon64(x.reg + CRCR, x.órdenes.fís ob 1)
+                x.suc_pos := 0
+                x.suc_ciclo := 1
+                t := virt(x.dcbaa) + 0x800
+                pon64(t, x.sucesos)
+                pon_m32(t + 8, TRBS)
+                pon_m32(t + 12, 0)
+                pon_m32(x.rt + 0x20 + 8, 1)
+                pon64(x.rt + 0x20 + 0x18, x.sucesos)
+                pon64(x.rt + 0x20 + 0x10, x.dcbaa + 0x800)
+                pon_m32(x.rt + 0x20 + 4, 160)
+                si x.modo <> NINGUNA entonces
+                    pon_m32(x.rt + 0x20, 3)
+                    pon(x, USBCMD, 1 ob 4)
+                sino
+                    pon_m32(x.rt + 0x20, 1)
+                    pon(x, USBCMD, 1)
+                fin
+                si espera_reg(x, USBSTS, 1, 0, 100) entonces
+                    k := 0
+                    mientras k < x.puertos hacer
+                        t := nat64(m32(x.reg + PORTSC + nat64(k) * 0x10))
+                        si t yb 0x200 = 0 entonces pon_m32(x.reg + PORTSC + nat64(k) * 0x10, (nat32(t) yb P_GUARDA) ob 0x200) fin
+                        k := k + 1
+                    fin
+                    n := n + 1
+                fin
+            fin
+            c := c + 1
+        fin
+        devolver n
+    fin
+
     ; todas las controladoras xHCI de PCI (clase 0C, 03, 30)
     público función prepara_xhci(sin_msix: bool, sin_msi: bool)
         variable i: nat32
