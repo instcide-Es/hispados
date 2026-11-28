@@ -1829,6 +1829,15 @@ if [ -w /dev/kvm ]; then
        && grep -q "^Programa «MWEB»: acaba con el código 0, como debe" <<< "$v" && grep -q "^  la memoria: la de antes;" <<< "$v"; then
       ok "[etapa 10 g] con KVM y 3 GB: LibJS (MJS: $(grep -o "^  Tests: .*" <<< "$v" | sed "s/^  Tests: *//"), en $(grep -o "^  test-js-runtime: acaba con el código 0, en [0-9]* ms" <<< "$v" | grep -o "[0-9]* ms")) y Ladybird sin ventana (MWEB: el Hub con WebContent, RequestServer, ImageDecoder y Compositor; el texto de la página de prueba, 7 de 7 líneas, en $(grep -o "^  Hub --headless=text file:///tmp/web/paginas/prueba.html: acaba con el código 0, en [0-9]* ms" <<< "$v" | grep -o "[0-9]* ms")); después, la memoria, la de antes"
     else ko "[etapa 10 g] LibJS y Ladybird sin ventana no salen (código $c): $(grep -E "^MJS|^MWEB|^  test-js-runtime|^  falta|^  errores|  MAL|parado" <<< "$v" | head -8 | paste -sd '|')"; fi
+    # [etapa 10 i] en el mismo arranque, las pruebas de la WebCrypto de Ladybird
+    # (MWEB --cripto: Tests/LibWeb/Text/input/Crypto, servidas por 127.0.0.1) frente
+    # a lo que dan en Linux; las que no salen igual son las de lo que no hay
+    # (ML-DSA, ML-KEM y X448: hispa64/webcripto/LEEME.txt): 70 de 79 como poco
+    nc=$(grep -o "^MWEB: la WebCrypto de Ladybird: [0-9]* de [0-9]* iguales que en Linux$" <<< "$v")
+    ni=$(grep -o ': [0-9]* de' <<< "$nc" | grep -o '[0-9]*')
+    if [ -n "$nc" ] && [ "${ni:-0}" -ge 70 ] && grep -q "^Programa «MWEB --cripto»: acaba con el código 0, como debe" <<< "$v"; then
+      ok "[etapa 10 i] la WebCrypto de Ladybird (sus pruebas, en el navegador sin ventana): $(sed 's/^MWEB: la WebCrypto de Ladybird: //' <<< "$nc"); las distintas: $(grep '^  cripto distinta: ' <<< "$v" | sed 's/^  cripto distinta: SubtleCrypto-//; s/ (.*//' | paste -sd ' ')"
+    else ko "[etapa 10 i] la WebCrypto de Ladybird no sale: ${nc:-sin el resumen}; $(grep -E '^  cripto distinta|^  \(|^Programa «MWEB --cripto»' <<< "$v" | head -14 | cut -c1-140 | paste -sd '|')"; fi
   fi
   # [etapa 10 h] Ladybird con ventana: NAVEGADOR (la interfaz de Hispa-64 sobre el
   # Hub de Ladybird, programas/ladybird/hispa64/navegador) en el escritorio

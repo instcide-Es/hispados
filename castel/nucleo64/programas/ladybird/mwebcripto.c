@@ -46,6 +46,16 @@ static int n_pruebas, n_hechas, actual = -1;
 static struct timespec ultima;
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
+/* las que Ladybird tampoco corre (Tests/LibWeb/TestConfig.ini, [Skipped]):
+ * SubtleCrypto-generateKey, «Times out» (genera RSA de 256 bits, que su
+ * LibCrypto ya no deja: lo que espera es de antes) */
+static const char *saltadas[] = { "SubtleCrypto-generateKey" };
+static int saltada(const char *n)
+{
+	for (size_t i = 0; i < sizeof saltadas / sizeof *saltadas; i++) if (!strcmp(n, saltadas[i])) return 1;
+	return 0;
+}
+
 static int busca(const char *n)
 {
 	for (int i = 0; i < n_pruebas; i++) if (!strcmp(nombres[i], n)) return i;
@@ -242,7 +252,11 @@ int mweb_cripto(const char *hub)
 	struct dirent *e;
 	while (d && (e = readdir(d)) && n_pruebas < MAX_PRUEBAS) {
 		size_t l = strlen(e->d_name);
-		if (l > 5 && !strcmp(e->d_name + l - 5, ".html")) nombres[n_pruebas++] = strndup(e->d_name, l - 5);
+		if (l > 5 && !strcmp(e->d_name + l - 5, ".html")) {
+			char *n = strndup(e->d_name, l - 5);
+			if (saltada(n)) { printf("  cripto saltada: %s (también en Ladybird: TestConfig.ini)\n", n); free(n); continue; }
+			nombres[n_pruebas++] = n;
+		}
 	}
 	if (d) closedir(d);
 	if (!n_pruebas) { printf("  no están las pruebas en " RAIZ "/Crypto\nMWEB: 1 mal de 1\n"); return 1; }

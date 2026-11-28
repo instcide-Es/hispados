@@ -527,7 +527,18 @@ static EVP_PKEY *ec_privada_de_der(const uint8_t *b, size_t n, int curva)
 		if (!h64_der_lee(t.p, t.n, &e, &oid, &ok2) || e != 0x06 || h64_curva_por_oid(oid.p, oid.n) != curva) return NULL;
 		p += k; q -= k;
 	}
-	if (q && h64_der_lee(p, q, &e, &t, &k) && e == 0xA1) { p += k; q -= k; }
+	if (q && h64_der_lee(p, q, &e, &t, &k) && e == 0xA1) {
+		/* la pública que trae: como OpenSSL, tiene que ser un punto de la curva
+		 * (no se mira si es la del escalar: eso lo hace el Rust) */
+		h64_trozo bs;
+		size_t bo;
+		EVP_PKEY *pp = h64_clave_nueva(K_EC);
+		int vale = pp && h64_der_lee(t.p, t.n, &e, &bs, &bo) && e == 0x03 && bo == t.n && bs.n > 1 && bs.p[0] == 0
+			&& h64_ec_pon_punto(pp, curva, bs.p + 1, bs.n - 1);
+		EVP_PKEY_free(pp);
+		if (!vale) return NULL;
+		p += k; q -= k;
+	}
 	if (q) return NULL;
 	EVP_PKEY *kk = h64_clave_nueva(K_EC);
 	if (!kk || !h64_ec_pon_privada(kk, curva, d.p, d.n)) { EVP_PKEY_free(kk); return NULL; }
