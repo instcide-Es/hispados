@@ -406,11 +406,17 @@ módulo Teclas64
             si uso >= 0x04 y uso <= 0x1D entonces
                 t[0] := byte(uso - 0x04 + 1)
                 sale(dirección(t[0]), 1)
+                devolver
             sino si uso = 0x2C entonces
                 t[0] := 0
                 sale(dirección(t[0]), 1)
+                devolver
             fin
-            devolver
+            ; [etapa 10 i] (docs/64/HISPA-64.md, sección 26) con las demás teclas
+            ; (Ctrl +, Ctrl -, Ctrl 0: el zoom del Navegador), la letra misma:
+            ; quien mira si Control está pulsado (VENTANAS) las junta; con una
+            ; tecla muerta, nada
+            si u yb DE_HID <> 0 entonces devolver fin
         fin
         ; los acentos muertos
         si u yb DE_HID <> 0 entonces

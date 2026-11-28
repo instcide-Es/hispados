@@ -1,0 +1,196 @@
+<!doctype html>
+<!-- Hispa-64, etapa 10 i (docs/64/HISPA-64.md, sección 26): la página de Ladybird
+     cuando no se puede llegar a un sitio (Base/res/ladybird/templates/error.html,
+     BSD-2: su estilo y su dibujo), en español. Lo que dice, según el error: «Sin
+     conexión» si no se encuentra el nombre (sin red, o mal escrito), «El servidor
+     no contesta», «Tarda demasiado» o «La conexión segura no es de fiar»; el
+     mensaje de Ladybird, en «Ver los detalles». (Lo que va entre dos signos de
+     tanto por ciento lo pone Ladybird: aquí no se escribe ese signo suelto.) -->
+<html lang="es">
+    <head>
+        <meta charset="UTF-8" />
+        <title>No se puede abrir %failed_host%</title>
+        <style>
+            :root {
+                color-scheme: light dark;
+                font-family:
+                    -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+                font-size: 13px;
+
+                --page: #ffffff;
+                --text: #1d1d1f;
+                --body: #3a3a40;
+                --muted: #5d5d64;
+                --control: rgba(0, 0, 0, 0.06);
+                --control-hover: rgba(0, 0, 0, 0.09);
+                --primary: #0a66d0;
+                --primary-hover: #0959b8;
+                --focus-edge: #0a7aff;
+                --focus-ring: rgba(10, 122, 255, 0.16);
+            }
+            @media (prefers-color-scheme: dark) {
+                :root {
+                    --page: #1c1c1e;
+                    --text: #f2f2f5;
+                    --body: #dcdce1;
+                    --muted: #acacb4;
+                    --control: rgba(255, 255, 255, 0.1);
+                    --control-hover: rgba(255, 255, 255, 0.14);
+                    --focus-edge: rgba(64, 140, 255, 0.75);
+                    --focus-ring: rgba(64, 140, 255, 0.16);
+                }
+            }
+            body {
+                margin: 0;
+                padding: 132px 24px 48px;
+                color: var(--text);
+                background: var(--page);
+            }
+            /* Centered, like every other page with a single message. */
+            main {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 14px;
+                max-width: 560px;
+                margin: 0 auto;
+                text-align: center;
+            }
+            svg {
+                width: 40px;
+                height: 40px;
+                color: var(--muted);
+            }
+            h1 {
+                margin: 0;
+                font-size: 22px;
+                font-weight: 600;
+                overflow-wrap: anywhere;
+            }
+            p {
+                margin: 0;
+                line-height: 1.55;
+                color: var(--body);
+            }
+            .actions {
+                display: flex;
+                flex-wrap: wrap;
+                justify-content: center;
+                gap: 8px;
+                margin-top: 10px;
+            }
+            button,
+            summary {
+                font: inherit;
+                font-size: 13px;
+                height: 28px;
+                padding: 0 16px;
+                border: 0;
+                border-radius: 7px;
+                cursor: pointer;
+            }
+            button {
+                color: #ffffff;
+                background: var(--primary);
+                font-weight: 500;
+            }
+            button:hover {
+                background: var(--primary-hover);
+            }
+            details {
+                display: contents;
+            }
+            summary {
+                display: inline-flex;
+                align-items: center;
+                color: var(--text);
+                background: var(--control);
+                list-style: none;
+            }
+            summary::-webkit-details-marker {
+                display: none;
+            }
+            summary:hover {
+                background: var(--control-hover);
+            }
+            details::details-content {
+                order: 1;
+                flex-basis: 100\%;
+            }
+            .details {
+                margin-top: 4px;
+                font-size: 12px;
+                color: var(--muted);
+                overflow-wrap: anywhere;
+            }
+            .hint {
+                margin-top: 10px;
+                font-size: 12px;
+                color: var(--muted);
+            }
+            :focus-visible {
+                outline: none;
+                box-shadow:
+                    0 0 0 1px var(--focus-edge),
+                    0 0 0 3px var(--focus-ring);
+            }
+        </style>
+    </head>
+    <body>
+        <main>
+            <svg
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+            >
+                <path d="M2.5 8a5.5 5.5 0 1 0 11 0a5.5 5.5 0 1 0-11 0M4.2 4.2l7.6 7.6" />
+            </svg>
+            <h1 id="titulo">No se puede abrir %failed_host%</h1>
+            <p id="explica">El navegador no ha podido llegar a esta página.</p>
+            <div class="actions">
+                <details>
+                    <summary>Ver los detalles</summary>
+                    <div class="details">%failed_url%<br /><span id="mensaje">%error_message%</span></div>
+                </details>
+                <button type="button" data-url="%failed_url%" onclick="location.href = this.dataset.url" autofocus>
+                    Probar otra vez
+                </button>
+            </div>
+            <p class="hint" id="pista" %certificate_setting_hidden%>%certificate_setting_hint%</p>
+            <span id="sitio" hidden>%failed_host%</span>
+        </main>
+        <script>
+            (function () {
+                var m = document.getElementById("mensaje").textContent;
+                var sitio = document.getElementById("sitio").textContent;
+                var t = null, x = null, titulo = null;
+                if (/resolve|DNS|name or service|no address/i.test(m)) {
+                    t = "Sin conexión";
+                    titulo = "Sin conexión (" + sitio + ")";
+                    x = "No se encuentra «" + sitio + "». Puede que este equipo no tenga conexión a internet (sin cable, sin Wi-Fi, o arrancado con «sinred»), o que la dirección esté mal escrita. Cuando haya red, pulsa «Probar otra vez».";
+                } else if (/refused|could not connect|couldn.t connect|unreachable/i.test(m)) {
+                    t = "El servidor no contesta";
+                    x = "«" + sitio + "» no acepta la conexión: puede que esté apagado, o que la red no deje llegar a él.";
+                } else if (/timed? ?out|timeout/i.test(m)) {
+                    t = "El servidor tarda demasiado";
+                    x = "«" + sitio + "» no ha contestado a tiempo. Puede que la red vaya muy lenta o que el servidor esté muy ocupado.";
+                } else if (/certificate|ssl|tls|handshake/i.test(m)) {
+                    t = "La conexión segura no es de fiar";
+                    x = "El certificado de «" + sitio + "» no se ha podido comprobar, así que el navegador no se fía de que sea de verdad ese sitio. Mira que la fecha y la hora del equipo estén bien.";
+                }
+                if (t) {
+                    document.getElementById("titulo").textContent = t;
+                    document.getElementById("explica").textContent = x;
+                    document.title = titulo || (t + " (" + sitio + ")");
+                }
+                var pista = document.getElementById("pista");
+                if (!pista.hidden && pista.textContent.trim())
+                    pista.textContent = "Si sabes lo que haces: en los ajustes de Ladybird se puede elegir que pregunte antes de fiarse de un certificado así.";
+            })();
+        </script>
+    </body>
+</html>

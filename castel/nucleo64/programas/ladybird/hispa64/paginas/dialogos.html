@@ -1,0 +1,46 @@
+<!doctype html>
+<!-- Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+     Hispa-64, etapa 10 i (docs/64/HISPA-64.md, sección 26): la página de prueba de
+     los cuadros de NAVEGADOR (pruebas.sh): alert, confirm, prompt, elegir un
+     archivo, una lista <select>, una descarga, un enlace (el menú del botón
+     derecho) y un texto para buscar. Todo en su sitio (position: absolute), para
+     que la prueba sepa dónde pulsar; lo que pasa, en el título. -->
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Cuadros</title>
+<style>
+body { margin: 0; background: #EAF7EA; font-family: "DejaVu Sans", sans-serif; font-size: 16px; }
+button, input, select { position: absolute; font: inherit; }
+button { width: 160px; height: 40px; top: 20px; }
+#a { left: 20px; } #c { left: 200px; } #p { left: 380px; }
+#f { left: 20px; top: 80px; width: 320px; height: 32px; }
+#s { left: 20px; top: 140px; width: 200px; height: 32px; }
+a { position: absolute; left: 20px; color: #2E8B57; }
+#d { top: 200px; } #enlace { top: 250px; }
+#texto { position: absolute; left: 20px; top: 300px; width: 700px; margin: 0; line-height: 1.6; }
+</style>
+</head>
+<body>
+<button id="a" onclick="alert('Hola desde la página: ñandú y pingüino'); document.title = 'Aviso cerrado'">Aviso</button>
+<button id="c" onclick="document.title = 'Confirmar: ' + (confirm('¿Seguimos?') ? 'sí' : 'no')">Confirmar</button>
+<button id="p" onclick="var v = prompt('¿Cómo te llamas?', 'Carlos'); document.title = 'Pregunta: ' + v">Preguntar</button>
+<input id="f" type="file">
+<select id="s"><option value="uno">Uno</option><option value="dos">Dos</option><option value="tres">Tres</option></select>
+<a id="d" href="descarga.txt" download="descarga.txt">Descargar el texto</a>
+<a id="enlace" href="otra.html">La otra página</a>
+<p id="texto">El pingüino de la página. Otro pingüino más. Un PINGÜINO en mayúsculas.
+Aquí, pingüino otra vez, y el último pingüino.</p>
+<script>
+document.getElementById("f").onchange = function () {
+    var a = this.files[0];
+    var r = new FileReader();
+    r.onload = function () {
+        document.title = "Archivo: " + a.name + " (" + a.size + "): " + r.result.split("\n")[0];
+    };
+    r.readAsText(a);
+};
+document.getElementById("s").onchange = function () { document.title = "Elegido: " + this.value; };
+</script>
+</body>
+</html>

@@ -8,7 +8,7 @@
 # Las teclas especiales, entre llaves: {intro} {retro} {supr} {izq} {der}
 # {arriba} {abajo} {inicio} {fin} {tab} {esc} {ctrl-c} {ctrl-d} {ctrl-u}
 # {bloqmayus} {bloqnum} {f1}... {pausa} (medio segundo sin teclas); [etapa 8] {ctrl-LETRA}, {alt-f4},
-# {logo}, {ctrl-esc}. Va igual para el teclado PS/2
+# {logo}, {ctrl-esc}; [etapa 10 i] {ctrl-mas}, {ctrl-menos}, {ctrl-0}. Va igual para el teclado PS/2
 # y para uno USB (QEMU manda sendkey al teclado que haya).
 # [etapa 11] {indicador}: espera a que el intérprete vuelva a dar su
 # indicador (una línea más que empiece por «/...> » en la salida del puerto
@@ -50,6 +50,11 @@ for c in 'abefghijklmnopqrstvwxyz':
 ESPECIALES['alt-f4'] = 'alt-f4'
 ESPECIALES['logo'] = 'meta_l'
 ESPECIALES['ctrl-esc'] = 'ctrl-esc'
+# [etapa 10 i] el zoom del Navegador: Ctrl con «+», «-» y «0» (en el mapa español, «+» y «-» van
+# en las teclas de «]» y «/» del de EE. UU.); y las flechas del menú emergente
+ESPECIALES['ctrl-mas'] = 'ctrl-bracket_right'
+ESPECIALES['ctrl-menos'] = 'ctrl-slash'
+ESPECIALES['ctrl-0'] = 'ctrl-0'
 
 
 def una(c):

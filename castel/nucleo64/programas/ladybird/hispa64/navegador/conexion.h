@@ -61,7 +61,7 @@ private:
     virtual void app_open_view_in_new_tab(u64 view_id, Optional<u64> source_view_id, WebView::IsPrivate is_private, Web::HTML::ActivateTab activate_tab) override;
     virtual void view_web_content_crashed(u64 view_id, WebView::ViewImplementation::WebContentCrashReason reason) override;
 
-    // lo que el Hub espera que se conteste (sin cuadros de diálogo aún: lo prudente)
+    // lo que el Hub espera que se conteste ([etapa 10 i] con los cuadros de la oficina)
     virtual void view_request_alert(u64 view_id, Utf16String message) override;
     virtual void view_request_confirm(u64 view_id, Utf16String message) override;
     virtual void view_request_prompt(u64 view_id, Utf16String message, Utf16String default_value) override;
@@ -78,6 +78,17 @@ private:
     virtual void app_read_clipboard_item(u64 request_id) override;
     virtual void app_ask_user_for_download_path(u64 request_id, ByteString file) override;
     virtual void app_display_error_dialog(String message) override;
+    // [etapa 10 i] (sección 26) las descargas, el menú del botón derecho, el
+    // texto elegido (Ctrl+C), el historial, buscar en la página y el zoom
+    virtual void app_display_download_confirmation_dialog(String download_name, ByteString path) override;
+    virtual void download_added(Hub::DownloadState download) override;
+    virtual void download_updated(Hub::DownloadState download) override;
+    virtual void view_request_context_menu(u64 view_id, WebView::ContextMenuRequest request) override;
+    virtual void view_selected_text(u64 view_id, u64 request_id, Optional<ByteString> text) override;
+    virtual void view_visited_page(u64 view_id, URL::URL url, Optional<String> title, WebView::HistoryVisitTransition transition) override;
+    virtual void view_visited_page_title_change(u64 view_id, URL::URL url, String title) override;
+    virtual void view_find_in_page(u64 view_id, size_t current_match_index, Optional<size_t> total_match_count) override;
+    virtual void view_update_zoom(u64 view_id) override;
     virtual void app_quit_for_signal() override;
 
 public:

@@ -4,7 +4,9 @@
  * (VENTANAS, por la capa «so» de la oficina: so_hispa64.c) y de la letra de
  * la oficina (lienzo.c y letras.c, la DejaVu Sans con suavizado), con tipos
  * de C sencillos: así las cabeceras de la oficina (u32, so_suceso...) no se
- * cruzan con las de Ladybird (AK). Lo hace ventana.c. */
+ * cruzan con las de Ladybird (AK). Lo hace ventana.c.
+ * [etapa 10 i] (sección 26) y los menús del escritorio y los cuadros de
+ * diálogo de la oficina (ui.c): avisos, preguntas y el selector de archivos. */
 #ifndef NV_VENTANA_H
 #define NV_VENTANA_H
 #include <stdint.h>
@@ -52,6 +54,26 @@ void nv_puntero(int v, int forma);
 int nv_control(void);					/* Control pulsado ahora */
 void nv_al_portapapeles(const char *t, uint32_t n);
 char *nv_del_portapapeles(uint32_t *n);			/* (con free) o NULL */
+
+/* [etapa 10 i] un menú emergente del escritorio (so_menu): las opciones
+ * separadas por «|» («-», una raya), un bit por opción en gris; lo elegido
+ * llega como NV_MENU (opcion, desde 0, o -1; etiqueta, la de aquí) */
+void nv_menu(int v, int x, int y, const char *opciones, uint32_t grises, uint32_t etiqueta);
+
+/* [etapa 10 i] los cuadros de diálogo (los de la oficina, ui.c), uno a la
+ * vez, dentro de la ventana, encima de la página: */
+enum { NV_C_AVISO, NV_C_CONFIRMA, NV_C_PREGUNTA, NV_C_SALIR, NV_C_ARCHIVO };
+/* el cuadro (con «valor»: lo escrito de PREGUNTA; con «carpeta»: dónde empieza ARCHIVO) */
+void nv_cuadro_abre(int clase, const char *titulo, const char *mensaje, const char *valor, const char *carpeta);
+int nv_cuadro_abierto(void);
+/* un suceso de la ventana para el cuadro, que va en el trozo de abajo (desde
+ * «dy», de an x al): 1 si hay que pintarlo otra vez */
+int nv_cuadro_suceso(int v, const nv_suceso *s, int dy, int an, int al);
+/* el cuadro, pintado sobre unos puntos de an x al (la página, atenuada) */
+void nv_cuadro_pinta(uint32_t *px, int an, int al);
+/* -1: sigue abierto; 0: cancelado (Cancelar o Esc); 1: aceptado. En «valor»,
+ * lo escrito (PREGUNTA) o la ruta elegida (ARCHIVO). Lo cierra. */
+int nv_cuadro_cerrado(char *valor, int cabe);
 
 /* la letra de la oficina, sobre unos puntos 0x00RRGGBB (de «paso» por fila) */
 void nv_letras(void);

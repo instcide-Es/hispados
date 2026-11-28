@@ -24,6 +24,9 @@
  *   VENTANAS [PROGRAMA[=ARGUMENTO] ...]   (los programas, arrancados al
  *                                         empezar: «NOTAS=/sata1/A.TXT»)
  * Lo que pasa lo dice por la salida (el puerto serie): lo miran las pruebas.
+ * [etapa 10 i] (docs/64/HISPA-64.md, sección 26) Control llega también con
+ * las teclas que no son letras (Ctrl + y Ctrl - del zoom del Navegador), y
+ * los menús emergentes se llevan con el teclado (↑ ↓, Inicio, Fin, Intro).
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -115,6 +118,7 @@ static int foco = -1;
 /* ---- el puntero, el teclado ---- */
 static int px_ = 0, py_ = 0, nx, ny, botones, botones_nuevos;
 static int shift, ctrl, alt, logo;
+static int altgr;			/* [etapa 10 i] (con AltGr, Control no cuenta: hay quien lo manda con Ctrl izquierdo, como Windows a VirtualBox) */
 static int arrastra = -1, ax, ay;	/* una ventana que se mueve: lo que va del puntero a su esquina */
 static int estira = -1;			/* una que cambia de tamaño */
 static int captura = -1;		/* la que recibe el ratón mientras se pulsa */
@@ -139,6 +143,7 @@ static int emerg = -1;			/* la ventana del menú emergente abierto */
 static int em_x, em_y, em_an, em_n, em_sel = -1;
 static char em_op[32][120];
 static u32 em_grises, em_etiqueta;
+static void mueve_emerg(u32 t);		/* [etapa 10 i] */
 static int saliendo;
 static int reloj_min = -1;
 
@@ -1147,7 +1152,7 @@ static void tecla(int codigo, int valor)
 	case KEY_LEFTSHIFT: case KEY_RIGHTSHIFT: shift = abajo; return;
 	case KEY_LEFTCTRL: case KEY_RIGHTCTRL: ctrl = abajo; ctl->control = (u32)abajo; return;
 	case KEY_LEFTALT: alt = abajo; return;
-	case KEY_RIGHTALT: return;
+	case KEY_RIGHTALT: altgr = abajo; return;
 	case KEY_LEFTMETA: case KEY_RIGHTMETA:
 		if (valor == 1)
 			logo = 1;
@@ -1179,6 +1184,11 @@ static void tecla(int codigo, int valor)
 	}
 	if (!t)
 		return;
+	/* [etapa 10 i] el menú emergente, con las flechas */
+	if (emerg >= 0 && (t == SO_T_ARRIBA || t == SO_T_ABAJO || t == SO_T_INICIO || t == SO_T_FIN)) {
+		mueve_emerg(t);
+		return;
+	}
 	if (t == SO_T_F4 && alt) {
 		if (foco >= 0) {
 			di("Alt+F4: cerrar «%s»", W[foco].titulo);
@@ -1187,6 +1197,38 @@ static void tecla(int codigo, int valor)
 		return;
 	}
 	manda_tecla(t, ctrl ? SO_CON_CONTROL : 0);
+}
+
+/* [etapa 10 i] la opción elegida del menú emergente, con el teclado (sin las
+ * rayas ni las grises) */
+static int em_vale(int k)
+{
+	return k >= 0 && k < em_n && strcmp(em_op[k], "-") && !((em_grises >> k) & 1);
+}
+
+static void mueve_emerg(u32 t)
+{
+	int k = em_sel, paso = (t == SO_T_ARRIBA || t == SO_T_FIN) ? -1 : 1, i;
+
+	if (t == SO_T_INICIO)
+		k = -1;
+	if (t == SO_T_FIN)
+		k = em_n;
+	if (k < -1)
+		k = -1;
+	for (i = 0; i < em_n; i++) {
+		k += paso;
+		if (k < 0)
+			k = em_n - 1;
+		if (k >= em_n)
+			k = 0;
+		if (em_vale(k))
+			break;
+	}
+	if (em_vale(k) && k != em_sel) {
+		em_sel = k;
+		dana(em_x, em_y, em_an, em_n * 26 + 8);
+	}
 }
 
 static void letra(u32 u)
@@ -1201,6 +1243,11 @@ static void letra(u32 u)
 	}
 	if (emerg >= 0 && u == 27) {
 		cierra_emerg(-1);
+		return;
+	}
+	if (emerg >= 0 && u == 13) {
+		/* [etapa 10 i] Intro: la elegida con las flechas */
+		cierra_emerg(em_vale(em_sel) ? em_sel : -1);
 		return;
 	}
 	if (u == 13) {
@@ -1221,7 +1268,8 @@ static void letra(u32 u)
 	} else if (alt && ((u >= 'a' && u <= 'z') || (u >= 'A' && u <= 'Z'))) {
 		manda_tecla(SO_T_ALT + ((u | 32) - 'a'), 0);
 	} else if (u >= 32) {
-		manda_tecla(u, 0);
+		/* [etapa 10 i] con Control, que lo sepa el programa (Ctrl +, Ctrl -, Ctrl 0) */
+		manda_tecla(u, ctrl && !altgr ? SO_CON_CONTROL : 0);
 	}
 }
 

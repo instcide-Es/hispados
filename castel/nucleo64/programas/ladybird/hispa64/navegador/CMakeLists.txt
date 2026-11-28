@@ -26,7 +26,7 @@ add_custom_command(
 
 add_library(navoficina STATIC
     ventana.c
-    "${OFI}/texto.c" "${OFI}/ttf.c" "${OFI}/letras.c" "${OFI}/lienzo.c"
+    "${OFI}/texto.c" "${OFI}/ttf.c" "${OFI}/letras.c" "${OFI}/lienzo.c" "${OFI}/ui.c" "${OFI}/iconos.c"
     "${CMAKE_CURRENT_BINARY_DIR}/letras_dejavu.c")
 target_compile_definitions(navoficina PRIVATE OFI_HISPA64)
 target_compile_options(navoficina PRIVATE -std=gnu11 -w)
