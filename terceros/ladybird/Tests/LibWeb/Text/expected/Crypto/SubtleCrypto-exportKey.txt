@@ -1,0 +1,15 @@
+exportKey with RSA-OAEP algorithm
+exportedPublicKey kwt: RSA
+exportedPublicKey alg: RSA-OAEP-256
+exportedPublicKey exponent: AQAB
+exportedPublicKey key_ops: encrypt,wrapKey
+exportedPublicKey ext: true
+exportedPrivateKey kwt: RSA
+exportedPrivateKey alg: RSA-OAEP-256
+exportedPrivateKey exponent: AQAB
+exportedPrivateKey key_ops: decrypt,unwrapKey
+exportedPrivateKey ext: true
+exportedPublicKey2 byteLength: 94
+exportedPublicKey2 header: 305c300d06092a864886f70d0101010500034b003048024100
+exportedPublicKey2 exponent: 0203010001
+exportKey spki private key: InvalidAccessError Key is not public

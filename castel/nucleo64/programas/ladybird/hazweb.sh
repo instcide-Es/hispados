@@ -54,7 +54,7 @@ CMAKE=$(command -v cmake || true)
 [ -z "$CMAKE" ] && [ -x "$HERR/cmake-3.31.6-linux-x86_64/bin/cmake" ] && CMAKE=$HERR/cmake-3.31.6-linux-x86_64/bin/cmake
 NINJA=$(command -v ninja || true)
 [ -z "$NINJA" ] && [ -x "$HERR/ninja" ] && NINJA=$HERR/ninja
-PROGS="Hub WebContent RequestServer ImageDecoder Compositor SystemProbe test-js-runtime js Navegador"
+PROGS=${HAZWEB_PROGS:-"Hub WebContent RequestServer ImageDecoder Compositor SystemProbe test-js-runtime js Navegador"}   # ([etapa 10 i] HAZWEB_PROGS: solo esos)
 
 # MJS (mjs.c), con las pruebas de LibJS dentro (js.tar, como lb.tar de MLB)
 haz_mjs() {
@@ -71,6 +71,9 @@ haz_mjs() {
 haz_mweb() {
   rm -rf "$O/webtar" && mkdir -p "$O/webtar/share/fonts"
   cp -a "$L/Base/res" "$O/webtar/share/Lagom"
+  # ([etapa 10 i] las plantillas de Ladybird en español: la página de «sin
+  # conexión» o de no poder llegar a un sitio, y la de las carpetas)
+  cp "$AQUI/hispa64/plantillas/error.html" "$AQUI/hispa64/plantillas/directory.html" "$O/webtar/share/Lagom/ladybird/templates/"
   cp "$T/dejavu/"*.TTF "$O/webtar/share/fonts/"
   # ([etapa 10 h] la DejaVu Sans entera, no la recortada de la oficina: las
   # páginas de hoy traen flechas, griego, cirílico, signos...)
@@ -78,9 +81,15 @@ haz_mweb() {
   # ([etapa 10 h] las autoridades de Mozilla, no solo las de Let's Encrypt)
   cp "$T/autoridades-mozilla/autoridades.pem" "$O/webtar/share/"
   cp -a "$AQUI/hispa64/paginas" "$O/webtar/paginas"
-  tar --format=ustar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C "$O/webtar" -cf "$O/web.tar" share paginas
+  # ([etapa 10 i] las pruebas de la WebCrypto de Ladybird, lo que dan en Linux y
+  # su include.js con nuestro «internals» delante: MWEB --cripto, mwebcripto.c)
+  mkdir -p "$O/webtar/cripto"
+  cp -a "$L/Tests/LibWeb/Text/input/Crypto" "$O/webtar/cripto/Crypto"
+  cp -a "$L/Tests/LibWeb/Text/expected/Crypto" "$O/webtar/cripto/expected"
+  cat "$AQUI/hispa64/cripto-preludio.js" "$L/Tests/LibWeb/Text/input/include.js" > "$O/webtar/cripto/include.js"
+  tar --format=ustar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C "$O/webtar" -cf "$O/web.tar" share paginas cripto
   printf '\t.section .rodata\n\t.globl web_tar\n\t.globl web_tar_fin\nweb_tar:\n\t.incbin "%s"\nweb_tar_fin:\n\t.byte 0\n\t.section .note.GNU-stack,"",@progbits\n' "$O/web.tar" > "$O/webtar.s"
-  "$CC" -O2 -Wall -fno-stack-protector -static -o "$S/MWEB" "$AQUI/mweb.c" "$O/webtar.s"
+  "$CC" -O2 -Wall -fno-stack-protector -static -pthread -o "$S/MWEB" "$AQUI/mweb.c" "$AQUI/mwebcripto.c" "$O/webtar.s"
   "$X-strip" --strip-unneeded "$S/MWEB"
 }
 # [etapa 10 i] la WebCrypto (hispa64/webcripto, sobre BearSSL y monocypher; ver su
@@ -149,7 +158,15 @@ fi
 "$CC" -O2 -I"$AQUI/hispa64/incluir" -c "$AQUI/hispa64/sindbus.c" -o "$O/sindbus.o"
 "$CC" -O2 -DEGL_NO_X11 -I"$T/angle-cabeceras" -c "$AQUI/hispa64/singl.c" -o "$O/singl.o"
 haz_cripto
-rm -f "$O/libh64capa.a"; "$X-ar" rcs "$O/libh64capa.a" "$O/pila.o" "$O/sindbus.o" "$O/singl.o" "$O"/cripto/*.o
+# ([etapa 10 i] libh64capa.a solo se cambia si cambia lo de dentro; si cambia, los
+# programas se enlazan otra vez: ninja no la sigue, va en CMAKE_C_STANDARD_LIBRARIES)
+rm -f "$O/libh64capa.nueva.a"; "$X-ar" rcsD "$O/libh64capa.nueva.a" "$O/pila.o" "$O/sindbus.o" "$O/singl.o" "$O"/cripto/*.o
+if cmp -s "$O/libh64capa.nueva.a" "$O/libh64capa.a"; then rm -f "$O/libh64capa.nueva.a"
+else
+  mv "$O/libh64capa.nueva.a" "$O/libh64capa.a"
+  rm -f "$O"/cmake/bin/Hub "$O"/cmake/bin/WebContent "$O"/cmake/bin/RequestServer "$O"/cmake/bin/ImageDecoder "$O"/cmake/bin/Compositor \
+    "$O"/cmake/bin/SystemProbe "$O"/cmake/bin/test-js-runtime "$O"/cmake/bin/js "$O"/cmake/bin/Navegador
+fi
 # ---- 2. las crates de crates.io, de terceros/rust-crates, sin red (como
 # hazlb.sh: crates.py las comprueba con el Cargo.lock y las abre en V; cargo
 # las toma de ahí por la configuración de CARGO_HOME) ----
@@ -184,7 +201,7 @@ for p in $PROGS; do
   cp "$O/sal/$p" "$S/"
 done
 # ([etapa 10 h] la interfaz, NAVEGADOR: con mayúsculas, como los demás programas de Hispa-64)
-mv "$S/Navegador" "$S/NAVEGADOR"
+[ -f "$S/Navegador" ] && mv "$S/Navegador" "$S/NAVEGADOR"
 haz_mcripto
 haz_mjs
 haz_mweb

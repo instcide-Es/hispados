@@ -20,6 +20,8 @@
  * En Linux (para probar), PREFIJO es la carpeta de encima de la de MWEB, y
  * el enlace es PREFIJO/share (MWEB_PREFIJO=... lo cambia).
  * Uso: MWEB                 la página de prueba, comparada
+ *      MWEB --cripto        [etapa 10 i] las pruebas de la WebCrypto de
+ *                           Ladybird, comparadas con lo de Linux (mwebcripto.c)
  *      MWEB --prepara       [etapa 10 h] solo deja los recursos en /tmp/web
  *                           y el enlace /share (para NAVEGADOR, Ladybird con
  *                           ventana), y no los quita al acabar
@@ -47,6 +49,7 @@
 
 extern char **environ;
 extern const unsigned char web_tar[], web_tar_fin[];
+int mweb_cripto(const char *hub);   /* [etapa 10 i] mwebcripto.c */
 
 /* lo que tiene que decir «--headless=text» de la página de prueba (las
  * líneas con texto, sin los blancos de los lados) */
@@ -204,6 +207,13 @@ int main(int argc, char **argv)
 		return 0;
 	}
 	snprintf(hub, sizeof hub, "%s/Hub", carpeta);
+	if (argc > 1 && !strcmp(argv[1], "--cripto")) {
+		/* [etapa 10 i] las pruebas de la WebCrypto de Ladybird (mwebcripto.c) */
+		int r = mweb_cripto(hub);
+		unlink(share);
+		borra(base);
+		return r;
+	}
 	const char *url = argc > 1 ? argv[1] : "file:///tmp/web/paginas/prueba.html";
 	const char *modo = argc > 2 ? argv[2] : "text";
 	char opción[64];

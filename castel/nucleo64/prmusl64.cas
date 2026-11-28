@@ -134,6 +134,9 @@ módulo PrMusl64
         ; pruebas.sh, y la entrada del menú de la imagen con el navegador)
         si con_ladybird y busca_archivo("MJS") >= 0 entonces corre("MJS", 0) fin
         si con_ladybird y busca_archivo("MWEB") >= 0 entonces corre("MWEB", 0) fin
+        ; [etapa 10 i] las pruebas de la WebCrypto de Ladybird (MWEB --cripto: sus
+        ; 80 páginas de Tests/LibWeb/Text/input/Crypto, servidas por 127.0.0.1)
+        si con_ladybird y busca_archivo("MWEB") >= 0 entonces corre("MWEB --cripto", 0) fin
         si busca_archivo("MCURL") >= 0 entonces corre("MCURL", 0) fin          ; libcurl por 127.0.0.1
         si busca_archivo("MSONIDO") >= 0 entonces
             corre("MSONIDO", 0)                                                 ; [etapa 11] el sonido (/dev/dsp)

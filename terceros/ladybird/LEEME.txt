@@ -45,3 +45,12 @@ Ladybird y la capa de Hispa-64 (hispa64/cmake: la cadena del compilador
 cruzado, las dependencias con nuestras bibliotecas y la raíz sin Qt; hispa64/
 LibCrypto y hispa64/RequestServer, sin OpenSSL; hispa64/incluir, lo poco de
 libedit, D-Bus y OpenSSL que se nombra), sin tocar nada de aquí.
+
+[Etapa 10 i] (docs/64/HISPA-64.md, sección 26) Del mismo commit (830fbef6),
+sin cambiar nada (BSD-2, como lo demás): Tests/LibWeb/Text/input/Crypto (80
+pruebas de la WebCrypto), lo que dan en Linux (Tests/LibWeb/Text/expected/
+Crypto) y su Tests/LibWeb/Text/input/include.js, bajados de
+raw.githubusercontent.com/LadybirdBrowser/ladybird/830fbef6.../ . Las corre
+«MWEB --cripto» (castel/nucleo64/programas/ladybird/mwebcripto.c) en el
+navegador sin ventana de Hispa-64, con un «internals» nuestro delante del
+include.js (hispa64/cripto-preludio.js), y compara con lo de Linux.

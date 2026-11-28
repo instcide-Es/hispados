@@ -232,7 +232,10 @@ H64_VISIBLE int OSSL_set_max_threads(void *ctx, uint64_t max_threads) { (void)ct
 /* la cola de errores: no hay */
 H64_VISIBLE void ERR_clear_error(void) {}
 H64_VISIBLE void ERR_print_errors_cb(int (*cb)(const char *, size_t, void *), void *u) { (void)cb; (void)u; }
-/* lo que nombran RequestServer y WebContent y no se usa */
+/* lo que nombran RequestServer y WebContent y no se usa (X509_free: el
+ * Request.cpp de Ladybird suelta con ella los certificados de AIA, que aquí
+ * no hay: le llega nulo) */
+H64_VISIBLE void X509_free(void *x) { (void)x; }
 #define NO_HAY(f) long f(void); long f(void) { return 0; }
 NO_HAY(is_end)
 NO_HAY(OPENSSL_version_major)
