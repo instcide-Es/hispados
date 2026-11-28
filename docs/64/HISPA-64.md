@@ -10,7 +10,7 @@ cueste un año.
 
 Este documento es el plan: lo que se quiere, las decisiones de arquitectura con su
 porqué, y las etapas, cada una con lo que se verá funcionar y cómo se prueba. Las
-**etapas 0 a 9 están hechas** (secciones 6 a 15), y la **10** y la **11**, en su base (secciones 16 a 25: la 10 h, la última, con **Ladybird con ventana en el escritorio de Hispa-64** —NAVEGADOR, nuestra interfaz sobre el Hub de Ladybird: pestañas, barra de direcciones, teclado, ratón y rueda; https://hispados.es/ y https://github.com/—, mmap compartido de escribir de archivos —sqlite en modo WAL: la base de datos de Ladybird— y dos esperas perdidas: la de la prueba del eco y la de epoll_ctl; y la vuelta 2 de la auditoría: SCM_RIGHTS, SCM_CREDENTIALS, los sellos de memfd, los candados OFD, recvmsg).
+**etapas 0 a 9 están hechas** (secciones 6 a 15), y la **10** y la **11**, en su base (secciones 16 a 26: la 10 i, la última, con **el navegador para el uso diario** —los cuadros de las páginas, el selector de archivos, el menú del botón derecho, el zoom, buscar, los marcadores, el historial, las descargas, la página de inicio y la de «Sin conexión», en español—, **la WebCrypto sin OpenSSL** —sobre BearSSL y monocypher: 70 de 79 de las pruebas de Ladybird— y **pidfd**; la 10 h, con **Ladybird con ventana en el escritorio de Hispa-64** —NAVEGADOR, nuestra interfaz sobre el Hub de Ladybird: pestañas, barra de direcciones, teclado, ratón y rueda; https://hispados.es/ y https://github.com/—, mmap compartido de escribir de archivos —sqlite en modo WAL: la base de datos de Ladybird— y dos esperas perdidas: la de la prueba del eco y la de epoll_ctl; y la vuelta 2 de la auditoría: SCM_RIGHTS, SCM_CREDENTIALS, los sellos de memfd, los candados OFD, recvmsg).
 
 ---
 
@@ -267,7 +267,7 @@ y la Wi-Fi son lo que más puede alargarlo.
 | 7 | musl, POSIX, herramientas de compilar cruzado | **hecha (24/11)** | — |
 | 8 | Gráficos: compositor, ventanas, ratón, oficina | **hecha (24/11)** | — |
 | 9 | Red por cable, TCP/IP, TLS; Wi-Fi en paralelo | **hecha (25/11)** (la Wi-Fi, en paralelo: 3–5 meses) | — |
-| 10 | Navegador moderno (Ladybird o WebKit) | **la base, hecha (25/11)**: C++, la letra (FreeType y HarfBuzz), TCP de hoy; y lo que quedaba de la 9 (sección 16). **La base de la 10 b, hecha (25/11)**: curl 8.14.1 con BearSSL (la orden y libcurl, con «multi») e ICU 77.1 (con sus datos filtrados), readlink (sección 19). **La 10 c, hecha (26/11)**: una referencia al descriptor durante cada llamada, la causa de fondo de lo lento con varios procesadores (la TLB: la cuarentena del montón) y de los cortes del sonido, el compilador cruzado (GCC 14.3 con la libstdc++ para musl; C++ dinámico), **IPv6** (SLAAC, ND, ICMPv6, AF_INET6) y lo de la auditoría (sección 20). **La 10 d, hecha (26/11)**: los sockets de Unix (AF_UNIX, con SCM_RIGHTS y SCM_CREDENTIALS), `memfd_create` con sus sellos, un programa de C++23 que se habla con otro como los de Ladybird, el vigilante, el HPET de 32 bits y H4 y H11 de la auditoría (sección 21). **La 10 e, hecha (27/11)**: Skia m148 (la de Ladybird) con el procesador, las bibliotecas que pide Ladybird (17 en `terceros/`, con su prueba), AK, LibCore, LibFileSystem, LibThreading y LibTest de Ladybird con sus pruebas de AK (970 casos) dentro de Hispa-64, preadv y pwritev (sección 22). **La 10 f, hecha (27/11)**: Rust con nuestra musl, ICU 78.3, LibUnicode, LibURL, LibIPC, LibGfx (y LibRegex, LibCompress, LibTextCodec, LibImageDecoders, LibCrypto propia) con sus pruebas dentro de Hispa-64; el reloj del núcleo con el TSC, el vDSO, getrandom rápido y los programas de la unidad sin copiar (TestAK, de 25 s a 3 s con KVM), los cerrojos de fcntl y ARRANQUE.TXT al pararse (sección 23). **La 10 g, hecha (27/11)**: los enlaces simbólicos, 65.536 descriptores y regiones, mremap (la causa de TestURLPattern colgado), memfd con read y write, madvise de archivos, EDEADLK, flock, statfs, `__vdso_getcpu`; ensambla.py de 28 minutos a 1; MLB sin pendientes; **LibJS (8.449 pruebas) y Ladybird sin ventana dentro de Hispa-64** (texto, árbol, captura PNG, https://hispados.es/) (sección 24). **La 10 h, hecha (28/11)**: **Ladybird con ventana** (NAVEGADOR en VENTANAS: pestañas, barra de direcciones, teclado, ratón y rueda; en el menú Inicio), mmap MAP_SHARED de escribir de archivos y msync (sqlite en WAL: la base de datos y la caché de disco de Ladybird), epoll_ctl que avisa (RequestServer que no contestaba), la causa del fallo intermitente del eco (de la prueba) (sección 25). Queda: WebCrypto, los cuadros de diálogo del navegador, vídeo | (8–12 sem.) |
+| 10 | Navegador moderno (Ladybird o WebKit) | **la base, hecha (25/11)**: C++, la letra (FreeType y HarfBuzz), TCP de hoy; y lo que quedaba de la 9 (sección 16). **La base de la 10 b, hecha (25/11)**: curl 8.14.1 con BearSSL (la orden y libcurl, con «multi») e ICU 77.1 (con sus datos filtrados), readlink (sección 19). **La 10 c, hecha (26/11)**: una referencia al descriptor durante cada llamada, la causa de fondo de lo lento con varios procesadores (la TLB: la cuarentena del montón) y de los cortes del sonido, el compilador cruzado (GCC 14.3 con la libstdc++ para musl; C++ dinámico), **IPv6** (SLAAC, ND, ICMPv6, AF_INET6) y lo de la auditoría (sección 20). **La 10 d, hecha (26/11)**: los sockets de Unix (AF_UNIX, con SCM_RIGHTS y SCM_CREDENTIALS), `memfd_create` con sus sellos, un programa de C++23 que se habla con otro como los de Ladybird, el vigilante, el HPET de 32 bits y H4 y H11 de la auditoría (sección 21). **La 10 e, hecha (27/11)**: Skia m148 (la de Ladybird) con el procesador, las bibliotecas que pide Ladybird (17 en `terceros/`, con su prueba), AK, LibCore, LibFileSystem, LibThreading y LibTest de Ladybird con sus pruebas de AK (970 casos) dentro de Hispa-64, preadv y pwritev (sección 22). **La 10 f, hecha (27/11)**: Rust con nuestra musl, ICU 78.3, LibUnicode, LibURL, LibIPC, LibGfx (y LibRegex, LibCompress, LibTextCodec, LibImageDecoders, LibCrypto propia) con sus pruebas dentro de Hispa-64; el reloj del núcleo con el TSC, el vDSO, getrandom rápido y los programas de la unidad sin copiar (TestAK, de 25 s a 3 s con KVM), los cerrojos de fcntl y ARRANQUE.TXT al pararse (sección 23). **La 10 g, hecha (27/11)**: los enlaces simbólicos, 65.536 descriptores y regiones, mremap (la causa de TestURLPattern colgado), memfd con read y write, madvise de archivos, EDEADLK, flock, statfs, `__vdso_getcpu`; ensambla.py de 28 minutos a 1; MLB sin pendientes; **LibJS (8.449 pruebas) y Ladybird sin ventana dentro de Hispa-64** (texto, árbol, captura PNG, https://hispados.es/) (sección 24). **La 10 h, hecha (28/11)**: **Ladybird con ventana** (NAVEGADOR en VENTANAS: pestañas, barra de direcciones, teclado, ratón y rueda; en el menú Inicio), mmap MAP_SHARED de escribir de archivos y msync (sqlite en WAL: la base de datos y la caché de disco de Ladybird), epoll_ctl que avisa (RequestServer que no contestaba), la causa del fallo intermitente del eco (de la prueba) (sección 25). **La 10 i, hecha (28/11)**: el navegador para el uso diario (los cuadros, el selector de archivos, el botón derecho, el zoom, buscar, los marcadores, el historial, las descargas, la página de inicio y la de «Sin conexión»), la WebCrypto sin OpenSSL (BearSSL y monocypher) y pidfd (sección 26). Queda: Ed448, X448, ML-DSA y ML-KEM, vídeo | (8–12 sem.) |
 | 11 | Impresión IPP, sonido HDA, energía (suspender, batería) | **la base, hecha (25/11)**: el planificador, TCP con congestión, la INTx, el tiempo de procesador y **el sonido (HD Audio, /dev/dsp)** (sección 17). **La 11 b, hecha (25/11)**: el tic estable (la calibración del APIC), **ACPICA en el núcleo** (la batería, el cable, el EC, apagar por `_S5`, el `_CRS` de los enlaces de los `_PRT`), el brillo y HWP (sección 18). Quedan suspender, los P-states sin HWP, IPP y la mezcla del sonido | (en paralelo) |
 | 12 | Instalar en el disco, actualizar, cuentas | 3–4 sem. | (en paralelo) |
 | 13 | (opcional) Cargador UEFI propio, Secure Boot; UEFI de 32 bits | 3–4 sem. | — |
@@ -5299,3 +5299,42 @@ cargo resuelva el «workspace» van sin código: `terceros/rust-crates/resolver/
 ### Las imágenes
 
 - Hispa-64 **0.11.9** (uname: «etapa 10 i (el navegador de cada día)»).
+- La de siempre y la **con navegador** (`WEB=1 imagen.sh`), como en la 10 h.
+- **Probadas** (QEMU, KVM, 4 procesadores): la de siempre por UEFI (el
+  disco) y por la BIOS (el CD), hasta el escritorio; la del navegador por
+  UEFI con «el escritorio con el Navegador» y su CD por la BIOS.
+- Las capturas para la web (QEMU, 1280 x 800, con la red de QEMU):
+  https://hispados.es/, https://github.com/ y una búsqueda de «ñandú».
+
+### Cómo se ha probado
+
+- **La batería entera: 145 de 145** (eran 143: la WebCrypto de Ladybird y
+  la del navegador de cada día), en 81 minutos, en el servidor con KVM.
+
+### Qué hace
+
+| Archivo | Qué |
+|---|---|
+| `objet64.cas`, `procesos.cas`, `sistema.cas`, `hispa64.cas` | pidfd (`F_PIDFD`, el hilo «pidfd», 434 y 424); 0.11.9 |
+| `teclas64.cas`, `programas/ventanas/ventanas.c` | Ctrl con las teclas que no son letras; los menús emergentes con el teclado |
+| `programas/ladybird/hispa64/navegador/` | los cuadros, los menús, buscar, el zoom, los marcadores, el historial, la página de inicio, las descargas |
+| `programas/ladybird/hispa64/plantillas/` | la página de «Sin conexión» y la de las carpetas, en español |
+| `programas/ladybird/hispa64/webcripto/`, `sinopenssl.c` | la WebCrypto sobre BearSSL y monocypher |
+| `programas/ladybird/mcripto.c`, `mwebcripto.c`, `mweb.c`, `hazweb.sh` | MCRIPTO y `MWEB --cripto`; las plantillas en /tmp/web |
+| `programas/ladybird/hispa64/paginas/dialogos.html` | la página de prueba de los cuadros |
+| `programas/musl/mposix.c`, `programas/teclas.py`, `pruebas.sh` | las pruebas de pidfd; {ctrl-mas}...; la prueba del navegador de cada día |
+| `terceros/bearssl/src64w/`, `terceros/ladybird/Tests/LibWeb/` | lo que faltaba de BearSSL; las pruebas de la WebCrypto de Ladybird |
+
+### Lo que queda (y más adelante)
+
+- Ed448, X448, ML-DSA y ML-KEM (con PQClean, CC0, se podrían).
+- Los textos de Ladybird que pinta LibWeb en inglés (el botón «Select
+  file...» de `<input type=file>`, la tabla de las carpetas): habría que
+  cambiar Ladybird o poner una capa.
+- La casa en el disco (las descargas, los marcadores y el historial están en
+  /tmp/web/casa, en la memoria: se pierden al apagar) cuando haya usuarios y
+  una carpeta de verdad.
+- Los permisos de las páginas (notificaciones, ubicación: aún «no»), el
+  color y la fecha (aún cerrados), arrastrar las pestañas, la rueda del
+  touchpad con precisión, las teclas al soltarlas.
+- Lo de la sección 24: DNSSEC, vídeo y sonido, WebGL, test262 entero.
