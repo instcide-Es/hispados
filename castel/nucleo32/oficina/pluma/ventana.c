@@ -901,7 +901,11 @@ void pl_orden(int o)
 	case O_GUARDAR_COMO: dlg_abrir(1, 0); break;
 	case O_EXPORTAR_PDF: dlg_abrir(1, 1); break;
 	case O_IMPRIMIR:
+#ifdef OFI_HISPA64
+		dlg_imprimir();		/* [Hispa-64, etapa 11 a] por IPP o a PDF */
+#else
 		dlg_aviso("Imprimir", "Hispa-Pentium aún no tiene impresoras.\nPluma deja el documento listo para imprimir en un PDF\n(Archivo > Exportar a PDF): se imprime igual que se ve.");
+#endif
 		break;
 	case O_RESUMEN: dlg_resumen(); break;
 	case O_PREPARAR: dlg_pagina(); break;

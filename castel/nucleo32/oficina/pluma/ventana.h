@@ -109,6 +109,9 @@ void dlg_ancho_celda(void);
 void dlg_campo(void);
 void dlg_idioma(void);
 void dlg_aviso(const char *titulo, const char *texto);
+#ifdef OFI_HISPA64
+void dlg_imprimir(void);	/* [Hispa-64, etapa 11 a] por IPP (IMPRIMIR) o a PDF */
+#endif
 /* ¿guardar los cambios? (al acabar, la orden «pendiente» sigue) */
 void dlg_guardar_cambios(int orden);
 /* las imágenes de un archivo: los datos (de so_pide) o NULL */

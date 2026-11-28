@@ -140,6 +140,9 @@ int vs_alto_px(u32 f);
 /* ---- los cuadros (dialogos.c) ---- */
 void cuadro_abre(ui_cuadro *q, void (*f)(int id));
 void dlg_aviso(const char *titulo, const char *t);
+#ifdef OFI_HISPA64
+void dlg_imprimir(void);	/* [Hispa-64, etapa 11 a] por IPP (IMPRIMIR) o a PDF */
+#endif
 void dlg_guardar_cambios(int orden);
 void dlg_abrir(int modo);	/* 0 abrir, 1 guardar como, 2 exportar a PDF */
 void dlg_formato_celdas(int pestana);

@@ -151,6 +151,15 @@ int so_fondo_escritorio(const u32 *px, int an, int al);
  * la barra de tareas: para las ventanas) */
 void so_pantalla_entera(int *an, int *al);
 
+/* [Hispa-64, etapa 11 a] imprimir en una impresora de red (IPP, con
+ * IMPRIMIR): so_impresora deja en «d» la de siempre (su URI) y da 1 si la
+ * hay; so_pon_impresora la guarda; so_imprime manda un PDF (una ruta como
+ * las demás). Las dos, 0 si va bien, y en «msj» lo que se ha dicho. En
+ * Hispa-Pentium y en Linux no hay impresoras: 0, y -1. */
+int so_impresora(char *d, int cabe);
+int so_pon_impresora(const char *uri, char *msj, int cabe);
+int so_imprime(const char *pdf, const char *titulo, char *msj, int cabe);
+
 /* lanzar otro programa sin esperarlo (una ventana nueva de Pluma, Hispa-PDF...) */
 int so_lanza(const char *programa, const char *args);
 /* la ruta del programa que corre (para lanzarse otra vez): en Hispa-Pentium,

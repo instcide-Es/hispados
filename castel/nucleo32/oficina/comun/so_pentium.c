@@ -1004,6 +1004,29 @@ int so_fondo_escritorio(const u32 *px, int an, int al)
 	return ES_ERROR(llamada(172, 1, (u32)&it, 0)) ? -1 : 0;
 }
 
+/* [Hispa-64, etapa 11 a] aquí no hay impresoras (so.h) */
+int so_impresora(char *d, int cabe)
+{
+	if (cabe > 0)
+		d[0] = 0;
+	return 0;
+}
+
+int so_pon_impresora(const char *uri, char *msj, int cabe)
+{
+	(void)uri;
+	copia(msj, "aquí no hay impresoras", (u32)cabe);
+	return -1;
+}
+
+int so_imprime(const char *pdf, const char *titulo, char *msj, int cabe)
+{
+	(void)pdf;
+	(void)titulo;
+	copia(msj, "aquí no hay impresoras", (u32)cabe);
+	return -1;
+}
+
 int so_lanza(const char *programa, const char *args)
 {
 	char p[300], a[400];

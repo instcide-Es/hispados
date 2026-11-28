@@ -9,6 +9,8 @@
 #   NOTAS      el bloc de notas (ventanas/notas.c)
 #   PLUMA      Pluma 2, el procesador de textos (oficina/pluma, tal cual)
 #   CUENTAS    Cuentas 2, la hoja de cálculo (oficina/cuentas, tal cual)
+#   PDF        [etapa 11 a] Hispa-PDF (castel/nucleo32/pdf, tal cual): la orden PDF
+#   IMPRIMIR   [etapa 11 a] imprimir por IPP, sin CUPS (imprimir/imprimir.c)
 # Los objetos se guardan en build/ventanas-obj (solo se rehacen los que han
 # cambiado). Con SIN_OFICINA=1, sin Pluma ni Cuentas. Sin «make -j».
 set -e
@@ -68,6 +70,34 @@ oficina() {   # PROGRAMA NOMBRE
 if [ "${SIN_OFICINA:-0}" != 1 ]; then
   oficina pluma PLUMA
   oficina cuentas CUENTAS
+fi
+# [etapa 11 a] imprimir (docs/64/HISPA-64.md, sección 27): Hispa-PDF
+# (castel/nucleo32/pdf, tal cual, con su so_anfitrion.c, que es POSIX) como
+# la orden PDF (unir, separar, pasar a imágenes...), y su pintor dentro de
+# IMPRIMIR (imprimir/imprimir.c: IPP sin CUPS; las páginas a PWG raster)
+if [ "${SIN_OFICINA:-0}" != 1 ]; then
+  HP=$R/castel/nucleo32/pdf
+  [ -f "$O/hpdf_fuentes.c" ] && [ "$O/hpdf_fuentes.c" -nt "$HP/haz_fuentes.py" ] || python3 -I "$HP/haz_fuentes.py" "$R/terceros/dejavu" "$O/hpdf_fuentes.c"
+  HPO=""
+  for c in objetos documento filtros cifra escribe paginas util orden imagen fuente pinta texto miniz_hpdf; do
+    o=$O/hpdf_$c.o
+    if [ ! -f "$o" ] || [ "$HP/$c.c" -nt "$o" ] || [ -n "$(find "$HP" -name '*.h' -newer "$o" 2> /dev/null | head -1)" ]; then
+      "$M" -std=gnu11 -O2 -g0 -fno-stack-protector -w -I"$HP" -I"$R/terceros/miniz" -I"$R/terceros/stb" -c "$HP/$c.c" -o "$o"
+    fi
+    HPO="$HPO $o"
+  done
+  [ -f "$O/hpdf_fuentesc.o" ] && [ "$O/hpdf_fuentesc.o" -nt "$O/hpdf_fuentes.c" ] || "$M" -std=gnu11 -O2 -w -I"$HP" -c "$O/hpdf_fuentes.c" -o "$O/hpdf_fuentesc.o"
+  for v in so so_sinmain; do
+    o=$O/hpdf_$v.o; d=""; [ $v = so_sinmain ] && d="-Dmain=hpdf_main_anfitrion"
+    # shellcheck disable=SC2086
+    [ -f "$o" ] && [ "$o" -nt "$HP/so_anfitrion.c" ] || "$M" -std=gnu11 -O2 -g0 -fno-stack-protector -w $d -I"$HP" -c "$HP/so_anfitrion.c" -o "$o"
+  done
+  # shellcheck disable=SC2086
+  "$M" -static -o "$S/PDF" $HPO "$O/hpdf_fuentesc.o" "$O/hpdf_so.o" -lm
+  compila "$AQUI/imprimir/imprimir.c" "$O/imprimir.o"
+  # shellcheck disable=SC2086
+  "$M" -static -o "$S/IMPRIMIR" "$O/imprimir.o" $HPO "$O/hpdf_fuentesc.o" "$O/hpdf_so_sinmain.o" -lm
+  HECHOS="$HECHOS PDF IMPRIMIR"
 fi
 for f in $HECHOS; do strip --strip-unneeded "$S/$f"; done
 echo "hechos: $HECHOS"

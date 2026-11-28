@@ -1686,7 +1686,11 @@ void cu_orden(int o)
 	case O_GUARDAR_COMO: dlg_abrir(1); break;
 	case O_EXPORTAR_PDF: dlg_abrir(2); break;
 	case O_IMPRIMIR:
+#ifdef OFI_HISPA64
+		dlg_imprimir();		/* [Hispa-64, etapa 11 a] por IPP o a PDF */
+#else
 		dlg_aviso("Imprimir", "Aún no hay impresoras en Hispa-Pentium.\nExporte la hoja a PDF (Archivo > Exportar a PDF)\ny llévela a otro equipo para imprimirla.");
+#endif
 		break;
 	case O_PREPARAR: dlg_preparar(); break;
 	case O_AREA:

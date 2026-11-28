@@ -5,12 +5,16 @@
  * de Linux), con las unidades de DOS: «C:\DOCUMENT\x.plu» es
  * /DISCO/DOCUMENT/x.plu, con DISCO el de $HISPA_C o, si no se dice, uno de
  * los discos de «/» (sata1, nvme0p2...): el que tenga la carpeta DOCUMENT,
- * o el primero que no sea el del arranque (disco_c). La ventana es un hueco del
+ * o el primero que no sea el del arranque (disco_c). [etapa 11 a] Con la
+ * casa en el disco (el núcleo arranca los programas con HOME=/casa, una
+ * carpeta de escribir), «C:» es la casa y «C:\DOCUMENT», su carpeta
+ * Documentos; y se imprime con IMPRIMIR (IPP, sin CUPS). La ventana es un hueco del
  * servidor y sus puntos, una memoria compartida (/dev/shm/hv-PID-N).
  * Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <math.h>
 #include <time.h>
 #include <errno.h>
@@ -79,6 +83,15 @@ u32 so_memoria_usada(void)
 
 /* ---- las rutas: «C:\x\y» -> /DISCO/x/y ---- */
 static char disco[256];
+static int en_casa;		/* [etapa 11 a] «C:» es $HOME */
+
+/* [etapa 11 a] la casa: $HOME, si no es «/» y es una carpeta de escribir */
+static int casa_vale(const char *h)
+{
+	struct stat st;
+
+	return h && h[0] == '/' && h[1] && !stat(h, &st) && S_ISDIR(st.st_mode) && !access(h, W_OK);
+}
 
 /* el disco de «C:»: $HISPA_C; si no, el primero de «/» con una carpeta
  * DOCUMENT; si no, el primero que no es el del arranque (el que tiene
@@ -118,6 +131,15 @@ static const char *disco_c(void)
 		copia(disco, getenv("HISPA_C"), sizeof disco);
 		return disco;
 	}
+	if (casa_vale(getenv("HOME"))) {
+		char t[300];
+
+		copia(disco, getenv("HOME"), sizeof disco);
+		fmt(t, sizeof t, "%s/Documentos", disco);
+		mkdir(t, 0755);
+		en_casa = 1;
+		return disco;
+	}
 	d = opendir("/");
 	if (d) {
 		while ((e = readdir(d))) {
@@ -143,10 +165,19 @@ static void ruta_hispa(const char *r, char *d)
 	u32 i;
 
 	if (((r[0] >= 'A' && r[0] <= 'Z') || (r[0] >= 'a' && r[0] <= 'z')) && r[1] == ':') {
+		const char *resto = r + 2;
+
 		copia(d, disco_c(), 1024);
-		if (r[2] != '\\' && r[2] != '/')
-			anade(d, "/", 1024);
-		anade(d, r + 2, 1024);
+		if (*resto == '\\' || *resto == '/')
+			resto++;
+		anade(d, "/", 1024);
+		/* [etapa 11 a] en la casa, \DOCUMENT es Documentos */
+		if (en_casa && (resto[0] == 'D' || resto[0] == 'd') && !strncasecmp(resto, "DOCUMENT", 8) &&
+		    (resto[8] == 0 || resto[8] == '\\' || resto[8] == '/')) {
+			anade(d, "Documentos", 1024);
+			resto += 8;
+		}
+		anade(d, resto, 1024);
 	} else {
 		copia(d, r, 1024);
 	}
@@ -758,6 +789,118 @@ int so_lanza(const char *programa, const char *args)
 	if (posix_spawn(&h, r, NULL, NULL, argv, environ))
 		return -1;
 	return 0;
+}
+
+/* ---- [etapa 11 a] imprimir: con IMPRIMIR (castel/nucleo64/programas/imprimir) ---- */
+static const char *archivo_impresora(void)
+{
+	static char r[600];
+	const char *h = getenv("HOME");
+
+	if (!h || !h[0])
+		h = "/";
+	fmt(r, sizeof r, "%s%s.config/impresora.txt", h, h[largo(h) - 1] == '/' ? "" : "/");
+	return r;
+}
+
+int so_impresora(char *d, int cabe)
+{
+	FILE *f = fopen(archivo_impresora(), "r");
+	u32 n;
+
+	if (cabe > 0)
+		d[0] = 0;
+	if (!f)
+		return 0;
+	if (!fgets(d, cabe, f))
+		d[0] = 0;
+	fclose(f);
+	n = largo(d);
+	while (n && (d[n - 1] == '\n' || d[n - 1] == '\r' || d[n - 1] == ' '))
+		d[--n] = 0;
+	return n > 0;
+}
+
+/* IMPRIMIR con esos argumentos: su código, y lo que ha dicho (sin
+ * «IMPRIMIR: » delante) en «msj» */
+static int imprimir_(char **argv, char *msj, int cabe)
+{
+	int p[2], st = 0;
+	u32 n = 0;
+	pid_t h;
+	posix_spawn_file_actions_t fa;
+	void (*antes)(int);
+	char t[2048];
+
+	if (cabe > 0)
+		msj[0] = 0;
+	if (pipe2(p, O_CLOEXEC))
+		return -1;
+	posix_spawn_file_actions_init(&fa);
+	posix_spawn_file_actions_adddup2(&fa, p[1], 1);
+	posix_spawn_file_actions_adddup2(&fa, p[1], 2);
+	/* (aquí hace falta su código: SIGCHLD, el de siempre, mientras) */
+	antes = signal(SIGCHLD, SIG_DFL);
+	if (posix_spawn(&h, "/IMPRIMIR", &fa, NULL, argv, environ)) {
+		posix_spawn_file_actions_destroy(&fa);
+		close(p[0]);
+		close(p[1]);
+		signal(SIGCHLD, antes);
+		copia(msj, "no está el programa IMPRIMIR", (u32)cabe);
+		return -1;
+	}
+	posix_spawn_file_actions_destroy(&fa);
+	close(p[1]);
+	for (;;) {
+		ssize_t k = read(p[0], t + n, sizeof t - 1 - n);
+
+		if (k < 0 && errno == EINTR)
+			continue;
+		if (k <= 0)
+			break;
+		n += (u32)k;
+		if (n >= sizeof t - 1)
+			break;
+	}
+	close(p[0]);
+	t[n] = 0;
+	while (waitpid(h, &st, 0) < 0 && errno == EINTR)
+		;
+	signal(SIGCHLD, antes);
+	/* (sin «IMPRIMIR: » ni el salto del final) */
+	{
+		char *a = t, *b = msj;
+		u32 q = 0;
+
+		while (*a && q + 1 < (u32)cabe) {
+			if (!strncmp(a, "IMPRIMIR: ", 10) && (a == t || a[-1] == '\n'))
+				a += 10;
+			b[q++] = *a++;
+		}
+		while (q && (b[q - 1] == '\n' || b[q - 1] == ' '))
+			q--;
+		b[q] = 0;
+	}
+	return WIFEXITED(st) ? WEXITSTATUS(st) : -1;
+}
+
+int so_pon_impresora(const char *uri, char *msj, int cabe)
+{
+	char u[600];
+	char *argv[] = { "/IMPRIMIR", "-g", u, NULL };
+
+	copia(u, uri, sizeof u);
+	return imprimir_(argv, msj, cabe);
+}
+
+int so_imprime(const char *pdf, const char *titulo, char *msj, int cabe)
+{
+	char r[1024], t[300];
+	char *argv[] = { "/IMPRIMIR", "-t", t, r, NULL };
+
+	ruta_hispa(pdf, r);
+	copia(t, titulo && titulo[0] ? titulo : "Documento", sizeof t);
+	return imprimir_(argv, msj, cabe);
 }
 
 static char nombre_programa[300];

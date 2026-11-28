@@ -2138,3 +2138,86 @@ void dlg_ortografia(void)
 	}
 	abre_orto();
 }
+
+#ifdef OFI_HISPA64
+/* ===================================================================== */
+/*  [Hispa-64, etapa 11 a] Imprimir: en una impresora de red (IPP, con   */
+/*  IMPRIMIR; la hoja, como en Exportar a PDF) o a PDF                    */
+/* ===================================================================== */
+#define ID_IMPRESORA 140
+#define B_A_PDF 3
+static char impresora_txt[600];
+
+static void al_imprimir(int id)
+{
+	char uri[600], msj[1500], real[600], e[300], tit[300];
+	int r;
+
+	if (id == B_A_PDF) {
+		dlg_abrir(1, 1);
+		return;
+	}
+	if (id != B_ACEPTAR)
+		return;
+	copia(uri, c_(ID_IMPRESORA) ? c_(ID_IMPRESORA)->valor : "", sizeof uri);
+	if (!uri[0]) {
+		dlg_aviso("Imprimir", "Falta la impresora: escriba su dirección, como\nipp://192.168.1.20/ipp/print (la dice la propia impresora en\nsu pantalla o en su hoja de configuración).");
+		return;
+	}
+	if (!iguales(uri, impresora_txt) && so_pon_impresora(uri, msj, sizeof msj)) {
+		dlg_aviso("No se puede imprimir", msj);
+		return;
+	}
+	{
+		bufer b = { 0 };
+		void *f;
+		const char *er = NULL;
+
+		copia(real, "/tmp/IMPRIME-PLUMA.PDF", sizeof real);
+		(void)e;
+		if (pdf_exporta(P.d, &b) || b.mal) {
+			buf_suelta(&b);
+			dlg_aviso("No se puede imprimir", "No se ha podido hacer el PDF del documento.");
+			return;
+		}
+		f = so_crea(real, &er);
+		if (!f || so_escribe(f, b.d, b.n) || so_cierra(f)) {
+			buf_suelta(&b);
+			dlg_aviso("No se puede imprimir", er ? er : "No se puede escribir en /tmp.");
+			return;
+		}
+		buf_suelta(&b);
+	}
+	copia(tit, P.ruta[0] ? sin_carpeta(P.ruta) : "Documento de Pluma", sizeof tit);
+	r = so_imprime(real, tit, msj, sizeof msj);
+	so_borra(real);
+	dice("pluma: imprimir: %s", msj);
+	dlg_aviso(r ? "No se ha podido imprimir" : "Imprimir", msj);
+}
+
+void dlg_imprimir(void)
+{
+	int an = 520, y = 14;
+
+	so_impresora(impresora_txt, sizeof impresora_txt);
+	nuevo_cuadro("Imprimir", an, 0);
+	texto(14, y, an - 28, 3 * U, "En una impresora de red «sin controlador» (casi todas las de hoy:\nIPP Everywhere o AirPrint), el documento tal como sale en PDF. O guárdela\nen un PDF para imprimirla en otro equipo.");
+	y += 3 * U + 12;
+	rotulo(14, y + 4, "&Impresora:");
+	campo(ID_IMPRESORA, 120, y, an - 134, impresora_txt);
+	y += H + 6;
+	texto(120, y, an - 134, U, "(como ipp://192.168.1.20/ipp/print)");
+	y += U + 14;
+	Q.al = y + H + 14;
+	boton(B_A_PDF, 14, Q.al - H - 12, 130, "A &PDF...", 0);
+	aceptar_cancelar("&Imprimir");
+	abre(al_imprimir);
+	{
+		int k;
+
+		for (k = 0; k < Q.n; k++)
+			if (Q.c[k].id == ID_IMPRESORA)
+				Q.foco = k;
+	}
+}
+#endif
