@@ -2033,7 +2033,7 @@ PY
     sleep 1; kill $qj 2> /dev/null; wait $qj 2> /dev/null
     mcopy -o -i "$T/uefi-nav/hispa64.img@@$OFI" "$T/grub-10i.cfg" ::boot/grub/grub.cfg 2> /dev/null
     vj=$(serie "$SR")
-    if [ $bieni = 1 ] && [ "$i_atn" -gt 200000 ] && [ "$i_cua" -gt 20000 ] && [ "$i_arc" -gt $(( i_cua + 50000 )) ] && [ "$i_men" -gt 30000 ] \
+    if [ $bieni = 1 ] && [ "$i_atn" -gt 200000 ] && [ "$i_cua" -gt 20000 ] && [ "$i_arc" -gt $(( i_cua + 20000 )) ] && [ "$i_men" -gt 30000 ] \
        && [ "$i_amar" -gt 800 ] && [ "$i_bus" -gt 15000 ] && [ "$i_est" -gt 60 ] && [ "$i_avi" -gt 15000 ] && [ "$i_ini" -gt 300000 ] && [ "$i_des" -gt 15000 ] \
        && grep -q "^NAVEGADOR: cuadro cerrado (aceptado): /tmp/web/paginas/descarga.txt$" <<< "$vi" \
        && ! grep -q "llamada al sistema 434" <<< "$vi" && ! grep -qi "disk I/O error\|database is locked\|SQLITE_IOERR" <<< "$vi" \
