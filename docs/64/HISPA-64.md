@@ -5139,3 +5139,163 @@ cargo resuelva el «workspace» van sin código: `terceros/rust-crates/resolver/
   segundo con kill, como en los sistemas que no lo tienen).
 - Lo de la sección 24: DNSSEC, vídeo y sonido, WebGL, test262 entero; y lo
   de antes.
+
+## 26. La etapa 10 i, hecha (28/11/2026): el navegador de cada día, la WebCrypto sin OpenSSL y pidfd
+
+### Las decisiones
+
+- **Por qué la 10 i**: lo que dejó la 10 h (sección 25): rematar NAVEGADOR
+  para usarlo cada día (los cuadros de las páginas, el menú del botón
+  derecho, el zoom, buscar, los marcadores, el historial, las descargas, una
+  página de inicio en español), la WebCrypto (`crypto.subtle`), `pidfd_open`
+  y el fallo sin confirmar de «sinred».
+- **Los cuadros, dentro de la ventana, con los de la oficina**: nada de
+  ventanas aparte. ventana.c lleva `ui.c` (los cuadros de Pluma y Cuentas) y
+  pinta el cuadro encima de la página atenuada; los menús, los del
+  escritorio (`so_menu`, los de VENTANAS). Así se ven y se manejan igual que
+  el resto de Hispa-64 (el teclado, el foco, Intro, Esc, Tab).
+- **Nada de Ladybird cambia**: lo que se pinta en español (la página de
+  «sin conexión», la de las carpetas) son sus plantillas, puestas otra vez
+  en /tmp/web por hazweb.sh; lo demás, mensajes del Hub que la interfaz ya
+  tenía que atender.
+
+### pidfd (objet64.cas, procesos.cas, sistema.cas)
+
+- **`pidfd_open` (434)** y **`pidfd_send_signal` (424)**, como Linux: un
+  descriptor del proceso (con O_CLOEXEC siempre; PIDFD_NONBLOCK) que se pone
+  listo para leer (POLLIN) cuando el proceso acaba (un zombi, listo ya);
+  read, EINVAL; un pid que no está, ESRCH; marcas que no son, EINVAL; la
+  señal, como kill (si ya ha acabado, ESRCH). Es una clase más de Objet64
+  (`F_PIDFD`, 18): dup, close, poll, epoll y fstat van solos.
+- **Quién despierta a los que esperan**: Procesos cuenta los que acaban
+  (`acabados`, antes de `despierta_todos` de wait4) y un hilo del núcleo,
+  **«pidfd»** (desde el arranque, con los procesos), espera ahí
+  (`espera_acabado`) y, si hay algún pidfd abierto, avisa a poll y epoll
+  (Sondeo64.avisa). Procesos no puede llamar a Sondeo64: Sondeo64 lo importa
+  a él (Castel no deja importar en círculo).
+- Así el Hub de Ladybird vigila a la interfaz como en Linux, en vez de mirar
+  cada segundo con kill; y ya no sale «ha pedido la llamada al sistema 434».
+- **Las pruebas**: MPOSIX (138, eran 121): 17 de pidfd, las mismas líneas en
+  Linux y en Hispa-64 (poll sin plazo despierta a los 300 ms de acabar el
+  hijo; epoll; el zombi; ESRCH después de wait; la señal).
+
+### La WebCrypto, sin OpenSSL (hispa64/webcripto)
+
+- La parte de Rust de LibCrypto de Ladybird (`sys.rs`) llama a unas 120
+  funciones de OpenSSL 3. Ahora están de verdad, con los mismos nombres y la
+  misma forma de llamarlas, sobre **BearSSL 0.6** y **monocypher 4** y con
+  lo que no tienen hecho por nosotros:
+  - resúmenes y MAC: SHA-1 y SHA-2 (BearSSL); SHA-3, SHAKE y el Keccak de
+    KMAC (Keccak-f[1600] propio); HMAC de todos; KMAC128/256;
+  - derivar claves: HKDF y PBKDF2, y Argon2 con monocypher;
+  - cifrado simétrico: AES-CBC, AES-CTR con el contador de 128 bits, AES-GCM
+    (BearSSL), AES-KW, AES-OCB y ChaCha20-Poly1305;
+  - RSA: generar con i62 o i31 y operar en privado con el CRT de BearSSL (de
+    tiempo constante); PKCS #1 v1.5, PSS y OAEP propios, también con SHA-3;
+    sacar el CRT de una JWK que solo trae n, e y d; las comprobaciones de
+    OpenSSL al importar (SP 800-56B);
+  - curvas: ECDSA y ECDH con P-256/384/521 (la firma, con el número de RFC
+    6979), con los puntos comprimidos; Ed25519 y X25519;
+  - el DER de SPKI, PKCS #8, RSAPrivateKey, ECPrivateKey y las firmas.
+- Lo que no hay (Ed448, X448, ML-DSA y ML-KEM) falla limpio, con
+  NotSupportedError u OperationError. Lo que faltaba de BearSSL va en
+  `terceros/bearssl/src64w`, sin cambiar (con su suma). `bn.c` (los BIGNUM)
+  no es de tiempo constante: lo secreto lo hace BearSSL; bn.c solo lo raro
+  (comprobar al importar, los puntos comprimidos, las JWK sin CRT, RSA de
+  más de 4096 bits).
+- **Las pruebas**: **MCRIPTO** (104, con los vectores de FIPS 180-4 y 202,
+  SP 800-185, RFC 4231/2202, SP 800-38A, GCM, RFC 3394, 7253, 8439,
+  6070/7914, 5869, 9106, 8032, 7748, 6979 y NIST CAVP) en cada arranque con
+  musl, igual que en Linux; y **`MWEB --cripto`**, que sirve por 127.0.0.1
+  las 80 pruebas de la WebCrypto de Ladybird (`Tests/LibWeb/Text/input/Crypto`,
+  del commit 830fbef6, BSD-2) al navegador sin ventana con un «internals»
+  nuestro y las compara con lo de Linux: **70 de 79 iguales** (las otras 9,
+  de ML-DSA, ML-KEM y X448; SubtleCrypto-generateKey, saltada también por
+  Ladybird).
+
+### NAVEGADOR para el uso diario (navegador.cpp, ventana.c, conexion.h)
+
+- **Los cuadros de las páginas**: alert («Mensaje de…», Aceptar), confirm
+  (Aceptar y Cancelar; Esc es cancelar), prompt (con lo que propone la
+  página), y «¿Salir de la página?» (onbeforeunload: Salir o Quedarse). Uno
+  a la vez (los demás esperan en cola), encima de la página atenuada.
+- **Subir un archivo** (`<input type=file>`): el selector de archivos de la
+  oficina (la carpeta, Subir, la lista con las carpetas primero, el nombre:
+  o una ruta entera); el archivo va a la página abierto (`IPC::File`). La
+  carpeta de la última vez se recuerda.
+- **Las listas `<select>`**: un menú del escritorio, con ✓ en la elegida y
+  los grupos.
+- **Las descargas**: a la carpeta **Descargas** de la casa
+  (`/tmp/web/casa/Descargas`; con «nombre (2).ext» si ya está), con un
+  aviso abajo al acabar (o si falla, en rojo) y el menú Descargas (cada una
+  con su estado; abrir la carpeta).
+- **El menú del botón derecho**: de un enlace (abrirlo en una pestaña nueva
+  o aquí, copiar su dirección, guardarlo), de una imagen (abrirla, guardarla,
+  copiar su dirección), de lo elegido (copiar, buscarlo en internet), de un
+  campo (cortar, copiar, pegar, seleccionar todo), y siempre atrás,
+  adelante, recargar y añadir a los marcadores.
+- **El zoom**: Ctrl +, Ctrl -, Ctrl 0 y Ctrl con la rueda; el tanto por
+  ciento, a la derecha de la dirección si no es el 100 %.
+- **Buscar en la página** (Ctrl+F): una barra abajo, con «N de M» (o «No
+  está», en rojo), ▲ ▼, Intro (la siguiente; con Mayús, la de antes), F3 y
+  Esc.
+- **Los marcadores**: Ctrl+D pone o quita la página (la estrella de la
+  barra, llena); la estrella y Ctrl+B, la lista. **El historial** (Ctrl+H):
+  lo visitado (`view_visited_page`), de más nuevo a más viejo, y borrarlo.
+  Se guardan en la casa (`marcadores.txt`, `historial.txt`, de texto).
+- **El menú ☰**: pestaña nueva, inicio, marcadores, historial, descargas,
+  buscar, el zoom, recargar, cerrar la pestaña.
+- **La página de inicio propia** (⌂, «+» y Ctrl+T): `inicio.html`, en
+  español, hecha cada vez que cambian los marcadores o el historial: el
+  buscador (DuckDuckGo), los marcadores, lo último visitado y las teclas. La
+  barra no enseña su ruta. Al arrancar se sigue abriendo
+  https://hispados.es/ (o lo que se diga).
+- **Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+A, Ctrl+Z y Ctrl+Y**, como la interfaz de
+  Qt (al Hub: el texto elegido, cortar, pegar...).
+- **Los iconos** que la letra recortada de la oficina no tiene (☆ ★ ☰ ⌂),
+  dibujados con polígonos suavizados.
+
+### «sinred»: el fallo no sale; la página de «Sin conexión»
+
+- Arrancado con «sinred» (y sin tarjeta, `-nic none`), el navegador
+  arranca bien: el nombre no se encuentra en unos 2 s y Ladybird pone su
+  página de error (en inglés). No se ha visto colgarse (KVM, 4
+  procesadores, varias veces).
+- **La página propia** (`hispa64/plantillas/error.html`, la de Ladybird con
+  su estilo, en español): **«Sin conexión con hispados.es»** (el título,
+  «Sin conexión (hispados.es)»), las causas que puede haber (sin red, la
+  dirección mal escrita, el servidor que no contesta), el mensaje de
+  Ladybird en «Ver los detalles» y «Probar otra vez» (un enlace: Ladybird
+  no corre JavaScript en esta página, así que un solo texto para todos los
+  errores de red). Y la de las carpetas (file:///...), «Carpeta …», «Subir a
+  la carpeta de arriba».
+
+### El teclado (teclas64.cas, ventanas.c)
+
+- El núcleo daba Ctrl solo con las letras (los controles) y el espacio:
+  con las demás teclas, nada. Ahora, con las que no son letras, da la letra
+  misma (Ctrl + → «+»); VENTANAS le pone la marca de Control (salvo con
+  AltGr pulsado: hay quien manda Ctrl izquierdo con AltGr, como Windows a
+  VirtualBox) y así llegan Ctrl +, Ctrl - y Ctrl 0.
+- Los menús emergentes de VENTANAS, con el teclado: ↑ ↓, Inicio, Fin (sin
+  las rayas ni las grises) e Intro.
+
+### La prueba (pruebas.sh)
+
+- **[etapa 10 i] NAVEGADOR para el uso diario**: la imagen de la 10 h, con
+  la red de QEMU y un servidor HTTP en el anfitrión; la página de los
+  cuadros (`paginas/dialogos.html`): alert, confirm (Esc e Intro), prompt,
+  subir un archivo (leído por la página), `<select>`, el menú del botón
+  derecho de un enlace, buscar («2 de 4»), el zoom (110 % y 100 %),
+  Ctrl+D (la estrella), Ctrl+B, Ctrl+H, ⌂ y una descarga por HTTP (300.000
+  octetos, con su aviso); en los pantallazos, la página atenuada, el cuadro,
+  el selector, el menú, lo encontrado en amarillo, la barra de buscar, la
+  estrella, el aviso y la página de inicio. Y otro arranque con «sinred»
+  (el grub.cfg de la imagen cambiado con mtools y vuelto a poner): la
+  página de «Sin conexión (hispados.es)». Y que no falte pidfd_open.
+- MPOSIX 138, MCRIPTO 104 (en la etapa 7) y la WebCrypto de Ladybird (70 o
+  más de 79, en el arranque de la 10 g).
+
+### Las imágenes
+
+- Hispa-64 **0.11.9** (uname: «etapa 10 i (el navegador de cada día)»).

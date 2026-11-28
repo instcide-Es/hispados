@@ -1,15 +1,16 @@
 <!doctype html>
 <!-- Hispa-64, etapa 10 i (docs/64/HISPA-64.md, sección 26): la página de Ladybird
      cuando no se puede llegar a un sitio (Base/res/ladybird/templates/error.html,
-     BSD-2: su estilo y su dibujo), en español. Lo que dice, según el error: «Sin
-     conexión» si no se encuentra el nombre (sin red, o mal escrito), «El servidor
-     no contesta», «Tarda demasiado» o «La conexión segura no es de fiar»; el
-     mensaje de Ladybird, en «Ver los detalles». (Lo que va entre dos signos de
+     BSD-2: su estilo y su dibujo), en español: «Sin conexión», y las causas que
+     puede haber (sin red, la dirección mal escrita, el servidor que no contesta); el
+     mensaje de Ladybird, en «Ver los detalles».
+     (Sin JavaScript: Ladybird no lo corre en esta página; por eso un solo texto
+     para todos los errores de red.) (Lo que va entre dos signos de
      tanto por ciento lo pone Ladybird: aquí no se escribe ese signo suelto.) -->
 <html lang="es">
     <head>
         <meta charset="UTF-8" />
-        <title>No se puede abrir %failed_host%</title>
+        <title>Sin conexión (%failed_host%)</title>
         <style>
             :root {
                 color-scheme: light dark;
@@ -89,12 +90,22 @@
                 border-radius: 7px;
                 cursor: pointer;
             }
-            button {
+            button,
+            a.boton {
                 color: #ffffff;
                 background: var(--primary);
                 font-weight: 500;
             }
-            button:hover {
+            a.boton {
+                display: inline-flex;
+                align-items: center;
+                height: 28px;
+                padding: 0 16px;
+                border-radius: 7px;
+                text-decoration: none;
+            }
+            button:hover,
+            a.boton:hover {
                 background: var(--primary-hover);
             }
             details {
@@ -149,48 +160,17 @@
             >
                 <path d="M2.5 8a5.5 5.5 0 1 0 11 0a5.5 5.5 0 1 0-11 0M4.2 4.2l7.6 7.6" />
             </svg>
-            <h1 id="titulo">No se puede abrir %failed_host%</h1>
-            <p id="explica">El navegador no ha podido llegar a esta página.</p>
+            <h1 id="titulo">Sin conexión con %failed_host%</h1>
+            <p id="explica">No se ha podido llegar a «%failed_host%». Puede que este equipo no tenga conexión a internet (sin cable, sin Wi-Fi, o arrancado con «sinred»), que la dirección esté mal escrita o que el servidor no conteste. Cuando haya red, pulsa «Probar otra vez».</p>
             <div class="actions">
                 <details>
                     <summary>Ver los detalles</summary>
                     <div class="details">%failed_url%<br /><span id="mensaje">%error_message%</span></div>
                 </details>
-                <button type="button" data-url="%failed_url%" onclick="location.href = this.dataset.url" autofocus>
-                    Probar otra vez
-                </button>
+                <a class="boton" href="%failed_url%" autofocus>Probar otra vez</a>
             </div>
             <p class="hint" id="pista" %certificate_setting_hidden%>%certificate_setting_hint%</p>
             <span id="sitio" hidden>%failed_host%</span>
         </main>
-        <script>
-            (function () {
-                var m = document.getElementById("mensaje").textContent;
-                var sitio = document.getElementById("sitio").textContent;
-                var t = null, x = null, titulo = null;
-                if (/resolve|DNS|name or service|no address/i.test(m)) {
-                    t = "Sin conexión";
-                    titulo = "Sin conexión (" + sitio + ")";
-                    x = "No se encuentra «" + sitio + "». Puede que este equipo no tenga conexión a internet (sin cable, sin Wi-Fi, o arrancado con «sinred»), o que la dirección esté mal escrita. Cuando haya red, pulsa «Probar otra vez».";
-                } else if (/refused|could not connect|couldn.t connect|unreachable/i.test(m)) {
-                    t = "El servidor no contesta";
-                    x = "«" + sitio + "» no acepta la conexión: puede que esté apagado, o que la red no deje llegar a él.";
-                } else if (/timed? ?out|timeout/i.test(m)) {
-                    t = "El servidor tarda demasiado";
-                    x = "«" + sitio + "» no ha contestado a tiempo. Puede que la red vaya muy lenta o que el servidor esté muy ocupado.";
-                } else if (/certificate|ssl|tls|handshake/i.test(m)) {
-                    t = "La conexión segura no es de fiar";
-                    x = "El certificado de «" + sitio + "» no se ha podido comprobar, así que el navegador no se fía de que sea de verdad ese sitio. Mira que la fecha y la hora del equipo estén bien.";
-                }
-                if (t) {
-                    document.getElementById("titulo").textContent = t;
-                    document.getElementById("explica").textContent = x;
-                    document.title = titulo || (t + " (" + sitio + ")");
-                }
-                var pista = document.getElementById("pista");
-                if (!pista.hidden && pista.textContent.trim())
-                    pista.textContent = "Si sabes lo que haces: en los ajustes de Ladybird se puede elegir que pregunte antes de fiarse de un certificado así.";
-            })();
-        </script>
     </body>
 </html>

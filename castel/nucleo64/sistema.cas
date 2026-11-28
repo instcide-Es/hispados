@@ -1714,8 +1714,8 @@ módulo Sistema
         fin
         pon_texto(dirección(t[0]), 0, "Hispa-64")
         pon_texto(dirección(t[0]), 65, "hispa64")
-        pon_texto(dirección(t[0]), 130, "0.11.8")
-        pon_texto(dirección(t[0]), 195, "etapa 10 h (Ladybird con ventana)")
+        pon_texto(dirección(t[0]), 130, "0.11.9")
+        pon_texto(dirección(t[0]), 195, "etapa 10 i (el navegador de cada día)")
         pon_texto(dirección(t[0]), 260, "x86_64")
         pon_texto(dirección(t[0]), 325, "(none)")
         si no copia_a(p, v, nat64(dirección(t[0])), 390) entonces devolver EFAULT fin

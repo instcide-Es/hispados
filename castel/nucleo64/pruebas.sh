@@ -339,7 +339,7 @@ e4_bien() {   # SALIDA N
   local s=$1 n=$2 v; v=$(serie "$s")
   grep -q "^Programas: syscall y sysret (los números de Linux x86-64), swapgs, una pila del núcleo por hilo$" <<< "$v" \
     && [ "$(grep -o "^Unidad en memoria: [0-9]* archivos: " <<< "$v" | grep -o "[0-9]*")" -ge "$(ls "$T/prog" | wc -l)" ] \
-    && grep -q "^  argc = 4: HOLA uno dos tres$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.8 x86_64$" <<< "$v" \
+    && grep -q "^  argc = 4: HOLA uno dos tres$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.9 x86_64$" <<< "$v" \
     && grep -q "^  la unidad en memoria: SALUDO.TXT dice «Hola, soy SALUDO.TXT" <<< "$v" && grep -q "^  writev: en tres trozos$" <<< "$v" \
     && grep -q "^HOLA: todo bien (28 pruebas)$" <<< "$v" && grep -q "^Programa «HOLA uno dos tres»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^HOLACAS: todo bien (con acentos de la página 437: «añadir», «canción»)$" <<< "$v" \
@@ -380,7 +380,7 @@ e7_bien() {   # SALIDA N [avx]
     && grep -q "^MHOLA: hola desde musl (printf); estático$" <<< "$v" \
     && grep -q "^MHOLA: hola desde musl (printf); dinámico: ld-musl en 0x7f0000000000, el programa en 0x555555554000$" <<< "$v" \
     && grep -q "^MHOLA: hola desde musl (printf); estático de posición libre, en 0x555555554000$" <<< "$v" \
-    && grep -q "^  libsaludo.so: hola (42)$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.8 x86_64 (etapa 10 h (Ladybird con ventana))$" <<< "$v" \
+    && grep -q "^  libsaludo.so: hola (42)$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.9 x86_64 (etapa 10 i (el navegador de cada día))$" <<< "$v" \
     && grep -q "^  procesadores (sched_getaffinity): $n$" <<< "$v" \
     && [ "$(grep -c "^MHOLA: todo bien (" <<< "$v")" = 3 ] && [ "$(grep -c "^MHILOS: todo bien (" <<< "$v")" = 2 ] \
     && [ "$(grep -c "^  8 hilos que suman 2000 veces con un mutex: 16000 (exacto)" <<< "$v")" = 2 ] \
@@ -450,7 +450,7 @@ pci_igual() {   # SALIDA opciones de QEMU
 }
 mb1 apagar "$T/mb1.txt" 128; c=$?
 S=$T/mb1.txt
-if [ $c = 85 ] && hay $S "^Hispa-64 0.11.8 ─ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.$" \
+if [ $c = 85 ] && hay $S "^Hispa-64 0.11.9 ─ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.$" \
    && hay $S "^Cargador: qemu, multiboot$" && serie $S | grep -qE "^Memoria: ([6-9][0-9]|1[0-2][0-9]),[0-9] MB libres en [0-9]* trozos \(de 127,4 MB que da el firmware\); [0-9,]* [KM]B usados por el núcleo$" \
    && hay $S "^  sin la identidad de abajo: 1 MB ya no está en las tablas$" && hay $S "los nombres de [0-9]* funciones (HISPA64.SIM)$" \
    && hay $S "^El núcleo, en la mitad alta: 0xFFFFFFFF80100000 (código, de solo leer)" && hay $S "^TSS con pilas propias (IST)" \
@@ -1175,7 +1175,7 @@ con_interprete "$T/e7.txt" "$TECLAS7" -drive file="$T/w7/fat.img",if=none,id=s0,
 v=$(serie "$T/e7.txt")
 HM1=$(TZ=Europe/Madrid date +%H:%M)
 HOY=$(LC_ALL=C TZ=Europe/Madrid date +%-d)
-if [ $c = 85 ] && grep -q "^ORDENES 1.0, el intérprete de órdenes de Hispa-64 (en Hispa-64 0.11.8, etapa 10 h " <<< "$v" \
+if [ $c = 85 ] && grep -q "^ORDENES 1.0, el intérprete de órdenes de Hispa-64 (en Hispa-64 0.11.9, etapa 10 i " <<< "$v" \
    && grep -q "^ *[0-9.]*  HOLA$" <<< "$v" && grep -q "^         <DIR>  sata0/$" <<< "$v" && grep -q "^  $(ls "$T/prog" | wc -l) archivos (" <<< "$v" \
    && [ "$(grep -c "^hola desde el teclado$" <<< "$v")" = 1 ] && grep -q "^            22  copia.txt$" <<< "$v" \
    && grep -q "^/sata0/prueba> " <<< "$v" \
@@ -1239,7 +1239,7 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
   # dos últimos, icudt77l.dat y libstdc++.so.6, se quedaban fuera)
   uefi "$T/uefi.txt" -m 192 -monitor none; c=$?
   S=$(serie "$T/uefi.txt")
-  if [ $c = 85 ] && grep -q "Hispa-64 0.11.8 ─ Copyright" <<< "$S" && grep -q "^Cargador: GRUB .*, multiboot2, con UEFI de 64 bits$" <<< "$S" \
+  if [ $c = 85 ] && grep -q "Hispa-64 0.11.9 ─ Copyright" <<< "$S" && grep -q "^Cargador: GRUB .*, multiboot2, con UEFI de 64 bits$" <<< "$S" \
      && grep -q "^Pantalla: [0-9]* x [0-9]* puntos, 32 bits por punto" <<< "$S" && grep -q "^  consola de [0-9]* x [0-9]* letras" <<< "$S" \
      && grep -q "^  la pantalla, en 0xFFFFC00000000000, con escritura combinada (PAT)$" <<< "$S" \
      && grep -q "^  módulo del cargador: HISPA64.SIM, .*: los nombres de [0-9]* funciones (HISPA64.SIM)$" <<< "$S" \
@@ -1927,6 +1927,120 @@ PY
        && grep -q "^VENTANAS: ventana nueva «.*Navegador" <<< "$vn" && ! grep -qi "disk I/O error\|database is locked\|SQLITE_IOERR" <<< "$vn"; then
       ok "[etapa 10 h] Ladybird con ventana (NAVEGADOR en el escritorio, por UEFI, KVM y 3 GB): la página de la unidad pintada en la ventana ($n_fon puntos de su fondo; la barra, $n_bar; el enlace, $n_ver), lo escrito en un campo con ñ, ú y ü (el título que pone la página: «Escrito: ñandú y pingüino»), la rueda ($n_mo2 a $n_mo3 puntos del bloque de abajo), un enlace con el ratón (la otra página: $n_otr), atrás ($n_vue), Ctrl+T y una dirección escrita en la barra (dos pestañas: $n_ot6), Ctrl+W (una); con la base de datos de Ladybird (sqlite en modo WAL), sin errores"
     else ko "[etapa 10 h] Ladybird con ventana no hace lo que debe: fondo $n_fon, barra $n_bar, pestaña $n_pes, enlace $n_ver, rueda $n_mo2/$n_mo3, otra $n_otr, atrás $n_vue, Ctrl+T $n_ot6/$n_p6, Ctrl+W $n_p7/$n_fo7; $(grep -E '^NAVEGADOR|^VENTANAS: (arranca|ventana)|parado|disk I/O' <<< "$vn" | tail -8 | paste -sd '|')"; fi
+  fi
+  # [etapa 10 i] NAVEGADOR para el uso diario (programas/ladybird/hispa64/navegador): la
+  # misma imagen de la 10 h, con la red de QEMU (el anfitrión, 10.0.2.2, con un servidor
+  # HTTP que da un archivo para descargar), y la página de los cuadros (paginas/dialogos.html,
+  # escrita en la barra con Ctrl+L): alert (Intro), confirm (Esc y luego Intro), prompt (lo
+  # escrito), elegir un archivo (el selector de la oficina: Tab y la ruta), una lista <select>
+  # (el menú del escritorio, con las flechas), el menú del botón derecho de un enlace («Abrir
+  # el enlace en una pestaña nueva»), buscar en la página (Ctrl+F: «N de M», Intro la
+  # siguiente), el zoom (Ctrl +, Ctrl 0), Ctrl+D (la estrella llena), Ctrl+B y Ctrl+H (sus
+  # menús), ⌂ (la página de inicio propia) y una descarga a Descargas (con su aviso). Lo que
+  # hace lo dice NAVEGADOR por el puerto serie; lo pintado, en los pantallazos. Y sin red
+  # (el grub.cfg cambiado a «escritorio navegador sinred»): https://hispados.es/ da la página
+  # propia de «Sin conexión» (su título). Y que el Hub ya
+  # no pide pidfd_open (434), que ahora hay.
+  if [ -x "$T/progweb/NAVEGADOR" ] && [ -f $OVMF_C ] && [ -f "$T/uefi-nav/hispa64.img" ]; then
+    RI=$T/red10i; mkdir -p "$RI"; head -c 300000 /dev/urandom > "$RI/descarga.bin"
+    (cd "$RI" && exec python3 -I "$AQUI/programas/red/servidores.py" http 0 descarga.bin) > "$RI/srv.txt" 2>&1 & PSI=$!
+    for i in $(seq 1 50); do grep -q '^listo' "$RI/srv.txt" 2> /dev/null && break; sleep 0.2; done
+    PHI=$(grep -o '^listo [0-9]*' "$RI/srv.txt" | grep -o '[0-9]*$')
+    SI="$T/nav10i.txt"; MI="$T/mon10i.sock"; QI="$T/qmp10i.sock"
+    rm -f "$SI" "$MI" "$QI" "$T"/n10i-*.ppm; cp $OVMF_V "$T/vars10i.fd"
+    timeout 900 qemu-system-x86_64 -enable-kvm -cpu host -machine q35 -m 3072 -smp 4 -drive if=pflash,format=raw,readonly=on,file=$OVMF_C \
+      -drive if=pflash,format=raw,file="$T/vars10i.fd" -drive file="$T/uefi-nav/hispa64.img",format=raw,if=none,id=d0,snapshot=on -device ide-hd,drive=d0,bus=ide.0 \
+      -device qemu-xhci,id=xhci -device usb-tablet,bus=xhci.0 -display none -serial file:"$SI" \
+      -monitor unix:"$MI",server,nowait -qmp unix:"$QI",server,nowait -no-reboot -nic user,model=e1000 > /dev/null 2>&1 &
+    qi=$!
+    bieni=1; falta=""
+    esperai() { local i; for i in $(seq 1 $(( $2 * 5 ))); do serie "$SI" | grep -q -- "$1" && return 0; sleep 0.2; done; bieni=0; falta="$falta|$1"; echo "  (etapa 10 i: no llega «$1»)"; return 1; }
+    cuantasi() { serie "$SI" | grep -c -- "$1"; }
+    fotoi() { python3 -I "$AQUI/pantallazo.py" foto "$MI" "$T/n10i-$1.ppm" 2> /dev/null; }
+    teclasi() { python3 -I "$AQUI/programas/teclas.py" "$MI" "$@" 2> /dev/null; sleep 0.3; }
+    ratoni() {   # X Y [clic | der]
+      python3 -I - "$QI" "$@" <<'PY' 2> /dev/null
+import json, socket, sys, time
+s = socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); f = s.makefile('rw')
+f.readline(); f.write('{"execute": "qmp_capabilities"}\n'); f.flush(); f.readline()
+def manda(ev):
+    f.write(json.dumps({"execute": "input-send-event", "arguments": {"events": ev}}) + '\n'); f.flush(); f.readline()
+manda([{"type": "abs", "data": {"axis": "x", "value": (int(sys.argv[2]) * 32767 + 1278) // 1279}},
+       {"type": "abs", "data": {"axis": "y", "value": (int(sys.argv[3]) * 32767 + 798) // 799}}])
+time.sleep(0.2)
+if len(sys.argv) > 4:
+    b = 'left' if sys.argv[4] == 'clic' else 'right'
+    for d in (True, False):
+        manda([{"type": "btn", "data": {"button": b, "down": d}}]); time.sleep(0.15)
+PY
+      sleep 0.5
+    }
+    # (la página empieza en (1, 96) de la pantalla; la de los cuadros pone todo en su sitio)
+    esperai "^NAVEGADOR: cargada file:///tmp/web/paginas/ventana.html$" 240 && sleep 1.5
+    teclasi '{ctrl-l}'; teclasi 'file:///tmp/web/paginas/dialogos.html{intro}'
+    esperai "^NAVEGADOR: cargada file:///tmp/web/paginas/dialogos.html$" 60 && sleep 1.5
+    ratoni 101 136 clic; esperai "^NAVEGADOR: cuadro «aviso»: Hola desde la página: ñandú y pingüino$" 20 && sleep 1; fotoi 1
+    teclasi '{intro}'; esperai "^NAVEGADOR: título «Aviso cerrado»$" 20
+    ratoni 281 136 clic; esperai "^NAVEGADOR: cuadro «confirmar»: ¿Seguimos?$" 20 && sleep 0.5
+    teclasi '{esc}'; esperai "^NAVEGADOR: título «Confirmar: no»$" 20
+    ratoni 281 136 clic; sleep 1; teclasi '{intro}'; esperai "^NAVEGADOR: título «Confirmar: sí»$" 20
+    ratoni 461 136 clic; esperai "^NAVEGADOR: cuadro «pregunta»: ¿Cómo te llamas?$" 20 && sleep 0.5
+    teclasi 'Ana{intro}'; esperai "^NAVEGADOR: título «Pregunta: Ana»$" 20
+    ratoni 77 192 clic; esperai "^NAVEGADOR: cuadro «archivo»$" 20 && sleep 1; fotoi 2
+    teclasi '{tab}/tmp/web/paginas/descarga.txt{intro}'
+    esperai "^NAVEGADOR: título «Archivo: descarga.txt (80): Hola desde Hispa-64: un archivo para descargar y subir.»$" 30
+    ratoni 121 252 clic; esperai "^VENTANAS: menú emergente de «.*» (3 opciones)$" 20 && sleep 0.5
+    teclasi '{abajo}{abajo}{intro}'; esperai "^NAVEGADOR: título «Elegido: dos»$" 20
+    ratoni 79 355 der; esperai "^VENTANAS: menú emergente de «.*» (11 opciones)$" 20 && sleep 0.5; fotoi 3
+    ratoni 217 372 clic; esperai "^NAVEGADOR: cargada file:///tmp/web/paginas/otra.html$" 60 && sleep 1
+    teclasi '{ctrl-w}'; sleep 1.5
+    teclasi '{ctrl-f}'; sleep 0.5; teclasi 'pingüino'; esperai "^NAVEGADOR: buscar: 1 de 4$" 20
+    teclasi '{intro}'; esperai "^NAVEGADOR: buscar: 2 de 4$" 20 && sleep 0.8; fotoi 4
+    teclasi '{esc}'; sleep 0.5
+    teclasi '{ctrl-mas}'; esperai "^NAVEGADOR: zoom 110 %$" 20 && sleep 1; fotoi 5
+    teclasi '{ctrl-0}'; esperai "^NAVEGADOR: zoom 100 %$" 20 && sleep 0.8
+    teclasi '{ctrl-d}'; esperai "^NAVEGADOR: aviso «Añadido a los marcadores: «Elegido: dos»" 20 && sleep 0.8; fotoi 6
+    teclasi '{ctrl-b}'; esperai "^VENTANAS: menú emergente de «.*» (7 opciones)$" 20 && sleep 0.3; teclasi '{esc}'
+    teclasi '{ctrl-h}'; esperai "^VENTANAS: menú emergente de «.*» ([5-9] opciones)$" 20 && sleep 0.3; teclasi '{esc}'
+    ratoni 125 77 clic; esperai "^NAVEGADOR: cargada file:///tmp/web/casa/inicio.html$" 30 && sleep 1.5; fotoi 7
+    teclasi '{ctrl-l}'; teclasi "http://10.0.2.2:$PHI/descarga.bin{intro}"
+    esperai "^NAVEGADOR: descargado /tmp/web/casa/Descargas/descarga.bin (300000 octetos)$" 90 && sleep 0.8; fotoi 8
+    kill $qi 2> /dev/null; wait $qi 2> /dev/null
+    kill $PSI 2> /dev/null; wait $PSI 2> /dev/null
+    vi=$(serie "$SI")
+    ri() { python3 -I "$AQUI/pantallazo.py" "$@" 2> /dev/null || echo 0; }
+    i_atn=$(ri cuenta "$T/n10i-1.ppm" 1 96 1278 668 9CA39C)        # la página, atenuada debajo del cuadro
+    i_cua=$(ri cuenta "$T/n10i-1.ppm" 1 96 1278 668 F7F9FC)        # el cuadro
+    i_arc=$(ri cuenta "$T/n10i-2.ppm" 1 96 1278 668 F7F9FC)        # el selector de archivos (más grande)
+    i_men=$(ri cuenta "$T/n10i-3.ppm" 1 96 1278 668 FAFAFA)        # el menú del botón derecho (VENTANAS)
+    i_amar=$(ri cuenta "$T/n10i-4.ppm" 1 96 1278 600 FFFF00)       # lo encontrado, en amarillo
+    i_bus=$(ri cuenta "$T/n10i-4.ppm" 1 700 1278 66 F6F7F9)        # la barra de buscar, abajo
+    i_est=$(ri cuenta "$T/n10i-6.ppm" 1190 58 60 38 E8A317)        # la estrella, llena
+    i_avi=$(ri cuenta "$T/n10i-6.ppm" 1 640 1278 126 FFF4D6)       # el aviso de abajo
+    i_ini=$(ri cuenta "$T/n10i-7.ppm" 1 96 1278 668 F4F6F9)        # la página de inicio
+    i_des=$(ri cuenta "$T/n10i-8.ppm" 1 640 1278 126 FFF4D6)       # el aviso de la descarga
+    # sin red: https://hispados.es/ (el grub.cfg de la imagen, cambiado y vuelto a poner)
+    SR="$T/nav10i-sinred.txt"; rm -f "$SR"; cp $OVMF_V "$T/vars10j.fd"
+    OFI=1048576
+    mcopy -o -i "$T/uefi-nav/hispa64.img@@$OFI" ::boot/grub/grub.cfg "$T/grub-10i.cfg" 2> /dev/null
+    sed 's#^\(  multiboot2 /boot/HISPA64.BIN\) .*#\1 escritorio navegador sinred sinpruebas sinmusl#' "$T/grub-10i.cfg" > "$T/grub-10j.cfg"
+    mcopy -o -i "$T/uefi-nav/hispa64.img@@$OFI" "$T/grub-10j.cfg" ::boot/grub/grub.cfg 2> /dev/null
+    timeout 300 qemu-system-x86_64 -enable-kvm -cpu host -machine q35 -m 3072 -smp 4 -drive if=pflash,format=raw,readonly=on,file=$OVMF_C \
+      -drive if=pflash,format=raw,file="$T/vars10j.fd" -drive file="$T/uefi-nav/hispa64.img",format=raw,if=none,id=d0,snapshot=on -device ide-hd,drive=d0,bus=ide.0 \
+      -display none -serial file:"$SR" -monitor none -no-reboot -nic user,model=e1000 > /dev/null 2>&1 &
+    qj=$!
+    for i in $(seq 1 1200); do serie "$SR" | grep -q "^NAVEGADOR: título «Sin conexión (hispados.es)»$" && break; sleep 0.2; done
+    sleep 1; kill $qj 2> /dev/null; wait $qj 2> /dev/null
+    mcopy -o -i "$T/uefi-nav/hispa64.img@@$OFI" "$T/grub-10i.cfg" ::boot/grub/grub.cfg 2> /dev/null
+    vj=$(serie "$SR")
+    if [ $bieni = 1 ] && [ "$i_atn" -gt 200000 ] && [ "$i_cua" -gt 20000 ] && [ "$i_arc" -gt $(( i_cua + 50000 )) ] && [ "$i_men" -gt 30000 ] \
+       && [ "$i_amar" -gt 800 ] && [ "$i_bus" -gt 15000 ] && [ "$i_est" -gt 60 ] && [ "$i_avi" -gt 15000 ] && [ "$i_ini" -gt 300000 ] && [ "$i_des" -gt 15000 ] \
+       && grep -q "^NAVEGADOR: cuadro cerrado (aceptado): /tmp/web/paginas/descarga.txt$" <<< "$vi" \
+       && ! grep -q "llamada al sistema 434" <<< "$vi" && ! grep -qi "disk I/O error\|database is locked\|SQLITE_IOERR" <<< "$vi" \
+       && grep -q "^(sinred: sin las tarjetas de red; solo «lo», 127.0.0.1)$" <<< "$vj" && grep -q "^NAVEGADOR: título «Sin conexión (hispados.es)»$" <<< "$vj" \
+       && grep -q "^NAVEGADOR: cargada https://hispados.es/$" <<< "$vj"; then
+      ok "[etapa 10 i] NAVEGADOR para el uso diario: los cuadros de la página (alert, confirm con Esc e Intro, prompt: «Ana»; la página atenuada, $i_atn puntos, y el cuadro, $i_cua), el selector de archivos ($i_arc puntos; el archivo, subido y leído por la página), un <select> con el menú del escritorio, el menú del botón derecho ($i_men; el enlace en una pestaña nueva), buscar en la página (2 de 4; $i_amar puntos en amarillo, la barra $i_bus), el zoom (110 % y 100 %), Ctrl+D (la estrella, $i_est), Ctrl+B y Ctrl+H, ⌂ (la página de inicio propia, $i_ini), una descarga por HTTP a Descargas (300.000 octetos, con su aviso); sin red, la página propia de «Sin conexión (hispados.es)»; sin pidfd_open que falte"
+    else ko "[etapa 10 i] NAVEGADOR para el uso diario no hace lo que debe: atenuada $i_atn, cuadro $i_cua, archivo $i_arc, menú $i_men, amarillo $i_amar, buscar $i_bus, estrella $i_est, aviso $i_avi, inicio $i_ini, descarga $i_des; falta: ${falta#|}; sin red: $(grep -E '^NAVEGADOR|^\(sinred' <<< "$vj" | tail -4 | paste -sd '|'); $(grep -E '^NAVEGADOR' <<< "$vi" | tail -6 | paste -sd '|')"; fi
   fi
   # [etapa 11 b] con KVM, el tiempo es el de verdad: aquí cuentan el tic (90 o más de los 100, el
   # temporizador cada 10 ms contra el TSC) y el planificador (etapa 3 entera, el interactivo incluido)
