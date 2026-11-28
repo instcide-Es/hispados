@@ -4995,6 +4995,17 @@ cargo resuelva el «workspace» van sin código: `terceros/rust-crates/resolver/
   suelte al cerrar); MCANDADOS (49): 200 veces un descriptor y su dup
   cerrados a la vez desde dos hilos con un candado OFD: no queda huérfano.
 
+### Lo que salió en la batería: el plazo de TCP, doblado de más (tcp64.cas)
+
+- En una vuelta, MRED6 (200 KB de ida y vuelta por [::1], con
+  `red=pierde`: uno de cada 23 segmentos tirado) tardó 102 s (lo normal, de
+  250 a 400 ms) y no acabó. El plazo de reenvío (RTO) se doblaba en cada
+  reintento y **no volvía al de la RTT al confirmarse lo nuevo**: solo con
+  la siguiente medida, que con pérdidas seguidas se cancela una y otra vez
+  (Karn). Con varias pérdidas, el plazo crecía hasta el máximo. Ahora,
+  como BSD (`t_rxtshift = 0`) y Linux (`icsk_backoff = 0`): un ACK de algo
+  nuevo deja el plazo en el de la RTT (SRTT + 4·RTTVAR).
+
 ### NAVEGADOR: Ladybird con ventana (programas/ladybird/hispa64/navegador)
 
 - **`navegador.cpp`** (la interfaz): lanza el Hub (`/bin/Hub`, con
@@ -5090,6 +5101,7 @@ cargo resuelva el «workspace» van sin código: `terceros/rust-crates/resolver/
 | `procesos.cas`, `sistema.cas` | `R_COMPARCH`, mmap MAP_SHARED de escribir, msync; epoll_ctl avisa; `trazaprog=`, `trazamata` |
 | `hispa64.cas` | `navegador` y `navegador=URL` con `escritorio` |
 | `unix64.cas`, `disp64.cas`, `candados64.cas`, `chacha64.cas` | la auditoría, vuelta 2: M1 a M5 y B6 a B11 |
+| `tcp64.cas` | el plazo de reenvío, otra vez el de la RTT al confirmarse lo nuevo |
 | `programas/musl/mposix.c`, `mcandados.c` | las pruebas del mmap compartido y de sqlite en WAL |
 | `programas/ladybird/hispa64/navegador/` | NAVEGADOR: `navegador.cpp`, `conexion.h`, `talones.py`, `ventana.c` y `.h`, su CMake |
 | `programas/ladybird/mweb.c`, `hazweb.sh` | `MWEB --prepara`, sin `--disable-sql-database`; NAVEGADOR, la DejaVu Sans entera, las autoridades de Mozilla |

@@ -727,6 +727,17 @@ módulo Tcp64
             fin
             s.retx_n := 0
             s.dupacks := 0
+            ; [etapa 10 h] lo nuevo confirmado: el plazo, otra vez el de la RTT
+            ; (sin lo doblado por los reintentos), como BSD (t_rxtshift = 0) y
+            ; Linux (icsk_backoff = 0). Antes se quedaba doblado hasta la
+            ; siguiente medida, y con pérdidas seguidas (red=pierde) cada
+            ; reintento lo doblaba otra vez: MRED6, 200 KB por [::1], una vez
+            ; en 102 s (lo normal, 300 ms)
+            si s.srtt <> 0 entonces
+                s.rto := s.srtt + 4 * s.rttvar
+                si s.rto < RTO_MÍN entonces s.rto := RTO_MÍN fin
+                si s.rto > RTO_MÁX entonces s.rto := RTO_MÁX fin
+            fin
             si antes(s.retx_alto, s.snd_una) entonces s.retx_alto := s.snd_una fin
             sb_poda(s)
             si s.snd_una = s.snd_max entonces s.t_retx := 0 sino s.t_retx := ahora_ns() + s.rto fin
