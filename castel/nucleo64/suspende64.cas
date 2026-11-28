@@ -34,7 +34,7 @@
 ; =============================================================================
 módulo Suspende64
 
-    importar Cifras64, Es64, Cpu64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Gdt64, Acpi64, Reloj64, Apic64, Hilos64, Smp64, Entradas, Pci64, Hora64, Vdso64, Nodos64, Vfs64, Acpica64, Pant64
+    importar Cifras64, Es64, Cpu64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Gdt64, Acpi64, Reloj64, Apic64, Hilos64, Smp64, Entradas, Pci64, Hora64, Vdso64, Discos64, Nodos64, Vfs64, Acpica64, Pant64, Casa64
 
     público constante V_S3 = 0xF3
 
@@ -59,7 +59,8 @@ módulo Suspende64
     variable pila_bsp: arreglo [4096] de nat64 alineado 64      ; (32 KB) la pila de volver del procesador 0
     variable hilo: puntero a Hilo
     variable congelados: nat64
-    variable vuelve_núm: nat32                  ; el procesador que se está encendiendo otra vez
+    variable vuelve_núm: nat32
+    variable con_tic: bool                      ; había tic antes de dormir                  ; el procesador que se está encendiendo otra vez
     ; los IOAPIC (hasta 4 de 120 entradas)
     variable io_guarda: arreglo [960] de nat32
     ; PCI: 64 palabras de cada aparato y la entrada 0 de su MSI-X
@@ -292,7 +293,7 @@ módulo Suspende64
         si s3_traza entonces escribir("Suspender: (", c.número, ": lo suyo)\n") fin
         pon_este(x, c)
         si s3_traza entonces escribir("Suspender: (", c.número, ": el tic)\n") fin
-        si tic_va entonces pon_tic() fin
+        si con_tic entonces pon_tic() fin
         x.congelado := 0
         pon_atómico(dirección(x.llegó), 1)
         d := nat64(x)
@@ -550,6 +551,12 @@ módulo Suspende64
             fallo := "el equipo no tiene \\_S3"
             devolver falso
         fin
+        ; (una memoria USB, al volver, se enumera otra vez como nueva: si la
+        ; casa está en una, sus archivos abiertos se quedarían sin disco)
+        si casa_m <> 0xFFFFFFFF y clase_dk(padre_dk(casa_disco)) = D_USB entonces
+            fallo := "la casa está en una memoria USB: al volver, la memoria se vería como otra"
+            devolver falso
+        fin
         si pm1a_cnt = 0 o pm1a_evt = 0 entonces
             fallo := "sin los registros PM1 de la FADT"
             devolver falso
@@ -628,7 +635,7 @@ módulo Suspende64
 
     ; suspender ya (en el procesador 0); cierto si ha vuelto
     público función suspende(): bool
-        variable i: nat32
+        variable i, k: nat32
         variable b, t0: nat64
         variable bien: bool
         si no sabe entonces devolver falso fin
@@ -654,6 +661,7 @@ módulo Suspende64
         congelados := cuenta_congelados()
         si congelados + 1 < n_en_marcha entonces escribir("Suspender: ¡solo ", congelados, " de ", n_en_marcha - 1, " procesadores se han parado!\n") fin
         escribir("Suspender: a dormir (S3, SLP_TYP ", slp_a, "); ", congelados, " procesadores parados\n")
+        con_tic := tic_va
         para_tic()
         b := sin_ints()
         mono_antes := ahora_ns()
@@ -678,7 +686,7 @@ módulo Suspende64
             tras_s3(mono_antes)
             pon_real_ns(real_ns() + dormido_ms * 1000000)
         fin
-        si tic_va entonces pon_tic() fin
+        si con_tic entonces pon_tic() fin
         restaura(b)
         despierta_acpica()
         si bien entonces
@@ -709,6 +717,18 @@ módulo Suspende64
                 escribir("Suspender: (el reloj: antes ", mono_antes div 1000000, " ms, ahora ", ahora_ns() div 1000000, " ms; con el TSC ", con_tsc, ", con KVM ", con_pv, ")\n")
                 duerme_ms(20)
                 escribir("Suspender: (dormir 20 ms, bien: ", ahora_ns() div 1000000, " ms; los tics del 0: ", cpu(0).tics, ")\n")
+                k := 0
+                mientras k < 4 hacer
+                    escribir("Suspender: (", ahora_ns() div 1000000, " ms; los tics:")
+                    i := 0
+                    mientras i < n_cpus hacer
+                        escribir(" ", cpu(i).tics)
+                        i := i + 1
+                    fin
+                    escribir(")\n")
+                    duerme_ms(500)
+                    k := k + 1
+                fin
 
             fin
             escribir("Suspender: todo en marcha otra vez: ", aps_vueltos + 1, " procesadores")

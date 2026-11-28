@@ -5338,3 +5338,86 @@ cargo resuelva el «workspace» van sin código: `terceros/rust-crates/resolver/
   color y la fecha (aún cerrados), arrastrar las pestañas, la rueda del
   touchpad con precisión, las teclas al soltarlas.
 - Lo de la sección 24: DNSSEC, vídeo y sonido, WebGL, test262 entero.
+
+## 27. La etapa 11 a, hecha (28/11/2026): la casa en el disco, la batería, la tapa, el brillo, suspender e imprimir
+
+### Las decisiones
+
+- **Por qué la 11 a**: para usar Hispa-64 de verdad en un portátil hacía
+  falta guardar en el disco (la casa del navegador y de la oficina estaba en
+  /tmp, en la memoria), ver la batería y no quedarse sin ella a medias,
+  cerrar la tapa y suspender, e imprimir.
+- **La casa, FAT32 con diario** (no un sistema de archivos nuevo): la
+  partición CASA del disco del que se arranca (la memoria USB, el SATA o el
+  NVMe: el que tiene /boot/HISPA64.BIN) se lee también desde Windows y
+  Linux. El diario va **en sus sectores reservados** (16 MB, del 64 al
+  32.831; la marca de Casa64 en el 32), que nadie más toca. Solo esa
+  partición se da por escribible (`deja_escribir_parte`): lo demás del disco
+  sigue de solo leer, como siempre.
+- **El diario está en la caché de bloques** (Discos64), no en Fat64: todo lo
+  que se escribe en la casa (la FAT, las carpetas, los datos y el FSInfo)
+  queda en la caché marcado «del diario» y solo lo escribe la confirmación:
+  el descriptor (los números de los bloques y el CRC32 de cada uno), los
+  bloques, la confirmación (con el CRC del descriptor), **una sola orden de
+  vaciar la caché del disco**; después, cada bloque a su sitio y otra orden
+  de vaciar. Si el corte llega antes de acabar la confirmación, algún CRC no
+  casa y no se repite nada; si llega después, al montar se repite entera
+  (repetirla otra vez no cambia nada). Al apagar bien, el descriptor se
+  borra.
+- **Se confirma entre dos operaciones del VFS** (con su mutex tomado): fsync
+  y sync, el hilo «casa» cada 5 s, y Nodos64.abre_vfs cuando lo sucio llega
+  a la mitad de lo que cabe (o a la cuarta parte de la caché). Lo grande se
+  escribe a trozos de 1 MB (cada trozo, una escritura entera). Así lo
+  confirmado es siempre un estado de después de una operación: un archivo
+  puede quedar más corto, pero la FAT nunca a medias.
+- **Y, por si acaso, comprobar**: la marca dice «en uso» mientras está
+  montada; si al arrancar sigue así, no se apagó bien y Fat64.fat_comprueba
+  mira todo (las cadenas rotas o cruzadas, los tamaños, las carpetas que
+  empiezan mal, los cúmulos perdidos, los libres) y lo arregla, como
+  fsck.fat.
+- **HOME=/casa** para todos los programas (Procesos): la oficina, el
+  navegador (Descargas, Documentos, `.config/navegador`) e IMPRIMIR lo usan
+  (la rama «imprimir»: ver abajo). Sin casa, como antes (HOME=/).
+- **La batería, la tapa y el brillo**, en ACPICA (acpi/hispa64/servicio.c):
+  la tapa (PNP0C0D, su `_LID` y los Notify 80h), las teclas del brillo (los
+  Notify 86h, 85h y 87h al dispositivo de `_BCM`: el núcleo sube o baja un
+  10 %), `\_S3`. Acpica64 decide: sin el cable, al 10 % el aviso y al 3 %
+  **se apaga en orden** (como el botón: los discos y la casa cerrados bien,
+  `\_S5`). El escritorio lo ve en **/dev/energia** (una línea «clave=valor»;
+  y se le escribe «brillo=NN», «suspender» o «apagar»).
+- **Suspender (S3)**, sin firmware de por medio para los aparatos: los
+  demás procesadores se «congelan» en un aviso (V_S3) guardando lo suyo
+  (los registros, CR3, FS, KERNEL_GS, el RSP0 de su TSS y la coma flotante
+  con xsave); el 0 guarda lo que pierde el equipo (los IOAPIC, la
+  configuración PCI con MSI y la entrada 0 de MSI-X, los MTRR, el reloj) y
+  escribe SLP_TYP | SLP_EN. El vector de despertar de la FACS es **el
+  trampolín de Smp64** (de 16 a 64 bits): al volver, vuelve_bsp pone lo del
+  procesador y salta adonde se quedó; luego todo lo de antes, `_WAK(3)`, los
+  aparatos (la pantalla de Bochs en su modo, NVMe y AHCI con sus colas en
+  las mismas páginas, el xHCI reiniciado —lo enchufado lo vuelve a ver el
+  vigía como si se enchufara otra vez—, la Intel) y los demás procesadores
+  (INIT-SIPI con vuelve_ap). El monótono no cuenta lo dormido (como Linux);
+  la hora real suma lo dormido, del CMOS.
+- **Imprimir** (lo hizo una rama aparte, en sus commits): IMPRIMIR (IPP/1.1
+  sin CUPS: PDF tal cual, o PWG raster pintado por Hispa-PDF; ipps:// con
+  BearSSL), la orden PDF, «Imprimir» en Pluma, Cuentas y el Navegador (a
+  PDF o a la impresora de red).
+
+### Qué hace
+
+Hispa-64 0.11.10 (uname: «etapa 11 a (la casa, la batería y suspender)»).
+
+| Archivo | Qué |
+|---|---|
+| `discos64.cas` | el diario (descriptor, confirmación, CRC32 con tabla, repetir al montar, cerrar); las particiones de escribir solas |
+| `casa64.cas` (nuevo) | la casa: buscarla, la marca, montar /casa, repetir, comprobar, el hilo «casa», cerrar al apagar |
+| `fat64.cas` | `fat_comprueba` (como fsck.fat) y `fat_relee_info` |
+| `vfs64.cas`, `nodos64.cas`, `procesos.cas` | la confirmación entre operaciones, la escritura a trozos en la casa; HOME=/casa |
+| `imagen.sh`, `programas/hazcasa.py` | la partición CASA (512 MB la imagen, 1,75 GB la del navegador), la marca; `--mira` y `--estropea` para las pruebas |
+| `programas/musl/mcasa.c`, `menergia.c` | MCASA (y la prueba del corte: escribe, comprueba) y MENERGIA |
+| `acpica64.cas`, `acpi/hispa64/servicio.c`, `hispa64.h` | la política de la batería, la tapa, las teclas del brillo, `_PTS(3)` y `_WAK(3)` |
+| `disp64.cas` | /dev/energia |
+| `suspende64.cas` (nuevo), `smp64.cas`, `apic64.cas`, `reloj64.cas`, `pci64.cas`, `pant64.cas` | suspender y volver |
+| `nvme64.cas`, `ahci64.cas`, `xhci64.cas`, `usbvigia.cas`, `intel64.cas` | cada uno, otra vez después de S3 |
+| `programas/ventanas/ventanas.c` | la batería en la barra, el aviso, el brillo, «Suspender el equipo» en el menú Inicio |
+| `tests/acpi/haz_tapa.py`, `tapa-qemu.aml` | la tapa de mentira y los Notify del brillo |

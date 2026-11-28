@@ -339,7 +339,7 @@ e4_bien() {   # SALIDA N
   local s=$1 n=$2 v; v=$(serie "$s")
   grep -q "^Programas: syscall y sysret (los números de Linux x86-64), swapgs, una pila del núcleo por hilo$" <<< "$v" \
     && [ "$(grep -o "^Unidad en memoria: [0-9]* archivos: " <<< "$v" | grep -o "[0-9]*")" -ge "$(ls "$T/prog" | wc -l)" ] \
-    && grep -q "^  argc = 4: HOLA uno dos tres$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.9 x86_64$" <<< "$v" \
+    && grep -q "^  argc = 4: HOLA uno dos tres$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.10 x86_64$" <<< "$v" \
     && grep -q "^  la unidad en memoria: SALUDO.TXT dice «Hola, soy SALUDO.TXT" <<< "$v" && grep -q "^  writev: en tres trozos$" <<< "$v" \
     && grep -q "^HOLA: todo bien (28 pruebas)$" <<< "$v" && grep -q "^Programa «HOLA uno dos tres»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^HOLACAS: todo bien (con acentos de la página 437: «añadir», «canción»)$" <<< "$v" \
@@ -380,7 +380,7 @@ e7_bien() {   # SALIDA N [avx]
     && grep -q "^MHOLA: hola desde musl (printf); estático$" <<< "$v" \
     && grep -q "^MHOLA: hola desde musl (printf); dinámico: ld-musl en 0x7f0000000000, el programa en 0x555555554000$" <<< "$v" \
     && grep -q "^MHOLA: hola desde musl (printf); estático de posición libre, en 0x555555554000$" <<< "$v" \
-    && grep -q "^  libsaludo.so: hola (42)$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.9 x86_64 (etapa 10 i (el navegador de cada día))$" <<< "$v" \
+    && grep -q "^  libsaludo.so: hola (42)$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.10 x86_64 (etapa 11 a (la casa, la batería y suspender))$" <<< "$v" \
     && grep -q "^  procesadores (sched_getaffinity): $n$" <<< "$v" \
     && [ "$(grep -c "^MHOLA: todo bien (" <<< "$v")" = 3 ] && [ "$(grep -c "^MHILOS: todo bien (" <<< "$v")" = 2 ] \
     && [ "$(grep -c "^  8 hilos que suman 2000 veces con un mutex: 16000 (exacto)" <<< "$v")" = 2 ] \
@@ -450,7 +450,7 @@ pci_igual() {   # SALIDA opciones de QEMU
 }
 mb1 apagar "$T/mb1.txt" 128; c=$?
 S=$T/mb1.txt
-if [ $c = 85 ] && hay $S "^Hispa-64 0.11.9 ─ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.$" \
+if [ $c = 85 ] && hay $S "^Hispa-64 0.11.10 ─ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.$" \
    && hay $S "^Cargador: qemu, multiboot$" && serie $S | grep -qE "^Memoria: ([6-9][0-9]|1[0-2][0-9]),[0-9] MB libres en [0-9]* trozos \(de 127,4 MB que da el firmware\); [0-9,]* [KM]B usados por el núcleo$" \
    && hay $S "^  sin la identidad de abajo: 1 MB ya no está en las tablas$" && hay $S "los nombres de [0-9]* funciones (HISPA64.SIM)$" \
    && hay $S "^El núcleo, en la mitad alta: 0xFFFFFFFF80100000 (código, de solo leer)" && hay $S "^TSS con pilas propias (IST)" \
@@ -1197,7 +1197,7 @@ con_interprete "$T/e7.txt" "$TECLAS7" -drive file="$T/w7/fat.img",if=none,id=s0,
 v=$(serie "$T/e7.txt")
 HM1=$(TZ=Europe/Madrid date +%H:%M)
 HOY=$(LC_ALL=C TZ=Europe/Madrid date +%-d)
-if [ $c = 85 ] && grep -q "^ORDENES 1.0, el intérprete de órdenes de Hispa-64 (en Hispa-64 0.11.9, etapa 10 i " <<< "$v" \
+if [ $c = 85 ] && grep -q "^ORDENES 1.0, el intérprete de órdenes de Hispa-64 (en Hispa-64 0.11.10, etapa 11 a " <<< "$v" \
    && grep -q "^ *[0-9.]*  HOLA$" <<< "$v" && grep -q "^         <DIR>  sata0/$" <<< "$v" && grep -q "^  $(ls "$T/prog" | wc -l) archivos (" <<< "$v" \
    && [ "$(grep -c "^hola desde el teclado$" <<< "$v")" = 1 ] && grep -q "^            22  copia.txt$" <<< "$v" \
    && grep -q "^/sata0/prueba> " <<< "$v" \
@@ -1261,7 +1261,7 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
   # dos últimos, icudt77l.dat y libstdc++.so.6, se quedaban fuera)
   uefi "$T/uefi.txt" -m 192 -monitor none; c=$?
   S=$(serie "$T/uefi.txt")
-  if [ $c = 85 ] && grep -q "Hispa-64 0.11.9 ─ Copyright" <<< "$S" && grep -q "^Cargador: GRUB .*, multiboot2, con UEFI de 64 bits$" <<< "$S" \
+  if [ $c = 85 ] && grep -q "Hispa-64 0.11.10 ─ Copyright" <<< "$S" && grep -q "^Cargador: GRUB .*, multiboot2, con UEFI de 64 bits$" <<< "$S" \
      && grep -q "^Pantalla: [0-9]* x [0-9]* puntos, 32 bits por punto" <<< "$S" && grep -q "^  consola de [0-9]* x [0-9]* letras" <<< "$S" \
      && grep -q "^  la pantalla, en 0xFFFFC00000000000, con escritura combinada (PAT)$" <<< "$S" \
      && grep -q "^  módulo del cargador: HISPA64.SIM, .*: los nombres de [0-9]* funciones (HISPA64.SIM)$" <<< "$S" \
@@ -2190,6 +2190,42 @@ if [ -f $OVMF_C ] && [ -f "$T/uefi/hispa64.img" ]; then
   rm -f "$T/ucasa.img"
 fi
 rm -f "$CI" "$T/casa.part"
+# ---- [etapa 11 a] suspender a la memoria (S3) y volver ----
+# Por UEFI (OVMF) con KVM, q35 con S3 (ICH9-LPC.disable_s3=0), 4 procesadores,
+# la imagen en SATA (con la casa), un teclado y una tableta USB: «prueba=
+# suspender» se duerme (QEMU dice «suspended»), el monitor lo despierta
+# (system_wakeup) y, de vuelta: los 4 procesadores (un hilo en cada uno), el
+# reloj, la pantalla otra vez en su modo (el pantallazo, de la GOP y no de
+# texto, con la letra), el disco de la casa (escribir con fsync y leer), el
+# USB otra vez enumerado, y apagar con la casa cerrada bien.
+if [ -w /dev/kvm ] && [ -f $OVMF_C ]; then
+  "$AQUI/imagen.sh" "$T/us3" prueba "sinred prueba=suspender apagar" > "$T/imgs3.txt" 2>&1
+  rm -f "$T/s3.txt" "$T/s3.sock" "$T/s3.ppm"; cp $OVMF_V "$T/varss3.fd"
+  qemu-system-x86_64 -enable-kvm -cpu host -machine q35 -global ICH9-LPC.disable_s3=0 -m 1024 -smp 4 \
+    -drive if=pflash,format=raw,readonly=on,file=$OVMF_C -drive if=pflash,format=raw,file="$T/varss3.fd" \
+    -drive file="$T/us3/hispa64.img",if=none,id=b0,format=raw -device ide-hd,drive=b0,bus=ide.0 \
+    -device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0 -device usb-tablet,bus=xhci.0 \
+    -serial file:"$T/s3.txt" -monitor unix:"$T/s3.sock",server,nowait $DBG -no-reboot -nic none > /dev/null 2>&1 &
+  q=$!
+  for _ in $(seq 1 600); do hay "$T/s3.txt" "^Suspender: a dormir" && break; kill -0 $q 2> /dev/null || break; sleep 0.5; done
+  sleep 2
+  python3 -I "$AQUI/pantallazo.py" orden "$T/s3.sock" system_wakeup 2> /dev/null
+  for _ in $(seq 1 240); do hay "$T/s3.txt" "^Prueba de suspender: de vuelta" && break; kill -0 $q 2> /dev/null || break; sleep 0.5; done
+  sleep 1; python3 -I "$AQUI/pantallazo.py" foto "$T/s3.sock" "$T/s3.ppm" 2> /dev/null
+  for _ in $(seq 1 240); do kill -0 $q 2> /dev/null || break; sleep 0.5; done
+  kill -9 $q 2> /dev/null; wait $q; c=$?
+  read -r a3 l3 _ <<< "$(python3 -I "$AQUI/pantallazo.py" mira "$T/s3.ppm" "$T/s3.png" 2> /dev/null)"
+  g3=$(python3 -I "$AQUI/pantallazo.py" cuenta "$T/s3.ppm" 0 0 "${a3:-1}" "${l3:-1}" AAAAAA 30 2> /dev/null)
+  if [ $c = 85 ] && hay "$T/s3.txt" "^Suspender: se puede (\\\\_S3 y la FACS; 4 procesadores" && hay "$T/s3.txt" "^Suspender: a dormir (S3, SLP_TYP [0-9]*); 3 procesadores parados$" \
+     && hay "$T/s3.txt" "^Suspender: de vuelta (unos [0-9]* s dormido)$" && hay "$T/s3.txt" "^Suspender: la pantalla (la de Bochs), otra vez en su modo$" \
+     && hay "$T/s3.txt" "^Suspender: los discos, otra vez: 0 de 0 NVMe y 1 de 1 SATA$" && hay "$T/s3.txt" "^Suspender: el USB, otra vez: 1 de 1 controladoras" \
+     && hay "$T/s3.txt" "^Suspender: todo en marcha otra vez: 4 procesadores" && hay "$T/s3.txt" "^Prueba de suspender: de vuelta; un hilo en cada procesador: 4 de 4;" \
+     && hay "$T/s3.txt" "^Prueba de suspender: el disco de la casa, de vuelta: 256 KB escritos con fsync, leídos y bien$" \
+     && [ "$(serie "$T/s3.txt" | grep -c '^USB: se ha enchufado')" -ge 2 ] && hay "$T/s3.txt" "^Hispa-64 etapa 11: todo en orden.$" && hay "$T/s3.txt" "^Casa: cerrada bien (" \
+     && [ "${a3:-0}" -ge 800 ] && [ "${g3:-0}" -gt 2000 ]; then
+    ok "[etapa 11 a] suspender (S3) y volver, por UEFI con KVM y 4 procesadores: «$(serie "$T/s3.txt" | grep '^Suspender: a dormir' | cut -c12-)», despertado desde el monitor; «$(serie "$T/s3.txt" | grep '^Prueba de suspender: de vuelta; un hilo' | cut -c33-)»; la pantalla en su modo (${a3}x${l3}, $g3 puntos de letra); el disco de la casa (AHCI), escrito y leído; el USB, $(serie "$T/s3.txt" | grep -c '^USB: se ha enchufado') aparatos otra vez; todo en orden y la casa, cerrada bien"
+  else ko "[etapa 11 a] suspender (S3) no vuelve bien (código $c; pantalla ${a3:-?}x${l3:-?}, $g3 puntos de letra): $(serie "$T/s3.txt" | grep -E '^Suspender: [^(]|^Prueba de suspender|^USB: se ha|  MAL|parado' | cut -c1-120 | paste -sd '|')"; fi
+fi
 # ---- [etapa 11] el sonido: HD Audio y /dev/dsp (MSONIDO), lo que graba QEMU ----
 OYE="$C/nucleo32/sonido/oye.py"
 sonido_bien() {   # SALIDA GRABACIÓN: dos ráfagas, de 440 Hz (1 s) y de 1000 Hz (0,5 s), sin cortes
