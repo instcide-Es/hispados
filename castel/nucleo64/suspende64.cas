@@ -583,6 +583,9 @@ módulo Suspende64
                 fallo := "sin memoria"
                 devolver falso
             fin
+            ; (a cero: xsave no escribe lo reservado de la cabecera, y xrstor
+            ; falla con #GP si no es cero)
+            ceros_k(gu[i].fpu, 8192)
             gu[i].fpu := (gu[i].fpu + 63) yb (nob nat64(63))
             i := i + 1
         fin

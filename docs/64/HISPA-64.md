@@ -5421,3 +5421,31 @@ Hispa-64 0.11.10 (uname: «etapa 11 a (la casa, la batería y suspender)»).
 | `nvme64.cas`, `ahci64.cas`, `xhci64.cas`, `usbvigia.cas`, `intel64.cas` | cada uno, otra vez después de S3 |
 | `programas/ventanas/ventanas.c` | la batería en la barra, el aviso, el brillo, «Suspender el equipo» en el menú Inicio |
 | `tests/acpi/haz_tapa.py`, `tapa-qemu.aml` | la tapa de mentira y los Notify del brillo |
+
+### Lo que queda (y más adelante)
+
+- **Suspender desde una memoria USB**: hoy no se ofrece (la memoria, al
+  volver, se enumera como nueva y la casa se quedaría sin disco). Haría
+  falta volver a atar la memoria enumerada otra vez a su disco de antes (por
+  su número de serie) o el «Save/Restore State» del xHCI (CSS/CRS), que en
+  un equipo de verdad conserva lo enchufado. Con Hispa-64 instalado en el
+  disco (etapa 12) ya se puede.
+- **La pantalla de verdad al volver de S3**: solo se pone otra vez la de
+  Bochs (QEMU, VBoxVGA). En un portátil con gráfica Intel, sin su driver,
+  puede volver negra (la GOP no se vuelve a encender sola).
+- **La red al volver**: solo la Intel (e1000, e1000e, I219); la Realtek, la
+  virtio y la USB, no (siguen sin red hasta reiniciar). Y el sonido (HD
+  Audio) no se pone otra vez.
+- **Hibernar** (S4: la memoria al disco): no.
+- **Los GPE** (la SCI por ACPICA): la tapa y las teclas del brillo llegan
+  si el firmware las manda por el controlador embebido (sus `_Qxx`, que se
+  miran cada 250 ms); las que llegan por un GPE (algunos ASUS), aún no.
+- **La casa más grande**: hoy es la partición de la imagen (unos 370 MB, o
+  650 con el navegador); hacerla crecer hasta el final de la memoria USB al
+  primer arranque. Y varios usuarios (/usuarios/NOMBRE), con la etapa 12.
+- **La multidifusión IPv4** que pide la rama «imprimir» para encontrar las
+  impresoras solas (mDNS de verdad): mandar a 224.0.0.0/4 sin ARP (la MAC
+  01:00:5e…) e IP_ADD_MEMBERSHIP con IGMP. Hoy `IMPRIMIR -b` va contra una
+  dirección de unicast.
+- Imprimir: PWG raster desde el navegador sin pasar por PDF, las copias y
+  la cara doble, probar con impresoras de verdad.

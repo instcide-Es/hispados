@@ -1401,7 +1401,8 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
   # pantallazo.py (los puntos de cada color en cada sitio); las teclas, por
   # el monitor (teclas.py); el ratón, la tableta USB por QMP.
   PZ="python3 -I $AQUI/pantallazo.py"
-  "$AQUI/imagen.sh" "$T/uefi-e8" prueba "apagar sinpruebas escribir ordenes" > "$T/img-e8.txt" 2>&1 || ko "imagen.sh no hace la imagen de la etapa 8: $(tail -2 "$T/img-e8.txt" | paste -sd ' ')"
+  # ([etapa 11 a] sin la casa: así C: de la oficina es el disco de prueba, como antes)
+  "$AQUI/imagen.sh" "$T/uefi-e8" prueba "apagar sinpruebas escribir ordenes sincasa" > "$T/img-e8.txt" 2>&1 || ko "imagen.sh no hace la imagen de la etapa 8: $(tail -2 "$T/img-e8.txt" | paste -sd ' ')"
   rm -f "$T/e8fat.img" "$T/e8exfat.img"
   truncate -s 48M "$T/e8fat.img" && mkfs.fat -F 32 -n DATOS "$T/e8fat.img" > /dev/null && mmd -i "$T/e8fat.img" ::/DOCUMENT
   echo "volumen exFAT de la etapa 8" > "$T/e8leeme.txt"
