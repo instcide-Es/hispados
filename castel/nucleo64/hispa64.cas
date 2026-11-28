@@ -756,7 +756,7 @@ módulo Hispa64
 
     ; [etapa 11 a] (Suspende64.s3_aparatos) de vuelta de S3: los aparatos otra vez
     función reanuda_aparatos()
-        si reanuda_pantalla() entonces escribir("Suspender: la pantalla (la de Bochs), otra vez en su modo\n") fin
+        si reanuda_pantalla() entonces escribir("Suspender: la pantalla (la de Bochs), otra vez en su modo (", dispi_visto[0], " x ", dispi_visto[1], ", ", dispi_visto[2], " bits; ", dispi_visto[3], ")\n") fin
         repinta_fb()
         si nv_n_ctl + sa_n_ctl > 0 entonces escribir("Suspender: los discos, otra vez: ", nvme_reanuda(), " de ", nv_n_ctl, " NVMe y ", ahci_reanuda(), " de ", sa_n_discos, " SATA\n") fin
         si xh_n > 0 entonces escribir("Suspender: el USB, otra vez: ", usb_reanuda(), " de ", xh_n, " controladoras (lo enchufado, otra vez enumerado)\n") fin
@@ -793,6 +793,7 @@ módulo Hispa64
             fallos := fallos + 1
             escribir("  MAL: prueba=suspender: no todos los procesadores han vuelto\n")
         fin
+        duerme_ms(4000)             ; (para el pantallazo de la prueba)
         ; el disco de la casa, de vuelta: escribir, fsync, leer y borrar
         si casa_m <> 0xFFFFFFFF entonces
             si prueba_disco_s3() entonces

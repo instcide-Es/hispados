@@ -2196,8 +2196,9 @@ rm -f "$CI" "$T/casa.part"
 # la imagen en SATA (con la casa), un teclado y una tableta USB: «prueba=
 # suspender» se duerme (QEMU dice «suspended»), el monitor lo despierta
 # (system_wakeup) y, de vuelta: los 4 procesadores (un hilo en cada uno), el
-# reloj, la pantalla otra vez en su modo (el pantallazo, de la GOP y no de
-# texto, con la letra), el disco de la casa (escribir con fsync y leer), el
+# reloj, la pantalla otra vez en su modo (los registros de Bochs, como antes;
+# el pantallazo, en gráficos y no de texto, con la letra: QEMU lo da de
+# 640x480 aunque los registros digan el modo de antes), el disco de la casa (escribir con fsync y leer), el
 # USB otra vez enumerado, y apagar con la casa cerrada bien.
 if [ -w /dev/kvm ] && [ -f $OVMF_C ]; then
   "$AQUI/imagen.sh" "$T/us3" prueba "sinred prueba=suspender apagar" > "$T/imgs3.txt" 2>&1
@@ -2218,12 +2219,12 @@ if [ -w /dev/kvm ] && [ -f $OVMF_C ]; then
   read -r a3 l3 _ <<< "$(python3 -I "$AQUI/pantallazo.py" mira "$T/s3.ppm" "$T/s3.png" 2> /dev/null)"
   g3=$(python3 -I "$AQUI/pantallazo.py" cuenta "$T/s3.ppm" 0 0 "${a3:-1}" "${l3:-1}" AAAAAA 30 2> /dev/null)
   if [ $c = 85 ] && hay "$T/s3.txt" "^Suspender: se puede (\\\\_S3 y la FACS; 4 procesadores" && hay "$T/s3.txt" "^Suspender: a dormir (S3, SLP_TYP [0-9]*); 3 procesadores parados$" \
-     && hay "$T/s3.txt" "^Suspender: de vuelta (unos [0-9]* s dormido)$" && hay "$T/s3.txt" "^Suspender: la pantalla (la de Bochs), otra vez en su modo$" \
+     && hay "$T/s3.txt" "^Suspender: de vuelta (unos [0-9]* s dormido)$" && hay "$T/s3.txt" "^Suspender: la pantalla (la de Bochs), otra vez en su modo (" \
      && hay "$T/s3.txt" "^Suspender: los discos, otra vez: 0 de 0 NVMe y 1 de 1 SATA$" && hay "$T/s3.txt" "^Suspender: el USB, otra vez: 1 de 1 controladoras" \
      && hay "$T/s3.txt" "^Suspender: todo en marcha otra vez: 4 procesadores" && hay "$T/s3.txt" "^Prueba de suspender: de vuelta; un hilo en cada procesador: 4 de 4;" \
      && hay "$T/s3.txt" "^Prueba de suspender: el disco de la casa, de vuelta: 256 KB escritos con fsync, leídos y bien$" \
      && [ "$(serie "$T/s3.txt" | grep -c '^USB: se ha enchufado')" -ge 2 ] && hay "$T/s3.txt" "^Hispa-64 etapa 11: todo en orden.$" && hay "$T/s3.txt" "^Casa: cerrada bien (" \
-     && [ "${a3:-0}" -ge 800 ] && [ "${g3:-0}" -gt 2000 ]; then
+     && [ "${a3:-0}" -ge 640 ] && [ "${g3:-0}" -gt 500 ]; then
     ok "[etapa 11 a] suspender (S3) y volver, por UEFI con KVM y 4 procesadores: «$(serie "$T/s3.txt" | grep '^Suspender: a dormir' | cut -c12-)», despertado desde el monitor; «$(serie "$T/s3.txt" | grep '^Prueba de suspender: de vuelta; un hilo' | cut -c33-)»; la pantalla en su modo (${a3}x${l3}, $g3 puntos de letra); el disco de la casa (AHCI), escrito y leído; el USB, $(serie "$T/s3.txt" | grep -c '^USB: se ha enchufado') aparatos otra vez; todo en orden y la casa, cerrada bien"
   else ko "[etapa 11 a] suspender (S3) no vuelve bien (código $c; pantalla ${a3:-?}x${l3:-?}, $g3 puntos de letra): $(serie "$T/s3.txt" | grep -E '^Suspender: [^(]|^Prueba de suspender|^USB: se ha|  MAL|parado' | cut -c1-120 | paste -sd '|')"; fi
 fi

@@ -551,6 +551,13 @@ módulo Pant64
         sale16(0x1CF, v)
     fin
 
+    público variable dispi_visto: arreglo [4] de nat32     ; (lo que dice después: ancho, alto, bits, encendida)
+
+    función lee_dispi(r: nat32): nat32
+        sale16(0x1CE, r)
+        devolver entra16(0x1CF)
+    fin
+
     público función reanuda_pantalla(): bool
         variable id: nat32
         variable bochs: bool
@@ -568,6 +575,10 @@ módulo Pant64
             dispi(8, 0)
             dispi(9, 0)
             dispi(4, 0xC1)                  ; encendida, con el búfer lineal, sin borrarlo
+            dispi_visto[0] := lee_dispi(1)
+            dispi_visto[1] := lee_dispi(2)
+            dispi_visto[2] := lee_dispi(3)
+            dispi_visto[3] := lee_dispi(4)
         fin
         si no modo_gráfico entonces
             limpia := cierto
